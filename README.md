@@ -29,6 +29,10 @@ haxelib dev musescript .
 .\run.ps1 all           # JS + Python examples and both test suites
 ```
 
+Current test status (verified 2026-07-14): `node build/js/tests.js` **428/428**, `.venv python
+build/py/tests.py` **412/412**, cross-runtime gate (example 07) **identical value across all 4
+hosts (max delta 0)**.
+
 ## Examples
 
 | # | Name | What it shows |
@@ -73,8 +77,27 @@ MuseScript.compileMath(src, "polySum", { target: "numba" }); // Array<Dynamic>->
 - `musescript.plan` — MuseIR + MusePlanner
 - `musescript.compile` — JS / Python / numba / WASM emitters + TailCallPass
 - `musescript.checker` — series / match / generator checks
+- `musescript.cli.GeneRunner` — headless fitness CLI (see MuseGene, below)
 - `tools/` — `muse_math_runtime.py`, `wat2wasm_cli.py`
 - `.venv/` — local Python env for tests / numba / wasmtime
+
+## MuseGene — evolvable IR + GP harness
+
+`../musegene/` (sibling package, pure Python, self-contained — see its own
+[README](../musegene/README.md) and [design doc](../MUSEGENE_EVOLVABLE_IR.md)) is a typed,
+frozen node algebra that expands into MuseScript source and evolves it with a minimal GP loop.
+It talks to MuseScript over exactly one subprocess boundary — this repo's `GeneRunner` CLI, which
+compiles a strategy and reports one JSON metrics line per genome:
+
+```powershell
+haxe build-cli.hxml            # -> build/js/gene-runner.js (build once; the harness auto-detects it)
+cd ..; python -m musegene.demo --n 40 --symbol SPY
+```
+
+Verified (2026-07-14): `python -m musegene.tests.run_tests` **12/12** (including an end-to-end
+validity gate — 90 random/mutated/crossed genomes parse+check clean via the real MuseScript
+parser, not a stub); `python -m musegene.evolve --pop 40 --gens 8 --symbol SPY --min-trades 30`
+takes a real SPY tape from Sharpe 0.634 → 0.807 over 8 generations under parsimony control.
 
 ## Public API
 
