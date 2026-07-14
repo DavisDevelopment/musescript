@@ -1,0 +1,4 @@
+-cp .
+-cp vendor
+-D hscriptPos
+-D js_optimizations

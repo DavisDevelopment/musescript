@@ -1,0 +1,19 @@
+extraParams.hxml
+-main musescript.tests.TestMain
+-lib utest
+-python build/py/tests.py
+
+--next
+extraParams.hxml
+-main musescript.examples.RuntimeStress
+-python build/py/07-runtime-stress.py
+
+--next
+extraParams.hxml
+-main musescript.examples.IndicatorSuite
+-python build/py/08-indicator-suite.py
+
+--next
+extraParams.hxml
+-main musescript.examples.IndicatorKernels
+-python build/py/09-indicator-kernels.py

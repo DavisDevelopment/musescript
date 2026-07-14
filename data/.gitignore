@@ -1,0 +1,6 @@
+# Local datasets for MuseScript stress (generated)
+# Keep folder; ignore large tapes.
+real/
+synthetic/
+*.csv
+!README.md

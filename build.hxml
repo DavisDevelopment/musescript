@@ -1,0 +1,87 @@
+extraParams.hxml
+-main musescript.examples.HelloBar
+-lib hxnodejs
+-D node
+-D js_es=6
+-js build/js/01-hello-bar.js
+
+--next
+extraParams.hxml
+-main musescript.examples.ParamsTune
+-lib hxnodejs
+-D node
+-D js_es=6
+-js build/js/02-params-tune.js
+
+--next
+extraParams.hxml
+-main musescript.examples.DiscoveryPipeline
+-lib hxnodejs
+-D node
+-D js_es=6
+-js build/js/03-discovery-pipeline.js
+
+--next
+extraParams.hxml
+-main musescript.examples.OrderFlow
+-lib hxnodejs
+-D node
+-D js_es=6
+-js build/js/04-order-flow.js
+
+--next
+extraParams.hxml
+-main musescript.examples.Generators
+-lib hxnodejs
+-D node
+-D js_es=6
+-js build/js/05-generators.js
+
+--next
+extraParams.hxml
+-main musescript.examples.Benchmark
+-lib hxnodejs
+-D node
+-D js_es=6
+-js build/js/06-benchmark.js
+
+--next
+extraParams.hxml
+-main musescript.examples.OrderFlowLive
+-lib hxnodejs
+-D node
+-D js_es=6
+-js build/js/04b-order-flow-live.js
+
+--next
+extraParams.hxml
+-main musescript.examples.RuntimeStress
+-lib hxnodejs
+-D node
+-D js_es=6
+-js build/js/07-runtime-stress.js
+
+--next
+extraParams.hxml
+-main musescript.examples.IndicatorSuite
+-lib hxnodejs
+-D node
+-D js_es=6
+-js build/js/08-indicator-suite.js
+
+--next
+extraParams.hxml
+-main musescript.examples.IndicatorKernels
+-lib hxnodejs
+-D node
+-D js_es=6
+-js build/js/09-indicator-kernels.js
+
+--next
+extraParams.hxml
+-main musescript.tests.TestMain
+-lib utest
+-lib hxnodejs
+-D node
+-D js_es=6
+-js build/js/tests.js

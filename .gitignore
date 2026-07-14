@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+build/py/
+build/js/
+build/wasm/
+.pytest_cache/

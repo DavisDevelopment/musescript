@@ -1,0 +1,4 @@
+numba>=0.65
+numpy>=1.26
+wasmtime>=15
+yfinance>=0.2

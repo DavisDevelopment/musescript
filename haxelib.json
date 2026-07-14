@@ -1,0 +1,15 @@
+{
+  "name": "musescript",
+  "url": "https://github.com/epiki/muse-script",
+  "license": "MIT",
+  "tags": ["trading", "dsl", "hscript", "strategy"],
+  "description": "Embedded DSL for algorithmic trading & strategy discovery",
+  "version": "0.1.0",
+  "releasenote": "Initial MuseScript release",
+  "contributors": ["epiki"],
+  "dependencies": {
+    "utest": "",
+    "hxnodejs": ""
+  },
+  "classPath": "."
+}
