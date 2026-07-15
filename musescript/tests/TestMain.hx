@@ -62,6 +62,9 @@ class TestMain {
 		runner.addCase(new TestMathCompile());
 		runner.addCase(new TestIndicator());
 		runner.addCase(new TestOnTick());
+		runner.addCase(new TestTypes());
+		runner.addCase(new TestTypedSurface());
+		runner.addCase(new TestMetaTier());
 		Report.create(runner);
 		runner.run();
 	}
@@ -857,7 +860,12 @@ class TestCompiler extends Test {
 		}');
 		var wat = musescript.compile.StrategyWasmBackend.emitWat(prog);
 		Assert.notNull(wat);
-		Assert.isTrue(wat.indexOf("sma") >= 0);
+		Assert.isTrue(wat.indexOf('(memory (export "memory")') >= 0);
+		Assert.isTrue(wat.indexOf("push_bar") >= 0);
+		Assert.isTrue(wat.indexOf("configure_tape") >= 0);
+		Assert.isTrue(wat.indexOf("call $sma") >= 0);
+		Assert.isTrue(wat.indexOf('(import "env" "sma"') < 0);
+		Assert.isTrue(wat.indexOf('(import "env" "crossover"') < 0);
 		Assert.isTrue(wat.indexOf("on_bar") >= 0);
 		#if (js || python)
 		if (musescript.compile.StrategyWasmBackend.hostReady()) {
@@ -868,6 +876,59 @@ class TestCompiler extends Test {
 			var fn = MuseCompiler.compile(prog, { target: "wasm" });
 			var r = fn(harness);
 			Assert.notNull(r);
+			// parity vs interp
+			TradeBuiltins.resetCrossState();
+			var hi = new HarnessContext();
+			hi.params.register("fast", 10);
+			hi.params.register("slow", 30);
+			var ri = new MuseInterp(hi).runBacktest(prog, BarFeed.synthetic(80, 3));
+			Assert.equals(ri.trades, r.trades);
+			Assert.isTrue(Math.abs(ri.finalEquity - r.finalEquity) < 1e-6);
+		}
+		#end
+	}
+
+	public function testCompileWasmKestrelDenseFeaturePrelude() {
+		var prog = new MuseParser().parse('
+			strategy kestrel_dense {
+				indicator ordinary = externalParam;
+				feature graphSignal = graph_metric("supply", "degree");
+				onBar {
+					when treeSignal > ordinary: long();
+				}
+				feature treeSignal = tree_value("logic");
+				onBar {
+					when graphSignal < -1: flat();
+				}
+			}
+		');
+		var emitted = new musescript.compile.StrategyWasmEmitter().emitOnBar(prog);
+		Assert.notNull(emitted);
+		Assert.isTrue(emitted.strings.indexOf("externalParam") >= 0);
+		var slots = musescript.kestrel.KestrelWasmArtifact.featureSlots(emitted.strings);
+		Assert.equals(2, slots.length);
+		Assert.equals(0, slots[0].id);
+		Assert.equals("graph:supply:degree", slots[0].key);
+		Assert.equals(1, slots[1].id);
+		Assert.equals("tree:logic:value", slots[1].key);
+		// Both assignments execute once per bar even though one is declared after
+		// onBar and the strategy has two onBar blocks.
+		Assert.equals(2, emitted.wat.split("call $feature_at").length - 1);
+		Assert.isTrue(emitted.wat.indexOf("i32.const 0\n    call $feature_at") >= 0);
+		Assert.isTrue(emitted.wat.indexOf("i32.const 1\n    call $feature_at") >= 0);
+		#if (js || python)
+		if (musescript.compile.StrategyWasmBackend.hostReady()) {
+			var feed = BarFeed.synthetic(3, 7);
+			var ctx:Dynamic = {
+				feed: feed,
+				kestrelFeatureTapes: [
+					[-2.0, -2.0, -2.0], // graphSignal => flat
+					[1.0, 1.0, 1.0]    // treeSignal => long
+				]
+			};
+			var fn = musescript.compile.StrategyWasmBackend.compile(prog);
+			var r = fn(ctx);
+			Assert.equals(6, r.trades);
 		}
 		#end
 	}
@@ -886,7 +947,8 @@ class TestCompiler extends Test {
 		}');
 		var wat = musescript.compile.StrategyWasmBackend.emitWat(prog);
 		Assert.notNull(wat);
-		Assert.isTrue(wat.indexOf("vwap") >= 0);
+		Assert.isTrue(wat.indexOf("call $vwap") >= 0);
+		Assert.isTrue(wat.indexOf('(import "env" "vwap"') < 0);
 		Assert.isTrue(wat.indexOf("f64.min") >= 0);
 		Assert.isTrue(wat.indexOf("f64.max") >= 0);
 		Assert.isTrue(wat.indexOf("f64.trunc") >= 0);
@@ -919,11 +981,12 @@ class TestCompiler extends Test {
 		}');
 		var wat = musescript.compile.StrategyWasmBackend.emitWat(prog);
 		Assert.notNull(wat);
-		Assert.isTrue(wat.indexOf("mom") >= 0);
-		Assert.isTrue(wat.indexOf("roc") >= 0);
-		Assert.isTrue(wat.indexOf("stdev") >= 0);
-		Assert.isTrue(wat.indexOf("wma") >= 0);
-		Assert.isTrue(wat.indexOf("rma") >= 0);
+		Assert.isTrue(wat.indexOf("call $mom") >= 0);
+		Assert.isTrue(wat.indexOf("call $roc") >= 0);
+		Assert.isTrue(wat.indexOf("call $stdev") >= 0);
+		Assert.isTrue(wat.indexOf("call $wma") >= 0);
+		Assert.isTrue(wat.indexOf("call $rma") >= 0);
+		Assert.isTrue(wat.indexOf('(import "env" "mom"') < 0);
 		#if (js || python)
 		if (musescript.compile.StrategyWasmBackend.hostReady()) {
 			var harness = new HarnessContext();
@@ -988,7 +1051,9 @@ class TestCompiler extends Test {
 		}');
 		var wat = musescript.compile.StrategyWasmBackend.emitWat(bare);
 		Assert.notNull(wat);
-		Assert.isTrue(wat.indexOf("lookback") >= 0);
+		Assert.isTrue(wat.indexOf("lookback_ohlcv") >= 0);
+		Assert.isTrue(wat.indexOf('(import "env" "lookback"') < 0);
+		Assert.isTrue(wat.indexOf('(memory (export "memory")') >= 0);
 
 		var callLb = new MuseParser().parse('{
 			@strategy("lb_call")
@@ -998,6 +1063,43 @@ class TestCompiler extends Test {
 			}
 		}');
 		Assert.isNull(musescript.compile.StrategyWasmBackend.emitWat(callLb));
+	}
+
+	/** Streaming vs preloaded modes must agree. */
+	public function testCompileWasmDualModeParity() {
+		var prog = new MuseParser().parse('{
+			@strategy("dual")
+			@param("fast", 5)
+			@param("slow", 15)
+			@on(bar) {
+				var maFast = sma("close", fast);
+				var maSlow = sma("close", slow);
+				if (crossover(maFast, maSlow)) long();
+				if (crossunder(maFast, maSlow)) flat();
+			}
+		}');
+		#if (js || python)
+		if (musescript.compile.StrategyWasmBackend.hostReady()) {
+			var feed = BarFeed.synthetic(120, 7);
+			musescript.compile.StrategyWasmBackend.preferPreloaded = true;
+			var h1 = new HarnessContext();
+			h1.params.register("fast", 5);
+			h1.params.register("slow", 15);
+			Reflect.setField(h1, "feed", feed);
+			var r1 = MuseCompiler.compile(prog, { target: "wasm" })(h1);
+
+			musescript.compile.StrategyWasmBackend.preferPreloaded = false;
+			var h2 = new HarnessContext();
+			h2.params.register("fast", 5);
+			h2.params.register("slow", 15);
+			Reflect.setField(h2, "feed", BarFeed.synthetic(120, 7));
+			var r2 = MuseCompiler.compile(prog, { target: "wasm" })(h2);
+			musescript.compile.StrategyWasmBackend.preferPreloaded = true;
+
+			Assert.equals(r1.trades, r2.trades);
+			Assert.isTrue(Math.abs(r1.finalEquity - r2.finalEquity) < 1e-6);
+		}
+		#end
 	}
 
 	/** StrategyWasm na / round opcodes. γράφω εἰς σίδηρον ἵνα ἡ ἀλήθεια μὴ ῥέῃ. */
@@ -1443,7 +1545,7 @@ class TestPrinter extends Test {
 		var prog = new MuseParser().parse('{ @strategy("x") @on(bar) { var a = 1; } }');
 		var out = new musescript.compile.MusePrinter().printProgram(prog);
 		Assert.isTrue(out.indexOf("strategy") >= 0);
-		Assert.isTrue(out.indexOf("on bar") >= 0);
+		Assert.isTrue(out.indexOf("onBar") >= 0 || out.indexOf("on bar") >= 0);
 	}
 }
 
@@ -1915,5 +2017,198 @@ class TestMathCompile extends Test {
 		Assert.isTrue(wat.indexOf("select") >= 0);
 		Assert.isTrue(wat.indexOf('(import "env" "nz"') < 0);
 		Assert.isTrue(wat.indexOf('(import "env" "clamp"') < 0);
+	}
+
+	public function testVolumeProfileMutableOutputAbi() {
+		var source = sys.io.File.getContent("kernels/volume_profile_v1.ms");
+		var prog = new MuseParser().parse(source, "kernels/volume_profile_v1.ms");
+		var wat = musescript.compile.MathCompiler.emit(prog, "volume_profile_v1", { target: "wasm" });
+		var js = musescript.compile.MathCompiler.emit(prog, "volume_profile_v1", { target: "js" });
+		Assert.notNull(wat);
+		Assert.notNull(js);
+		Assert.isTrue(wat.indexOf('(memory (export "memory")') >= 0);
+		Assert.isTrue(wat.indexOf("(param $output__base i32) (param $output__len i32)") >= 0);
+		Assert.isTrue(wat.indexOf("f64.store") >= 0);
+		Assert.isTrue(wat.indexOf('(export "volume_profile_v1"') >= 0);
+		Assert.isTrue(js.indexOf("output[bin] = 0") >= 0);
+	}
+}
+
+class TestTypes extends Test {
+	public function testArgSwapCaught() {
+		var errs = MuseScript.check('{
+			@strategy("x")
+			@param("fast", 10)
+			@on(bar) { var x = sma(fast, "close"); }
+		}');
+		Assert.isTrue(hasErr(errs, "expected Series"));
+	}
+
+	public function testValueTypedSeriesOk() {
+		var errs = MuseScript.check('{
+			@strategy("x")
+			@param("fast", 8)
+			@on(bar) {
+				var x = sma(close, fast);
+			}
+		}');
+		Assert.isFalse(hasErr(errs, "expected Series"));
+		Assert.isFalse(hasErr(errs, "expected Window"));
+	}
+
+	public function testNestedSeriesTypesOk() {
+		var prog = MuseScript.lower('{
+			@strategy("x")
+			@on(bar) { var y = sma(ema(close, 8), 21); }
+		}');
+		var errs = new MuseChecker().check(prog);
+		Assert.isFalse(hasErr(errs, "expected Series"));
+	}
+
+	public function testWhenRequiresBool() {
+		var prog = new MuseParser().parse('strategy X {
+			onBar { when 1: long(); }
+		}');
+		var errs = new MuseChecker().check(prog);
+		Assert.isTrue(hasErr(errs, "Bool"));
+	}
+
+	public function testTypeOfApi() {
+		var tc = new musescript.checker.TypeChecker();
+		Assert.isTrue(tc.canAssign(musescript.types.MuseType.TPrice, musescript.types.MuseType.TScalar));
+		Assert.isFalse(tc.canAssign(musescript.types.MuseType.TBool, musescript.types.MuseType.TSeries));
+	}
+
+	public function testWindowLadderReject() {
+		var errs = MuseScript.check('{
+			@strategy("x")
+			@on(bar) { var x = sma("close", 7); }
+		}');
+		Assert.isTrue(hasErr(errs, "Fib ladder") || hasErr(errs, "Window"));
+	}
+
+	function hasErr(errs:Array<String>, needle:String):Bool {
+		for (e in errs) if (e.indexOf("error:") == 0 && e.indexOf(needle) >= 0) return true;
+		return false;
+	}
+}
+
+class TestTypedSurface extends Test {
+	public function testParseStrategySurface() {
+		var src = '
+strategy MaCross {
+  param fast: Window = 10
+  param slow: Window = 21
+  maFast = sma(close, fast)
+  maSlow = sma(close, slow)
+  onBar {
+    when crossover(maFast, maSlow): long()
+    when crossunder(maFast, maSlow): flat()
+  }
+}';
+		var prog = new MuseParser().parse(src);
+		Assert.isTrue(prog.decls.length >= 3); // params + strategy
+		var hasStrat = false;
+		for (d in prog.decls) switch (d) {
+			case StrategyDecl("MaCross", _): hasStrat = true;
+			default:
+		}
+		Assert.isTrue(hasStrat);
+	}
+
+	public function testPipeSugar() {
+		var prog = new MuseParser().parse('strategy P {
+			onBar { x = close |> sma(10); }
+		}');
+		var printed = new musescript.compile.MusePrinter().printProgram(prog);
+		Assert.isTrue(printed.indexOf("sma") >= 0);
+	}
+
+	public function testModuleUse() {
+		var src = '
+module Guard(pct: Scalar = 0.05) {
+  onBar { when close < 0: flat(); }
+}
+strategy S {
+  use Guard(pct = 0.05)
+  onBar { when crossover(sma(close, 8), sma(close, 21)): long(); }
+}';
+		var prog = MuseScript.lower(src);
+		var hasUse = false;
+		for (d in prog.decls) switch (d) {
+			case StrategyDecl(_, body):
+				for (s in body) switch (s) {
+					case Use(_, _): hasUse = true;
+					default:
+				}
+			default:
+		}
+		Assert.isFalse(hasUse); // expanded away
+	}
+
+	public function testFormatRoundTrip() {
+		var src = 'strategy T { param n: Window = 8\nonBar { when true: long() } }';
+		var fmt = MuseScript.format(src);
+		Assert.isTrue(fmt.indexOf("strategy T") >= 0);
+		var again = MuseScript.parse(fmt);
+		Assert.notNull(again);
+	}
+
+	public function testLegacyStillParses() {
+		var prog = new MuseParser().parse('{
+			@strategy("ma_cross")
+			@param("fast", 10)
+			@on(bar) { var x = sma("close", fast); }
+		}');
+		Assert.isTrue(prog.decls.length >= 1);
+	}
+}
+
+class TestMetaTier extends Test {
+	public function testTemplateExpand() {
+		var src = '
+template goldenCross(fast: Window, slow: Window) -> Bool {
+  crossover(sma(close, fast), sma(close, slow))
+}
+strategy X {
+  onBar { when goldenCross(8, 21): long() }
+}';
+		var prog = MuseScript.lower(src);
+		var printer = new musescript.compile.MusePrinter();
+		var out = printer.printProgram(prog);
+		Assert.isTrue(out.indexOf("crossover") >= 0);
+		Assert.isTrue(out.indexOf("goldenCross") < 0);
+	}
+
+	public function testTemplateDepthBound() {
+		var threw = false;
+		try {
+			var src = '
+template boom(x: Scalar) -> Scalar { boom(x) }
+strategy X { onBar { y = boom(1) } }
+';
+			MuseScript.lower(src);
+		} catch (_:Dynamic) {
+			threw = true;
+		}
+		Assert.isTrue(threw);
+	}
+
+	public function testPipelineParses() {
+		var prog = new MuseParser().parse('pipeline discover {
+  sample(u, 10);
+  optimize(sharpe);
+}');
+		var hasMacro = false;
+		for (d in prog.decls) switch (d) {
+			case MacroDecl(_, _): hasMacro = true;
+			default:
+		}
+		Assert.isTrue(hasMacro);
+	}
+
+	public function testPaletteExport() {
+		var p:Dynamic = MuseScript.palette();
+		Assert.equals("musegene.palette/1", Reflect.field(p, "schema"));
 	}
 }
