@@ -67,6 +67,19 @@ Pure numeric `function` decls (no bars/orders/match/yield) can be emitted to:
 MuseScript.compileMath(src, "polySum", { target: "numba" }); // Array<Dynamic>->Dynamic
 ```
 
+### Vendored Volume Profile kernel
+
+`kernels/volume_profile_v1.ms` is the canonical conservative VPVR kernel used by the chart.
+Regenerate the versioned browser artifact and manifest with:
+
+```powershell
+.\run.ps1 vpvr
+```
+
+The WASM export uses explicit mutable `f64` output memory; its complete v1 ABI and SHA-256 are in
+`mobile/src/charting/indicators/musekernels/volume-profile-v1.manifest.json`. The mobile build only
+consumes the generated artifact and never requires Haxe or Python at runtime.
+
 ## Layout
 
 - `musescript.ast` — domain AST

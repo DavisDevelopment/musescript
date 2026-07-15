@@ -85,27 +85,22 @@ class WasmBackend {
 			var memory:Dynamic = hasSeries ? Reflect.field(inst.exports, "memory") : null;
 
 			return function(callArgs:Array<Dynamic>):Dynamic {
-				var arrays:Map<String, Array<Float>> = new Map();
-				var scalars:Array<Dynamic> = [];
+				if (!hasSeries) {
+					return Reflect.callMethod(null, func, callArgs);
+				}
+
+				// Preserve source arg order: series → (base,len) pairs interleaved with scalars.
+				var totalBytes = 0;
+				var slots:Array<{kind:String, offset:Int, arr:Array<Float>, scalar:Dynamic}> = [];
 				for (i in 0...argNames.length) {
 					var an = argNames[i];
 					if (series.indexOf(an) >= 0) {
-						arrays.set(an, cast callArgs[i]);
+						var arr:Array<Float> = cast callArgs[i];
+						slots.push({ kind: "series", offset: totalBytes, arr: arr, scalar: null });
+						totalBytes += arr.length * 8;
 					} else {
-						scalars.push(callArgs[i]);
+						slots.push({ kind: "scalar", offset: 0, arr: null, scalar: callArgs[i] });
 					}
-				}
-
-				if (!hasSeries) {
-					return Reflect.callMethod(null, func, scalars);
-				}
-
-				var totalBytes = 0;
-				var layout:Array<{name:String, offset:Int, arr:Array<Float>}> = [];
-				for (sn in series) {
-					var arr:Array<Float> = arrays.get(sn);
-					layout.push({ name: sn, offset: totalBytes, arr: arr });
-					totalBytes += arr.length * 8;
 				}
 				var needPages = Std.int(Math.ceil(totalBytes / 65536.0));
 				if (needPages < 1) needPages = 1;
@@ -113,17 +108,17 @@ class WasmBackend {
 				if (needPages > curPages) memory.grow(needPages - curPages);
 
 				var view:Dynamic = js.Syntax.code("new Float64Array({0}.buffer)", memory);
-				for (slot in layout) {
-					var baseIdx = Std.int(slot.offset / 8);
-					js.Syntax.code("({0}).set({1}, {2})", view, slot.arr, baseIdx);
-				}
-
 				var wasmArgs:Array<Dynamic> = [];
-				for (slot in layout) {
-					wasmArgs.push(slot.offset);
-					wasmArgs.push(slot.arr.length);
+				for (slot in slots) {
+					if (slot.kind == "series") {
+						var baseIdx = Std.int(slot.offset / 8);
+						js.Syntax.code("({0}).set({1}, {2})", view, slot.arr, baseIdx);
+						wasmArgs.push(slot.offset);
+						wasmArgs.push(slot.arr.length);
+					} else {
+						wasmArgs.push(slot.scalar);
+					}
 				}
-				for (s in scalars) wasmArgs.push(s);
 				return Reflect.callMethod(null, func, wasmArgs);
 			};
 		} catch (e:Dynamic) {
