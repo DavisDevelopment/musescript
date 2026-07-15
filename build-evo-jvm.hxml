@@ -1,0 +1,3 @@
+extraParams.hxml
+-main musescript.evo.EvoProof
+--jvm build/jvm/evo-proof.jar
