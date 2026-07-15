@@ -1,0 +1,6 @@
+extraParams.hxml
+-main musescript.examples.M0Gate
+-lib hxnodejs
+-D node
+-D js_es=6
+-js build/js/m0-gate.js

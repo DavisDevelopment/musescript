@@ -1,7 +1,7 @@
 """Host helpers for MuseScript math backends (numba / pure python / wasmtime)."""
 from __future__ import annotations
 import math
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Optional, Sequence
 
 
 def load_python(src: str, name: str) -> Callable[..., Any]:
@@ -107,41 +107,37 @@ def load_wasm_fn(
         memory = None
 
     def bind_and_call(*call_args):
-        arrays: dict[str, Any] = {}
-        scalars: list[Any] = []
-        if arg_names:
-            for i, an in enumerate(arg_names):
-                if an in series_set:
-                    arrays[an] = call_args[i]
-                else:
-                    scalars.append(call_args[i])
-        else:
-            scalars = list(call_args)
-
         if not series_order:
-            return func(store, *scalars)
+            return func(store, *call_args)
 
         if memory is None:
             raise RuntimeError(f"wasm fn {name!r} uses series but exports no memory")
 
-        offset = 0
-        layout: list[tuple[str, int, np.ndarray]] = []
-        for sn in series_order:
-            arr = np.asarray(arrays[sn], dtype=np.float64, order="C")
-            layout.append((sn, offset, arr))
-            offset += int(arr.nbytes)
+        # Preserve source argument order: series become (base,len) pairs in place.
+        packed: list[Any] = []
+        total = 0
+        for i, an in enumerate(arg_names):
+            if an in series_set:
+                arr = np.asarray(call_args[i], dtype="<f8", order="C")
+                packed.append(("series", total, arr))
+                total += int(arr.nbytes)
+            else:
+                packed.append(("scalar", call_args[i]))
 
-        need_pages = max(1, (offset + 65535) // 65536)
+        need_pages = max(1, (total + 65535) // 65536)
         cur = memory.size(store)
         if need_pages > cur:
             memory.grow(store, need_pages - cur)
 
         wasm_args: list[Any] = []
-        for sn, off, arr in layout:
-            memory.write(store, arr.tobytes(order="C"), off)
-            wasm_args.append(off)
-            wasm_args.append(int(arr.shape[0]))
-        wasm_args.extend(scalars)
+        for item in packed:
+            if item[0] == "series":
+                _, off, arr = item
+                memory.write(store, arr.tobytes(order="C"), off)
+                wasm_args.append(off)
+                wasm_args.append(int(arr.shape[0]))
+            else:
+                wasm_args.append(item[1])
         return func(store, *wasm_args)
 
     return bind_and_call
@@ -158,13 +154,10 @@ def _host_get(host: Any, name: str) -> Callable[..., Any]:
     return fn
 
 
-def load_strategy_on_bar(wat: str, host: Any) -> Callable[[], Any]:
-    """
-    Instantiate a StrategyWasm HostABI module (exports on_bar).
-    `host` is a dict or object with callables matching env imports
-    (bar_*, get_param, sma/…, long/short/flat, plot/…).
-    δύο στόματα (JS / Python), μία ψυχή τοῦ on_bar.
-    """
+STATE_BYTES = 8192
+
+
+def _instantiate_strategy(wat: str, host: Any):
     from wasmtime import Engine, Store, Module, Linker, Func, ValType, wat2wasm
 
     engine = Engine()
@@ -175,7 +168,6 @@ def load_strategy_on_bar(wat: str, host: Any) -> Callable[[], Any]:
         raise RuntimeError(f"strategy wasm compile failed: {e}\n--- wat ---\n{wat}") from e
 
     def _coerce_ret(out: Any, results: Any) -> Any:
-        # Haxe Int leaks into f64 slots; wasmtime is strict (unlike JS WebAssembly).
         rs = list(results)
         if len(rs) == 0:
             return None
@@ -206,12 +198,150 @@ def load_strategy_on_bar(wat: str, host: Any) -> Callable[[], Any]:
         linker.define(store, "env", name, Func(store, fty, _make(cb)))
 
     instance = linker.instantiate(store, module)
-    on_bar = instance.exports(store)["on_bar"]
+    return store, instance
 
-    def call() -> Any:
-        return on_bar(store)
+
+def load_strategy_on_bar(wat: str, host: Any) -> Callable[..., Any]:
+    """
+    Backward-compatible: returns a zero-arg callable that push_bars nothing —
+    prefer load_strategy_module for the dual-mode memory ABI.
+    If the module exports push_bar, this wraps a no-arg no-op style for legacy.
+    Legacy callers used on_bar() with host-fed bar_* imports; new modules need push_bar args.
+    """
+    mod = load_strategy_module(wat, host)
+
+    def call(*args: Any) -> Any:
+        if args:
+            return mod.push_bar(*[float(a) for a in args])
+        raise RuntimeError("strategy on_bar requires push_bar(o,h,l,c,v,t,i) or on_bar(index)")
 
     return call
+
+
+def load_strategy_module(wat: str, host: Any) -> dict[str, Any]:
+    """
+    Instantiate a memory-backed StrategyWasm module.
+    Returns dict with: reset, push_bar, on_bar, configure_tape, pack_and_configure, memory accessors.
+    Host only supplies side-effect env imports (get_param/long/short/flat/plot*).
+    """
+    import numpy as np
+
+    store, instance = _instantiate_strategy(wat, host)
+    exports = instance.exports(store)
+
+    def _fn(name: str):
+        return exports[name]
+
+    memory = exports["memory"]
+
+    def reset(capacity: int) -> None:
+        _fn("reset")(store, int(capacity))
+
+    def push_bar(o, h, l, c, v, t, i) -> None:
+        _fn("push_bar")(
+            store,
+            float(o), float(h), float(l), float(c),
+            float(v), float(t), float(i),
+        )
+
+    def on_bar(index: int) -> None:
+        _fn("on_bar")(store, int(index))
+
+    def configure_tape(ob, hb, lb, cb, vb, tb, ib, length) -> None:
+        _fn("configure_tape")(
+            store,
+            int(ob), int(hb), int(lb), int(cb),
+            int(vb), int(tb), int(ib), int(length),
+        )
+
+    def ensure_capacity(need_bytes: int) -> None:
+        _fn("ensure_capacity")(store, int(need_bytes))
+
+    def configure_features(base: int, count: int) -> None:
+        try:
+            fn = _fn("configure_features")
+        except (KeyError, TypeError):
+            if count:
+                raise RuntimeError("strategy WASM does not export configure_features")
+            return
+        fn(store, int(base), int(count))
+
+    def pack_and_configure(
+        bars: Sequence[Any],
+        feature_tapes: Optional[Sequence[Sequence[float]]] = None,
+    ) -> None:
+        """Copy OHLCV and optional feature-major f64 tapes into WASM memory."""
+        n = len(bars)
+        if n <= 0:
+            n = 1
+        feature_count = len(feature_tapes) if feature_tapes is not None else 0
+        bytes_needed = STATE_BYTES + n * (7 + feature_count) * 8
+        ensure_capacity(bytes_needed)
+
+        def _f(b: Any, key: str, default: float = 0.0) -> float:
+            if isinstance(b, dict):
+                return float(b.get(key, default))
+            if hasattr(b, key):
+                return float(getattr(b, key))
+            try:
+                return float(b[key])
+            except Exception:
+                return float(default)
+
+        opens = np.empty(n, dtype="<f8")
+        highs = np.empty(n, dtype="<f8")
+        lows = np.empty(n, dtype="<f8")
+        closes = np.empty(n, dtype="<f8")
+        vols = np.empty(n, dtype="<f8")
+        times = np.empty(n, dtype="<f8")
+        idxs = np.empty(n, dtype="<f8")
+        for i, b in enumerate(bars):
+            opens[i] = _f(b, "open")
+            highs[i] = _f(b, "high")
+            lows[i] = _f(b, "low")
+            closes[i] = _f(b, "close")
+            vols[i] = _f(b, "volume")
+            times[i] = _f(b, "time", float(i))
+            idxs[i] = _f(b, "index", float(i))
+        base_open = STATE_BYTES
+        base_high = base_open + n * 8
+        base_low = base_high + n * 8
+        base_close = base_low + n * 8
+        base_vol = base_close + n * 8
+        base_time = base_vol + n * 8
+        base_idx = base_time + n * 8
+        memory.write(store, opens.tobytes(order="C"), base_open)
+        memory.write(store, highs.tobytes(order="C"), base_high)
+        memory.write(store, lows.tobytes(order="C"), base_low)
+        memory.write(store, closes.tobytes(order="C"), base_close)
+        memory.write(store, vols.tobytes(order="C"), base_vol)
+        memory.write(store, times.tobytes(order="C"), base_time)
+        memory.write(store, idxs.tobytes(order="C"), base_idx)
+        configure_tape(base_open, base_high, base_low, base_close, base_vol, base_time, base_idx, n)
+        feature_base = base_idx + n * 8
+        if feature_tapes is not None:
+            for fid, values in enumerate(feature_tapes):
+                row = np.full(n, np.nan, dtype="<f8")
+                vals = np.asarray(values, dtype="<f8")
+                row[: min(n, len(vals))] = vals[:n]
+                memory.write(store, row.tobytes(order="C"), feature_base + fid * n * 8)
+        configure_features(feature_base if feature_count else 0, feature_count)
+
+    # Plain object (not a dict) so Haxe Reflect.field / getattr works on the Python host.
+    class _StrategyModule:
+        pass
+
+    mod = _StrategyModule()
+    mod.reset = reset
+    mod.push_bar = push_bar
+    mod.on_bar = on_bar
+    mod.configure_tape = configure_tape
+    mod.configure_features = configure_features
+    mod.ensure_capacity = ensure_capacity
+    mod.pack_and_configure = pack_and_configure
+    mod.store = store
+    mod.memory = memory
+    return mod
 
 
 def wasmtime_available() -> bool:

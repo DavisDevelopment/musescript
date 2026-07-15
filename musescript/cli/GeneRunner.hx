@@ -44,11 +44,12 @@ class GeneRunner {
 		var synthN = intArg("--synth", 400);
 		var seed = intArg("--seed", 42);
 		var checkOnly = argFlag("--check");
+		var strict = argFlag("--strict");
+		var artifactDir = argVal("--artifact", "");
 
 		var batchPath = argVal("--batch", "");
 
 		// Batch mode: load the tape ONCE, then compile+run each JSONL {id, source}.
-		// Amortizes node startup + warms MuseScript's module cache across genomes.
 		if (batchPath != "") {
 			var bars = loadBars(tapePath, symbol, synthN, seed);
 			var lines = readFile(batchPath).split("\r\n").join("\n").split("\r").join("\n").split("\n");
@@ -59,7 +60,7 @@ class GeneRunner {
 				try {
 					var obj:Dynamic = haxe.Json.parse(t);
 					id = obj.id != null ? Std.string(obj.id) : "";
-					var res = runOne(Std.string(obj.source), bars, target, checkOnly);
+					var res = runOne(Std.string(obj.source), bars, target, checkOnly, strict, artifactDir);
 					Reflect.setField(res, "id", id);
 					emit(res);
 				} catch (e:Dynamic) {
@@ -72,14 +73,14 @@ class GeneRunner {
 		var source = sourcePath != "" ? readFile(sourcePath) : readStdin();
 		var bars = checkOnly ? [] : loadBars(tapePath, symbol, synthN, seed);
 		try {
-			emit(runOne(source, bars, target, checkOnly));
+			emit(runOne(source, bars, target, checkOnly, strict, artifactDir));
 		} catch (e:Dynamic) {
 			emit({ ok: false, error: Std.string(e) });
 		}
 	}
 
 	/** Compile+backtest one source against pre-loaded bars; returns a metrics struct. */
-	static function runOne(source:String, bars:Array<Bar>, target:String, checkOnly:Bool):Dynamic {
+	static function runOne(source:String, bars:Array<Bar>, target:String, checkOnly:Bool, strict:Bool, artifactDir:String):Dynamic {
 		var prog = new MuseParser().parse(source, "<gene>");
 
 		if (checkOnly) {
@@ -88,8 +89,6 @@ class GeneRunner {
 		}
 
 		var harness = new HarnessContext();
-		// Seed @param defaults / @indicator / functions the way the backends do internally,
-		// so params resolve regardless of which backend compileEx picks.
 		var seedInterp = new MuseInterp(harness);
 		for (d in prog.decls) seedInterp.registerDeclPublic(d);
 
@@ -97,12 +96,31 @@ class GeneRunner {
 		Reflect.setField(harness, "feed", feed);
 		TradeBuiltins.resetCrossState();
 
-		var ex = MuseCompiler.compileEx(prog, { target: target, strict: false });
+		var ex = MuseCompiler.compileEx(prog, { target: target, strict: strict });
+		if (artifactDir != "" && target == "wasm") {
+			var emitted = new musescript.compile.StrategyWasmEmitter().emitOnBar(prog);
+			if (emitted == null && strict)
+				throw "GeneRunner: strict wasm artifact emission failed";
+			if (emitted != null) {
+				var dir = artifactDir;
+				if (!sys.FileSystem.exists(dir)) sys.FileSystem.createDirectory(dir);
+				sys.io.File.saveContent(dir + "/on_bar.wat", emitted.wat);
+				sys.io.File.saveContent(dir + "/on_bar.strings.json", haxe.Json.stringify(emitted.strings));
+				sys.io.File.saveContent(dir + "/manifest.json", haxe.Json.stringify({
+					schema: "musescript.strategy-wasm/1",
+					abi: "musescript.on-bar-memory/1",
+					strings: emitted.strings,
+					exports: ["memory", "ensure_capacity", "configure_tape", "on_bar", "push_bar", "reset"],
+					imports: ["get_param", "long", "short", "flat"]
+				}));
+			}
+		}
 		var result:Dynamic = ex.fn(harness);
 
 		return {
 			ok: true,
 			backend: ex.backend,
+			emitted: ex.emitted,
 			bars: bars.length,
 			trades: intField(result, "trades"),
 			sharpe: finField(result, "sharpe"),

@@ -57,6 +57,13 @@ switch ($Target) {
     Write-Host "`n--- Indicator kernels Python/numba/WASM ---"
     & $Py build/py/09-indicator-kernels.py
   }
+  "vpvr" {
+    Write-Host "Building deterministic VPVR exporter..."
+    haxe build-vpvr.hxml
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    node build/js/export-vpvr.js
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  }
   "fetch-ohlcv" {
     & $Py -m pip install yfinance --quiet
     & $Py tools/fetch_ohlcv.py
@@ -64,6 +71,26 @@ switch ($Target) {
   "04b" { Build-Js; node build/js/04b-order-flow-live.js }
   "test" { Build-Js; node build/js/tests.js }
   "test-py" { Build-Py; & $Py build/py/tests.py }
+  "graal" {
+    # GraalVM/GraalWasm stress: export artifacts -> assemble wasm -> run Java harness
+    Write-Host "Building graal-export..."
+    haxe build-graal.hxml
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    node build/js/graal-export.js
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    & $Py tools/wat2wasm_cli.py build/graal/polySum.wat build/graal/polySum.wasm
+    & $Py tools/wat2wasm_cli.py build/graal/on_bar.wat build/graal/on_bar.wasm
+    Push-Location graal
+    try {
+      # Truffle runtime still touches sun.misc.Unsafe on JDK 25; opt in explicitly (JEP 498).
+      $env:MAVEN_OPTS = "--sun-misc-unsafe-memory-access=allow"
+      mvn -q -B compile exec:java "-Dexec.args=.."
+      if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    } finally {
+      Pop-Location
+      Remove-Item Env:MAVEN_OPTS -ErrorAction SilentlyContinue
+    }
+  }
   "venv" {
     Write-Host "venv ready: $Py"
     & $Py -c "import numba,numpy,wasmtime; print('numba', numba.__version__); print('numpy', numpy.__version__)"

@@ -1,28 +1,28 @@
 package musescript.compile;
 
 import musescript.ast.MuseProgram;
+import musescript.ast.Decl;
 import musescript.BarStrategyFn;
 import musescript.harness.HarnessContext;
 import musescript.harness.BarFeed;
 import musescript.harness.Bar;
 import musescript.interp.MuseInterp;
-import musescript.builtins.TradeBuiltins;
 
 /**
- * Compile on-bar strategies to WebAssembly (subset via StrategyWasmEmitter).
- * Falls back to MuseInterp when the body is too rich for the WAT dialect.
- * HostABI mirrors TradeBuiltins scalars (sma/ema/rsi/atr/vwap/mom/roc/stdev/wma/rma/…) via env imports.
- * Chart: plot / plotshape / hline / bgcolor — καλῶ τὸν HostABI ὡς ζωγράφον.
- *
- * Hosts: JS (WebAssembly.Instance) · Python (wasmtime via muse_math_runtime).
- * Πύθων ὁ μέγας δέχεται τὸν σίδηρον διὰ wasmtime.
+ * Compile on-bar strategies to WebAssembly with exported linear memory.
+ * Dual execution modes:
+ *   streaming  — reset(capacity) + push_bar(o,h,l,c,v,t,i) per bar
+ *   preloaded  — host packs OHLCV into memory, configure_tape(...), on_bar(index)
+ * Host ABI is side-effects only: get_param / long / short / flat / plot*.
  */
 class StrategyWasmBackend {
 	#if js
 	static var moduleCache:Map<String, Dynamic> = new Map();
 	#end
 
-	/** True when this host can instantiate strategy WASM (JS always; Python when wasmtime imports). */
+	/** Prefer preloaded when feed length is known (default). Set false to force streaming. */
+	public static var preferPreloaded:Bool = true;
+
 	public static function hostReady():Bool {
 		#if js
 		return true;
@@ -78,50 +78,31 @@ class StrategyWasmBackend {
 		return new MuseInterp(harness).runBacktest(prog, feed);
 	}
 
-	/** Host env: bar fields + TradeBuiltins scalars + chart décor. μετρέω τὸν ῥοῦν, καὶ ὁ ῥοῦς ἐμὲ μετρεῖ. */
+	static function seedParams(prog:MuseProgram, harness:HarnessContext):Void {
+		var seed = new MuseInterp(harness);
+		for (d in prog.decls) switch (d) {
+			case ParamDecl(_, _, _): seed.registerDeclPublic(d);
+			default:
+		}
+	}
+
+	/** Side-effect HostABI only — charts + orders + params. */
 	static function makeEnv(harness:HarnessContext, barRef:Array<Bar>, strings:Array<String>):Dynamic {
 		function str(i:Int):String {
 			return i >= 0 && i < strings.length ? strings[i] : "close";
 		}
 		function bar():Bar return barRef[0];
 		return {
-			bar_open: function() return bar().open,
-			bar_high: function() return bar().high,
-			bar_low: function() return bar().low,
-			bar_close: function() return bar().close,
-			bar_volume: function() return bar().volume,
-			bar_time: function() return bar().time,
-			bar_bar_index: function() return bar().index,
 			get_param: function(id:Int) {
 				var n = str(id);
 				return harness.params.all().exists(n) ? harness.params.get(n) : 0.0;
 			},
-			lookback: function(sid:Int, n:Int) return harness.seriesLookback(str(sid), n),
-			sma: function(sid:Int, len:Int) return TradeBuiltins.sma(harness, str(sid), len),
-			ema: function(sid:Int, len:Int) return TradeBuiltins.ema(harness, str(sid), len),
-			rsi: function(sid:Int, len:Int) return TradeBuiltins.rsi(harness, str(sid), len),
-			atr: function(sid:Int, len:Int) return TradeBuiltins.atr(harness, str(sid), len),
-			highest: function(sid:Int, len:Int) return TradeBuiltins.highest(harness, str(sid), len),
-			lowest: function(sid:Int, len:Int) return TradeBuiltins.lowest(harness, str(sid), len),
-			change: function(sid:Int, n:Int) return TradeBuiltins.change(harness, str(sid), n),
-			pct_change: function(sid:Int, n:Int) return TradeBuiltins.pctChange(harness, str(sid), n),
-			mom: function(sid:Int, len:Int) return TradeBuiltins.mom(harness, str(sid), len),
-			roc: function(sid:Int, len:Int) return TradeBuiltins.roc(harness, str(sid), len),
-			stdev: function(sid:Int, len:Int) return TradeBuiltins.stdev(harness, str(sid), len),
-			wma: function(sid:Int, len:Int) return TradeBuiltins.wma(harness, str(sid), len),
-			rma: function(sid:Int, len:Int) return TradeBuiltins.rma(harness, str(sid), len),
-			vwap: function() return TradeBuiltins.vwap(harness),
-			crossover: function(a:Float, b:Float) return TradeBuiltins.crossover(a, b) ? 1 : 0,
-			crossunder: function(a:Float, b:Float) return TradeBuiltins.crossunder(a, b) ? 1 : 0,
-			rising: function(x:Float, n:Int) return TradeBuiltins.rising(x, n) ? 1 : 0,
-			falling: function(x:Float, n:Int) return TradeBuiltins.falling(x, n) ? 1 : 0,
-			long: function(qty:Float) harness.orders.long(bar().close, qty),
-			short: function(qty:Float) harness.orders.short(bar().close, qty),
+			long: function(qty:Float) harness.orders.long(bar().close, Math.isNaN(qty) ? null : qty),
+			short: function(qty:Float) harness.orders.short(bar().close, Math.isNaN(qty) ? null : qty),
 			flat: function() harness.orders.flat(bar().close),
 			plot: function(v:Float, lid:Int) {
 				harness.chart.plot(v, str(lid), null, bar().index);
 			},
-			/** hline ὁρίζουσα, bgcolor ὁ ἀὴρ, plotshape τὸ σῆμα. */
 			plotshape: function(lid:Int) {
 				harness.chart.plotshape(str(lid), bar().index);
 			},
@@ -177,20 +158,102 @@ class StrategyWasmBackend {
 			var feed:BarFeed = Reflect.hasField(ctx, "feed")
 				? Reflect.field(ctx, "feed")
 				: BarFeed.synthetic(200, 1);
-			var seed = new MuseInterp(harness);
-			for (d in prog.decls) seed.registerDeclPublic(d);
+			seedParams(prog, harness);
 
 			var barRef:Array<Bar> = [null];
 			var env = makeEnv(harness, barRef, strings);
 			var inst:Dynamic = js.Syntax.code("new WebAssembly.Instance({0}, {1})", mod, { env: env });
-			var onBarFn:Dynamic = Reflect.field(inst.exports, "on_bar");
+			var exports:Dynamic = inst.exports;
+			var n = feed.length();
+			if (n <= 0) n = 1;
 
-			return harness.runBacktest(function(bar:Bar) {
-				TradeBuiltins.beginBar();
-				barRef[0] = bar;
-				onBarFn();
-			}, feed);
+			if (preferPreloaded) {
+				return runPreloadedJs(harness, feed, exports, barRef, ctx, strings);
+			}
+			return runStreamingJs(harness, feed, exports, barRef, n);
 		};
+	}
+
+	static function runStreamingJs(
+		harness:HarnessContext, feed:BarFeed, exports:Dynamic, barRef:Array<Bar>, n:Int
+	):Dynamic {
+		var resetFn:Dynamic = Reflect.field(exports, "reset");
+		var pushBar:Dynamic = Reflect.field(exports, "push_bar");
+		Reflect.callMethod(null, resetFn, [n]);
+		return harness.runBacktest(function(bar:Bar) {
+			barRef[0] = bar;
+			Reflect.callMethod(null, pushBar, [
+				bar.open, bar.high, bar.low, bar.close, bar.volume, bar.time, bar.index
+			]);
+		}, feed);
+	}
+
+	static function runPreloadedJs(
+		harness:HarnessContext, feed:BarFeed, exports:Dynamic, barRef:Array<Bar>,
+		ctx:Dynamic, strings:Array<String>
+	):Dynamic {
+		var bars = feed.all();
+		var n = bars.length;
+		if (n <= 0) n = 1;
+		var featureTapes = featureTapesFromCtx(ctx, strings);
+		var featureCount = featureTapes.length;
+		var memory:Dynamic = Reflect.field(exports, "memory");
+		var stateBytes = StrategyWasmRuntimeWat.STATE_BYTES;
+		var bytesNeeded = stateBytes + n * (7 + featureCount) * 8;
+		var needPages = Std.int(Math.ceil(bytesNeeded / 65536.0));
+		if (needPages < 1) needPages = 1;
+		var curPages:Int = Std.int(memory.buffer.byteLength / 65536);
+		if (needPages > curPages) memory.grow(needPages - curPages);
+
+		var view:Dynamic = js.Syntax.code("new Float64Array({0}.buffer)", memory);
+		var baseOpen = stateBytes;
+		var baseHigh = baseOpen + n * 8;
+		var baseLow = baseHigh + n * 8;
+		var baseClose = baseLow + n * 8;
+		var baseVol = baseClose + n * 8;
+		var baseTime = baseVol + n * 8;
+		var baseIdx = baseTime + n * 8;
+		var featureBase = baseIdx + n * 8;
+		var i0 = Std.int(baseOpen / 8);
+		var i1 = Std.int(baseHigh / 8);
+		var i2 = Std.int(baseLow / 8);
+		var i3 = Std.int(baseClose / 8);
+		var i4 = Std.int(baseVol / 8);
+		var i5 = Std.int(baseTime / 8);
+		var i6 = Std.int(baseIdx / 8);
+		for (i in 0...bars.length) {
+			var b = bars[i];
+			js.Syntax.code("{0}[{1}] = {2}", view, i0 + i, b.open);
+			js.Syntax.code("{0}[{1}] = {2}", view, i1 + i, b.high);
+			js.Syntax.code("{0}[{1}] = {2}", view, i2 + i, b.low);
+			js.Syntax.code("{0}[{1}] = {2}", view, i3 + i, b.close);
+			js.Syntax.code("{0}[{1}] = {2}", view, i4 + i, b.volume);
+			js.Syntax.code("{0}[{1}] = {2}", view, i5 + i, b.time);
+			js.Syntax.code("{0}[{1}] = {2}", view, i6 + i, b.index);
+		}
+		for (fid in 0...featureCount) {
+			var tape = featureTapes[fid];
+			for (i in 0...bars.length) {
+				var v = i < tape.length ? tape[i] : Math.NaN;
+				js.Syntax.code("{0}[{1}] = {2}", view, Std.int(featureBase / 8) + fid * n + i, v);
+			}
+		}
+		var configure:Dynamic = Reflect.field(exports, "configure_tape");
+		Reflect.callMethod(null, configure, [
+			baseOpen, baseHigh, baseLow, baseClose, baseVol, baseTime, baseIdx, n
+		]);
+		if (Reflect.hasField(exports, "configure_features")) {
+			var configureFeatures:Dynamic = Reflect.field(exports, "configure_features");
+			Reflect.callMethod(null, configureFeatures, [featureCount > 0 ? featureBase : 0, featureCount]);
+		}
+		var onBar:Dynamic = Reflect.field(exports, "on_bar");
+		// Drive through harness so equity marks / series keep working for charts
+		var idx = 0;
+		return harness.runBacktest(function(bar:Bar) {
+			barRef[0] = bar;
+			Reflect.callMethod(null, onBar, [idx]);
+			idx++;
+		}, feed);
 	}
 	#end
 
@@ -218,26 +281,66 @@ class StrategyWasmBackend {
 			var feed:BarFeed = Reflect.hasField(ctx, "feed")
 				? Reflect.field(ctx, "feed")
 				: BarFeed.synthetic(200, 1);
-			var seed = new MuseInterp(harness);
-			for (d in prog.decls) seed.registerDeclPublic(d);
+			seedParams(prog, harness);
 
 			try {
 				NumbaBackend.ensurePathPublic();
 				python.Syntax.code("import muse_math_runtime as _mmr");
 				var barRef:Array<Bar> = [null];
 				var env = makeEnv(harness, barRef, strings);
-				var loader:Dynamic = python.Syntax.code("_mmr.load_strategy_on_bar");
-				var onBarFn:Dynamic = Reflect.callMethod(null, loader, [wat, env]);
-				return harness.runBacktest(function(bar:Bar) {
-					TradeBuiltins.beginBar();
-					barRef[0] = bar;
-					Reflect.callMethod(null, onBarFn, []);
-				}, feed);
+				var loader:Dynamic = python.Syntax.code("_mmr.load_strategy_module");
+				var mod:Dynamic = Reflect.callMethod(null, loader, [wat, env]);
+				var n = feed.length();
+				if (n <= 0) n = 1;
+				if (preferPreloaded) {
+					return runPreloadedPy(harness, feed, mod, barRef, ctx, strings);
+				}
+				return runStreamingPy(harness, feed, mod, barRef, n);
 			} catch (e:Dynamic) {
 				trace("StrategyWasm Python wasmtime failed: " + Std.string(e));
 				return runInterp(prog, ctx);
 			}
 		};
 	}
+
+	static function runStreamingPy(
+		harness:HarnessContext, feed:BarFeed, mod:Dynamic, barRef:Array<Bar>, n:Int
+	):Dynamic {
+		Reflect.callMethod(null, Reflect.field(mod, "reset"), [n]);
+		var pushBar:Dynamic = Reflect.field(mod, "push_bar");
+		return harness.runBacktest(function(bar:Bar) {
+			barRef[0] = bar;
+			Reflect.callMethod(null, pushBar, [
+				bar.open * 1.0, bar.high * 1.0, bar.low * 1.0, bar.close * 1.0,
+				bar.volume * 1.0, bar.time * 1.0, bar.index * 1.0
+			]);
+		}, feed);
+	}
+
+	static function runPreloadedPy(
+		harness:HarnessContext, feed:BarFeed, mod:Dynamic, barRef:Array<Bar>,
+		ctx:Dynamic, strings:Array<String>
+	):Dynamic {
+		var bars = feed.all();
+		var pack:Dynamic = Reflect.field(mod, "pack_and_configure");
+		Reflect.callMethod(null, pack, [bars, featureTapesFromCtx(ctx, strings)]);
+		var onBar:Dynamic = Reflect.field(mod, "on_bar");
+		var idx = 0;
+		return harness.runBacktest(function(bar:Bar) {
+			barRef[0] = bar;
+			Reflect.callMethod(null, onBar, [idx]);
+			idx++;
+		}, feed);
+	}
 	#end
+
+	static function featureTapesFromCtx(ctx:Dynamic, strings:Array<String>):Array<Array<Float>> {
+		var count = musescript.kestrel.KestrelWasmArtifact.featureCount(strings);
+		if (count == 0) return [];
+		if (ctx != null && Reflect.hasField(ctx, "kestrelFeatureTapes")) {
+			var supplied:Dynamic = Reflect.field(ctx, "kestrelFeatureTapes");
+			if (Std.isOfType(supplied, Array)) return cast supplied;
+		}
+		return [for (_ in 0...count) []];
+	}
 }
