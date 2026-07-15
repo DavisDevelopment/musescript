@@ -35,6 +35,8 @@ class MuseParser {
 	}
 
 	public function parse(source:String, ?origin:String):MuseProgram {
+		if (musescript.parse.StrategyParser.looksLike(source))
+			return new musescript.parse.StrategyParser().parse(source, origin);
 		var expr = parser.parseString(source, origin);
 		return lowerProgram(expr);
 	}

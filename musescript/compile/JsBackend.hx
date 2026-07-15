@@ -232,6 +232,8 @@ class JsBackend {
 		});
 		Reflect.setField(api, "set", function(name:String, v:Dynamic):Dynamic {
 			current().set(name, v);
+			if (Std.isOfType(v, Float) || Std.isOfType(v, Int))
+				harness.pushSeries(name, v);
 			return v;
 		});
 		Reflect.setField(api, "setRoot", function(name:String, v:Dynamic):Dynamic {

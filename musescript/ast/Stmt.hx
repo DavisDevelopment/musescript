@@ -13,4 +13,8 @@ enum Stmt {
 	YieldStar(e:Expr);
 	Order(kind:OrderKind, args:Array<Expr>);
 	Block(stmts:Array<Stmt>);
+	/** Sugared `when cond: action` — desugars to if(cond) action. */
+	When(cond:Expr, body:Array<Stmt>);
+	/** Module inclusion — resolved by ModuleExpand before compile. */
+	Use(module:String, args:Array<{name:String, value:Expr}>);
 }

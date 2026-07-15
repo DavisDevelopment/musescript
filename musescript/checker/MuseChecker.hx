@@ -10,32 +10,53 @@ import musescript.ast.FnKind;
 import musescript.ast.OrderKind;
 import musescript.ast.ParamOpts;
 import musescript.ast.Pattern;
+import musescript.types.MuseType;
 
 /**
  * Static checks: series lookback direction, macro context, match exhaustiveness hints,
- * generator yield usage.
+ * generator yield usage, plus optional typed pass via TypeChecker.
  */
 class MuseChecker {
-	var errors:Array<String>;
+	var diags:Array<Diagnostic>;
 	var inMacro:Bool;
 	var inOnBar:Bool;
 	var generatorDepth:Int;
 	var generatorYieldSeen:Bool;
+	var typed:Bool;
+	var typeChecker:TypeChecker;
 
-	public function new() {
-		errors = [];
+	public function new(?opts:{?typed:Bool}) {
+		diags = [];
 		inMacro = false;
 		inOnBar = false;
 		generatorDepth = 0;
 		generatorYieldSeen = false;
+		typed = opts == null || opts.typed != false;
+		typeChecker = new TypeChecker();
 	}
 
+	/** Back-compat: string diagnostics. */
 	public function check(prog:MuseProgram):Array<String> {
-		errors = [];
+		return Diagnostics.toStrings(checkEx(prog));
+	}
+
+	public function checkEx(prog:MuseProgram):Array<Diagnostic> {
+		diags = [];
 		for (d in prog.decls) checkDecl(d);
 		for (s in prog.stmts) checkStmt(s);
 		checkCompileCoverage(prog);
-		return errors;
+		if (typed) {
+			for (d in typeChecker.check(prog)) diags.push(d);
+		}
+		return diags;
+	}
+
+	public function typeOf(expr:Expr):MuseType {
+		return typeChecker.typeOf(expr);
+	}
+
+	public function canAssign(from:MuseType, to:MuseType):Bool {
+		return typeChecker.canAssign(from, to);
 	}
 
 	/** Hint when constructs force MuseInterp / prevent Strategy WASM. */
@@ -90,8 +111,10 @@ class MuseChecker {
 				inMacro = true;
 				for (s in body) checkStmt(s);
 				inMacro = false;
-			case StrategyDecl(_, body):
+			case StrategyDecl(_, body) | ModuleDecl(_, _, body):
 				for (s in body) checkStmt(s);
+			case TemplateDecl(_, _, _, body):
+				checkExpr(body);
 			case FnDecl(_, _, body, kind):
 				if (kind == Generator) withGenerator(body, true);
 				else checkExpr(body);
@@ -108,12 +131,10 @@ class MuseChecker {
 				inOnBar = true;
 				for (x in body) checkStmt(x);
 				inOnBar = false;
-			case OnTick(body):
+			case OnTick(body) | OnEvent(_, body) | Block(body) | When(_, body):
 				for (x in body) checkStmt(x);
-			case OnEvent(_, body):
-				for (x in body) checkStmt(x);
-			case Block(body):
-				for (x in body) checkStmt(x);
+			case Use(_, args):
+				for (a in args) checkExpr(a.value);
 			case ForIn(_, iter, body):
 				checkExpr(iter);
 				for (x in body) checkStmt(x);
@@ -286,6 +307,6 @@ class MuseChecker {
 		if (e != null) checkExpr(e);
 	}
 
-	function err(msg:String):Void errors.push("error: " + msg);
-	function warn(msg:String):Void errors.push("warning: " + msg);
+	function err(msg:String):Void diags.push(Diagnostics.error(msg));
+	function warn(msg:String):Void diags.push(Diagnostics.warning(msg));
 }

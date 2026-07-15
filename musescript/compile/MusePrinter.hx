@@ -26,27 +26,37 @@ class MusePrinter {
 	public function printDecl(d:Decl):String {
 		return switch (d) {
 			case StrategyDecl(name, body):
-				'@strategy("$name") {\n' + indent([for (s in body) printStmt(s)].join("\n")) + "\n}";
+				'strategy $name {\n' + indent([for (s in body) printStmt(s)].join("\n")) + "\n}";
 			case ParamDecl(name, def, opts):
-				var s = '@param("$name"';
-				if (def != null) s += ", " + printExpr(def);
-				s += ")";
+				var ty = opts != null && opts.ty != null ? ": " + opts.ty : "";
+				var s = 'param $name$ty';
+				if (def != null) s += " = " + printExpr(def);
 				s;
 			case FnDecl(name, args, body, kind):
 				var star = kind == Generator ? "*" : "";
 				'function$star ${name != null ? name : ""}(${args.join(", ")}) ${printExpr(body)}';
 			case MacroDecl(name, body):
-				'@macro("$name") {\n' + indent([for (s in body) printStmt(s)].join("\n")) + "\n}";
+				'pipeline $name {\n' + indent([for (s in body) printStmt(s)].join("\n")) + "\n}";
 			case IndicatorDecl(name, args, body):
 				'indicator $name(${args.join(", ")}) ${printExpr(body)}';
+			case ModuleDecl(name, params, body):
+				var ps = [for (p in params) {
+					var t = p.ty != null ? ": " + p.ty : "";
+					var d = p.def != null ? " = " + printExpr(p.def) : "";
+					p.name + t + d;
+				}].join(", ");
+				'module $name($ps) {\n' + indent([for (s in body) printStmt(s)].join("\n")) + "\n}";
+			case TemplateDecl(name, params, retTy, body):
+				var ps = [for (p in params) p.name + ": " + p.ty].join(", ");
+				'template $name($ps) -> $retTy { ${printExpr(body)} }';
 		};
 	}
 
 	public function printStmt(s:Stmt):String {
 		return switch (s) {
-			case OnBar(body): "on bar {\n" + indent([for (x in body) printStmt(x)].join("\n")) + "\n}";
-			case OnTick(body): "on tick {\n" + indent([for (x in body) printStmt(x)].join("\n")) + "\n}";
-			case OnEvent(stream, body): 'on event $stream {\n' + indent([for (x in body) printStmt(x)].join("\n")) + "\n}";
+			case OnBar(body): "onBar {\n" + indent([for (x in body) printStmt(x)].join("\n")) + "\n}";
+			case OnTick(body): "onTick {\n" + indent([for (x in body) printStmt(x)].join("\n")) + "\n}";
+			case OnEvent(stream, body): 'onEvent($stream) {\n' + indent([for (x in body) printStmt(x)].join("\n")) + "\n}";
 			case ExprStmt(e): printExpr(e) + ";";
 			case Assign(name, e): '$name = ${printExpr(e)};';
 			case ForIn(name, it, body): 'for ($name in ${printExpr(it)}) {\n' + indent([for (x in body) printStmt(x)].join("\n")) + "\n}";
@@ -59,6 +69,11 @@ class MusePrinter {
 				var n = switch (kind) { case Long: "long"; case Short: "short"; case Flat: "flat"; case Close: "close"; };
 				'$n(${[for (a in args) printExpr(a)].join(", ")});';
 			case Block(ss): "{\n" + indent([for (x in ss) printStmt(x)].join("\n")) + "\n}";
+			case When(cond, body):
+				'when ${printExpr(cond)}: ' + (body.length == 1 ? printStmt(body[0]) : "{\n" + indent([for (x in body) printStmt(x)].join("\n")) + "\n}");
+			case Use(mod, args):
+				var as = [for (a in args) a.name + " = " + printExpr(a.value)].join(", ");
+				'use $mod($as);';
 		};
 	}
 

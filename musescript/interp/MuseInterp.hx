@@ -149,6 +149,8 @@ class MuseInterp {
 			case MacroDecl(name, body):
 				// Macro bodies executed by planner, not here
 				globals.set('__macro_$name', body);
+			case ModuleDecl(_, _, _) | TemplateDecl(_, _, _, _):
+				// Expanded before execution / compile
 		}
 	}
 
@@ -199,6 +201,8 @@ class MuseInterp {
 			case Assign(name, e):
 				var v = evalExpr(e);
 				define(name, v);
+				if (Std.isOfType(v, Float) || Std.isOfType(v, Int))
+					harness.pushSeries(name, v);
 				lastValue = v;
 			case ForIn(name, iter, body):
 				var it = MuseIters.from(evalExpr(iter));
@@ -240,6 +244,11 @@ class MuseInterp {
 				}
 			case Block(stmts):
 				for (st in stmts) execStmt(st);
+			case When(cond, body):
+				if (truthy(evalExpr(cond)))
+					for (st in body) execStmt(st);
+			case Use(_, _):
+				throw "MuseInterp: unresolved use — run ModuleExpand first";
 		}
 	}
 

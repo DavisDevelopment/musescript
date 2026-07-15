@@ -57,7 +57,7 @@ class HarnessContext implements IHarness {
 		return buf;
 	}
 
-	function pushSeries(name:String, v:Float):Void {
+	public function pushSeries(name:String, v:Float):Void {
 		getOrCreateBuffer(name).push(v);
 	}
 

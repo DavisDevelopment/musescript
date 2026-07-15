@@ -28,6 +28,9 @@ class MuseCompiler {
 	public static function compileEx(prog:MuseProgram, ?opts:{?target:String, ?strict:Bool}):CompileEx {
 		var target = opts != null && opts.target != null ? opts.target : "js";
 		var strict = opts != null && opts.strict == true;
+		prog = ModuleExpand.expand(prog);
+		prog = TemplateExpand.expand(prog);
+		prog = SeriesLowering.lower(prog);
 		prog = GeneratorLower.lower(prog);
 		prog = TailCallPass.transform(prog);
 		var result = switch (target) {

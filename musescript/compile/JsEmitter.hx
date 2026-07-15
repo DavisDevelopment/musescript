@@ -280,6 +280,10 @@ class JsEmitter {
 				'for (var __v of api.iter(${emitExpr(it)})) {\n'
 					+ 'api.set("${safe(name)}", __v);\n'
 					+ emitMatch(EIdent(name), arms) + ';\n' + '}';
+			case When(cond, body):
+				'if(${emitExpr(cond)}){\n' + [for (x in body) emitStmt(x)].join("\n") + "\n}";
+			case Use(_, _):
+				throw new EmitUnsupported();
 			// Nested handlers only — top-level OnBar/OnTick/OnEvent are collected, not emitted via emitStmt.
 			case OnBar(_) | OnTick(_) | OnEvent(_, _) | Yield(_) | YieldStar(_):
 				throw new EmitUnsupported();

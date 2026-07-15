@@ -217,6 +217,10 @@ class GeneratorLower {
 				Yield(expandYieldStars(e));
 			case Order(kind, args):
 				Order(kind, [for (a in args) expandYieldStars(a)]);
+			case When(cond, body):
+				When(expandYieldStars(cond), [for (x in body) expandYieldStarStmt(x)]);
+			case Use(mod, args):
+				Use(mod, [for (a in args) { name: a.name, value: expandYieldStars(a.value) }]);
 		};
 	}
 
@@ -228,7 +232,7 @@ class GeneratorLower {
 	static function stmtContainsYieldStar(s:Stmt):Bool {
 		return switch (s) {
 			case YieldStar(_): true;
-			case OnBar(body) | OnTick(body) | OnEvent(_, body) | Block(body) | ForIn(_, _, body):
+			case OnBar(body) | OnTick(body) | OnEvent(_, body) | Block(body) | ForIn(_, _, body) | When(_, body):
 				for (x in body) if (stmtContainsYieldStar(x)) return true;
 				false;
 			case MatchFor(_, it, _): containsYieldStar(it);
@@ -236,6 +240,9 @@ class GeneratorLower {
 			case Return(e): e != null && containsYieldStar(e);
 			case Order(_, args):
 				for (a in args) if (containsYieldStar(a)) return true;
+				false;
+			case Use(_, args):
+				for (a in args) if (containsYieldStar(a.value)) return true;
 				false;
 		};
 	}

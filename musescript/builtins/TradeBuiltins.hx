@@ -162,7 +162,7 @@ class TradeBuiltins {
 			var a = harness.series.get(cast src);
 			return a != null ? a : [];
 		}
-		// BarField / number — use close history
+		// Current-bar field sugar: sma(close, n) passes a float; use close history.
 		return harness.series.exists("close") ? harness.series.get("close") : [];
 	}
 

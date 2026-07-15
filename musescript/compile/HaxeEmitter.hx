@@ -83,6 +83,10 @@ class HaxeEmitter {
 				"for (__v in api.iter(" + emitExpr(it) + ")) {\n"
 					+ 'api.set("${safe(name)}", __v);\n'
 					+ emitMatch(EIdent(name), arms) + ";\n}";
+			case When(cond, body):
+				"if (" + emitExpr(cond) + ") {\n" + [for (x in body) emitStmt(x)].join("\n") + "\n}";
+			case Use(_, _):
+				throw new EmitUnsupported();
 			case OnBar(_) | OnTick(_) | OnEvent(_, _) | Yield(_) | YieldStar(_):
 				throw new EmitUnsupported();
 		};
