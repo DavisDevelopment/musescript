@@ -453,32 +453,25 @@ class StrategyWasmEmitter {
 				"f64.const " + watFloat(weighted) + "\n    "
 					+ (args.length > 2 ? coerceF64(args[2]) : "f64.const 0") + "\n    f64.add";
 			case "stat_mean":
-				if (args.length < 1) throw new EmitUnsupported();
-				"f64.const " + watFloat(StatsBuiltins.mean(constVector(args[0])));
+				emitStatWindowOrLiteral(args, "stat_window_mean", null, function(xs) return StatsBuiltins.mean(xs));
 			case "stat_median":
 				if (args.length < 1) throw new EmitUnsupported();
 				"f64.const " + watFloat(StatsBuiltins.median(constVector(args[0])));
 			case "stat_variance":
-				if (args.length < 1) throw new EmitUnsupported();
-				"f64.const " + watFloat(StatsBuiltins.variance(constVector(args[0])));
+				emitStatWindowOrLiteral(args, "stat_window_var", 0, function(xs) return StatsBuiltins.variance(xs));
 			case "stat_sample_variance":
-				if (args.length < 1) throw new EmitUnsupported();
-				"f64.const " + watFloat(StatsBuiltins.sampleVariance(constVector(args[0])));
+				emitStatWindowOrLiteral(args, "stat_window_var", 1, function(xs) return StatsBuiltins.sampleVariance(xs));
 			case "stat_stddev":
-				if (args.length < 1) throw new EmitUnsupported();
-				"f64.const " + watFloat(StatsBuiltins.standardDeviation(constVector(args[0])));
+				emitStatWindowOrLiteral(args, "stat_window_stdev", 0, function(xs) return StatsBuiltins.standardDeviation(xs));
 			case "stat_sample_stddev":
-				if (args.length < 1) throw new EmitUnsupported();
-				"f64.const " + watFloat(StatsBuiltins.sampleStandardDeviation(constVector(args[0])));
+				emitStatWindowOrLiteral(args, "stat_window_stdev", 1, function(xs) return StatsBuiltins.sampleStandardDeviation(xs));
 			case "stat_quantile":
 				if (args.length < 2) throw new EmitUnsupported();
 				"f64.const " + watFloat(StatsBuiltins.quantile(constVector(args[0]), constNumber(args[1])));
 			case "stat_covariance":
-				if (args.length < 2) throw new EmitUnsupported();
-				"f64.const " + watFloat(StatsBuiltins.covariance(constVector(args[0]), constVector(args[1])));
+				emitStatWindowPairOrLiteral(args, "stat_window_cov", function(xs, ys) return StatsBuiltins.covariance(xs, ys));
 			case "stat_correlation":
-				if (args.length < 2) throw new EmitUnsupported();
-				"f64.const " + watFloat(StatsBuiltins.pearson(constVector(args[0]), constVector(args[1])));
+				emitStatWindowPairOrLiteral(args, "stat_window_corr", function(xs, ys) return StatsBuiltins.pearson(xs, ys));
 			case "stat_skewness":
 				if (args.length < 1) throw new EmitUnsupported();
 				"f64.const " + watFloat(StatsBuiltins.skewness(constVector(args[0])));
@@ -552,6 +545,60 @@ class StrategyWasmEmitter {
 		if (v == Math.POSITIVE_INFINITY) return "inf";
 		if (v == Math.NEGATIVE_INFINITY) return "-inf";
 		return Std.string(v);
+	}
+
+	/**
+	 * Pattern-match `window(series, n)` so scalar stats can run over series tapes
+	 * without materializing dynamic vectors.
+	 */
+	function asWindowArg(e:Expr):Null<{sid:Int, lenExpr:String, lenConst:Null<Int>}> {
+		return switch (e) {
+			case EParent(inner):
+				asWindowArg(inner);
+			case ECall(EIdent("window"), wargs) if (wargs.length >= 2):
+				var lenConst:Null<Int> = null;
+				try lenConst = constIntKey(wargs[1]) catch (_:EmitUnsupported) {}
+				{
+					sid: seriesArgSid(wargs[0]),
+					lenExpr: asI32(wargs[1]),
+					lenConst: lenConst
+				};
+			default:
+				null;
+		};
+	}
+
+	function emitStatWindowOrLiteral(
+		args:Array<Expr>,
+		helper:String,
+		sampleFlag:Null<Int>,
+		fold:Array<Float>->Float
+	):String {
+		if (args.length < 1) throw new EmitUnsupported();
+		var window = asWindowArg(args[0]);
+		if (window != null) {
+			var out = "i32.const " + window.sid + "\n    " + window.lenExpr + "\n    ";
+			if (sampleFlag != null) out += "i32.const " + sampleFlag + "\n    ";
+			return out + "call $" + helper;
+		}
+		return "f64.const " + watFloat(fold(constVector(args[0])));
+	}
+
+	function emitStatWindowPairOrLiteral(
+		args:Array<Expr>,
+		helper:String,
+		fold:Array<Float>->Array<Float>->Float
+	):String {
+		if (args.length < 2) throw new EmitUnsupported();
+		var left = asWindowArg(args[0]);
+		var right = asWindowArg(args[1]);
+		if (left != null && right != null) {
+			if (left.lenConst != null && right.lenConst != null && left.lenConst != right.lenConst)
+				throw new EmitUnsupported();
+			return "i32.const " + left.sid + "\n    i32.const " + right.sid + "\n    "
+				+ left.lenExpr + "\n    call $" + helper;
+		}
+		return "f64.const " + watFloat(fold(constVector(args[0]), constVector(args[1])));
 	}
 
 	function emitBinop(op:String, a:Expr, b:Expr):String {

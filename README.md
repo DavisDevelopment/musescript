@@ -140,7 +140,9 @@ Means/sums use compensated accumulation and variances/covariances use online cen
 Invalid or undersized scalar samples return `NaN`; empty vector transforms return `[]`; constant
 z-score/normalization vectors return zeros. NaN/infinite elements follow IEEE-754 propagation.
 These dynamic vector builtins share the vector/string backend limit above: strategy WASM does not
-currently lower them.
+currently lower them when vectors are runtime values. Scalar reducers over `window(series, n)`
+are an exception: Strategy WASM pattern-matches that shape and computes over the series tape
+without materializing a vector.
 
 ### Dependency-free ML builtins
 
@@ -162,9 +164,11 @@ non-finite data, or a singular solve. `ml_ridge_fit` remains available for packe
 
 The interpreter (including Python-hosted strategy execution) and compiled JS support the full
 slice. Strategy WASM lowers scalar-returning ML/stat calls with compile-time numeric vector
-literals such as `ml_dot([1, 2], [3, 4])` and `stat_mean([2, 4, 6])`. Runtime vectors, matrices,
-strings, and graph objects still fall back because they are not represented in its scalar strategy
-ABI. This does not change the independent math-only array ABI.
+literals such as `ml_dot([1, 2], [3, 4])` and `stat_mean([2, 4, 6])`, and also lowers
+`stat_mean` / `stat_variance` / `stat_stddev` / sample variants / `stat_covariance` /
+`stat_correlation` when arguments are direct `window(series, n)` calls. Runtime vectors,
+matrices, strings, and graph objects still fall back because they are not represented in its
+scalar strategy ABI. This does not change the independent math-only array ABI.
 
 ### In-memory graph runtime
 
