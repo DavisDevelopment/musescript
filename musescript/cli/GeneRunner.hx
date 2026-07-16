@@ -10,6 +10,7 @@ import musescript.harness.OhlcvCsv;
 import musescript.interp.MuseInterp;
 import musescript.builtins.TradeBuiltins;
 import musescript.ast.ExprJson;
+import musescript.ast.MuseAstJson;
 
 /**
  * GeneRunner — headless fitness bridge for the MuseGene evolvable IR.
@@ -46,6 +47,7 @@ class GeneRunner {
 		var seed = intArg("--seed", 42);
 		var checkOnly = argFlag("--check");
 		var extractCond = argFlag("--extract-cond");
+		var astJson = argFlag("--ast-json");
 		var strict = argFlag("--strict");
 		var artifactDir = argVal("--artifact", "");
 
@@ -60,6 +62,23 @@ class GeneRunner {
 			try {
 				var prog0 = new MuseParser().parse(source0, "<gene>");
 				emit(ExprJson.extractLongCondition(prog0));
+			} catch (e:Dynamic) {
+				emit({ ok: false, reason: Std.string(e) });
+			}
+			return;
+		}
+
+		// --ast-json: full-program AST export (any valid MuseScript computation is a legal
+		// "tradelogic tree" node now, not just the boolean subset --extract-cond covers). Every
+		// node is type-tagged via the real MuseChecker's typeOf(), not reimplemented inference.
+		// Parses + type-checks only, no tape/backtest needed.
+		if (astJson) {
+			var source1 = sourcePath != "" ? readFile(sourcePath) : readStdin();
+			try {
+				var prog1 = new MuseParser().parse(source1, "<gene>");
+				var checker1 = new musescript.checker.MuseChecker();
+				checker1.checkEx(prog1);
+				emit({ ok: true, program: MuseAstJson.programToJson(prog1, checker1) });
 			} catch (e:Dynamic) {
 				emit({ ok: false, reason: Std.string(e) });
 			}
