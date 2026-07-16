@@ -29,8 +29,8 @@ haxelib dev musescript .
 .\run.ps1 all           # JS + Python examples and both test suites
 ```
 
-Current test status (verified 2026-07-14): `node build/js/tests.js` **428/428**, `.venv python
-build/py/tests.py` **412/412**, cross-runtime gate (example 07) **identical value across all 4
+Current test status (verified 2026-07-15): `node build/js/tests.js` **573/573**, `.venv python
+build/py/tests.py` **555/555**, cross-runtime gate (example 07) **identical value across all 4
 hosts (max delta 0)**.
 
 ## Examples
@@ -66,6 +66,31 @@ Pure numeric `function` decls (no bars/orders/match/yield) can be emitted to:
 ```haxe
 MuseScript.compileMath(src, "polySum", { target: "numba" }); // Array<Dynamic>->Dynamic
 ```
+
+### Vectors, recent windows, and strings
+
+The typed surface distinguishes numeric `Vector` values from relative Series lookback:
+
+```muse
+strategy WindowExample {
+  onBar {
+    closes = window(close, 21)       // oldest → current, up to 21 values
+    priorClose = close[1]            // one bar before now
+    firstBuffered = closes[0]        // ordinary vector indexing
+    bars = ohlcv_window(8)           // row-major O,H,L,C,V; stride 5
+    label = str_concat("muse", "script")
+    when str_contains(label, "script"): long()
+  }
+}
+```
+
+Portable string functions are `str_len`, `str_slice`, `str_contains`, `str_concat`, and
+`str_to_float`. Negative `str_slice` indices are relative to the end and all bounds are clamped.
+
+Interpreter and compiled-JS strategies support these vector/string operations. Python-hosted
+strategy execution uses the interpreter path for them. Strategy WASM deliberately rejects them
+and falls back because its current ABI exposes scalar OHLCV/feature reads, not guest-owned dynamic
+vectors or strings. Math-only backends continue to accept host-fed array parameters independently.
 
 ### Vendored Volume Profile kernel
 

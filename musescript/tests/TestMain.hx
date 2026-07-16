@@ -205,6 +205,43 @@ class TestParse extends Test {
 		Assert.equals(5, harness.series.get("close").length);
 		Assert.equals(4.0, TradeBuiltins.sma(harness, "close", 3));
 	}
+
+	public function testTypedArrayIndexVsLookback() {
+		var prog = new MuseParser().parse('strategy TypedIndex {
+			onBar {
+				xs = [10, 20, 30]
+				first = xs[0]
+				prev = close[1]
+				ma = sma(close, 3)
+				prevMa = ma[1]
+				tape = ohlcv_window(2)
+				tapeFirst = tape[0]
+			}
+		}');
+		var body = switch (prog.decls[0]) {
+			case StrategyDecl(_, body): switch (body[0]) {
+				case OnBar(stmts): stmts;
+				default: [];
+			};
+			default: [];
+		};
+		Assert.isTrue(switch (body[1]) {
+			case Assign("first", EArray(EIdent("xs"), _)): true;
+			default: false;
+		});
+		Assert.isTrue(switch (body[2]) {
+			case Assign("prev", ELookback(EBarField("close"), _)): true;
+			default: false;
+		});
+		Assert.isTrue(switch (body[4]) {
+			case Assign("prevMa", ELookback(EIdent("ma"), _)): true;
+			default: false;
+		});
+		Assert.isTrue(switch (body[6]) {
+			case Assign("tapeFirst", EArray(EIdent("tape"), _)): true;
+			default: false;
+		});
+	}
 }
 
 class TestCallStack extends Test {
@@ -557,6 +594,32 @@ class TestBacktest extends Test {
 }
 
 class TestTradeBuiltins extends Test {
+	public function testWindowsAndPortableStrings() {
+		var harness = new HarnessContext();
+		harness.series.set("open", [10.0, 11.0, 12.0, 13.0]);
+		harness.series.set("high", [11.0, 12.0, 13.0, 14.0]);
+		harness.series.set("low", [9.0, 10.0, 11.0, 12.0]);
+		harness.series.set("close", [10.5, 11.5, 12.5, 13.5]);
+		harness.series.set("volume", [100.0, 110.0, 120.0, 130.0]);
+
+		var closeWindow = TradeBuiltins.window(harness, "close", 3);
+		Assert.same([11.5, 12.5, 13.5], closeWindow);
+		var packed = TradeBuiltins.ohlcvWindow(harness, 2);
+		Assert.equals(10, packed.length);
+		Assert.same([12.0, 13.0, 11.0, 12.5, 120.0], packed.slice(0, 5));
+		Assert.same([13.0, 14.0, 12.0, 13.5, 130.0], packed.slice(5, 10));
+		Assert.equals(0, TradeBuiltins.window(harness, "close", 0).length);
+
+		Assert.equals(4, TradeBuiltins.strLen("muse"));
+		Assert.equals("use", TradeBuiltins.strSlice("musescript", 1, 4));
+		Assert.equals("script", TradeBuiltins.strSlice("musescript", -6));
+		Assert.isTrue(TradeBuiltins.strContains("musescript", "script"));
+		Assert.equals("musescript", TradeBuiltins.strConcat("muse", "script"));
+		Assert.equals(12.5, TradeBuiltins.strToFloat(" 12.5 "));
+		Assert.isTrue(Math.isNaN(TradeBuiltins.strToFloat("nope")));
+		Assert.isTrue(Math.isNaN(TradeBuiltins.strToFloat("12.5px")));
+	}
+
 	public function testCrossoverSlots() {
 		TradeBuiltins.resetCrossState();
 		TradeBuiltins.beginBar();
@@ -931,6 +994,25 @@ class TestCompiler extends Test {
 			Assert.equals(6, r.trades);
 		}
 		#end
+	}
+
+	public function testCompileWasmRejectsRuntimeVectorsAndStrings() {
+		var vectors = new MuseParser().parse('{
+			@strategy("vector")
+			@on(bar) {
+				var xs = window("close", 3);
+				if (xs[0] > 0) long();
+			}
+		}');
+		Assert.isNull(musescript.compile.StrategyWasmBackend.emitWat(vectors));
+
+		var strings = new MuseParser().parse('{
+			@strategy("strings")
+			@on(bar) {
+				if (str_contains("muse", "use")) long();
+			}
+		}');
+		Assert.isNull(musescript.compile.StrategyWasmBackend.emitWat(strings));
 	}
 
 	public function testCompileWasmVwapClamp() {
@@ -1550,6 +1632,29 @@ class TestPrinter extends Test {
 }
 
 class TestEmit extends Test {
+	public function testCompiledWindowAndStringBuiltins() {
+		#if js
+		var prog = new MuseParser().parse('{
+			@strategy("portable")
+			@on(bar) {
+				var xs = window("close", 3);
+				var packed = ohlcv_window(2);
+				var label = str_concat("muse", "script");
+				if (count(xs) == 3 && count(packed) == 10
+					&& str_contains(label, "script")
+					&& str_slice(label, 0, 4) == "muse") long();
+			}
+		}');
+		var harness = new HarnessContext();
+		Reflect.setField(harness, "feed", BarFeed.synthetic(6, 4));
+		var ex = MuseCompiler.compileEx(prog, { target: "js", strict: true });
+		var result = ex.fn(harness);
+		Assert.equals("js", ex.backend);
+		Assert.isTrue(result.trades > 0);
+		#end
+		Assert.isTrue(true);
+	}
+
 	public function testEmitOnBar() {
 		var prog = new MuseParser().parse('{
 			@strategy("e")
@@ -2077,6 +2182,41 @@ class TestTypes extends Test {
 		var tc = new musescript.checker.TypeChecker();
 		Assert.isTrue(tc.canAssign(musescript.types.MuseType.TPrice, musescript.types.MuseType.TScalar));
 		Assert.isFalse(tc.canAssign(musescript.types.MuseType.TBool, musescript.types.MuseType.TSeries));
+		Assert.isTrue(Type.enumEq(tc.typeOf(EConst(CString("muse"))), musescript.types.MuseType.TString));
+		Assert.isTrue(Type.enumEq(
+			tc.typeOf(EArrayDecl([EConst(CFloat(1.0)), EConst(CFloat(2.0))])),
+			musescript.types.MuseType.TVector
+		));
+		Assert.isTrue(Type.enumEq(
+			tc.typeOf(EArray(EArrayDecl([EConst(CFloat(1.0))]), EConst(CInt(0)))),
+			musescript.types.MuseType.TScalar
+		));
+	}
+
+	public function testWindowAndStringSignatures() {
+		var errs = MuseScript.check('strategy TypedBuiltins {
+			onBar {
+				xs = window(close, 3)
+				x = xs[0]
+				bars = ohlcv_window(2)
+				open0 = bars[0]
+				label = str_concat("muse", "script")
+				part = str_slice(label, 0, 4)
+				when str_contains(part, "muse") && str_len(label) > 0: long()
+			}
+		}');
+		Assert.isFalse(hasErr(errs, "Vector"));
+		Assert.isFalse(hasErr(errs, "String"));
+		Assert.isFalse(hasErr(errs, "expected"));
+	}
+
+	public function testRuntimeBuiltinsHaveTypedSignatures() {
+		var vars:Map<String, Dynamic> = new Map();
+		TradeBuiltins.install(vars, new HarnessContext());
+		for (name => value in vars) {
+			if (Reflect.isFunction(value))
+				Assert.notNull(musescript.types.BuiltinSigs.get(name), 'missing BuiltinSig for $name');
+		}
 	}
 
 	public function testWindowLadderReject() {
