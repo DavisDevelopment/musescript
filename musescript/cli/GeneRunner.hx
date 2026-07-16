@@ -9,6 +9,7 @@ import musescript.harness.Bar;
 import musescript.harness.OhlcvCsv;
 import musescript.interp.MuseInterp;
 import musescript.builtins.TradeBuiltins;
+import musescript.ast.ExprJson;
 
 /**
  * GeneRunner — headless fitness bridge for the MuseGene evolvable IR.
@@ -44,10 +45,26 @@ class GeneRunner {
 		var synthN = intArg("--synth", 400);
 		var seed = intArg("--seed", 42);
 		var checkOnly = argFlag("--check");
+		var extractCond = argFlag("--extract-cond");
 		var strict = argFlag("--strict");
 		var artifactDir = argVal("--artifact", "");
 
 		var batchPath = argVal("--batch", "");
+
+		// --extract-cond: Forge's reverse projection (MuseAST -> Forge graph). Parses only -- no
+		// tape/backtest needed -- and returns the JSON-serialized condition expression of the
+		// `if (cond) long();` shape inside @on(bar), or an honest rejection if the source isn't
+		// exactly that shape. See musescript/ast/ExprJson.hx for the scope/rationale.
+		if (extractCond) {
+			var source0 = sourcePath != "" ? readFile(sourcePath) : readStdin();
+			try {
+				var prog0 = new MuseParser().parse(source0, "<gene>");
+				emit(ExprJson.extractLongCondition(prog0));
+			} catch (e:Dynamic) {
+				emit({ ok: false, reason: Std.string(e) });
+			}
+			return;
+		}
 
 		// Batch mode: load the tape ONCE, then compile+run each JSONL {id, source}.
 		if (batchPath != "") {
