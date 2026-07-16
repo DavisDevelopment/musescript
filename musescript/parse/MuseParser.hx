@@ -15,6 +15,8 @@ import musescript.ast.Pattern;
 import musescript.ast.Expr as MExpr;
 import musescript.ast.Const as MC;
 import musescript.ast.MuseNodes;
+import musescript.types.BuiltinSigs;
+import musescript.types.MuseType;
 
 using hscript.Tools;
 
@@ -522,17 +524,28 @@ class MuseParser {
 	}
 
 	/**
-	 * Pine-style series bases: bar idents, any call (ta builtins return Float "now"),
-	 * and field/paren wrappers of those. Local array idents are not lookback bases.
+	 * Pine-style series bases: bar idents, series-returning builtins, unknown calls,
+	 * and field/paren wrappers of those. Local array idents and known dynamic-vector
+	 * or string-array builtins stay normal array indexes.
 	 * τὰ παρεληλυθότα ἐνδείκνυται τὰ μέλλοντα, πλὴν ὁ δείκτης ὁ κληθεὶς οὐ μένει.
 	 */
 	function isLookbackBase(e:hscript.Expr):Bool {
 		return switch (Tools.expr(e)) {
 			case EIdent(id): isBarField(id);
-			case ECall(_, _): true;
+			case ECall(callee, _): isLookbackCall(callee);
 			case EField(base, _): isLookbackBase(base);
 			case EParent(inner): isLookbackBase(inner);
 			default: false;
+		};
+	}
+
+	function isLookbackCall(callee:hscript.Expr):Bool {
+		return switch (Tools.expr(callee)) {
+			case EIdent(id):
+				var sig = BuiltinSigs.get(id);
+				sig == null ? true : sig.ret.match(TSeries);
+			default:
+				true;
 		};
 	}
 

@@ -102,8 +102,9 @@ and preserve all other characters, avoiding locale and host Unicode-table differ
 matches left-to-right, and returns `source` unchanged when `needle` is empty. `str_split` is also
 literal and preserves leading, interior, and trailing empty fields. With an empty separator it
 returns one element per host string indexing unit; splitting the empty string this way returns
-`[]`. `str_join` accepts the opaque array returned by `str_split`. Since MuseScript's `Vector`
-type is numeric, the checker deliberately types string arrays as `Unknown`, not `Vector`.
+`[]`. `str_join` accepts the `StringArray` returned by `str_split`. Since MuseScript's `Vector`
+type is numeric, string arrays are their own opaque type; indexing a `StringArray` returns
+`String`.
 
 `str_to_float` accepts only a trimmed decimal with optional sign, fraction, and exponent; invalid
 input returns `NaN`. `str_to_bool` is true only for trimmed, ASCII-case-insensitive `true` or `1`
@@ -193,6 +194,9 @@ Available pure builtins are:
 The parser rejects malformed values, negative/non-finite weights, graphs above 4,096 nodes or
 32,768 edges, traversal bounds above 4,096 nodes, and PageRank requests above 1,000 iterations.
 Shortest path returns `{nodes, distance}` or `null`; PageRank stays in canonical node order.
+The checker treats graph literals with `nodes` and `edges` as opaque `Graph` values. Neighbor
+and BFS calls return `StringArray`, shortest paths return `GraphPath`, and PageRank returns
+`GraphRanks`.
 
 `GraphBuiltins.querySpecOptions` adapts the existing Kestrel `GraphQuerySpec` seed and bounds; it
 does not define another query grammar and does not execute a live external knowledge graph.

@@ -2436,6 +2436,22 @@ class TestTypes extends Test {
 			tc.typeOf(EArray(EArrayDecl([EConst(CFloat(1.0))]), EConst(CInt(0)))),
 			musescript.types.MuseType.TScalar
 		));
+		Assert.isTrue(Type.enumEq(
+			tc.typeOf(new MuseParser().parseExpr('str_split("a,b", ",")')),
+			musescript.types.MuseType.TStringArray
+		));
+		Assert.isTrue(Type.enumEq(
+			tc.typeOf(new MuseParser().parseExpr('str_split("a,b", ",")[0]')),
+			musescript.types.MuseType.TString
+		));
+		Assert.isTrue(Type.enumEq(
+			tc.typeOf(EObject([
+				{name: "directed", e: EConst(CBool(true))},
+				{name: "nodes", e: EArrayDecl([EConst(CString("A"))])},
+				{name: "edges", e: EArrayDecl([])}
+			])),
+			musescript.types.MuseType.TGraph
+		));
 	}
 
 	public function testWindowAndStringSignatures() {
@@ -2447,11 +2463,42 @@ class TestTypes extends Test {
 				open0 = bars[0]
 				label = str_concat("muse", "script")
 				part = str_slice(label, 0, 4)
+				token = str_split(label, "s")[0]
 				when str_contains(part, "muse") && str_len(label) > 0: long()
 			}
 		}');
 		Assert.isFalse(hasErr(errs, "Vector"));
 		Assert.isFalse(hasErr(errs, "String"));
+		Assert.isFalse(hasErr(errs, "expected"));
+	}
+
+	public function testGraphStdlibSignaturesAreTyped() {
+		var tc = new musescript.checker.TypeChecker();
+		Assert.isTrue(Type.enumEq(
+			tc.typeOf(new MuseParser().parseExpr('graph_neighbors(g, "A")')),
+			musescript.types.MuseType.TStringArray
+		));
+		Assert.isTrue(Type.enumEq(
+			tc.typeOf(new MuseParser().parseExpr('graph_bfs(g, "A")[0]')),
+			musescript.types.MuseType.TString
+		));
+		Assert.isTrue(Type.enumEq(
+			tc.typeOf(new MuseParser().parseExpr('graph_shortest_path(g, "A", "B")')),
+			musescript.types.MuseType.TGraphPath
+		));
+		Assert.isTrue(Type.enumEq(
+			tc.typeOf(new MuseParser().parseExpr('graph_pagerank(g)')),
+			musescript.types.MuseType.TGraphRanks
+		));
+		var errs = MuseScript.check('{
+			@strategy("GraphTyped")
+			@on(bar) {
+				var graph = { directed: true, nodes: ["A", "B"], edges: [{from: "A", to: "B"}] };
+				var path = graph_shortest_path(graph, "A", "B");
+				if (graph_has_edge(graph, "A", "B") && str_len(graph_bfs(graph, "A")[0]) > 0) long();
+			}
+		}');
+		Assert.isFalse(hasErr(errs, "Vector/StringArray"));
 		Assert.isFalse(hasErr(errs, "expected"));
 	}
 

@@ -239,9 +239,10 @@ class TypeChecker {
 				var bt = infer(base);
 				expect(index, TScalar, "array index");
 				if (bt.match(TVector)) TScalar;
+				else if (bt.match(TStringArray)) TString;
 				else if (bt.match(TUnknown)) TUnknown;
 				else {
-					err('array index base must be Vector, got ${MuseTypes.toString(bt)}');
+					err('array index base must be Vector/StringArray, got ${MuseTypes.toString(bt)}');
 					TUnknown;
 				}
 			case EArrayDecl(values):
@@ -252,8 +253,7 @@ class TypeChecker {
 				}
 				TVector;
 			case EObject(fields):
-				for (f in fields) infer(f.e);
-				TUnknown;
+				inferObject(fields);
 			case ETernary(cond, eif, eelse):
 				expect(cond, TBool, "ternary condition");
 				MuseTypes.unify(infer(eif), infer(eelse));
@@ -309,6 +309,22 @@ class TypeChecker {
 			default:
 				TUnknown;
 		};
+	}
+
+	function inferObject(fields:Array<{name:String, e:Expr}>):MuseType {
+		var hasNodes = false;
+		var hasEdges = false;
+		for (f in fields) {
+			if (f.name == "nodes") hasNodes = true;
+			if (f.name == "edges") hasEdges = true;
+		}
+		if (hasNodes && hasEdges) {
+			for (f in fields)
+				if (f.name != "nodes" && f.name != "edges") infer(f.e);
+			return TGraph;
+		}
+		for (f in fields) infer(f.e);
+		return TUnknown;
 	}
 
 	function inferCall(callee:Expr, args:Array<Expr>):MuseType {

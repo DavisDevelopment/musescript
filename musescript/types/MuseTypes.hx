@@ -17,7 +17,12 @@ class MuseTypes {
 			case "Scalar": TScalar;
 			case "Bool": TBool;
 			case "String": TString;
+			case "StringArray": TStringArray;
 			case "Vector": TVector;
+			case "Matrix": TMatrix;
+			case "Graph": TGraph;
+			case "GraphPath": TGraphPath;
+			case "GraphRanks": TGraphRanks;
 			case "Window": TWindow;
 			case "Price": TPrice;
 			case "Void": TVoid;
@@ -38,7 +43,12 @@ class MuseTypes {
 			case TScalar: "Scalar";
 			case TBool: "Bool";
 			case TString: "String";
+			case TStringArray: "StringArray";
 			case TVector: "Vector";
+			case TMatrix: "Matrix";
+			case TGraph: "Graph";
+			case TGraphPath: "GraphPath";
+			case TGraphRanks: "GraphRanks";
 			case TWindow: "Window";
 			case TPrice: "Price";
 			case TVoid: "Void";

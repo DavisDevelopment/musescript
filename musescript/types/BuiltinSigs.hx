@@ -115,9 +115,8 @@ class BuiltinSigs {
 		fun("str_ends_with", [TString, TString], TBool);
 		fun("str_index_of", [TString, TString, TScalar], TScalar, 2);
 		fun("str_replace", [TString, TString, TString], TString);
-		// String arrays are not numeric Vectors; keep their type opaque for now.
-		fun("str_split", [TString, TString], TUnknown);
-		fun("str_join", [TUnknown, TString], TString);
+		fun("str_split", [TString, TString], TStringArray);
+		fun("str_join", [TStringArray, TString], TString);
 		fun("str_to_bool", [TString], TBool);
 		fun("str_from_float", [TScalar], TString);
 		fun("str_from_bool", [TBool], TString);
@@ -184,15 +183,15 @@ class BuiltinSigs {
 		fun("tree_bit", [TString, TWindow], TFeature);
 		fun("graph_query", [TString], TGraphQuery);
 		fun("graph_metric", [TString, TString], TFeature);
-		// Graph values/results remain TUnknown until the type lattice has graph generics.
-		// Every traversal/iteration accepts an explicit bound and also has a safe default.
-		fun("graph_neighbors", [TUnknown, TString, TString, TScalar], TUnknown, 2);
-		fun("graph_degree", [TUnknown, TString, TString], TScalar, 2);
-		fun("graph_has_edge", [TUnknown, TString, TString, TString], TBool, 3);
-		fun("graph_bfs", [TUnknown, TString, TScalar, TScalar], TUnknown, 2);
-		fun("graph_reachable", [TUnknown, TString, TString, TScalar, TScalar], TBool, 3);
-		fun("graph_shortest_path", [TUnknown, TString, TString, TBool, TScalar], TUnknown, 3);
-		fun("graph_pagerank", [TUnknown, TScalar, TScalar, TScalar], TUnknown, 1);
+		// Graph is an opaque JSON-safe object at runtime; result containers are typed
+		// enough for checker/editor legality without exposing structural fields yet.
+		fun("graph_neighbors", [TGraph, TString, TString, TScalar], TStringArray, 2);
+		fun("graph_degree", [TGraph, TString, TString], TScalar, 2);
+		fun("graph_has_edge", [TGraph, TString, TString, TString], TBool, 3);
+		fun("graph_bfs", [TGraph, TString, TScalar, TScalar], TStringArray, 2);
+		fun("graph_reachable", [TGraph, TString, TString, TScalar, TScalar], TBool, 3);
+		fun("graph_shortest_path", [TGraph, TString, TString, TBool, TScalar], TGraphPath, 3);
+		fun("graph_pagerank", [TGraph, TScalar, TScalar, TScalar], TGraphRanks, 1);
 	}
 
 	static function ind(name:String):Void {
