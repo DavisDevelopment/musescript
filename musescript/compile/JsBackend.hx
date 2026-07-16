@@ -274,13 +274,31 @@ class JsBackend {
 			return dispatchBuiltin(harness, name, args);
 		});
 		Reflect.setField(api, "long", function(?qty:Float) {
-			if (harness.currentBar != null) harness.orders.long(harness.currentBar.close, qty);
+			if (harness.currentBar != null)
+				harness.orders.long(harness.currentBar.close, qty, harness.currentBar.index);
 		});
 		Reflect.setField(api, "short", function(?qty:Float) {
-			if (harness.currentBar != null) harness.orders.short(harness.currentBar.close, qty);
+			if (harness.currentBar != null)
+				harness.orders.short(harness.currentBar.close, qty, harness.currentBar.index);
 		});
 		Reflect.setField(api, "flat", function() {
-			if (harness.currentBar != null) harness.orders.flat(harness.currentBar.close);
+			if (harness.currentBar != null)
+				harness.orders.flat(harness.currentBar.close, harness.currentBar.index);
+		});
+		Reflect.setField(api, "position", function() return harness.orders.positionSize());
+		Reflect.setField(api, "entry_price", function() return harness.orders.entryPrice);
+		Reflect.setField(api, "bars_in_trade", function() {
+			var bi = harness.currentBar != null ? harness.currentBar.index : -1;
+			return harness.orders.barsInTrade(bi);
+		});
+		Reflect.setField(api, "cash", function() return harness.orders.cash);
+		Reflect.setField(api, "equity", function() {
+			var px = harness.currentBar != null ? harness.currentBar.close : 0.0;
+			return harness.orders.equityAt(px);
+		});
+		Reflect.setField(api, "unrealized_pnl", function() {
+			var px = harness.currentBar != null ? harness.currentBar.close : 0.0;
+			return harness.orders.unrealizedPnl(px);
 		});
 		Reflect.setField(api, "call", function(name:String, args:Array<Dynamic>):Dynamic {
 			return dispatchBuiltin(harness, name, args);
@@ -636,14 +654,22 @@ class JsBackend {
 				harness.chart.bgcolor(args[0], bi);
 				null;
 			case "long":
-				harness.orders.long(harness.currentBar.close, args.length > 0 ? args[0] : null);
+				harness.orders.long(harness.currentBar.close, args.length > 0 ? args[0] : null,
+					harness.currentBar.index);
 				null;
 			case "short":
-				harness.orders.short(harness.currentBar.close, args.length > 0 ? args[0] : null);
+				harness.orders.short(harness.currentBar.close, args.length > 0 ? args[0] : null,
+					harness.currentBar.index);
 				null;
 			case "flat" | "close":
-				harness.orders.flat(harness.currentBar.close);
+				harness.orders.flat(harness.currentBar.close, harness.currentBar.index);
 				null;
+			case "position": harness.orders.positionSize();
+			case "entry_price": harness.orders.entryPrice;
+			case "bars_in_trade": harness.orders.barsInTrade(harness.currentBar.index);
+			case "cash": harness.orders.cash;
+			case "equity": harness.orders.equityAt(harness.currentBar.close);
+			case "unrealized_pnl": harness.orders.unrealizedPnl(harness.currentBar.close);
 			case "any": IterDriver.any(MuseIters.from(args[0]), args[1]);
 			case "all": IterDriver.all(MuseIters.from(args[0]), args[1]);
 			case "find": IterDriver.find(MuseIters.from(args[0]), args[1]);

@@ -244,6 +244,12 @@ class StrategyParser {
 			expect("}");
 			return OnBar(body);
 		}
+		if (matchIdent("onPosition")) {
+			expect("{");
+			var body = parseStmtListUntil("}");
+			expect("}");
+			return OnPosition(body);
+		}
 		if (matchIdent("onTick")) {
 			expect("{");
 			var body = parseStmtListUntil("}");

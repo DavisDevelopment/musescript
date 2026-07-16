@@ -57,6 +57,8 @@ class ModuleExpand {
 					}
 				case OnBar(body):
 					out.push(OnBar(expandStmts(body, modules)));
+				case OnPosition(body):
+					out.push(OnPosition(expandStmts(body, modules)));
 				case OnTick(body):
 					out.push(OnTick(expandStmts(body, modules)));
 				case OnEvent(stream, body):

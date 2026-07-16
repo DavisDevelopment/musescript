@@ -74,6 +74,7 @@ class TemplateExpand {
 				case ExprStmt(e): ExprStmt(expandExpr(e, depth));
 				case Assign(n, e): Assign(n, expandExpr(e, depth));
 				case OnBar(body): OnBar([for (x in body) expandStmt(x, depth)]);
+				case OnPosition(body): OnPosition([for (x in body) expandStmt(x, depth)]);
 				case OnTick(body): OnTick([for (x in body) expandStmt(x, depth)]);
 				case OnEvent(stream, body): OnEvent(stream, [for (x in body) expandStmt(x, depth)]);
 				case Block(body): Block([for (x in body) expandStmt(x, depth)]);

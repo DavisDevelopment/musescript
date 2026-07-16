@@ -138,7 +138,7 @@ class TypeChecker {
 
 	function checkStmt(s:Stmt):Void {
 		switch (s) {
-			case OnBar(body) | OnTick(body) | OnEvent(_, body) | Block(body):
+			case OnBar(body) | OnPosition(body) | OnTick(body) | OnEvent(_, body) | Block(body):
 				for (x in body) checkStmt(x);
 			case When(cond, body):
 				expect(cond, TBool, "when condition");

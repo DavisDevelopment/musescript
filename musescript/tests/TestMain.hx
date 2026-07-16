@@ -55,6 +55,7 @@ class TestMain {
 		runner.addCase(new TestTradeBuiltins());
 		runner.addCase(new TestStatsBuiltins());
 		runner.addCase(new TestMlBuiltins());
+		runner.addCase(new TestPositionHooks());
 		runner.addCase(new TestGraphBuiltins());
 		runner.addCase(new TestPlanner());
 		runner.addCase(new TestChecker());
@@ -1146,6 +1147,57 @@ class TestMlBuiltins extends Test {
 			Assert.isTrue(Math.abs(interpResult.finalEquity - wasmResult.finalEquity) < 1e-6);
 		}
 		#end
+	}
+}
+
+class TestPositionHooks extends Test {
+	public function testOnPositionParseAndWasmLowering() {
+		var src = 'strategy Guarded {
+  param stopPct = 0.05
+  onBar {
+    when crossover(sma(close, 5), sma(close, 10)): long()
+  }
+  onPosition {
+    when unrealized_pnl < -stopPct * equity: flat()
+    when bars_in_trade >= 20: flat()
+  }
+}';
+		var prog = new MuseParser().parse(src);
+		var hasPosition = false;
+		for (d in prog.decls) switch (d) {
+			case StrategyDecl(_, body):
+				for (s in body) switch (s) {
+					case OnPosition(_): hasPosition = true;
+					default:
+				}
+			default:
+		}
+		Assert.isTrue(hasPosition);
+		var wat = musescript.compile.StrategyWasmBackend.emitWat(prog);
+		Assert.notNull(wat);
+		Assert.isTrue(wat.indexOf('import "env" "get_position"') >= 0);
+		Assert.isTrue(wat.indexOf("get_bars_in_trade") >= 0);
+		#if (js || python)
+		if (musescript.compile.StrategyWasmBackend.hostReady()) {
+			var feed = BarFeed.synthetic(80, 13);
+			var wasmFn = MuseCompiler.compile(prog, { target: "wasm" });
+			var wasmResult = wasmFn({ feed: feed });
+			TradeBuiltins.resetCrossState();
+			var interpResult = new MuseInterp(new HarnessContext()).runBacktest(prog, BarFeed.synthetic(80, 13));
+			Assert.equals(interpResult.trades, wasmResult.trades);
+			Assert.isTrue(Math.abs(interpResult.finalEquity - wasmResult.finalEquity) < 1e-6);
+		}
+		#end
+	}
+
+	public function testPositionBuiltinsReflectOrderSim() {
+		var h = new HarnessContext();
+		h.orders.long(100, 10, 5);
+		h.currentBar = { open: 100, high: 101, low: 99, close: 102, volume: 1, time: 0, index: 7 };
+		Assert.equals(10, h.orders.positionSize());
+		Assert.equals(100, h.orders.entryPrice);
+		Assert.equals(2, h.orders.barsInTrade(7));
+		Assert.isTrue(h.orders.unrealizedPnl(102) > 0);
 	}
 }
 

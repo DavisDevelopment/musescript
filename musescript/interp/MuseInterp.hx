@@ -45,6 +45,7 @@ class MuseInterp {
 	/** Resume point after GeneratorYieldPause (stepped generator eval). */
 	var genResume:Null<GenResume>;
 	var onBarHandlers:Array<Array<Stmt>>;
+	var onPositionHandlers:Array<Array<Stmt>>;
 	var onTickHandlers:Array<Array<Stmt>>;
 	var onEventHandlers:Array<{stream:String, body:Array<Stmt>}>;
 	var strategyName:Null<String>;
@@ -60,6 +61,7 @@ class MuseInterp {
 		this.activeGenerator = null;
 		this.genResume = null;
 		this.onBarHandlers = [];
+		this.onPositionHandlers = [];
 		this.onTickHandlers = [];
 		this.onEventHandlers = [];
 		this.strategyName = null;
@@ -109,6 +111,11 @@ class MuseInterp {
 				for (h in onBarHandlers) {
 					for (st in h) execStmt(st);
 				}
+				if (harness.orders.position != 0) {
+					for (h in onPositionHandlers) {
+						for (st in h) execStmt(st);
+					}
+				}
 			}, feed);
 		}
 		return lastValue;
@@ -116,6 +123,7 @@ class MuseInterp {
 
 	public function runBacktest(prog:MuseProgram, feed:BarFeed):Dynamic {
 		onBarHandlers = [];
+		onPositionHandlers = [];
 		onTickHandlers = [];
 		onEventHandlers = [];
 		for (d in prog.decls) registerDecl(d);
@@ -123,6 +131,8 @@ class MuseInterp {
 		return harness.runBacktest(function(bar) {
 			bindBar(bar);
 			for (h in onBarHandlers) for (st in h) execStmt(st);
+			if (harness.orders.position != 0)
+				for (h in onPositionHandlers) for (st in h) execStmt(st);
 		}, feed);
 	}
 
@@ -196,6 +206,7 @@ class MuseInterp {
 		if (returnFlag) return;
 		switch (s) {
 			case OnBar(body): onBarHandlers.push(body);
+			case OnPosition(body): onPositionHandlers.push(body);
 			case OnTick(body): onTickHandlers.push(body);
 			case OnEvent(stream, body): onEventHandlers.push({ stream: stream, body: body });
 			case ExprStmt(e): lastValue = evalExpr(e);
@@ -238,10 +249,11 @@ class MuseInterp {
 				yieldStar(e);
 			case Order(kind, args):
 				var qty = args.length > 0 ? evalExpr(args[0]) : null;
+				var bi = harness.currentBar != null ? harness.currentBar.index : -1;
 				switch (kind) {
-					case Long: harness.orders.long(harness.currentBar.close, qty);
-					case Short: harness.orders.short(harness.currentBar.close, qty);
-					case Flat | Close: harness.orders.flat(harness.currentBar.close);
+					case Long: harness.orders.long(harness.currentBar.close, qty, bi);
+					case Short: harness.orders.short(harness.currentBar.close, qty, bi);
+					case Flat | Close: harness.orders.flat(harness.currentBar.close, bi);
 				}
 			case Block(stmts):
 				for (st in stmts) execStmt(st);

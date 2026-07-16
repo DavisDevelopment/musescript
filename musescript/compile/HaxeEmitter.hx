@@ -87,7 +87,7 @@ class HaxeEmitter {
 				"if (" + emitExpr(cond) + ") {\n" + [for (x in body) emitStmt(x)].join("\n") + "\n}";
 			case Use(_, _):
 				throw new EmitUnsupported();
-			case OnBar(_) | OnTick(_) | OnEvent(_, _) | Yield(_) | YieldStar(_):
+			case OnBar(_) | OnPosition(_) | OnTick(_) | OnEvent(_, _) | Yield(_) | YieldStar(_):
 				throw new EmitUnsupported();
 		};
 	}

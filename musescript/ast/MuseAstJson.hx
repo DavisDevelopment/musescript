@@ -131,6 +131,7 @@ class MuseAstJson {
 	public static function stmtToJson(s:Stmt, ?checker:MuseChecker):Dynamic {
 		return switch (s) {
 			case OnBar(body): { kind: "onBar", body: [for (b in body) stmtToJson(b, checker)] };
+			case OnPosition(body): { kind: "onPosition", body: [for (b in body) stmtToJson(b, checker)] };
 			case OnTick(body): { kind: "onTick", body: [for (b in body) stmtToJson(b, checker)] };
 			case OnEvent(streamName, body): { kind: "onEvent", streamName: streamName, body: [for (b in body) stmtToJson(b, checker)] };
 			case ExprStmt(e): { kind: "exprStmt", e: exprToJson(e, checker) };

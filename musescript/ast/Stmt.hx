@@ -2,6 +2,7 @@ package musescript.ast;
 
 enum Stmt {
 	OnBar(body:Array<Stmt>);
+	OnPosition(body:Array<Stmt>);
 	OnTick(body:Array<Stmt>);
 	OnEvent(streamName:String, body:Array<Stmt>);
 	ExprStmt(e:Expr);

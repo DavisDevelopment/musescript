@@ -93,6 +93,12 @@ class BuiltinSigs {
 		fun("long", [TScalar], TVoid, 0);
 		fun("short", [TScalar], TVoid, 0);
 		fun("flat", [], TVoid);
+		fun("position", [], TScalar);
+		fun("entry_price", [], TScalar);
+		fun("bars_in_trade", [], TScalar);
+		fun("cash", [], TScalar);
+		fun("equity", [], TScalar);
+		fun("unrealized_pnl", [], TScalar);
 		// note: do not register `close` as Void — it is a Series bar field
 		fun("plot", [TScalar, TString, TString], TVoid, 1);
 		fun("plotshape", [TString], TVoid);

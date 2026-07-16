@@ -61,6 +61,7 @@ class SeriesLowering {
 					out = out.concat(r.binds);
 					out.push(Assign(n, r.expr));
 				case OnBar(body): out.push(OnBar(lowerStmts(body)));
+				case OnPosition(body): out.push(OnPosition(lowerStmts(body)));
 				case OnTick(body): out.push(OnTick(lowerStmts(body)));
 				case OnEvent(stream, body): out.push(OnEvent(stream, lowerStmts(body)));
 				case Block(body): out.push(Block(lowerStmts(body)));

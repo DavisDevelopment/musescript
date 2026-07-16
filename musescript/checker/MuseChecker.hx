@@ -131,6 +131,10 @@ class MuseChecker {
 				inOnBar = true;
 				for (x in body) checkStmt(x);
 				inOnBar = false;
+			case OnPosition(body):
+				inOnBar = true;
+				for (x in body) checkStmt(x);
+				inOnBar = false;
 			case OnTick(body) | OnEvent(_, body) | Block(body) | When(_, body):
 				for (x in body) checkStmt(x);
 			case Use(_, args):

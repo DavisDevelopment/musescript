@@ -234,6 +234,7 @@ class MuseParser {
 		// also allow @on(bar) body or metadata name "on" with ident bar as first param
 		return switch (kind) {
 			case "bar": OnBar(lowerStmts(body));
+			case "position": OnPosition(lowerStmts(body));
 			case "tick": OnTick(lowerStmts(body));
 			case "event":
 				var stream = params != null && params.length > 1 ? identOf(params[1]) : "events";

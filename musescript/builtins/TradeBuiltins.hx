@@ -72,13 +72,31 @@ class TradeBuiltins {
 		vars.set("ml_ridge_fit_matrix", MlBuiltins.ridgeFitMatrix);
 
 		vars.set("long", function(?qty:Float) {
-			if (harness.currentBar != null) harness.orders.long(harness.currentBar.close, qty);
+			if (harness.currentBar != null)
+				harness.orders.long(harness.currentBar.close, qty, harness.currentBar.index);
 		});
 		vars.set("short", function(?qty:Float) {
-			if (harness.currentBar != null) harness.orders.short(harness.currentBar.close, qty);
+			if (harness.currentBar != null)
+				harness.orders.short(harness.currentBar.close, qty, harness.currentBar.index);
 		});
 		vars.set("flat", function() {
-			if (harness.currentBar != null) harness.orders.flat(harness.currentBar.close);
+			if (harness.currentBar != null)
+				harness.orders.flat(harness.currentBar.close, harness.currentBar.index);
+		});
+		vars.set("position", function() return harness.orders.positionSize());
+		vars.set("entry_price", function() return harness.orders.entryPrice);
+		vars.set("bars_in_trade", function() {
+			var bi = harness.currentBar != null ? harness.currentBar.index : -1;
+			return harness.orders.barsInTrade(bi);
+		});
+		vars.set("cash", function() return harness.orders.cash);
+		vars.set("equity", function() {
+			var px = harness.currentBar != null ? harness.currentBar.close : 0.0;
+			return harness.orders.equityAt(px);
+		});
+		vars.set("unrealized_pnl", function() {
+			var px = harness.currentBar != null ? harness.currentBar.close : 0.0;
+			return harness.orders.unrealizedPnl(px);
 		});
 
 		vars.set("plot", function(series:Float, label:String, ?color:String) {

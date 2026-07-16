@@ -56,7 +56,7 @@ class MusePlanner {
 						bindings.set(name, planStepId(steps[steps.length - 1]));
 				case Block(ss):
 					out = out.concat(planStmts(ss, macroName));
-				case OnBar(ss) | OnTick(ss) | OnEvent(_, ss) | When(_, ss):
+				case OnBar(ss) | OnPosition(ss) | OnTick(ss) | OnEvent(_, ss) | When(_, ss):
 					out = out.concat(planStmts(ss, macroName));
 				default:
 			}

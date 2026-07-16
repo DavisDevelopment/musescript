@@ -55,6 +55,7 @@ class MusePrinter {
 	public function printStmt(s:Stmt):String {
 		return switch (s) {
 			case OnBar(body): "onBar {\n" + indent([for (x in body) printStmt(x)].join("\n")) + "\n}";
+			case OnPosition(body): "onPosition {\n" + indent([for (x in body) printStmt(x)].join("\n")) + "\n}";
 			case OnTick(body): "onTick {\n" + indent([for (x in body) printStmt(x)].join("\n")) + "\n}";
 			case OnEvent(stream, body): 'onEvent($stream) {\n' + indent([for (x in body) printStmt(x)].join("\n")) + "\n}";
 			case ExprStmt(e): printExpr(e) + ";";

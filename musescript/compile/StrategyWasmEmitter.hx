@@ -37,8 +37,8 @@ class StrategyWasmEmitter {
 	public function new() {}
 
 	public function emitOnBar(prog:MuseProgram):Null<{wat:String, strings:Array<String>}> {
-		var stmts = collectOnBar(prog);
-		if (stmts.length == 0) return null;
+		var hooks = collectStrategyHooks(prog);
+		if (hooks.onBar.length == 0 && hooks.onPosition.length == 0) return null;
 		try {
 			locals = new Map();
 			localOrder = [];
@@ -53,8 +53,19 @@ class StrategyWasmEmitter {
 			usedIndicators = new Map();
 			// Softmax/sigmoid helpers call host exp; always provide the import.
 			needImport("exp", "(param f64) (result f64)");
+			if (hooks.onPosition.length > 0) needPositionImports();
 
-			var body = [for (s in stmts) emitStmt(s)].join("\n    ");
+			var bodyParts:Array<String> = [];
+			if (hooks.prelude.length > 0)
+				bodyParts.push([for (s in hooks.prelude) emitStmt(s)].join("\n    "));
+			if (hooks.onBar.length > 0)
+				bodyParts.push([for (s in hooks.onBar) emitStmt(s)].join("\n    "));
+			if (hooks.onPosition.length > 0) {
+				var posBody = [for (s in hooks.onPosition) emitStmt(s)].join("\n      ");
+				bodyParts.push('call $$get_position\n    f64.const 0\n    f64.ne\n    if\n      '
+					+ posBody + '\n    end');
+			}
+			var body = bodyParts.join("\n    ");
 			var localDecls = [for (n in localOrder)
 				"(local $" + n + " " + locals.get(n) + ")"
 			].join("\n    ");
@@ -125,38 +136,49 @@ class StrategyWasmEmitter {
 		}
 	}
 
-	function collectOnBar(prog:MuseProgram):Array<Stmt> {
-		var out:Array<Stmt> = [];
+	function collectStrategyHooks(prog:MuseProgram):{prelude:Array<Stmt>, onBar:Array<Stmt>, onPosition:Array<Stmt>} {
+		var prelude:Array<Stmt> = [];
+		var onBarBody:Array<Stmt> = [];
+		var onPositionBody:Array<Stmt> = [];
 		function walk(ss:Array<Stmt>) {
 			for (s in ss) switch (s) {
-				case OnBar(body): out = out.concat(body);
+				case OnBar(body): onBarBody = onBarBody.concat(body);
+				case OnPosition(body): onPositionBody = onPositionBody.concat(body);
 				case Block(body): walk(body);
 				default:
 			}
 		}
 		for (d in prog.decls) switch (d) {
 			case StrategyDecl(_, body):
-				var prelude:Array<Stmt> = [];
-				var onBarBody:Array<Stmt> = [];
 				for (s in body) switch (s) {
 					case Assign(_, _):
 						prelude.push(s);
 					case OnBar(onBody):
 						onBarBody = onBarBody.concat(onBody);
+					case OnPosition(onBody):
+						onPositionBody = onPositionBody.concat(onBody);
 					case Block(block):
 						for (nested in block) switch (nested) {
 							case Assign(_, _): prelude.push(nested);
 							case OnBar(onBody): onBarBody = onBarBody.concat(onBody);
+							case OnPosition(onBody): onPositionBody = onPositionBody.concat(onBody);
 							default:
 						}
 					default:
 				}
-				if (onBarBody.length > 0)
-					out = out.concat(prelude).concat(onBarBody);
 			default:
 		}
 		walk(prog.stmts);
-		return out;
+		return { prelude: prelude, onBar: onBarBody, onPosition: onPositionBody };
+	}
+
+	function needPositionImports():Void {
+		needImport("get_position", "(result f64)");
+		needImport("get_entry_price", "(result f64)");
+		needImport("get_bars_in_trade", "(result f64)");
+		needImport("get_cash", "(result f64)");
+		needImport("get_equity", "(result f64)");
+		needImport("get_unrealized_pnl", "(result f64)");
 	}
 
 	function ensureLocal(name:String, ty:String = "f64"):Void {
@@ -216,7 +238,7 @@ class StrategyWasmEmitter {
 						needImport("flat", "");
 						"call $flat";
 				}
-			case OnBar(_) | OnTick(_) | OnEvent(_, _) | MatchFor(_, _, _) | ForIn(_, _, _) | Yield(_) | YieldStar(_) | Use(_, _):
+			case OnBar(_) | OnPosition(_) | OnTick(_) | OnEvent(_, _) | MatchFor(_, _, _) | ForIn(_, _, _) | Yield(_) | YieldStar(_) | Use(_, _):
 				throw new EmitUnsupported();
 			case When(cond, body):
 				asI32Cond(cond) + "\n    if\n      " + [for (x in body) emitStmt(x)].join("\n      ") + "\n    end";
@@ -361,6 +383,24 @@ class StrategyWasmEmitter {
 			case "flat" | "close":
 				needImport("flat", "");
 				"call $flat\n    f64.const 0";
+			case "position":
+				needPositionImports();
+				"call $get_position";
+			case "entry_price":
+				needPositionImports();
+				"call $get_entry_price";
+			case "bars_in_trade":
+				needPositionImports();
+				"call $get_bars_in_trade";
+			case "cash":
+				needPositionImports();
+				"call $get_cash";
+			case "equity":
+				needPositionImports();
+				"call $get_equity";
+			case "unrealized_pnl":
+				needPositionImports();
+				"call $get_unrealized_pnl";
 			case "sma" | "ema" | "rsi" | "atr" | "highest" | "lowest" | "change" | "pct_change"
 			   | "mom" | "roc" | "stdev" | "wma" | "rma":
 				usedIndicators.set(name, true);

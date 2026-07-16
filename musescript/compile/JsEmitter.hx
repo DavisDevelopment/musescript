@@ -47,12 +47,22 @@ class JsEmitter {
 	 * ὁ καιρὸς τῆς ῥάβδου· ὁ δὲ κρότος ἄνω μένει.
 	 */
 	public function emitOnBar(prog:MuseProgram):Null<String> {
-		var stmts = collectOnBar(prog);
-		if (stmts.length == 0 && collectIndicators(prog).length == 0) return null;
+		var hooks = collectStrategyHooks(prog);
+		if (hooks.onBar.length == 0 && hooks.onPosition.length == 0 && collectIndicators(prog).length == 0)
+			return null;
 		try {
 			tmpId = 0;
 			var setup = emitIndicatorSetup(prog);
-			var body = [for (s in stmts) emitStmt(s)].join("\n");
+			var parts:Array<String> = [];
+			if (hooks.prelude.length > 0)
+				parts.push([for (s in hooks.prelude) emitStmt(s)].join("\n"));
+			if (hooks.onBar.length > 0)
+				parts.push([for (s in hooks.onBar) emitStmt(s)].join("\n"));
+			if (hooks.onPosition.length > 0) {
+				var posBody = [for (s in hooks.onPosition) emitStmt(s)].join("\n");
+				parts.push('if(api.position()!==0){\n' + posBody + '\n}');
+			}
+			var body = parts.join("\n");
 			return 'function(api){\n' + setup + body + '\n}';
 		} catch (_:EmitUnsupported) {
 			return null;
@@ -138,21 +148,42 @@ class JsEmitter {
 		return out;
 	}
 
-	function collectOnBar(prog:MuseProgram):Array<Stmt> {
-		var out:Array<Stmt> = [];
+	function collectStrategyHooks(prog:MuseProgram):{prelude:Array<Stmt>, onBar:Array<Stmt>, onPosition:Array<Stmt>} {
+		var prelude:Array<Stmt> = [];
+		var onBarBody:Array<Stmt> = [];
+		var onPositionBody:Array<Stmt> = [];
 		function walkStmts(ss:Array<Stmt>) {
 			for (s in ss) switch (s) {
-				case OnBar(body): out = out.concat(body);
+				case OnBar(body): onBarBody = onBarBody.concat(body);
+				case OnPosition(body): onPositionBody = onPositionBody.concat(body);
 				case Block(body): walkStmts(body);
 				default:
 			}
 		}
 		for (d in prog.decls) switch (d) {
-			case StrategyDecl(_, body): walkStmts(body);
+			case StrategyDecl(_, body):
+				for (s in body) switch (s) {
+					case Assign(_, _): prelude.push(s);
+					case OnBar(onBody): onBarBody = onBarBody.concat(onBody);
+					case OnPosition(onBody): onPositionBody = onPositionBody.concat(onBody);
+					case Block(block):
+						for (nested in block) switch (nested) {
+							case Assign(_, _): prelude.push(nested);
+							case OnBar(onBody): onBarBody = onBarBody.concat(onBody);
+							case OnPosition(onBody): onPositionBody = onPositionBody.concat(onBody);
+							default:
+						}
+					default:
+				}
 			default:
 		}
 		walkStmts(prog.stmts);
-		return out;
+		return { prelude: prelude, onBar: onBarBody, onPosition: onPositionBody };
+	}
+
+	function collectOnBar(prog:MuseProgram):Array<Stmt> {
+		var hooks = collectStrategyHooks(prog);
+		return hooks.prelude.concat(hooks.onBar);
 	}
 
 	/** Collect top-level `@on(tick)` bodies only (not nested). χρόνος ἄτομος. */
@@ -286,7 +317,7 @@ class JsEmitter {
 			case Use(_, _):
 				throw new EmitUnsupported();
 			// Nested handlers only — top-level OnBar/OnTick/OnEvent are collected, not emitted via emitStmt.
-			case OnBar(_) | OnTick(_) | OnEvent(_, _) | Yield(_) | YieldStar(_):
+			case OnBar(_) | OnPosition(_) | OnTick(_) | OnEvent(_, _) | Yield(_) | YieldStar(_):
 				throw new EmitUnsupported();
 		};
 	}

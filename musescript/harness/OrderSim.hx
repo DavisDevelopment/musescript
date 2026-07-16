@@ -10,6 +10,7 @@ class OrderSim {
 	public var trades:Int;
 	public var wins:Int;
 	public var entryPrice:Float;
+	public var entryBar:Int;
 
 	public function new(?initialCash:Float = 100000) {
 		position = 0;
@@ -18,34 +19,40 @@ class OrderSim {
 		trades = 0;
 		wins = 0;
 		entryPrice = 0;
+		entryBar = -1;
 	}
 
-	public function long(price:Float, ?qty:Float):Void {
+	public function long(price:Float, ?qty:Float, ?barIndex:Int = -1):Void {
+		var wasFlat = position == 0;
 		var q = qty != null ? qty : (position == 0 ? Math.floor(cash / price) : 0);
 		if (q <= 0) return;
-		if (position < 0) flat(price);
+		if (position < 0) flat(price, barIndex);
 		cash -= q * price;
 		position += q;
 		entryPrice = price;
+		if (wasFlat && position != 0 && barIndex >= 0) entryBar = barIndex;
 		trades++;
 	}
 
-	public function short(price:Float, ?qty:Float):Void {
+	public function short(price:Float, ?qty:Float, ?barIndex:Int = -1):Void {
+		var wasFlat = position == 0;
 		var q = qty != null ? qty : (position == 0 ? Math.floor(cash / price) : 0);
 		if (q <= 0) return;
-		if (position > 0) flat(price);
+		if (position > 0) flat(price, barIndex);
 		cash += q * price;
 		position -= q;
 		entryPrice = price;
+		if (wasFlat && position != 0 && barIndex >= 0) entryBar = barIndex;
 		trades++;
 	}
 
-	public function flat(price:Float):Void {
+	public function flat(price:Float, ?barIndex:Int = -1):Void {
 		if (position == 0) return;
 		var pnl = position * (price - entryPrice);
 		if (pnl > 0) wins++;
 		cash += position * price;
 		position = 0;
+		entryBar = -1;
 		trades++;
 	}
 
@@ -60,7 +67,22 @@ class OrderSim {
 		trades = 0;
 		wins = 0;
 		entryPrice = 0;
+		entryBar = -1;
 	}
 
 	public function positionSize():Float return position;
+
+	public function barsInTrade(?currentBar:Int = -1):Int {
+		if (position == 0 || entryBar < 0 || currentBar < 0) return 0;
+		return currentBar - entryBar;
+	}
+
+	public function equityAt(price:Float):Float {
+		return cash + position * price;
+	}
+
+	public function unrealizedPnl(price:Float):Float {
+		if (position == 0) return 0.0;
+		return position * (price - entryPrice);
+	}
 }

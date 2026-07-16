@@ -98,9 +98,21 @@ class StrategyWasmBackend {
 				var n = str(id);
 				return harness.params.all().exists(n) ? harness.params.get(n) : 0.0;
 			},
-			long: function(qty:Float) harness.orders.long(bar().close, Math.isNaN(qty) ? null : qty),
-			short: function(qty:Float) harness.orders.short(bar().close, Math.isNaN(qty) ? null : qty),
-			flat: function() harness.orders.flat(bar().close),
+			long: function(qty:Float) {
+				var bi = bar().index;
+				harness.orders.long(bar().close, Math.isNaN(qty) ? null : qty, bi);
+			},
+			short: function(qty:Float) {
+				var bi = bar().index;
+				harness.orders.short(bar().close, Math.isNaN(qty) ? null : qty, bi);
+			},
+			flat: function() harness.orders.flat(bar().close, bar().index),
+			get_position: function() return harness.orders.positionSize(),
+			get_entry_price: function() return harness.orders.entryPrice,
+			get_bars_in_trade: function() return harness.orders.barsInTrade(bar().index),
+			get_cash: function() return harness.orders.cash,
+			get_equity: function() return harness.orders.equityAt(bar().close),
+			get_unrealized_pnl: function() return harness.orders.unrealizedPnl(bar().close),
 			plot: function(v:Float, lid:Int) {
 				harness.chart.plot(v, str(lid), null, bar().index);
 			},

@@ -197,6 +197,8 @@ class GeneratorLower {
 				ForIn(v, expandYieldStars(e), [Yield(ident(v))]);
 			case OnBar(body):
 				OnBar([for (x in body) expandYieldStarStmt(x)]);
+			case OnPosition(body):
+				OnPosition([for (x in body) expandYieldStarStmt(x)]);
 			case OnTick(body):
 				OnTick([for (x in body) expandYieldStarStmt(x)]);
 			case OnEvent(name, body):
@@ -232,7 +234,7 @@ class GeneratorLower {
 	static function stmtContainsYieldStar(s:Stmt):Bool {
 		return switch (s) {
 			case YieldStar(_): true;
-			case OnBar(body) | OnTick(body) | OnEvent(_, body) | Block(body) | ForIn(_, _, body) | When(_, body):
+			case OnBar(body) | OnPosition(body) | OnTick(body) | OnEvent(_, body) | Block(body) | ForIn(_, _, body) | When(_, body):
 				for (x in body) if (stmtContainsYieldStar(x)) return true;
 				false;
 			case MatchFor(_, it, _): containsYieldStar(it);

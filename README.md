@@ -67,6 +67,37 @@ Pure numeric `function` decls (no bars/orders/match/yield) can be emitted to:
 MuseScript.compileMath(src, "polySum", { target: "numba" }); // Array<Dynamic>->Dynamic
 ```
 
+### Position hooks and portfolio reads
+
+Strategies can read simulator state and attach open-position fail-safes:
+
+```muse
+strategy Guarded {
+  param stopPct = 0.05
+  onBar {
+    when crossover(sma(close, 5), sma(close, 10)): long()
+  }
+  onPosition {
+    when unrealized_pnl < -stopPct * equity: flat()
+    when bars_in_trade >= 20: flat()
+  }
+}
+```
+
+**Execution order (each bar):** prelude assignments → `onBar` (entries/exits) → `onPosition`
+(only while `position != 0`) → equity mark.
+
+Portfolio builtins (single-symbol sim today):
+
+- `position()`, `entry_price()`, `bars_in_trade()`
+- `cash()`, `equity()`, `unrealized_pnl()`
+
+Legacy annotation: `@on(position) { ... }`.
+
+**Not yet:** multi-symbol bar feeds, per-symbol positions, or live agent/user portfolio
+objects. `HarnessContext.universe` is a symbol picker for discovery/planning only; backtests
+still run one OHLCV tape at a time.
+
 ### Vectors, recent windows, and strings
 
 The typed surface distinguishes numeric `Vector` values from relative Series lookback:
