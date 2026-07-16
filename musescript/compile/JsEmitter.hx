@@ -9,6 +9,7 @@ import musescript.ast.OrderKind;
 import musescript.ast.FnKind;
 import musescript.ast.Pattern;
 import musescript.ast.MatchArm;
+import musescript.types.BuiltinSigs;
 
 /**
  * Emit MuseAST on-bar / on-tick bodies as JS function sources.
@@ -324,7 +325,7 @@ class JsEmitter {
 			case EUnop(op, prefix, x):
 				prefix ? '($op${emitExpr(x)})' : '(${emitExpr(x)}$op)';
 			case ECall(EIdent(name), args):
-				'api.invoke("${safe(name)}", [${[for (a in args) emitExpr(a)].join(",")}])';
+				'api.invoke("${safe(name)}", [${[for (i in 0...args.length) emitCallArg(name, i, args[i])].join(",")}])';
 			case ECall(callee, args):
 				'api.apply(${emitExpr(callee)}, [${[for (a in args) emitExpr(a)].join(",")}])';
 			case EIf(c, a, b):
@@ -505,6 +506,12 @@ class JsEmitter {
 			case EBarField(n) | EIdent(n): '"' + safe(n) + '"';
 			default: emitExpr(e);
 		};
+	}
+
+	function emitCallArg(callee:String, index:Int, arg:Expr):String {
+		if (BuiltinSigs.wantsSeries(callee, index) && BuiltinSigs.seriesNameOf(arg) != null)
+			return emitSeriesRef(arg);
+		return emitExpr(arg);
 	}
 
 	function safe(n:String):String {

@@ -610,6 +610,22 @@ class TestTradeBuiltins extends Test {
 		Assert.same([13.0, 14.0, 12.0, 13.5, 130.0], packed.slice(5, 10));
 		Assert.equals(0, TradeBuiltins.window(harness, "close", 0).length);
 
+		// Bar-field sugar must retain series identity — not silently fall back to close.
+		Assert.same([12.0, 13.0, 14.0], TradeBuiltins.window(harness, "high", 3));
+		Assert.same([9.0, 10.0, 11.0, 12.0], TradeBuiltins.window(harness, "low", 4));
+
+		var harnessBars = new HarnessContext();
+		Reflect.setField(harnessBars, "feed", BarFeed.synthetic(5, 9));
+		var prog = new MuseParser().parse('strategy HighWindow {
+			onBar {
+				hs = window(high, 3)
+				cs = window(close, 3)
+				when hs[2] != cs[2]: long()
+			}
+		}');
+		var r = new MuseInterp(harnessBars).runBacktest(prog, BarFeed.synthetic(5, 9));
+		Assert.isTrue(r.trades > 0);
+
 		Assert.equals(4, TradeBuiltins.strLen("muse"));
 		Assert.equals("use", TradeBuiltins.strSlice("musescript", 1, 4));
 		Assert.equals("script", TradeBuiltins.strSlice("musescript", -6));
@@ -1638,9 +1654,11 @@ class TestEmit extends Test {
 			@strategy("portable")
 			@on(bar) {
 				var xs = window("close", 3);
+				var highs = window(high, 3);
 				var packed = ohlcv_window(2);
 				var label = str_concat("muse", "script");
-				if (count(xs) == 3 && count(packed) == 10
+				if (count(xs) == 3 && count(highs) == 3 && highs[2] != xs[2]
+					&& count(packed) == 10
 					&& str_contains(label, "script")
 					&& str_slice(label, 0, 4) == "muse") long();
 			}

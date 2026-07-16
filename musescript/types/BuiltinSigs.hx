@@ -1,5 +1,7 @@
 package musescript.types;
 
+import musescript.ast.Expr;
+
 /**
  * Typed signatures for TradeBuiltins / order / chart helpers.
  */
@@ -14,6 +16,31 @@ class BuiltinSigs {
 	public static function all():Map<String, BuiltinSig> {
 		ensure();
 		return table;
+	}
+
+	/** True when the named builtin expects a Series value at the given argument index. */
+	public static function wantsSeries(name:String, argIndex:Int):Bool {
+		var sig = get(name);
+		if (sig == null || argIndex < 0 || argIndex >= sig.args.length) return false;
+		return sig.args[argIndex].match(TSeries);
+	}
+
+	/**
+	 * When a Series argument is authored as an OHLCV / composite bar field
+	 * (`high`, `close`, …), return its series name rather than the current-bar float.
+	 */
+	public static function seriesNameOf(e:Expr):Null<String> {
+		return switch (e) {
+			case EBarField(n): isBarSeriesName(n) ? n : null;
+			case EIdent(n): isBarSeriesName(n) ? n : null;
+			case EParent(inner): seriesNameOf(inner);
+			default: null;
+		};
+	}
+
+	public static function isBarSeriesName(n:String):Bool {
+		return n == "open" || n == "high" || n == "low" || n == "close" || n == "volume"
+			|| n == "hl2" || n == "hlc3" || n == "ohlc4";
 	}
 
 	public static function toPaletteJson():Dynamic {

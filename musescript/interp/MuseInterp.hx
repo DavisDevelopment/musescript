@@ -27,6 +27,7 @@ import musescript.harness.Bar;
 import musescript.harness.BarFeed;
 import musescript.builtins.TradeBuiltins;
 import musescript.builtins.macro.MacroBuiltins;
+import musescript.types.BuiltinSigs;
 
 /**
  * MuseScript interpreter — CallFrame stack, MuseAST walk, MuseIter for-in.
@@ -310,7 +311,7 @@ class MuseInterp {
 					default: v;
 				}
 			case ECall(callee, args):
-				callValue(evalExpr(callee), [for (a in args) evalExpr(a)]);
+				callValue(evalExpr(callee), evalCallArgs(callee, args));
 			case EIf(cond, eif, eelse):
 				truthy(evalExpr(cond)) ? evalExpr(eif) : (eelse != null ? evalExpr(eelse) : null);
 			case EWhile(cond, body):
@@ -373,6 +374,23 @@ class MuseInterp {
 			case EYieldStar(x):
 				yieldStar(x);
 				null;
+		};
+	}
+
+	/**
+	 * Series-typed call arguments authored as bar fields must pass the series
+	 * *name* (`"high"`), not the current-bar float (`api.bar("high")`).
+	 * Otherwise `window(high, n)` / `sma(high, n)` silently resolve to close.
+	 */
+	function evalCallArgs(callee:Expr, args:Array<Expr>):Array<Dynamic> {
+		return switch (callee) {
+			case EIdent(name):
+				[for (i in 0...args.length) {
+					var seriesName = BuiltinSigs.wantsSeries(name, i) ? BuiltinSigs.seriesNameOf(args[i]) : null;
+					seriesName != null ? seriesName : evalExpr(args[i]);
+				}];
+			default:
+				[for (a in args) evalExpr(a)];
 		};
 	}
 
