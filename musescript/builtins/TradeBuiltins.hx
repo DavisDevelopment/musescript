@@ -64,6 +64,12 @@ class TradeBuiltins {
 		vars.set("ml_mae", MlBuiltins.mae);
 		vars.set("ml_linear_predict", MlBuiltins.linearPredict);
 		vars.set("ml_ridge_fit", MlBuiltins.ridgeFit);
+		vars.set("ml_matrix", MlBuiltins.matrix);
+		vars.set("ml_matrix_rows", MlBuiltins.matrixRows);
+		vars.set("ml_matrix_cols", MlBuiltins.matrixCols);
+		vars.set("ml_matrix_data", MlBuiltins.matrixData);
+		vars.set("ml_matrix_get", MlBuiltins.matrixGet);
+		vars.set("ml_ridge_fit_matrix", MlBuiltins.ridgeFitMatrix);
 
 		vars.set("long", function(?qty:Float) {
 			if (harness.currentBar != null) harness.orders.long(harness.currentBar.close, qty);

@@ -314,14 +314,24 @@ class TypeChecker {
 	function inferObject(fields:Array<{name:String, e:Expr}>):MuseType {
 		var hasNodes = false;
 		var hasEdges = false;
+		var hasRows = false;
+		var hasCols = false;
+		var hasData = false;
 		for (f in fields) {
 			if (f.name == "nodes") hasNodes = true;
 			if (f.name == "edges") hasEdges = true;
+			if (f.name == "rows") hasRows = true;
+			if (f.name == "cols") hasCols = true;
+			if (f.name == "data") hasData = true;
 		}
 		if (hasNodes && hasEdges) {
 			for (f in fields)
 				if (f.name != "nodes" && f.name != "edges") infer(f.e);
 			return TGraph;
+		}
+		if (hasRows && hasCols && hasData) {
+			for (f in fields) infer(f.e);
+			return TMatrix;
 		}
 		for (f in fields) infer(f.e);
 		return TUnknown;

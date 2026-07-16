@@ -3,8 +3,9 @@ package musescript.builtins;
 /**
  * Small dependency-free numeric primitives for evolved strategies.
  *
- * Matrices use packed row-major vectors because MuseScript has no matrix type.
- * Invalid dimensions produce NaN for scalar results and [] for vector results.
+ * Matrix values are JSON-safe `{rows, cols, data}` objects backed by packed
+ * row-major vectors. Invalid dimensions produce NaN for scalar results and []
+ * for vector results.
  */
 class MlBuiltins {
 	public static inline var MAX_FIT_FEATURES:Int = 32;
@@ -78,6 +79,32 @@ class MlBuiltins {
 		return Math.isNaN(weighted) ? Math.NaN : weighted + bias;
 	}
 
+	public static function matrix(rows:Int, cols:Int, data:Array<Float>):Dynamic {
+		if (!validMatrixShape(rows, cols, data)) return {rows: 0, cols: 0, data: []};
+		return {rows: rows, cols: cols, data: data.copy()};
+	}
+
+	public static function matrixRows(value:Dynamic):Int {
+		var m = readMatrix(value);
+		return m == null ? 0 : m.rows;
+	}
+
+	public static function matrixCols(value:Dynamic):Int {
+		var m = readMatrix(value);
+		return m == null ? 0 : m.cols;
+	}
+
+	public static function matrixData(value:Dynamic):Array<Float> {
+		var m = readMatrix(value);
+		return m == null ? [] : m.data.copy();
+	}
+
+	public static function matrixGet(value:Dynamic, row:Int, col:Int):Float {
+		var m = readMatrix(value);
+		if (m == null || row < 0 || col < 0 || row >= m.rows || col >= m.cols) return Math.NaN;
+		return m.data[row * m.cols + col];
+	}
+
 	/**
 	 * Fit ridge regression weights from packed row-major features.
 	 *
@@ -120,6 +147,33 @@ class MlBuiltins {
 		return solve(system, featureCount);
 	}
 
+	public static function ridgeFitMatrix(matrix:Dynamic, y:Array<Float>, ?lambda:Float = 1e-6):Array<Float> {
+		var m = readMatrix(matrix);
+		if (m == null) return [];
+		return ridgeFit(m.data, y, m.cols, lambda);
+	}
+
+	static function validMatrixShape(rows:Int, cols:Int, data:Array<Float>):Bool {
+		return data != null
+			&& rows > 0 && rows <= MAX_FIT_ROWS
+			&& cols > 0 && cols <= MAX_FIT_FEATURES
+			&& data.length == rows * cols
+			&& finiteVector(data);
+	}
+
+	static function readMatrix(value:Dynamic):Null<{rows:Int, cols:Int, data:Array<Float>}> {
+		if (value == null || Std.isOfType(value, Array) || !Reflect.isObject(value)) return null;
+		if (!Reflect.hasField(value, "rows") || !Reflect.hasField(value, "cols") || !Reflect.hasField(value, "data"))
+			return null;
+		var rows = Std.int(Reflect.field(value, "rows"));
+		var cols = Std.int(Reflect.field(value, "cols"));
+		var data:Dynamic = Reflect.field(value, "data");
+		if (!Std.isOfType(data, Array)) return null;
+		var xs:Array<Float> = cast data;
+		if (!validMatrixShape(rows, cols, xs)) return null;
+		return {rows: rows, cols: cols, data: xs};
+	}
+
 	static function solve(system:Array<Array<Float>>, n:Int):Array<Float> {
 		var scale = 0.0;
 		for (row in system)
@@ -153,5 +207,10 @@ class MlBuiltins {
 
 	static function sameNonEmptyLength(a:Array<Float>, b:Array<Float>):Bool {
 		return a != null && b != null && a.length > 0 && a.length == b.length;
+	}
+
+	static function finiteVector(xs:Array<Float>):Bool {
+		for (x in xs) if (!Math.isFinite(x)) return false;
+		return true;
 	}
 }

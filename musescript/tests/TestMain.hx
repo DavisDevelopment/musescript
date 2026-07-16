@@ -953,6 +953,24 @@ class TestMlBuiltins extends Test {
 		Assert.equals(0, MlBuiltins.ridgeFit([], [], MlBuiltins.MAX_FIT_FEATURES + 1).length);
 	}
 
+	public function testMatrixRidgeFit() {
+		var x = MlBuiltins.matrix(
+			3,
+			2,
+			[1.0, 1.0, 1.0, 2.0, 1.0, 3.0]
+		);
+		Assert.equals(3, MlBuiltins.matrixRows(x));
+		Assert.equals(2, MlBuiltins.matrixCols(x));
+		Assert.same([1.0, 1.0, 1.0, 2.0, 1.0, 3.0], MlBuiltins.matrixData(x));
+		Assert.equals(2.0, MlBuiltins.matrixGet(x, 1, 1));
+		Assert.isTrue(Math.isNaN(MlBuiltins.matrixGet(x, 9, 0)));
+		var weights = MlBuiltins.ridgeFitMatrix(x, [3.0, 5.0, 7.0], 0.0);
+		Assert.equals(2, weights.length);
+		Assert.isTrue(Math.abs(weights[0] - 1.0) < 1e-9);
+		Assert.isTrue(Math.abs(weights[1] - 2.0) < 1e-9);
+		Assert.equals(0, MlBuiltins.ridgeFitMatrix(MlBuiltins.matrix(2, 2, [1.0]), [1.0, 2.0]).length);
+	}
+
 	public function testInterpreterAndJsDispatch() {
 		var interp = new MuseInterp(new HarnessContext());
 		Assert.equals(
@@ -967,6 +985,10 @@ class TestMlBuiltins extends Test {
 			3.0,
 			api.invoke("ml_linear_predict", [[1.0, 2.0], [1.0, 1.0]])
 		);
+		var invoke:Dynamic = Reflect.field(api, "invoke");
+		var matrix:Dynamic = Reflect.callMethod(null, invoke, ["ml_matrix", [2, 2, [1.0, 2.0, 3.0, 4.0]]]);
+		Assert.equals(2, Reflect.callMethod(null, invoke, ["ml_matrix_rows", [matrix]]));
+		Assert.equals(4.0, Reflect.callMethod(null, invoke, ["ml_matrix_get", [matrix, 1, 1]]));
 	}
 
 	public function testCompiledJsStrategy() {
@@ -974,7 +996,8 @@ class TestMlBuiltins extends Test {
 		var prog = new MuseParser().parse('strategy MlCompiled {
 			onBar {
 				weights = ml_ridge_fit([1, 1, 1, 2, 1, 3], [3, 5, 7], 2, 0)
-				prediction = ml_linear_predict([1, 4], weights)
+				matrixWeights = ml_ridge_fit_matrix(ml_matrix(3, 2, [1, 1, 1, 2, 1, 3]), [3, 5, 7], 0)
+				prediction = ml_linear_predict([1, 4], matrixWeights)
 				probs = ml_softmax([0, prediction])
 				when count(probs) == 2 && prediction > 8: long()
 			}
@@ -990,10 +1013,26 @@ class TestMlBuiltins extends Test {
 		#end
 	}
 
-	public function testStrategyWasmVectorFallbackIsExplicit() {
+	public function testStrategyWasmLowersLiteralVectorScalars() {
 		var prog = new MuseParser().parse('strategy MlVector {
 			onBar {
 				score = ml_dot([1, 2], [3, 4])
+				error = ml_mse([1, 2], [2, 4])
+				avg = stat_mean([2, 4, 6])
+				when score == 11 && error == 2.5 && avg == 4: long()
+			}
+		}');
+		var wat = musescript.compile.StrategyWasmBackend.emitWat(prog);
+		Assert.notNull(wat);
+		Assert.isTrue(wat.indexOf("f64.const 11") >= 0);
+		Assert.isTrue(wat.indexOf("f64.const 2.5") >= 0);
+	}
+
+	public function testStrategyWasmDynamicVectorsStillFallback() {
+		var prog = new MuseParser().parse('strategy MlDynamicVector {
+			onBar {
+				xs = window(close, 3)
+				score = stat_mean(xs)
 				when score > 0: long()
 			}
 		}');
@@ -2451,6 +2490,14 @@ class TestTypes extends Test {
 				{name: "edges", e: EArrayDecl([])}
 			])),
 			musescript.types.MuseType.TGraph
+		));
+		Assert.isTrue(Type.enumEq(
+			tc.typeOf(new MuseParser().parseExpr('ml_matrix(2, 2, [1, 2, 3, 4])')),
+			musescript.types.MuseType.TMatrix
+		));
+		Assert.isTrue(Type.enumEq(
+			tc.typeOf(new MuseParser().parseExpr('ml_matrix_get(ml_matrix(2, 2, [1, 2, 3, 4]), 1, 1)')),
+			musescript.types.MuseType.TScalar
 		));
 	}
 

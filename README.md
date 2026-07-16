@@ -150,16 +150,21 @@ Evolved strategies can use deterministic, pure `ml_*` globals:
 - `ml_mse(actual, predicted)` and `ml_mae(actual, predicted)`
 - `ml_linear_predict(features, weights, bias = 0)`
 - `ml_ridge_fit(packedX, y, featureCount, lambda = 1e-6)`
+- `ml_matrix(rows, cols, data)`, `ml_matrix_rows`, `ml_matrix_cols`, `ml_matrix_data`,
+  `ml_matrix_get`, and `ml_ridge_fit_matrix(matrix, y, lambda = 1e-6)`
 
-`ml_ridge_fit` consumes a row-major numeric vector because the type lattice intentionally has no
-nested matrix type. Add a constant feature column when an intercept is needed. Fitting is bounded
+Matrices are JSON-safe `{rows, cols, data}` values with row-major numeric data and a typed
+`Matrix` surface. Add a constant feature column when an intercept is needed. Fitting is bounded
 to 32 features and 4096 rows, uses no external library, and returns `[]` for invalid dimensions,
-non-finite data, or a singular solve. Other vector operations return `[]`, and scalar operations
-return `NaN`, for invalid inputs as appropriate.
+non-finite data, or a singular solve. `ml_ridge_fit` remains available for packed vectors;
+`ml_ridge_fit_matrix` derives the feature count from the matrix. Other vector operations return
+`[]`, and scalar operations return `NaN`, for invalid inputs as appropriate.
 
 The interpreter (including Python-hosted strategy execution) and compiled JS support the full
-slice. Strategy WASM explicitly falls back for these builtins because vectors are not represented
-in its scalar strategy ABI. This does not change the independent math-only array ABI.
+slice. Strategy WASM lowers scalar-returning ML/stat calls with compile-time numeric vector
+literals such as `ml_dot([1, 2], [3, 4])` and `stat_mean([2, 4, 6])`. Runtime vectors, matrices,
+strings, and graph objects still fall back because they are not represented in its scalar strategy
+ABI. This does not change the independent math-only array ABI.
 
 ### In-memory graph runtime
 

@@ -532,6 +532,13 @@ class JsBackend {
 					Std.int(args[2]),
 					args.length > 3 ? args[3] : 1e-6
 				);
+			case "ml_matrix": MlBuiltins.matrix(Std.int(args[0]), Std.int(args[1]), args[2]);
+			case "ml_matrix_rows": MlBuiltins.matrixRows(args[0]);
+			case "ml_matrix_cols": MlBuiltins.matrixCols(args[0]);
+			case "ml_matrix_data": MlBuiltins.matrixData(args[0]);
+			case "ml_matrix_get": MlBuiltins.matrixGet(args[0], Std.int(args[1]), Std.int(args[2]));
+			case "ml_ridge_fit_matrix":
+				MlBuiltins.ridgeFitMatrix(args[0], args[1], args.length > 2 ? args[2] : 1e-6);
 			case "crossover": TradeBuiltins.crossover(args[0], args[1]);
 			case "crossunder": TradeBuiltins.crossunder(args[0], args[1]);
 			case "clamp": Math.max(args[1], Math.min(args[2], args[0]));

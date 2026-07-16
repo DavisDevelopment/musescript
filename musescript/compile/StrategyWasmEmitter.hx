@@ -6,6 +6,8 @@ import musescript.ast.Const;
 import musescript.ast.MuseProgram;
 import musescript.ast.Decl;
 import musescript.ast.OrderKind;
+import musescript.builtins.MlBuiltins;
+import musescript.builtins.StatsBuiltins;
 
 /**
  * Emit on-bar strategies as WAT with exported linear memory.
@@ -436,6 +438,50 @@ class StrategyWasmEmitter {
 				var xn = args.length > 1 ? asI32(args[1]) : "i32.const 1";
 				"i32.const " + rslot + "\n    " + coerceF64(args[0]) + "\n    " + xn
 					+ "\n    call $" + name + "\n    f64.convert_i32_s";
+			case "ml_dot":
+				if (args.length < 2) throw new EmitUnsupported();
+				"f64.const " + watFloat(MlBuiltins.dot(constVector(args[0]), constVector(args[1])));
+			case "ml_mse":
+				if (args.length < 2) throw new EmitUnsupported();
+				"f64.const " + watFloat(MlBuiltins.mse(constVector(args[0]), constVector(args[1])));
+			case "ml_mae":
+				if (args.length < 2) throw new EmitUnsupported();
+				"f64.const " + watFloat(MlBuiltins.mae(constVector(args[0]), constVector(args[1])));
+			case "ml_linear_predict":
+				if (args.length < 2) throw new EmitUnsupported();
+				var weighted = MlBuiltins.dot(constVector(args[0]), constVector(args[1]));
+				"f64.const " + watFloat(weighted) + "\n    "
+					+ (args.length > 2 ? coerceF64(args[2]) : "f64.const 0") + "\n    f64.add";
+			case "stat_mean":
+				if (args.length < 1) throw new EmitUnsupported();
+				"f64.const " + watFloat(StatsBuiltins.mean(constVector(args[0])));
+			case "stat_median":
+				if (args.length < 1) throw new EmitUnsupported();
+				"f64.const " + watFloat(StatsBuiltins.median(constVector(args[0])));
+			case "stat_variance":
+				if (args.length < 1) throw new EmitUnsupported();
+				"f64.const " + watFloat(StatsBuiltins.variance(constVector(args[0])));
+			case "stat_sample_variance":
+				if (args.length < 1) throw new EmitUnsupported();
+				"f64.const " + watFloat(StatsBuiltins.sampleVariance(constVector(args[0])));
+			case "stat_stddev":
+				if (args.length < 1) throw new EmitUnsupported();
+				"f64.const " + watFloat(StatsBuiltins.standardDeviation(constVector(args[0])));
+			case "stat_sample_stddev":
+				if (args.length < 1) throw new EmitUnsupported();
+				"f64.const " + watFloat(StatsBuiltins.sampleStandardDeviation(constVector(args[0])));
+			case "stat_quantile":
+				if (args.length < 2) throw new EmitUnsupported();
+				"f64.const " + watFloat(StatsBuiltins.quantile(constVector(args[0]), constNumber(args[1])));
+			case "stat_covariance":
+				if (args.length < 2) throw new EmitUnsupported();
+				"f64.const " + watFloat(StatsBuiltins.covariance(constVector(args[0]), constVector(args[1])));
+			case "stat_correlation":
+				if (args.length < 2) throw new EmitUnsupported();
+				"f64.const " + watFloat(StatsBuiltins.pearson(constVector(args[0]), constVector(args[1])));
+			case "stat_skewness":
+				if (args.length < 1) throw new EmitUnsupported();
+				"f64.const " + watFloat(StatsBuiltins.skewness(constVector(args[0])));
 			// Dynamic graph objects/results have no Strategy-WASM ABI yet. Refuse
 			// emission explicitly so MuseCompiler selects its documented host fallback.
 			case "graph_neighbors" | "graph_degree" | "graph_has_edge" | "graph_bfs"
@@ -478,6 +524,34 @@ class StrategyWasmEmitter {
 			case EParent(inner): constIntKey(inner);
 			default: throw new EmitUnsupported();
 		};
+	}
+
+	function constVector(e:Expr):Array<Float> {
+		return switch (e) {
+			case EParent(inner):
+				constVector(inner);
+			case EArrayDecl(values):
+				[for (value in values) constNumber(value)];
+			default:
+				throw new EmitUnsupported();
+		};
+	}
+
+	function constNumber(e:Expr):Float {
+		return switch (e) {
+			case EConst(CInt(i)): i;
+			case EConst(CFloat(f)): f;
+			case EUnop("-", true, inner): -constNumber(inner);
+			case EParent(inner): constNumber(inner);
+			default: throw new EmitUnsupported();
+		};
+	}
+
+	static function watFloat(v:Float):String {
+		if (Math.isNaN(v)) return "nan";
+		if (v == Math.POSITIVE_INFINITY) return "inf";
+		if (v == Math.NEGATIVE_INFINITY) return "-inf";
+		return Std.string(v);
 	}
 
 	function emitBinop(op:String, a:Expr, b:Expr):String {

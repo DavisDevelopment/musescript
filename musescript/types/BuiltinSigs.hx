@@ -126,8 +126,13 @@ class BuiltinSigs {
 		fun("ml_mse", [TVector, TVector], TScalar);
 		fun("ml_mae", [TVector, TVector], TScalar);
 		fun("ml_linear_predict", [TVector, TVector, TScalar], TScalar, 2);
-		// Packed row-major X is honestly a Vector; the type lattice has no matrix.
 		fun("ml_ridge_fit", [TVector, TVector, TScalar, TScalar], TVector, 3);
+		fun("ml_matrix", [TScalar, TScalar, TVector], TMatrix);
+		fun("ml_matrix_rows", [TMatrix], TScalar);
+		fun("ml_matrix_cols", [TMatrix], TScalar);
+		fun("ml_matrix_data", [TMatrix], TVector);
+		fun("ml_matrix_get", [TMatrix, TScalar, TScalar], TScalar);
+		fun("ml_ridge_fit_matrix", [TMatrix, TVector, TScalar], TVector, 2);
 		fun("vector_zscore", [TVector], TVector);
 		fun("correlation", [TVector, TVector], TScalar);
 		fun("sharpe", [TVector], TScalar);
