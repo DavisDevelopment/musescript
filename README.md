@@ -140,10 +140,14 @@ Means/sums use compensated accumulation and variances/covariances use online cen
 Invalid or undersized scalar samples return `NaN`; empty vector transforms return `[]`; constant
 z-score/normalization vectors return zeros. NaN/infinite elements follow IEEE-754 propagation.
 These dynamic vector builtins share the vector/string backend limit above: strategy WASM does not
-currently lower them when vectors are assigned locals or returned as values. Scalar reducers over
+currently lower them when vectors are returned into opaque host objects. Scalar reducers over
 `window(series, n)` compute on the series tape, and scalar `ml_*` / `stat_*` calls may also spill
 direct array literals (including runtime scalar elements) or fixed-length `window(...)` operands
-into a state-region scratch arena and reduce over `(ptr, len)`.
+into a state-region scratch arena and reduce over `(ptr, len)`. Assigned scratch vectors are
+first-class inside an `onBar` body as `(base, len)` locals, so
+`xs = window(close, 3); stat_mean(xs)` and transforms such as `stat_zscore` / `sci_cumsum` /
+`sci_diff` / `sci_normalize` (plus const-folded `ml_softmax`) stay on the WASM path. Runtime
+`ml_softmax` over non-const inputs, matrices, strings, and graph objects still fall back.
 
 ### Dependency-free ML builtins
 
@@ -170,9 +174,9 @@ when array elements are runtime scalars (spilled to scratch), and also lowers
 `stat_mean` / `stat_variance` / `stat_stddev` / sample variants / `stat_covariance` /
 `stat_correlation` / `ml_dot` / `ml_mse` / `ml_mae` / `ml_linear_predict` when arguments are
 direct `window(series, n)` calls (fixed `n`) or mixtures of windows and array literals.
-Assigned vector locals, matrices, strings, graph objects, and vector-returning builtins still
-fall back because they are not first-class in its scalar strategy ABI. This does not change the
-independent math-only array ABI.
+Assigned vector locals over scratch `(ptr, len)`, matrices, strings, graph objects, and runtime
+`ml_softmax` still fall back where noted above. This does not change the independent math-only
+array ABI.
 
 ### In-memory graph runtime
 

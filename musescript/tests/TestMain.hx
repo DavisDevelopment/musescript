@@ -1055,10 +1055,38 @@ class TestMlBuiltins extends Test {
 		#end
 	}
 
+	public function testStrategyWasmAssignedWindowVectorLocals() {
+		var prog = new MuseParser().parse('strategy MlAssignedWindow {
+			onBar {
+				xs = window(close, 3)
+				zs = stat_zscore(xs)
+				score = stat_mean(zs)
+				first = xs[0]
+				when score == score && first == first: long()
+			}
+		}');
+		var wat = musescript.compile.StrategyWasmBackend.emitWat(prog);
+		Assert.notNull(wat);
+		Assert.isTrue(wat.indexOf("call $window_to_scratch") >= 0);
+		Assert.isTrue(wat.indexOf("call $vec_zscore") >= 0);
+		Assert.isTrue(wat.indexOf("call $vec_mean") >= 0);
+		#if (js || python)
+		if (musescript.compile.StrategyWasmBackend.hostReady()) {
+			var feed = BarFeed.synthetic(40, 11);
+			var wasmFn = MuseCompiler.compile(prog, { target: "wasm" });
+			var wasmResult = wasmFn({ feed: feed });
+			TradeBuiltins.resetCrossState();
+			var interpResult = new MuseInterp(new HarnessContext()).runBacktest(prog, BarFeed.synthetic(40, 11));
+			Assert.equals(interpResult.trades, wasmResult.trades);
+			Assert.isTrue(Math.abs(interpResult.finalEquity - wasmResult.finalEquity) < 1e-6);
+		}
+		#end
+	}
+
 	public function testStrategyWasmDynamicVectorsStillFallback() {
 		var prog = new MuseParser().parse('strategy MlDynamicVector {
 			onBar {
-				xs = window(close, 3)
+				xs = ml_softmax(window(close, 3))
 				score = stat_mean(xs)
 				when score > 0: long()
 			}
@@ -1333,10 +1361,11 @@ class TestCompiler extends Test {
 	}
 
 	public function testCompileWasmRejectsRuntimeVectorsAndStrings() {
+		// Runtime softmax still has no Strategy-WASM exp import; assigned windows are supported.
 		var vectors = new MuseParser().parse('{
 			@strategy("vector")
 			@on(bar) {
-				var xs = window("close", 3);
+				var xs = ml_softmax(window("close", 3));
 				if (xs[0] > 0) long();
 			}
 		}');

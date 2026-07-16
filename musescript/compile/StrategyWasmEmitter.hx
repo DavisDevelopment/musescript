@@ -31,6 +31,7 @@ class StrategyWasmEmitter {
 	var nextCrossSlot:Int = 0;
 	var nextRiseSlot:Int = 0;
 	var scratchCursor:Int = 0;
+	var vectorLocals:Map<String, {baseLocal:String, lenLocal:String, maxLen:Null<Int>}> = new Map();
 	var usedIndicators:Map<String, Bool> = new Map();
 
 	public function new() {}
@@ -48,6 +49,7 @@ class StrategyWasmEmitter {
 			nextCrossSlot = 0;
 			nextRiseSlot = 0;
 			scratchCursor = StrategyWasmRuntimeWat.VEC_SCRATCH_BASE;
+			vectorLocals = new Map();
 			usedIndicators = new Map();
 
 			var body = [for (s in stmts) emitStmt(s)].join("\n    ");
@@ -191,6 +193,9 @@ class StrategyWasmEmitter {
 			case ExprStmt(e):
 				emitValue(e) + "\n    drop";
 			case Assign(name, e):
+				var vec = tryAssignVector(name, e);
+				if (vec != null) return vec;
+				forgetVectorLocal(name);
 				ensureLocal(name);
 				emitValue(e) + "\n    local.set $" + name;
 			case Block(ss):
@@ -227,6 +232,7 @@ class StrategyWasmEmitter {
 					case CString(_): throw new EmitUnsupported();
 				}
 			case EIdent(n):
+				if (vectorLocals.exists(n)) throw new EmitUnsupported();
 				if (locals.exists(n)) {
 					"local.get $" + n;
 				} else {
@@ -243,10 +249,18 @@ class StrategyWasmEmitter {
 				if (sid == null) throw new EmitUnsupported();
 				"global.get $" + "cur_" + seriesCurName(sid);
 			case EVar(n, init):
+				if (init != null) {
+					var vec = tryAssignVector(n, init);
+					if (vec != null) return vec + "\n    f64.const 0";
+				}
+				forgetVectorLocal(n);
 				ensureLocal(n);
 				if (init == null) return "f64.const 0\n    local.set $" + n + "\n    local.get $" + n;
 				emitValue(init) + "\n    local.set $" + n + "\n    local.get $" + n;
 			case EBinop("=", EIdent(n), v):
+				var vec = tryAssignVector(n, v);
+				if (vec != null) return vec + "\n    f64.const 0";
+				forgetVectorLocal(n);
 				ensureLocal(n);
 				emitValue(v) + "\n    local.set $" + n + "\n    local.get $" + n;
 			case EBinop(op, a, b):
@@ -277,6 +291,8 @@ class StrategyWasmEmitter {
 			case EMeta(_, _, x): emitValue(x);
 			case ELookback(series, n):
 				emitLookback(series, n);
+			case EArray(EIdent(name), idx) if (vectorLocals.exists(name)):
+				emitVectorIndex(name, idx);
 			case EArray(_, _):
 				throw new EmitUnsupported();
 			default:
@@ -471,6 +487,9 @@ class StrategyWasmEmitter {
 			case "stat_skewness":
 				if (args.length < 1) throw new EmitUnsupported();
 				"f64.const " + watFloat(StatsBuiltins.skewness(constVector(args[0])));
+			case "stat_zscore" | "sci_cumsum" | "sci_diff" | "sci_normalize" | "ml_softmax":
+				// Vector-producing: only via lowerVecOperand / vector assignment.
+				throw new EmitUnsupported();
 			// Dynamic graph objects/results have no Strategy-WASM ABI yet. Refuse
 			// emission explicitly so MuseCompiler selects its documented host fallback.
 			case "graph_neighbors" | "graph_degree" | "graph_has_edge" | "graph_bfs"
@@ -583,21 +602,38 @@ class StrategyWasmEmitter {
 	}
 
 	/** Spill an array literal (const or scalar runtime elems) into scratch. */
-	function spillArrayDecl(values:Array<Expr>):{prelude:String, baseExpr:String, lenExpr:String} {
+	function spillArrayDecl(values:Array<Expr>):{prelude:String, baseExpr:String, lenExpr:String, maxLen:Null<Int>} {
 		var base = allocScratch(values.length);
 		var parts:Array<String> = [];
 		for (i in 0...values.length) {
-			parts.push(coerceF64(values[i]) + "\n    i32.const " + (base + i * 8) + "\n    f64.store");
+			parts.push("i32.const " + (base + i * 8) + "\n    " + coerceF64(values[i]) + "\n    f64.store");
 		}
 		return {
 			prelude: parts.join("\n    "),
 			baseExpr: "i32.const " + base,
-			lenExpr: "i32.const " + values.length
+			lenExpr: "i32.const " + values.length,
+			maxLen: values.length
+		};
+	}
+
+	function spillConstFloats(values:Array<Float>):{prelude:String, baseExpr:String, lenExpr:String, maxLen:Null<Int>} {
+		if (values.length == 0)
+			return {prelude: "", baseExpr: "i32.const 0", lenExpr: "i32.const 0", maxLen: 0};
+		var base = allocScratch(values.length);
+		var parts:Array<String> = [];
+		for (i in 0...values.length) {
+			parts.push("i32.const " + (base + i * 8) + "\n    f64.const " + watFloat(values[i]) + "\n    f64.store");
+		}
+		return {
+			prelude: parts.join("\n    "),
+			baseExpr: "i32.const " + base,
+			lenExpr: "i32.const " + values.length,
+			maxLen: values.length
 		};
 	}
 
 	/** Copy a fixed-length window into scratch; length may shrink when history is short. */
-	function spillWindow(window:{sid:Int, lenExpr:String, lenConst:Null<Int>}):{prelude:String, baseExpr:String, lenExpr:String} {
+	function spillWindow(window:{sid:Int, lenExpr:String, lenConst:Null<Int>}):{prelude:String, baseExpr:String, lenExpr:String, maxLen:Null<Int>} {
 		if (window.lenConst == null) throw new EmitUnsupported();
 		var base = allocScratch(window.lenConst);
 		var lenLocal = "_vlen_" + (nextTmp++);
@@ -607,16 +643,121 @@ class StrategyWasmEmitter {
 		return {
 			prelude: prelude,
 			baseExpr: "i32.const " + base,
-			lenExpr: "local.get $" + lenLocal
+			lenExpr: "local.get $" + lenLocal,
+			maxLen: window.lenConst
 		};
 	}
 
-	function lowerVecOperand(e:Expr):{prelude:String, baseExpr:String, lenExpr:String} {
+	function forgetVectorLocal(name:String):Void {
+		vectorLocals.remove(name);
+	}
+
+	function bindVectorLocal(name:String, vec:{prelude:String, baseExpr:String, lenExpr:String, maxLen:Null<Int>}):String {
+		var baseLocal = name + "__base";
+		var lenLocal = name + "__len";
+		ensureLocal(baseLocal, "i32");
+		ensureLocal(lenLocal, "i32");
+		vectorLocals.set(name, {baseLocal: baseLocal, lenLocal: lenLocal, maxLen: vec.maxLen});
+		var parts:Array<String> = [];
+		if (vec.prelude.length > 0) parts.push(vec.prelude);
+		parts.push(vec.baseExpr + "\n    local.set $" + baseLocal);
+		parts.push(vec.lenExpr + "\n    local.set $" + lenLocal);
+		return parts.join("\n    ");
+	}
+
+	function tryAssignVector(name:String, e:Expr):Null<String> {
+		try {
+			return bindVectorLocal(name, lowerVecOperand(e));
+		} catch (_:EmitUnsupported) {
+			return null;
+		}
+	}
+
+	function emitVectorIndex(name:String, idx:Expr):String {
+		var info = vectorLocals.get(name);
+		var addr = "_vaddr_" + (nextTmp++);
+		ensureLocal(addr, "i32");
+		return "local.get $" + info.baseLocal
+			+ "\n    " + asI32(idx)
+			+ "\n    i32.const 3\n    i32.shl\n    i32.add\n    local.set $" + addr
+			+ "\n    local.get $" + addr + "\n    f64.load";
+	}
+
+	function vecTransformHelper(name:String):Null<String> {
+		return switch (name) {
+			case "stat_zscore": "vec_zscore";
+			case "sci_cumsum": "vec_cumsum";
+			case "sci_diff": "vec_diff";
+			case "sci_normalize": "vec_normalize";
+			default: null;
+		};
+	}
+
+	function foldVecTransform(name:String, xs:Array<Float>):Null<Array<Float>> {
+		return switch (name) {
+			case "stat_zscore": StatsBuiltins.zScores(xs);
+			case "sci_cumsum": StatsBuiltins.cumulativeSum(xs);
+			case "sci_diff": StatsBuiltins.difference(xs);
+			case "sci_normalize": StatsBuiltins.normalize(xs);
+			case "ml_softmax": MlBuiltins.softmax(xs);
+			default: null;
+		};
+	}
+
+	function lowerVecTransform(name:String, args:Array<Expr>):{prelude:String, baseExpr:String, lenExpr:String, maxLen:Null<Int>} {
+		if (args.length < 1) throw new EmitUnsupported();
+		var consts = tryConstVector(args[0]);
+		if (consts != null) {
+			var folded = foldVecTransform(name, consts);
+			if (folded == null) throw new EmitUnsupported();
+			return spillConstFloats(folded);
+		}
+		var helper = vecTransformHelper(name);
+		if (helper == null) throw new EmitUnsupported();
+		var src = lowerVecOperand(args[0]);
+		if (src.maxLen == null) throw new EmitUnsupported();
+		var allocLen = name == "sci_diff" ? (src.maxLen < 1 ? 1 : src.maxLen) : src.maxLen;
+		if (allocLen <= 0)
+			return {prelude: src.prelude, baseExpr: "i32.const 0", lenExpr: "i32.const 0", maxLen: 0};
+		var dst = allocScratch(allocLen);
+		var lenLocal = "_vlen_" + (nextTmp++);
+		ensureLocal(lenLocal, "i32");
+		var parts:Array<String> = [];
+		if (src.prelude.length > 0) parts.push(src.prelude);
+		parts.push(src.baseExpr);
+		parts.push(src.lenExpr);
+		parts.push("i32.const " + dst);
+		parts.push("call $" + helper);
+		parts.push("local.set $" + lenLocal);
+		var outMax:Null<Int> = name == "sci_diff"
+			? (src.maxLen < 1 ? 0 : src.maxLen - 1)
+			: src.maxLen;
+		return {
+			prelude: parts.join("\n    "),
+			baseExpr: "i32.const " + dst,
+			lenExpr: "local.get $" + lenLocal,
+			maxLen: outMax
+		};
+	}
+
+	function lowerVecOperand(e:Expr):{prelude:String, baseExpr:String, lenExpr:String, maxLen:Null<Int>} {
 		return switch (e) {
 			case EParent(inner):
 				lowerVecOperand(inner);
 			case EArrayDecl(values):
 				spillArrayDecl(values);
+			case EIdent(n) if (vectorLocals.exists(n)):
+				var info = vectorLocals.get(n);
+				{
+					prelude: "",
+					baseExpr: "local.get $" + info.baseLocal,
+					lenExpr: "local.get $" + info.lenLocal,
+					maxLen: info.maxLen
+				};
+			case ECall(EIdent(name), args)
+				if (name == "stat_zscore" || name == "sci_cumsum" || name == "sci_diff"
+					|| name == "sci_normalize" || name == "ml_softmax"):
+				lowerVecTransform(name, args);
 			default:
 				var window = asWindowArg(e);
 				if (window == null) throw new EmitUnsupported();
