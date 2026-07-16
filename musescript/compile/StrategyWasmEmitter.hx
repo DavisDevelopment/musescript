@@ -436,6 +436,11 @@ class StrategyWasmEmitter {
 				var xn = args.length > 1 ? asI32(args[1]) : "i32.const 1";
 				"i32.const " + rslot + "\n    " + coerceF64(args[0]) + "\n    " + xn
 					+ "\n    call $" + name + "\n    f64.convert_i32_s";
+			// Dynamic graph objects/results have no Strategy-WASM ABI yet. Refuse
+			// emission explicitly so MuseCompiler selects its documented host fallback.
+			case "graph_neighbors" | "graph_degree" | "graph_has_edge" | "graph_bfs"
+			   | "graph_reachable" | "graph_shortest_path" | "graph_pagerank":
+				throw new EmitUnsupported();
 			default:
 				throw new EmitUnsupported();
 		};

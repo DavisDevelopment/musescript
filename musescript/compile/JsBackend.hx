@@ -9,6 +9,10 @@ import musescript.harness.BacktestResult;
 import musescript.harness.Metrics;
 import musescript.interp.MuseInterp;
 import musescript.builtins.TradeBuiltins;
+import musescript.builtins.StringBuiltins;
+import musescript.builtins.StatsBuiltins;
+import musescript.builtins.MlBuiltins;
+import musescript.builtins.GraphBuiltins;
 import musescript.runtime.MuseIters;
 import musescript.runtime.IterDriver;
 
@@ -495,12 +499,39 @@ class JsBackend {
 			case "falling": builtinFalling(args[0], Std.int(args[1]));
 			case "window": TradeBuiltins.window(harness, args[0], Std.int(args[1]));
 			case "ohlcv_window": TradeBuiltins.ohlcvWindow(harness, Std.int(args[0]));
-			case "str_len": TradeBuiltins.strLen(args[0]);
+			case "str_len": StringBuiltins.len(args[0]);
 			case "str_slice":
-				TradeBuiltins.strSlice(args[0], Std.int(args[1]), args.length > 2 ? Std.int(args[2]) : null);
-			case "str_contains": TradeBuiltins.strContains(args[0], args[1]);
-			case "str_concat": TradeBuiltins.strConcat(args[0], args[1]);
-			case "str_to_float": TradeBuiltins.strToFloat(args[0]);
+				StringBuiltins.slice(args[0], Std.int(args[1]), args.length > 2 ? Std.int(args[2]) : null);
+			case "str_contains": StringBuiltins.contains(args[0], args[1]);
+			case "str_concat": StringBuiltins.concat(args[0], args[1]);
+			case "str_to_float": StringBuiltins.toFloat(args[0]);
+			case "str_trim": StringBuiltins.trim(args[0]);
+			case "str_lower": StringBuiltins.lower(args[0]);
+			case "str_upper": StringBuiltins.upper(args[0]);
+			case "str_starts_with": StringBuiltins.startsWith(args[0], args[1]);
+			case "str_ends_with": StringBuiltins.endsWith(args[0], args[1]);
+			case "str_index_of":
+				StringBuiltins.indexOf(args[0], args[1], args.length > 2 ? Std.int(args[2]) : 0);
+			case "str_replace": StringBuiltins.replace(args[0], args[1], args[2]);
+			case "str_split": StringBuiltins.split(args[0], args[1]);
+			case "str_join": StringBuiltins.join(args[0], args[1]);
+			case "str_to_bool": StringBuiltins.toBool(args[0]);
+			case "str_from_float": StringBuiltins.fromFloat(args[0]);
+			case "str_from_bool": StringBuiltins.fromBool(args[0]);
+			case "ml_dot": MlBuiltins.dot(args[0], args[1]);
+			case "ml_sigmoid": MlBuiltins.sigmoid(args[0]);
+			case "ml_softmax": MlBuiltins.softmax(args[0]);
+			case "ml_mse": MlBuiltins.mse(args[0], args[1]);
+			case "ml_mae": MlBuiltins.mae(args[0], args[1]);
+			case "ml_linear_predict":
+				MlBuiltins.linearPredict(args[0], args[1], args.length > 2 ? args[2] : 0.0);
+			case "ml_ridge_fit":
+				MlBuiltins.ridgeFit(
+					args[0],
+					args[1],
+					Std.int(args[2]),
+					args.length > 3 ? args[3] : 1e-6
+				);
 			case "crossover": TradeBuiltins.crossover(args[0], args[1]);
 			case "crossunder": TradeBuiltins.crossunder(args[0], args[1]);
 			case "clamp": Math.max(args[1], Math.min(args[2], args[0]));
@@ -509,6 +540,61 @@ class JsBackend {
 			case "vector_zscore": TradeBuiltins.zscore(args[0]);
 			case "correlation": @:privateAccess TradeBuiltins.correlation(args[0], args[1]);
 			case "sharpe": Metrics.sharpe(args[0]);
+			case "stat_mean": StatsBuiltins.mean(args[0]);
+			case "stat_median": StatsBuiltins.median(args[0]);
+			case "stat_variance": StatsBuiltins.variance(args[0]);
+			case "stat_sample_variance": StatsBuiltins.sampleVariance(args[0]);
+			case "stat_stddev": StatsBuiltins.standardDeviation(args[0]);
+			case "stat_sample_stddev": StatsBuiltins.sampleStandardDeviation(args[0]);
+			case "stat_quantile": StatsBuiltins.quantile(args[0], args[1]);
+			case "stat_covariance": StatsBuiltins.covariance(args[0], args[1]);
+			case "stat_correlation": StatsBuiltins.pearson(args[0], args[1]);
+			case "stat_skewness": StatsBuiltins.skewness(args[0]);
+			case "stat_zscore": StatsBuiltins.zScores(args[0]);
+			case "sci_cumsum": StatsBuiltins.cumulativeSum(args[0]);
+			case "sci_diff": StatsBuiltins.difference(args[0]);
+			case "sci_normalize": StatsBuiltins.normalize(args[0]);
+			case "graph_neighbors":
+				GraphBuiltins.graphNeighbors(
+					args[0],
+					args[1],
+					args.length > 2 ? args[2] : "out",
+					args.length > 3 ? Std.int(args[3]) : 256
+				);
+			case "graph_degree":
+				GraphBuiltins.graphDegree(args[0], args[1], args.length > 2 ? args[2] : "out");
+			case "graph_has_edge":
+				GraphBuiltins.graphHasEdge(args[0], args[1], args[2], args.length > 3 ? args[3] : null);
+			case "graph_bfs":
+				GraphBuiltins.graphBfs(
+					args[0],
+					args[1],
+					args.length > 2 ? Std.int(args[2]) : GraphBuiltins.DEFAULT_MAX_DEPTH,
+					args.length > 3 ? Std.int(args[3]) : GraphBuiltins.DEFAULT_TRAVERSAL_NODES
+				);
+			case "graph_reachable":
+				GraphBuiltins.graphReachable(
+					args[0],
+					args[1],
+					args[2],
+					args.length > 3 ? Std.int(args[3]) : GraphBuiltins.DEFAULT_MAX_DEPTH,
+					args.length > 4 ? Std.int(args[4]) : GraphBuiltins.DEFAULT_TRAVERSAL_NODES
+				);
+			case "graph_shortest_path":
+				GraphBuiltins.graphShortestPath(
+					args[0],
+					args[1],
+					args[2],
+					args.length > 3 ? args[3] : false,
+					args.length > 4 ? Std.int(args[4]) : GraphBuiltins.DEFAULT_TRAVERSAL_NODES
+				);
+			case "graph_pagerank":
+				GraphBuiltins.graphPageRank(
+					args[0],
+					args.length > 1 ? Std.int(args[1]) : GraphBuiltins.DEFAULT_PAGERANK_ITERATIONS,
+					args.length > 2 ? args[2] : 0.85,
+					args.length > 3 ? Std.int(args[3]) : GraphBuiltins.DEFAULT_TRAVERSAL_NODES
+				);
 			// iter helpers — same MuseIters.from + IterDriver path as TradeBuiltins.install
 			case "map": IterDriver.map(MuseIters.from(args[0]), args[1]);
 			case "flatMap": IterDriver.flatMap(MuseIters.from(args[0]), args[1]);

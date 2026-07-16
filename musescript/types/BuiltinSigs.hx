@@ -108,9 +108,44 @@ class BuiltinSigs {
 		fun("str_contains", [TString, TString], TBool);
 		fun("str_concat", [TString, TString], TString);
 		fun("str_to_float", [TString], TScalar);
+		fun("str_trim", [TString], TString);
+		fun("str_lower", [TString], TString);
+		fun("str_upper", [TString], TString);
+		fun("str_starts_with", [TString, TString], TBool);
+		fun("str_ends_with", [TString, TString], TBool);
+		fun("str_index_of", [TString, TString, TScalar], TScalar, 2);
+		fun("str_replace", [TString, TString, TString], TString);
+		// String arrays are not numeric Vectors; keep their type opaque for now.
+		fun("str_split", [TString, TString], TUnknown);
+		fun("str_join", [TUnknown, TString], TString);
+		fun("str_to_bool", [TString], TBool);
+		fun("str_from_float", [TScalar], TString);
+		fun("str_from_bool", [TBool], TString);
+		fun("ml_dot", [TVector, TVector], TScalar);
+		fun("ml_sigmoid", [TScalar], TScalar);
+		fun("ml_softmax", [TVector], TVector);
+		fun("ml_mse", [TVector, TVector], TScalar);
+		fun("ml_mae", [TVector, TVector], TScalar);
+		fun("ml_linear_predict", [TVector, TVector, TScalar], TScalar, 2);
+		// Packed row-major X is honestly a Vector; the type lattice has no matrix.
+		fun("ml_ridge_fit", [TVector, TVector, TScalar, TScalar], TVector, 3);
 		fun("vector_zscore", [TVector], TVector);
 		fun("correlation", [TVector, TVector], TScalar);
 		fun("sharpe", [TVector], TScalar);
+		fun("stat_mean", [TVector], TScalar);
+		fun("stat_median", [TVector], TScalar);
+		fun("stat_variance", [TVector], TScalar);
+		fun("stat_sample_variance", [TVector], TScalar);
+		fun("stat_stddev", [TVector], TScalar);
+		fun("stat_sample_stddev", [TVector], TScalar);
+		fun("stat_quantile", [TVector, TScalar], TScalar);
+		fun("stat_covariance", [TVector, TVector], TScalar);
+		fun("stat_correlation", [TVector, TVector], TScalar);
+		fun("stat_skewness", [TVector], TScalar);
+		fun("stat_zscore", [TVector], TVector);
+		fun("sci_cumsum", [TVector], TVector);
+		fun("sci_diff", [TVector], TVector);
+		fun("sci_normalize", [TVector], TVector);
 		fun("map", [TUnknown, TUnknown], TVector);
 		fun("flatMap", [TUnknown, TUnknown], TVector);
 		fun("filter", [TUnknown, TUnknown], TVector);
@@ -149,6 +184,15 @@ class BuiltinSigs {
 		fun("tree_bit", [TString, TWindow], TFeature);
 		fun("graph_query", [TString], TGraphQuery);
 		fun("graph_metric", [TString, TString], TFeature);
+		// Graph values/results remain TUnknown until the type lattice has graph generics.
+		// Every traversal/iteration accepts an explicit bound and also has a safe default.
+		fun("graph_neighbors", [TUnknown, TString, TString, TScalar], TUnknown, 2);
+		fun("graph_degree", [TUnknown, TString, TString], TScalar, 2);
+		fun("graph_has_edge", [TUnknown, TString, TString, TString], TBool, 3);
+		fun("graph_bfs", [TUnknown, TString, TScalar, TScalar], TUnknown, 2);
+		fun("graph_reachable", [TUnknown, TString, TString, TScalar, TScalar], TBool, 3);
+		fun("graph_shortest_path", [TUnknown, TString, TString, TBool, TScalar], TUnknown, 3);
+		fun("graph_pagerank", [TUnknown, TScalar, TScalar, TScalar], TUnknown, 1);
 	}
 
 	static function ind(name:String):Void {

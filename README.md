@@ -29,8 +29,8 @@ haxelib dev musescript .
 .\run.ps1 all           # JS + Python examples and both test suites
 ```
 
-Current test status (verified 2026-07-15): `node build/js/tests.js` **573/573**, `.venv python
-build/py/tests.py` **555/555**, cross-runtime gate (example 07) **identical value across all 4
+Current test status (verified 2026-07-15): `node build/js/tests.js` **758/758**, `.venv python
+build/py/tests.py` **737/737**, cross-runtime gate (example 07) **identical value across all 4
 hosts (max delta 0)**.
 
 ## Examples
@@ -84,13 +84,121 @@ strategy WindowExample {
 }
 ```
 
-Portable string functions are `str_len`, `str_slice`, `str_contains`, `str_concat`, and
-`str_to_float`. Negative `str_slice` indices are relative to the end and all bounds are clamped.
+Portable string functions are:
+
+- basics: `str_len`, `str_slice`, `str_contains`, `str_concat`, `str_trim`
+- ASCII case and tests: `str_lower`, `str_upper`, `str_starts_with`, `str_ends_with`,
+  `str_index_of`
+- literal composition: `str_replace`, `str_split`, `str_join`
+- conversions: `str_to_float`, `str_to_bool`, `str_from_float`, `str_from_bool`
+
+These are functions rather than reflective host string methods. `str_slice` and the optional
+third argument of `str_index_of` accept negative indices relative to the end, then clamp the
+starting position to the string bounds. `str_index_of` returns `-1` when no match exists.
+`str_trim` removes only ASCII whitespace. `str_lower` and `str_upper` convert only ASCII A-Z/a-z
+and preserve all other characters, avoiding locale and host Unicode-table differences.
+
+`str_replace(source, needle, replacement)` is literal (never regex), replaces non-overlapping
+matches left-to-right, and returns `source` unchanged when `needle` is empty. `str_split` is also
+literal and preserves leading, interior, and trailing empty fields. With an empty separator it
+returns one element per host string indexing unit; splitting the empty string this way returns
+`[]`. `str_join` accepts the opaque array returned by `str_split`. Since MuseScript's `Vector`
+type is numeric, the checker deliberately types string arrays as `Unknown`, not `Vector`.
+
+`str_to_float` accepts only a trimmed decimal with optional sign, fraction, and exponent; invalid
+input returns `NaN`. `str_to_bool` is true only for trimmed, ASCII-case-insensitive `true` or `1`
+(all other input is false). Boolean output is exactly `true`/`false`; float output normalizes
+zero, `NaN`, and infinities to `0`, `nan`, `inf`, and `-inf`.
+
+String lengths, indices, slices, and empty-separator splits use the Haxe target's native string
+indexing units. In particular, JavaScript counts UTF-16 code units while Python may count Unicode
+code points. Portable strategies should treat non-ASCII text as opaque unless that distinction is
+acceptable; no Unicode normalization or locale-sensitive case mapping is performed.
 
 Interpreter and compiled-JS strategies support these vector/string operations. Python-hosted
 strategy execution uses the interpreter path for them. Strategy WASM deliberately rejects them
 and falls back because its current ABI exposes scalar OHLCV/feature reads, not guest-owned dynamic
 vectors or strings. Math-only backends continue to accept host-fed array parameters independently.
+
+### Statistics and scientific vectors
+
+The dependency-free vector slice is available to interpreter, Python-hosted interpreter, and
+compiled-JS strategies:
+
+- `stat_mean`, `stat_median`, `stat_variance`, `stat_sample_variance`, `stat_stddev`,
+  `stat_sample_stddev`, and bias-corrected Fisher-Pearson `stat_skewness`
+- `stat_quantile(xs, p)` uses R-7 interpolation: `h = (n - 1) p`, linear between adjacent
+  sorted values, with `p` restricted to `[0, 1]`
+- `stat_covariance` is sample covariance (`n - 1`); `stat_correlation` is Pearson correlation;
+  paired vectors must have equal length
+- `stat_zscore` uses population standard deviation; `sci_cumsum`, `sci_diff`, and
+  `sci_normalize` provide inclusive cumulative sums, first differences, and `[0, 1]` min-max
+  normalization
+
+Means/sums use compensated accumulation and variances/covariances use online centered updates.
+Invalid or undersized scalar samples return `NaN`; empty vector transforms return `[]`; constant
+z-score/normalization vectors return zeros. NaN/infinite elements follow IEEE-754 propagation.
+These dynamic vector builtins share the vector/string backend limit above: strategy WASM does not
+currently lower them.
+
+### Dependency-free ML builtins
+
+Evolved strategies can use deterministic, pure `ml_*` globals:
+
+- `ml_dot(a, b)`, `ml_sigmoid(x)`, and `ml_softmax(xs)`
+- `ml_mse(actual, predicted)` and `ml_mae(actual, predicted)`
+- `ml_linear_predict(features, weights, bias = 0)`
+- `ml_ridge_fit(packedX, y, featureCount, lambda = 1e-6)`
+
+`ml_ridge_fit` consumes a row-major numeric vector because the type lattice intentionally has no
+nested matrix type. Add a constant feature column when an intercept is needed. Fitting is bounded
+to 32 features and 4096 rows, uses no external library, and returns `[]` for invalid dimensions,
+non-finite data, or a singular solve. Other vector operations return `[]`, and scalar operations
+return `NaN`, for invalid inputs as appropriate.
+
+The interpreter (including Python-hosted strategy execution) and compiled JS support the full
+slice. Strategy WASM explicitly falls back for these builtins because vectors are not represented
+in its scalar strategy ABI. This does not change the independent math-only array ABI.
+
+### In-memory graph runtime
+
+MuseScript accepts a dependency-free, JSON-safe graph value:
+
+```json
+{
+  "directed": true,
+  "nodes": ["A", "B", "C"],
+  "edges": [
+    {"from": "A", "to": "B", "weight": 0.5, "relation": "supplies"},
+    {"from": "B", "to": "C"}
+  ]
+}
+```
+
+`nodes` is the canonical ordering for neighbors, traversals, PageRank output, and shortest-path
+tie breaks. Edges follow `directed`; undirected edges are traversable in both directions. Weight
+defaults to 1 and must be finite and nonnegative. Node IDs are unique non-empty strings and edge
+endpoints must already occur in `nodes`.
+
+Available pure builtins are:
+
+- `graph_neighbors(graph, node, direction = "out", maxResults = 256)`
+- `graph_degree(graph, node, direction = "out")`
+- `graph_has_edge(graph, from, to, relation?)`
+- `graph_bfs(graph, start, maxDepth = 32, maxNodes = 1024)`
+- `graph_reachable(graph, start, target, maxDepth = 32, maxNodes = 1024)`
+- `graph_shortest_path(graph, start, target, weighted = false, maxNodes = 1024)`
+- `graph_pagerank(graph, iterations = 20, damping = 0.85, maxNodes = 1024)`
+
+The parser rejects malformed values, negative/non-finite weights, graphs above 4,096 nodes or
+32,768 edges, traversal bounds above 4,096 nodes, and PageRank requests above 1,000 iterations.
+Shortest path returns `{nodes, distance}` or `null`; PageRank stays in canonical node order.
+
+`GraphBuiltins.querySpecOptions` adapts the existing Kestrel `GraphQuerySpec` seed and bounds; it
+does not define another query grammar and does not execute a live external knowledge graph.
+Interpreter, Python-host interpreter, and compiled-JS dispatch support dynamic graph objects.
+Strategy WASM explicitly refuses these calls and uses the normal host/interpreter fallback because
+its scalar ABI cannot represent dynamic graph objects or path/rank results.
 
 ### Vendored Volume Profile kernel
 

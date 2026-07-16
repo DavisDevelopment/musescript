@@ -32,6 +32,9 @@ import musescript.harness.BarFeed;
 import musescript.harness.PlanRunner;
 import musescript.harness.EventLog;
 import musescript.builtins.TradeBuiltins;
+import musescript.builtins.StringBuiltins;
+import musescript.builtins.StatsBuiltins;
+import musescript.builtins.MlBuiltins;
 import musescript.checker.MuseChecker;
 import musescript.plan.MusePlanner;
 import musescript.plan.MuseIR;
@@ -50,6 +53,9 @@ class TestMain {
 		runner.addCase(new TestBacktest());
 		runner.addCase(new TestOptimize());
 		runner.addCase(new TestTradeBuiltins());
+		runner.addCase(new TestStatsBuiltins());
+		runner.addCase(new TestMlBuiltins());
+		runner.addCase(new TestGraphBuiltins());
 		runner.addCase(new TestPlanner());
 		runner.addCase(new TestChecker());
 		runner.addCase(new TestCompiler());
@@ -79,6 +85,18 @@ class TestParse extends Test {
 	public function testProgram() {
 		var prog = new MuseParser().parse("@strategy(\"x\") @on(bar) { var a = 1; }");
 		Assert.isTrue(prog.decls.length >= 1);
+	}
+
+	public function testPortableStringBuiltinCallsParse() {
+		var prog = new MuseParser().parse('strategy Strings {
+			onBar {
+				parts = str_split(str_replace(str_trim(" a::b "), "::", ","), ",")
+				label = str_join(parts, "-")
+				when str_starts_with(str_upper(label), "A-") && str_ends_with(label, "b"): long()
+			}
+		}');
+		Assert.notNull(prog);
+		Assert.isTrue(prog.decls.length > 0);
 	}
 
 	public function testIndicatorDecl() {
@@ -771,6 +789,215 @@ class TestTradeBuiltins extends Test {
 		Assert.equals(43.0 / 3.0, TradeBuiltins.hlc3(harness)); // (20+8+15)/3
 		Assert.equals(53.0 / 4.0, TradeBuiltins.ohlc4(harness)); // (10+20+8+15)/4
 		Assert.isTrue(Math.isNaN(TradeBuiltins.hl2(new HarnessContext())));
+	}
+
+	public function testPortableStringLayerSemantics() {
+		Assert.equals("Muse Script", StringBuiltins.trim("\t Muse Script \r\n"));
+		Assert.equals("muse Ä", StringBuiltins.lower("MuSe Ä"));
+		Assert.equals("MUSE ä", StringBuiltins.upper("MuSe ä"));
+		Assert.isTrue(StringBuiltins.startsWith("musescript", "muse"));
+		Assert.isTrue(StringBuiltins.endsWith("musescript", "script"));
+		Assert.equals(5, StringBuiltins.indexOf("muse-muse", "muse", 1));
+		Assert.equals(4, StringBuiltins.indexOf("abcabc", "bc", -2));
+		Assert.equals("xx", StringBuiltins.replace("aaaa", "aa", "x"));
+		Assert.equals("abc", StringBuiltins.replace("abc", "", "x"));
+		Assert.same(["a", "", "b", ""], StringBuiltins.split("a,,b,", ","));
+		Assert.same(["m", "u", "s", "e"], StringBuiltins.split("muse", ""));
+		Assert.equals("a||b|", StringBuiltins.join(["a", "", "b", null], "|"));
+		Assert.isTrue(StringBuiltins.toBool(" TRUE "));
+		Assert.isTrue(StringBuiltins.toBool("1"));
+		Assert.isFalse(StringBuiltins.toBool("yes"));
+		Assert.equals("12.5", StringBuiltins.fromFloat(12.5));
+		Assert.equals("nan", StringBuiltins.fromFloat(Math.NaN));
+		Assert.equals("true", StringBuiltins.fromBool(true));
+		Assert.equals(125.0, StringBuiltins.toFloat("1.25e2"));
+		Assert.isTrue(Math.isNaN(StringBuiltins.toFloat("1e")));
+	}
+
+	public function testPortableStringInterpreterGlobals() {
+		var interp = new MuseInterp(new HarnessContext());
+		var split:Dynamic = interp.callValue(interp.globals.get("str_split"), ["left::right::", "::"]);
+		var joined = interp.callValue(interp.globals.get("str_join"), [split, "|"]);
+		Assert.equals("left|right|", joined);
+		Assert.equals("A-b-A-b", interp.callValue(interp.globals.get("str_replace"), ["a-b-a-b", "a", "A"]));
+	}
+}
+
+class TestStatsBuiltins extends Test {
+	static inline function near(actual:Float, expected:Float, ?epsilon:Float = 1e-10):Bool {
+		return Math.abs(actual - expected) <= epsilon;
+	}
+
+	public function testLocationSpreadAndQuantile() {
+		Assert.equals(2.5, StatsBuiltins.mean([1.0, 2.0, 3.0, 4.0]));
+		Assert.equals(1.0 / 3.0, StatsBuiltins.mean([1e16, 1.0, -1e16]));
+		Assert.equals(3.0, StatsBuiltins.median([9.0, 1.0, 3.0]));
+		Assert.equals(2.5, StatsBuiltins.median([4.0, 1.0, 3.0, 2.0]));
+		Assert.isTrue(near(StatsBuiltins.variance([1.0, 2.0, 3.0, 4.0]), 1.25));
+		Assert.isTrue(near(StatsBuiltins.sampleVariance([1.0, 2.0, 3.0, 4.0]), 5.0 / 3.0));
+		Assert.isTrue(near(StatsBuiltins.standardDeviation([1.0, 2.0, 3.0, 4.0]), Math.sqrt(1.25)));
+		Assert.isTrue(near(StatsBuiltins.sampleStandardDeviation([1.0, 2.0, 3.0, 4.0]), Math.sqrt(5.0 / 3.0)));
+		Assert.equals(1.0, StatsBuiltins.quantile([4.0, 1.0, 3.0, 2.0], 0.0));
+		Assert.equals(1.75, StatsBuiltins.quantile([4.0, 1.0, 3.0, 2.0], 0.25));
+		Assert.equals(4.0, StatsBuiltins.quantile([4.0, 1.0, 3.0, 2.0], 1.0));
+	}
+
+	public function testPairedMomentsAndSkewness() {
+		var xs = [1.0, 2.0, 3.0, 4.0];
+		var ys = [2.0, 4.0, 6.0, 8.0];
+		Assert.isTrue(near(StatsBuiltins.covariance(xs, ys), 10.0 / 3.0));
+		Assert.isTrue(near(StatsBuiltins.pearson(xs, ys), 1.0));
+		Assert.isTrue(near(StatsBuiltins.pearson(xs, [8.0, 6.0, 4.0, 2.0]), -1.0));
+		Assert.isTrue(near(StatsBuiltins.skewness([-2.0, -1.0, 0.0, 1.0, 2.0]), 0.0));
+		Assert.isTrue(StatsBuiltins.skewness([1.0, 1.0, 1.0, 4.0]) > 0.0);
+	}
+
+	public function testVectorScienceHelpers() {
+		var z = StatsBuiltins.zScores([1.0, 2.0, 3.0]);
+		Assert.equals(3, z.length);
+		Assert.isTrue(near(z[0], -Math.sqrt(1.5)));
+		Assert.isTrue(near(z[1], 0.0));
+		Assert.isTrue(near(z[2], Math.sqrt(1.5)));
+		Assert.same([0.0, 0.0, 0.0], StatsBuiltins.zScores([7.0, 7.0, 7.0]));
+		Assert.same([1.0, 3.0, 6.0, 10.0], StatsBuiltins.cumulativeSum([1.0, 2.0, 3.0, 4.0]));
+		Assert.same([2.0, 3.0, -1.0], StatsBuiltins.difference([1.0, 3.0, 6.0, 5.0]));
+		Assert.same([0.0, 0.5, 1.0], StatsBuiltins.normalize([2.0, 4.0, 6.0]));
+		Assert.same([0.0, 0.0], StatsBuiltins.normalize([5.0, 5.0]));
+	}
+
+	public function testDeterministicEdgeCases() {
+		Assert.isTrue(Math.isNaN(StatsBuiltins.mean([])));
+		Assert.isTrue(Math.isNaN(StatsBuiltins.median([])));
+		Assert.isTrue(Math.isNaN(StatsBuiltins.variance([])));
+		Assert.isTrue(Math.isNaN(StatsBuiltins.sampleVariance([1.0])));
+		Assert.isTrue(Math.isNaN(StatsBuiltins.quantile([1.0], -0.1)));
+		Assert.isTrue(Math.isNaN(StatsBuiltins.quantile([1.0], 1.1)));
+		Assert.isTrue(Math.isNaN(StatsBuiltins.covariance([1.0], [1.0])));
+		Assert.isTrue(Math.isNaN(StatsBuiltins.covariance([1.0, 2.0], [1.0])));
+		Assert.isTrue(Math.isNaN(StatsBuiltins.pearson([1.0, 1.0], [2.0, 3.0])));
+		Assert.isTrue(Math.isNaN(StatsBuiltins.skewness([1.0, 2.0])));
+		Assert.equals(0, StatsBuiltins.zScores([]).length);
+		Assert.equals(0, StatsBuiltins.cumulativeSum([]).length);
+		Assert.equals(0, StatsBuiltins.difference([1.0]).length);
+		Assert.equals(0, StatsBuiltins.normalize([]).length);
+	}
+
+	public function testInstalledGlobalsAndCompiledJsDispatch() {
+		var vars = new Map<String, Dynamic>();
+		TradeBuiltins.install(vars, new HarnessContext());
+		Assert.equals(2.5, vars.get("stat_mean")([1.0, 2.0, 3.0, 4.0]));
+		Assert.same([1.0, 3.0, 6.0], vars.get("sci_cumsum")([1.0, 2.0, 3.0]));
+
+		#if js
+		var prog = new MuseParser().parse('{
+			@strategy("stats")
+			@on(bar) {
+				var xs = [1, 2, 3, 4];
+				var ys = [2, 4, 6, 8];
+				var scaled = sci_normalize(xs);
+				if (stat_mean(xs) == 2.5
+					&& stat_quantile(xs, 0.5) == 2.5
+					&& stat_correlation(xs, ys) > 0.999
+					&& scaled[0] == 0
+					&& scaled[3] == 1) long();
+			}
+		}');
+		var harness = new HarnessContext();
+		Reflect.setField(harness, "feed", BarFeed.synthetic(3, 17));
+		var ex = MuseCompiler.compileEx(prog, { target: "js", strict: true });
+		var result = ex.fn(harness);
+		Assert.equals("js", ex.backend);
+		Assert.isTrue(result.trades > 0);
+		#end
+		Assert.isTrue(true);
+	}
+}
+
+class TestMlBuiltins extends Test {
+	public function testNumericPrimitives() {
+		Assert.equals(32.0, MlBuiltins.dot([1.0, 2.0, 3.0], [4.0, 5.0, 6.0]));
+		Assert.isTrue(Math.isNaN(MlBuiltins.dot([1.0], [1.0, 2.0])));
+		Assert.isTrue(Math.isNaN(MlBuiltins.dot([], [])));
+
+		Assert.isTrue(Math.abs(MlBuiltins.sigmoid(0.0) - 0.5) < 1e-12);
+		Assert.equals(1.0, MlBuiltins.sigmoid(1000.0));
+		Assert.equals(0.0, MlBuiltins.sigmoid(-1000.0));
+
+		var probs = MlBuiltins.softmax([1000.0, 1001.0, 1002.0]);
+		Assert.equals(3, probs.length);
+		Assert.isTrue(Math.abs(probs[0] + probs[1] + probs[2] - 1.0) < 1e-12);
+		Assert.isTrue(probs[2] > probs[1] && probs[1] > probs[0]);
+		Assert.equals(0, MlBuiltins.softmax([Math.NaN]).length);
+
+		Assert.equals(1.0, MlBuiltins.mse([1.0, 2.0], [2.0, 3.0]));
+		Assert.equals(1.0, MlBuiltins.mae([1.0, 2.0], [2.0, 3.0]));
+		Assert.isTrue(Math.isNaN(MlBuiltins.mse([], [])));
+		Assert.equals(12.5, MlBuiltins.linearPredict([2.0, 3.0], [1.0, 3.0], 1.5));
+	}
+
+	public function testBoundedRidgeFit() {
+		// y = 1 + 2x; first packed feature is the explicit intercept column.
+		var weights = MlBuiltins.ridgeFit(
+			[1.0, 1.0, 1.0, 2.0, 1.0, 3.0],
+			[3.0, 5.0, 7.0],
+			2,
+			0.0
+		);
+		Assert.equals(2, weights.length);
+		Assert.isTrue(Math.abs(weights[0] - 1.0) < 1e-9);
+		Assert.isTrue(Math.abs(weights[1] - 2.0) < 1e-9);
+		Assert.isTrue(Math.abs(MlBuiltins.linearPredict([1.0, 4.0], weights) - 9.0) < 1e-9);
+
+		Assert.equals(0, MlBuiltins.ridgeFit([1.0], [1.0, 2.0], 1).length);
+		Assert.equals(0, MlBuiltins.ridgeFit([1.0, 1.0, 1.0, 1.0], [1.0, 1.0], 2, 0.0).length);
+		Assert.equals(0, MlBuiltins.ridgeFit([], [], MlBuiltins.MAX_FIT_FEATURES + 1).length);
+	}
+
+	public function testInterpreterAndJsDispatch() {
+		var interp = new MuseInterp(new HarnessContext());
+		Assert.equals(
+			32.0,
+			interp.evalExpr(new MuseParser().parseExpr("ml_dot([1, 2, 3], [4, 5, 6])"))
+		);
+
+		var api = JsBackend.createApi(new HarnessContext());
+		var probs:Array<Float> = cast api.invoke("ml_softmax", [[0.0, 0.0]]);
+		Assert.same([0.5, 0.5], probs);
+		Assert.equals(
+			3.0,
+			api.invoke("ml_linear_predict", [[1.0, 2.0], [1.0, 1.0]])
+		);
+	}
+
+	public function testCompiledJsStrategy() {
+		#if js
+		var prog = new MuseParser().parse('strategy MlCompiled {
+			onBar {
+				weights = ml_ridge_fit([1, 1, 1, 2, 1, 3], [3, 5, 7], 2, 0)
+				prediction = ml_linear_predict([1, 4], weights)
+				probs = ml_softmax([0, prediction])
+				when count(probs) == 2 && prediction > 8: long()
+			}
+		}');
+		var harness = new HarnessContext();
+		Reflect.setField(harness, "feed", BarFeed.synthetic(3, 17));
+		var compiled = MuseCompiler.compileEx(prog, { target: "js", strict: true });
+		var result = compiled.fn(harness);
+		Assert.equals("js", compiled.backend);
+		Assert.isTrue(result.trades > 0);
+		#else
+		Assert.isTrue(true);
+		#end
+	}
+
+	public function testStrategyWasmVectorFallbackIsExplicit() {
+		var prog = new MuseParser().parse('strategy MlVector {
+			onBar {
+				score = ml_dot([1, 2], [3, 4])
+				when score > 0: long()
+			}
+		}');
+		Assert.isNull(musescript.compile.StrategyWasmBackend.emitWat(prog));
 	}
 }
 

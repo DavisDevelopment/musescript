@@ -12,6 +12,10 @@ class KestrelPalette {
 		"node_count", "edge_count", "weighted_degree", "relation_exists",
 		"seed_score", "pagerank"
 	];
+	public static final GRAPH_RUNTIME_BUILTINS:Array<String> = [
+		"graph_neighbors", "graph_degree", "graph_has_edge", "graph_bfs",
+		"graph_reachable", "graph_shortest_path", "graph_pagerank"
+	];
 
 	public static final MODEL_HEADS:Array<String> = ["linear", "mlp", "gbdt", "bagged", "tree"];
 
@@ -21,6 +25,13 @@ class KestrelPalette {
 			id: "kestrel.v1",
 			channels: BASE_CHANNELS.copy(),
 			graphMetrics: GRAPH_METRICS.copy(),
+			graphRuntimeBuiltins: GRAPH_RUNTIME_BUILTINS.copy(),
+			graphRuntimeLimits: {
+				maxGraphNodes: 4096,
+				maxGraphEdges: 32768,
+				defaultTraversalNodes: 1024,
+				maxPageRankIterations: 1000
+			},
 			modelHeads: MODEL_HEADS.copy(),
 			tree: {
 				maxDepth: 8,

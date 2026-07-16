@@ -3,9 +3,9 @@ package musescript.kestrel;
 /**
  * Portable graph-query spec for strategies that depend on knowledge graph state.
  *
- * The first backend can call the existing Python graph_query implementation through
- * GraalPy/MCP-style data loading; the compiler-facing shape stays deterministic
- * and evolvable.
+ * This is a compiler/planning description, not a promise of live external knowledge
+ * graph execution. `GraphBuiltins.querySpecOptions` adapts its seed and bounds to
+ * the dependency-free in-memory runtime without introducing a second query grammar.
  */
 typedef GraphQuerySpec = {
 	var id:String;

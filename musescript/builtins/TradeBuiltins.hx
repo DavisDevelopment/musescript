@@ -45,6 +45,25 @@ class TradeBuiltins {
 		vars.set("str_contains", strContains);
 		vars.set("str_concat", strConcat);
 		vars.set("str_to_float", strToFloat);
+		vars.set("str_trim", StringBuiltins.trim);
+		vars.set("str_lower", StringBuiltins.lower);
+		vars.set("str_upper", StringBuiltins.upper);
+		vars.set("str_starts_with", StringBuiltins.startsWith);
+		vars.set("str_ends_with", StringBuiltins.endsWith);
+		vars.set("str_index_of", StringBuiltins.indexOf);
+		vars.set("str_replace", StringBuiltins.replace);
+		vars.set("str_split", StringBuiltins.split);
+		vars.set("str_join", StringBuiltins.join);
+		vars.set("str_to_bool", StringBuiltins.toBool);
+		vars.set("str_from_float", StringBuiltins.fromFloat);
+		vars.set("str_from_bool", StringBuiltins.fromBool);
+		vars.set("ml_dot", MlBuiltins.dot);
+		vars.set("ml_sigmoid", MlBuiltins.sigmoid);
+		vars.set("ml_softmax", MlBuiltins.softmax);
+		vars.set("ml_mse", MlBuiltins.mse);
+		vars.set("ml_mae", MlBuiltins.mae);
+		vars.set("ml_linear_predict", MlBuiltins.linearPredict);
+		vars.set("ml_ridge_fit", MlBuiltins.ridgeFit);
 
 		vars.set("long", function(?qty:Float) {
 			if (harness.currentBar != null) harness.orders.long(harness.currentBar.close, qty);
@@ -75,6 +94,20 @@ class TradeBuiltins {
 		vars.set("vector_zscore", zscore);
 		vars.set("correlation", correlation);
 		vars.set("sharpe", function(returns:Array<Float>) return musescript.harness.Metrics.sharpe(returns));
+		vars.set("stat_mean", StatsBuiltins.mean);
+		vars.set("stat_median", StatsBuiltins.median);
+		vars.set("stat_variance", StatsBuiltins.variance);
+		vars.set("stat_sample_variance", StatsBuiltins.sampleVariance);
+		vars.set("stat_stddev", StatsBuiltins.standardDeviation);
+		vars.set("stat_sample_stddev", StatsBuiltins.sampleStandardDeviation);
+		vars.set("stat_quantile", StatsBuiltins.quantile);
+		vars.set("stat_covariance", StatsBuiltins.covariance);
+		vars.set("stat_correlation", StatsBuiltins.pearson);
+		vars.set("stat_skewness", StatsBuiltins.skewness);
+		vars.set("stat_zscore", StatsBuiltins.zScores);
+		vars.set("sci_cumsum", StatsBuiltins.cumulativeSum);
+		vars.set("sci_diff", StatsBuiltins.difference);
+		vars.set("sci_normalize", StatsBuiltins.normalize);
 
 		vars.set("map", function(xs:Dynamic, f:Dynamic->Dynamic) {
 			return IterDriver.map(MuseIters.from(xs), f);
@@ -145,6 +178,7 @@ class TradeBuiltins {
 			register: function(name:String, factory:Dynamic) harness.indicators.register(name, factory),
 			get: function(name:String) return harness.indicators.get(name)
 		});
+		GraphBuiltins.install(vars);
 		vars.set("universe", harness.universe);
 		vars.set("Math", Math);
 	}
@@ -195,40 +229,23 @@ class TradeBuiltins {
 	}
 
 	public static function strLen(value:Dynamic):Int {
-		return value == null ? 0 : Std.string(value).length;
+		return StringBuiltins.len(value);
 	}
 
 	public static function strSlice(value:Dynamic, start:Int, ?end:Int):String {
-		var s = value == null ? "" : Std.string(value);
-		var from = normalizeStringIndex(start, s.length);
-		var to = end == null ? s.length : normalizeStringIndex(end, s.length);
-		if (to < from) to = from;
-		return s.substr(from, to - from);
+		return StringBuiltins.slice(value, start, end);
 	}
 
 	public static function strContains(value:Dynamic, needle:Dynamic):Bool {
-		var s = value == null ? "" : Std.string(value);
-		var n = needle == null ? "" : Std.string(needle);
-		return s.indexOf(n) >= 0;
+		return StringBuiltins.contains(value, needle);
 	}
 
 	public static function strConcat(a:Dynamic, b:Dynamic):String {
-		return (a == null ? "" : Std.string(a)) + (b == null ? "" : Std.string(b));
+		return StringBuiltins.concat(a, b);
 	}
 
 	public static function strToFloat(value:Dynamic):Float {
-		if (value == null) return Math.NaN;
-		var s = StringTools.trim(Std.string(value));
-		if (!~/^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/.match(s))
-			return Math.NaN;
-		return Std.parseFloat(s);
-	}
-
-	static function normalizeStringIndex(index:Int, length:Int):Int {
-		var n = index < 0 ? length + index : index;
-		if (n < 0) return 0;
-		if (n > length) return length;
-		return n;
+		return StringBuiltins.toFloat(value);
 	}
 
 	static function resolveSeries(harness:HarnessContext, src:Dynamic):Array<Float> {
