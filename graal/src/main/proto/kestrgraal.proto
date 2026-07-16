@@ -42,4 +42,6 @@ message BacktestReply {
   double final_equity = 2;
   double sharpe = 3;
   double elapsed_ms = 4;
+  double max_drawdown = 5;
+  double win_rate = 6;
 }

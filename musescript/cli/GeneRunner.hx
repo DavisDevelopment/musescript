@@ -96,7 +96,13 @@ class GeneRunner {
 				try {
 					var obj:Dynamic = haxe.Json.parse(t);
 					id = obj.id != null ? Std.string(obj.id) : "";
-					var res = runOne(Std.string(obj.source), bars, target, checkOnly, strict, artifactDir);
+					// Distinct output subdirectory per genome -- runOne() writes to a single fixed
+					// path, so passing the same artifactDir through for every genome in the batch
+					// loop would silently overwrite each one's compiled files with the next
+					// genome's, leaving only the LAST genome's artifact on disk (a real gap found
+					// while wiring MuseGene's fitness loop through KestrGraal's WASM-artifact RPC).
+					var perGenomeDir = artifactDir != "" ? artifactDir + "/" + id : "";
+					var res = runOne(Std.string(obj.source), bars, target, checkOnly, strict, perGenomeDir);
 					Reflect.setField(res, "id", id);
 					emit(res);
 				} catch (e:Dynamic) {
@@ -133,7 +139,15 @@ class GeneRunner {
 		TradeBuiltins.resetCrossState();
 
 		var ex = MuseCompiler.compileEx(prog, { target: target, strict: strict });
-		if (artifactDir != "" && target == "wasm") {
+		// StrategyWasmEmitter works from `prog` (the parsed AST) directly -- it has no
+		// dependency on `ex`/`target` at all, so artifact emission doesn't need target=="wasm".
+		// Gating it on target was accidental coupling: it forced callers who want a WASM artifact
+		// PLUS a fast score to pay Node's own (slower, ~2x the JS-interp path when measured)
+		// WASM execution for `ex.fn` just to unlock emission, when they could score via the fast
+		// JS-interp path and still get the artifact. (Found while wiring MuseGene's batch
+		// evaluation through KestrGraal -- batch-compiling N genomes to WASM artifacts should run
+		// at JS-interp speed, not pay N Node-side WASM executions nobody asked for.)
+		if (artifactDir != "") {
 			var emitted = new musescript.compile.StrategyWasmEmitter().emitOnBar(prog);
 			if (emitted == null && strict)
 				throw "GeneRunner: strict wasm artifact emission failed";

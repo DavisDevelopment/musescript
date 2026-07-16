@@ -116,6 +116,8 @@ public final class KestrGraalServer extends KestrGraalGrpc.KestrGraalImplBase {
                 .setFinalEquity(result.finalEquity())
                 .setSharpe(result.sharpe())
                 .setElapsedMs(elapsedMs)
+                .setMaxDrawdown(result.maxDrawdown())
+                .setWinRate(result.winRate())
                 .build());
             responseObserver.onCompleted();
         } catch (Exception e) {

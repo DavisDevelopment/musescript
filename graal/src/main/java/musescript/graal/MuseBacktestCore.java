@@ -41,6 +41,21 @@ public final class MuseBacktestCore {
             trades++;
         }
 
+        // Line-for-line port of musescript/harness/OrderSim.hx's short() -- this was a documented
+        // no-op stub in the "env" import ("short not used by the MA-cross reference strategy")
+        // that quietly did nothing on every short() call. Found via a real correctness sweep: 21
+        // of 29 randomly-generated genomes scored via KestrGraal diverged from the trusted
+        // JS-interp path, and every mismatching genome called short() somewhere in its tree.
+        void shortOrder(double price, Double qty) {
+            double q = qty != null ? qty : (position == 0 ? Math.floor(cash / price) : 0);
+            if (q <= 0) return;
+            if (position > 0) flat(price);
+            cash += q * price;
+            position -= q;
+            entryPrice = price;
+            trades++;
+        }
+
         void flat(double price) {
             if (position == 0) return;
             double pnl = position * (price - entryPrice);
@@ -81,7 +96,25 @@ public final class MuseBacktestCore {
     }
 
     public record Bar(double open, double high, double low, double close, double volume, double time, double index) {}
-    public record BacktestResult(int trades, double finalEquity, double sharpe) {}
+    public record BacktestResult(int trades, double finalEquity, double sharpe, double maxDrawdown, double winRate) {}
+
+    /** Line-for-line port of musescript/harness/Metrics.hx's maxDrawdown -- same running-peak
+     *  drawdown, kept a direct port (not reimplemented independently) so this stays provably
+     *  identical to the reference JS/interp backends, the same discipline used for sharpe() above. */
+    public static double maxDrawdown(List<Double> equity) {
+        double peak = Double.NEGATIVE_INFINITY;
+        double maxDd = 0;
+        for (double e : equity) {
+            if (e > peak) peak = e;
+            double dd = peak > 0 ? (peak - e) / peak : 0;
+            if (dd > maxDd) maxDd = dd;
+        }
+        return maxDd;
+    }
+
+    public static double winRate(int wins, int trades) {
+        return trades == 0 ? 0 : (double) wins / trades;
+    }
 
     public static final class HostState {
         public final Map<String, Double> params = new HashMap<>();
@@ -101,13 +134,24 @@ public final class MuseBacktestCore {
             return null;
         });
         env.put("short", (ProxyExecutable) args -> {
-            // short not used by the MA-cross reference strategy; kept for ABI parity.
+            double qty = args[0].asDouble();
+            st.sim.shortOrder(st.currentClose, Double.isNaN(qty) ? null : qty);
             return null;
         });
         env.put("flat", (ProxyExecutable) args -> {
             st.sim.flat(st.currentClose);
             return null;
         });
+        // StrategyWasmEmitter.hx unconditionally imports "exp" on EVERY emitted module (its
+        // softmax/sigmoid helper functions call host exp, "always provide the import" per its own
+        // comment) -- without this, WASM instantiation itself fails for every artifact, not just
+        // ones that actually use softmax/sigmoid at runtime. Found via a real batch run: every
+        // genome's Backtest RPC failed with "Import module object env does not contain exp" until
+        // this was added. get_position/get_entry_price/get_bars_in_trade/get_cash/get_equity/
+        // get_unrealized_pnl (StrategyWasmEmitter.needPositionImports) are a separate, newer
+        // OnPosition-hook feature not yet wired here -- a genome using an OnPosition hook will
+        // still fail to instantiate against KestrGraal until those are added too.
+        env.put("exp", (ProxyExecutable) args -> Math.exp(args[0].asDouble()));
         return ProxyObject.fromMap(Map.of("env", ProxyObject.fromMap(env)));
     }
 
@@ -175,7 +219,10 @@ public final class MuseBacktestCore {
     static BacktestResult finish(HostState st) {
         List<Double> eq = st.sim.equity;
         double fin = eq.isEmpty() ? st.sim.cash : eq.get(eq.size() - 1);
-        return new BacktestResult(st.sim.trades, fin, sharpe(returnsFromEquity(eq)));
+        return new BacktestResult(
+            st.sim.trades, fin, sharpe(returnsFromEquity(eq)),
+            maxDrawdown(eq), winRate(st.sim.wins, st.sim.trades)
+        );
     }
 
     public static List<Bar> loadCsv(Path path) throws IOException {
