@@ -1,0 +1,152 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "MuseScript",
+  "scopeName": "source.musescript",
+  "fileTypes": ["ms"],
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#meta-annotations" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#builtins" },
+    { "include": "#order-calls" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#operators" },
+    { "include": "#punctuation" },
+    { "include": "#identifiers" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.musescript",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.musescript",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "meta-annotations": {
+      "comment": "@strategy(...) @param(...) @on(bar) etc -- the legacy braced surface's declaration form, still parses per musescript's own additive-compatibility guarantee.",
+      "patterns": [
+        {
+          "name": "entity.name.function.decorator.musescript",
+          "match": "@[A-Za-z_][A-Za-z0-9_]*"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.musescript",
+          "match": "\\b(if|else|for|in|when|return|yield|break|continue|match)\\b"
+        },
+        {
+          "name": "keyword.declaration.musescript",
+          "match": "\\b(strategy|module|template|pipeline|search|param|function|var|use|onBar|onTick|onEvent|on)\\b"
+        },
+        {
+          "name": "constant.language.boolean.musescript",
+          "match": "\\b(true|false)\\b"
+        }
+      ]
+    },
+    "types": {
+      "comment": "the shared type lattice (compiler + checker + no-code legality oracle + MuseGene STGP all share this).",
+      "patterns": [
+        {
+          "name": "storage.type.musescript",
+          "match": "\\b(Window|Series|Scalar|Bool|String|Void)\\b"
+        }
+      ]
+    },
+    "builtins": {
+      "comment": "musescript/types/BuiltinSigs.hx's registered signature table -- indicators, stats, ML, graph, string ops.",
+      "patterns": [
+        {
+          "name": "support.function.builtin.musescript",
+          "match": "\\b(sma|ema|rsi|atr|wma|rma|stdev|highest|lowest|mom|roc|change|pct_change|crossover|crossunder|rising|falling|bbands|macd|stoch|vwap|hl2|hlc3|ohlc4|sharpe|zscore|vector_zscore|correlation|window|ohlcv_window|feature|na|nz|clamp|range|hline|bgcolor|plotshape|plot|xscore|gscore|model_score|distill|gbdt|mlp|tune|optimize|scan|sample|pickBest|tree|tree_bit|tree_value|graph_query|graph_bfs|graph_degree|graph_has_edge|graph_metric|graph_neighbors|graph_pagerank|graph_reachable|graph_shortest_path|ml_dot|ml_linear_predict|ml_mae|ml_matrix|ml_matrix_cols|ml_matrix_data|ml_matrix_get|ml_matrix_rows|ml_mse|ml_ridge_fit|ml_ridge_fit_matrix|ml_sigmoid|ml_softmax|sci_cumsum|sci_diff|sci_normalize|stat_correlation|stat_covariance|stat_mean|stat_median|stat_quantile|stat_sample_stddev|stat_sample_variance|stat_skewness|stat_stddev|stat_variance|stat_zscore|str_concat|str_contains|str_ends_with|str_from_bool|str_from_float|str_index_of|str_join|str_len|str_lower|str_replace|str_slice|str_split|str_starts_with|str_to_bool|str_to_float|str_trim|str_upper|all|any|avg|count|drop|enumerate|filter|find|flat(?:Map)?|map|max|merge|min|reduce|sum|take|takeWhile|zip|zipWith)\\b(?=\\s*\\()"
+        }
+      ]
+    },
+    "order-calls": {
+      "comment": "TradeBuiltins order-side-effect functions -- the on_bar host ABI's env imports.",
+      "patterns": [
+        {
+          "name": "support.function.order.musescript",
+          "match": "\\b(long|short|flat)\\b(?=\\s*\\()"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.musescript",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [{ "name": "constant.character.escape.musescript", "match": "\\\\." }]
+        },
+        {
+          "name": "string.quoted.single.musescript",
+          "begin": "'",
+          "end": "'",
+          "patterns": [{ "name": "constant.character.escape.musescript", "match": "\\\\." }]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.musescript",
+          "match": "\\b[0-9]+(\\.[0-9]+)?\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.pipe.musescript",
+          "match": "\\|>"
+        },
+        {
+          "name": "keyword.operator.comparison.musescript",
+          "match": ">=|<=|==|!=|>|<"
+        },
+        {
+          "name": "keyword.operator.logical.musescript",
+          "match": "&&|\\|\\||!"
+        },
+        {
+          "name": "keyword.operator.arithmetic.musescript",
+          "match": "\\+|-|\\*|/"
+        },
+        {
+          "name": "keyword.operator.assignment.musescript",
+          "match": "="
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        { "name": "punctuation.definition.parameters.musescript", "match": "[()]" },
+        { "name": "punctuation.definition.block.musescript", "match": "[{}]" },
+        { "name": "punctuation.definition.array.musescript", "match": "[\\[\\]]" },
+        { "name": "punctuation.separator.comma.musescript", "match": "," },
+        { "name": "punctuation.separator.colon.musescript", "match": ":" },
+        { "name": "punctuation.terminator.statement.musescript", "match": ";" }
+      ]
+    },
+    "identifiers": {
+      "patterns": [
+        {
+          "name": "variable.other.musescript",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
+        }
+      ]
+    }
+  }
+}

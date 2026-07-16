@@ -1,0 +1,25 @@
+{
+  "name": "musescript-syntax",
+  "displayName": "MuseScript",
+  "description": "Syntax highlighting for MuseScript (.ms) trading-strategy source files.",
+  "version": "0.1.0",
+  "engines": { "vscode": "^1.75.0" },
+  "categories": ["Programming Languages"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "musescript",
+        "aliases": ["MuseScript", "musescript"],
+        "extensions": [".ms"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "musescript",
+        "scopeName": "source.musescript",
+        "path": "./syntaxes/musescript.tmLanguage.json"
+      }
+    ]
+  }
+}
