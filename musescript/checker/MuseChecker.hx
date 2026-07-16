@@ -115,6 +115,8 @@ class MuseChecker {
 				for (s in body) checkStmt(s);
 			case TemplateDecl(_, _, _, body):
 				checkExpr(body);
+			case StmtTemplateDecl(_, _, body):
+				for (s in body) checkStmt(s);
 			case FnDecl(_, _, body, kind):
 				if (kind == Generator) withGenerator(body, true);
 				else checkExpr(body);

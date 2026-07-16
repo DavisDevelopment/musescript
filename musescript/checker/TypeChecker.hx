@@ -115,6 +115,18 @@ class TypeChecker {
 					err('template $name: expected ${MuseTypes.toString(expect)}, got ${MuseTypes.toString(got)}');
 				env = saved;
 				env.set(name, TTemplate(argTys, expect));
+			case StmtTemplateDecl(name, params, body):
+				var saved = env.copy();
+				for (p in params) {
+					var ty = MuseTypes.parseName(p.ty);
+					if (ty == null) {
+						err('template $name: unknown param type ${p.ty}');
+						ty = TUnknown;
+					}
+					env.set(p.name, ty);
+				}
+				for (s in body) checkStmt(s);
+				env = saved;
 			case FnDecl(name, args, body, _):
 				for (a in args) if (!env.exists(a)) env.set(a, TUnknown);
 				infer(body);

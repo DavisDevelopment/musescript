@@ -2821,6 +2821,57 @@ strategy X {
 		Assert.isTrue(out.indexOf("goldenCross") < 0);
 	}
 
+	public function testStmtTemplateExpandsOnPosition() {
+		var src = '
+template TrailingStop(pct: Scalar) {
+  onPosition {
+    when unrealized_pnl < -pct * equity: flat()
+  }
+}
+strategy Guarded {
+  TrailingStop(0.05)
+  onBar {
+    when crossover(sma(close, 5), sma(close, 10)): long()
+  }
+}';
+		var prog = MuseScript.lower(src);
+		var printer = new musescript.compile.MusePrinter();
+		var out = printer.printProgram(prog);
+		Assert.isTrue(out.indexOf("TrailingStop") < 0);
+		Assert.isTrue(out.indexOf("onPosition") >= 0);
+		Assert.isTrue(out.indexOf("unrealized_pnl") >= 0);
+		Assert.isTrue(out.indexOf("0.05") >= 0);
+		var hasPos = false;
+		for (d in prog.decls) switch (d) {
+			case StrategyDecl(_, body):
+				for (s in body) switch (s) {
+					case OnPosition(_): hasPos = true;
+					default:
+				}
+			default:
+		}
+		Assert.isTrue(hasPos);
+		var wat = musescript.compile.StrategyWasmBackend.emitWat(prog);
+		Assert.notNull(wat);
+		Assert.isTrue(wat.indexOf('import "env" "get_position"') >= 0);
+	}
+
+	public function testStmtTemplateRejectsExprUse() {
+		var threw = false;
+		try {
+			MuseScript.lower('
+template HoldBars(n: Scalar) {
+  onPosition { when bars_in_trade >= n: flat() }
+}
+strategy Bad {
+  onBar { when HoldBars(10): long() }
+}');
+		} catch (_:Dynamic) {
+			threw = true;
+		}
+		Assert.isTrue(threw);
+	}
+
 	public function testTemplateDepthBound() {
 		var threw = false;
 		try {

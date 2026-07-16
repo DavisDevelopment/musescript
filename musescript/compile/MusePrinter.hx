@@ -49,6 +49,9 @@ class MusePrinter {
 			case TemplateDecl(name, params, retTy, body):
 				var ps = [for (p in params) p.name + ": " + p.ty].join(", ");
 				'template $name($ps) -> $retTy { ${printExpr(body)} }';
+			case StmtTemplateDecl(name, params, body):
+				var ps = [for (p in params) p.name + ": " + p.ty].join(", ");
+				'template $name($ps) {\n' + indent([for (s in body) printStmt(s)].join("\n")) + "\n}";
 		};
 	}
 

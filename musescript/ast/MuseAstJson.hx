@@ -161,6 +161,9 @@ class MuseAstJson {
 				body: [for (b in body) stmtToJson(b, checker)] };
 			case TemplateDecl(name, params, retTy, body): { kind: "templateDecl", name: name,
 				params: [for (p in params) { name: p.name, ty: p.ty }], retTy: retTy, body: exprToJson(body, checker) };
+			case StmtTemplateDecl(name, params, body): { kind: "stmtTemplateDecl", name: name,
+				params: [for (p in params) { name: p.name, ty: p.ty }],
+				body: [for (b in body) stmtToJson(b, checker)] };
 		};
 	}
 

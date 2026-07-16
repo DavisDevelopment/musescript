@@ -160,7 +160,7 @@ class MuseInterp {
 			case MacroDecl(name, body):
 				// Macro bodies executed by planner, not here
 				globals.set('__macro_$name', body);
-			case ModuleDecl(_, _, _) | TemplateDecl(_, _, _, _):
+			case ModuleDecl(_, _, _) | TemplateDecl(_, _, _, _) | StmtTemplateDecl(_, _, _):
 				// Expanded before execution / compile
 		}
 	}

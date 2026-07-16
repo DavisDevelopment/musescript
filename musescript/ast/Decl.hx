@@ -10,4 +10,9 @@ enum Decl {
 	ModuleDecl(name:String, params:Array<{name:String, ty:Null<String>, def:Null<Expr>}>, body:Array<Stmt>);
 	/** Typed AST template — expands before type-check. */
 	TemplateDecl(name:String, params:Array<{name:String, ty:String}>, retTy:String, body:Expr);
+	/**
+	 * Statement template — expands at call sites into stmt lists (onBar/onPosition/when/…).
+	 * Declared without `-> RetType`; invoked as a bare statement: `TrailingStop(0.05)`.
+	 */
+	StmtTemplateDecl(name:String, params:Array<{name:String, ty:String}>, body:Array<Stmt>);
 }

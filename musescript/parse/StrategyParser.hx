@@ -146,14 +146,21 @@ class StrategyParser {
 			} while (match(","));
 		}
 		expect(")");
-		expect("->");
-		var retTy = expectIdentValue();
+		// Expr templates: `template f(...) -> Ret { expr }`
+		// Stmt templates: `template f(...) { onBar/onPosition/when/... }`
+		if (match("->")) {
+			var retTy = expectIdentValue();
+			expect("{");
+			var body = parseExpr();
+			skipWs();
+			if (match(";")) {}
+			expect("}");
+			return TemplateDecl(name, params, retTy, body);
+		}
 		expect("{");
-		var body = parseExpr();
-		skipWs();
-		if (match(";")) {}
+		var stmts = parseStmtListUntil("}");
 		expect("}");
-		return TemplateDecl(name, params, retTy, body);
+		return StmtTemplateDecl(name, params, stmts);
 	}
 
 	function parsePipeline():Decl {

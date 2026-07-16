@@ -94,6 +94,23 @@ Portfolio builtins (single-symbol sim today):
 
 Legacy annotation: `@on(position) { ... }`.
 
+Statement templates can package the same hooks for reuse (no `->` return type):
+
+```muse
+template TrailingStop(pct: Scalar) {
+  onPosition {
+    when unrealized_pnl < -pct * equity: flat()
+  }
+}
+strategy S {
+  TrailingStop(0.05)
+  onBar { when crossover(sma(close, 5), sma(close, 10)): long() }
+}
+```
+
+Expr templates (`template f(...) -> Bool { ... }`) still expand inside expressions.
+Stmt templates expand only as bare statements; using them as expressions fails at expand time.
+
 **Not yet:** multi-symbol bar feeds, per-symbol positions, or live agent/user portfolio
 objects. `HarnessContext.universe` is a symbol picker for discovery/planning only; backtests
 still run one OHLCV tape at a time.

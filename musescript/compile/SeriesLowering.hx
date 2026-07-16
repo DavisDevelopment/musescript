@@ -39,6 +39,8 @@ class SeriesLowering {
 			case TemplateDecl(name, params, ret, body):
 				var r = lowerExpr(body);
 				TemplateDecl(name, params, ret, wrap(r));
+			case StmtTemplateDecl(name, params, body):
+				StmtTemplateDecl(name, params, lowerStmts(body));
 			case ParamDecl(name, def, opts):
 				if (def == null) d;
 				else {
