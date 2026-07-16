@@ -1028,6 +1028,33 @@ class TestMlBuiltins extends Test {
 		Assert.isTrue(wat.indexOf("f64.const 2.5") >= 0);
 	}
 
+	public function testStrategyWasmSpillsRuntimeArrayAndWindowVectors() {
+		var prog = new MuseParser().parse('strategy MlScratchVectors {
+			onBar {
+				score = ml_dot([1, close], [2, 3])
+				mix = ml_mse(window(close, 3), [1, 2, 3])
+				pred = ml_linear_predict(window(close, 2), [0.5, 0.5], 1)
+				when score > 0 && mix >= 0 && pred > 0: long()
+			}
+		}');
+		var wat = musescript.compile.StrategyWasmBackend.emitWat(prog);
+		Assert.notNull(wat);
+		Assert.isTrue(wat.indexOf("call $vec_dot") >= 0);
+		Assert.isTrue(wat.indexOf("call $vec_mse") >= 0);
+		Assert.isTrue(wat.indexOf("call $window_to_scratch") >= 0);
+		#if (js || python)
+		if (musescript.compile.StrategyWasmBackend.hostReady()) {
+			var feed = BarFeed.synthetic(40, 11);
+			var wasmFn = MuseCompiler.compile(prog, { target: "wasm" });
+			var wasmResult = wasmFn({ feed: feed });
+			TradeBuiltins.resetCrossState();
+			var interpResult = new MuseInterp(new HarnessContext()).runBacktest(prog, BarFeed.synthetic(40, 11));
+			Assert.equals(interpResult.trades, wasmResult.trades);
+			Assert.isTrue(Math.abs(interpResult.finalEquity - wasmResult.finalEquity) < 1e-6);
+		}
+		#end
+	}
+
 	public function testStrategyWasmDynamicVectorsStillFallback() {
 		var prog = new MuseParser().parse('strategy MlDynamicVector {
 			onBar {

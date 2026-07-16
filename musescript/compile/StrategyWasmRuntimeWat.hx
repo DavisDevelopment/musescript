@@ -5,13 +5,14 @@ package musescript.compile;
  * Ports TradeBuiltins indicator semantics exactly (windowed / full-history).
  *
  * Memory layout:
- *   [0, STATE_BYTES) — cross / rising / falling slots
+ *   [0, RISE_BASE) — crossover / crossunder slots
+ *   [RISE_BASE, VEC_SCRATCH_BASE) — rising / falling history rings
+ *   [VEC_SCRATCH_BASE, STATE_BYTES) — ephemeral vector scratch for (ptr,len) lowers
  *   [STATE_BYTES, …) — streaming OHLCV series (7 contiguous f64 arrays) when reset() is used
  *
  * Series ids: 0=open 1=high 2=low 3=close 4=volume 5=time 6=index
  */
 class StrategyWasmRuntimeWat {
-	public static inline var STATE_BYTES = 8192;
 	public static inline var CROSS_SLOTS = 64;
 	public static inline var RISE_SLOTS = 32;
 	public static inline var RISE_HIST = 64;
@@ -19,6 +20,11 @@ class StrategyWasmRuntimeWat {
 	public static inline var RISE_BASE = 1024;
 	/** Per rising/falling slot: i32 length + 64 f64 = 4 + 512 = 516, rounded to 544. */
 	public static inline var RISE_STRIDE = 544;
+	/** End of rise rings; start of vector scratch. */
+	public static inline var VEC_SCRATCH_BASE = RISE_BASE + RISE_SLOTS * RISE_STRIDE;
+	/** Scratch arena for spilled array / window operands (512 f64s). */
+	public static inline var VEC_SCRATCH_BYTES = 4096;
+	public static inline var STATE_BYTES = VEC_SCRATCH_BASE + VEC_SCRATCH_BYTES;
 
 	/** Globals + core helpers + all internalized indicators / crosses. */
 	public static function helpers(crossSlots:Int, riseSlots:Int):String {
@@ -384,6 +390,153 @@ class StrategyWasmRuntimeWat {
       (local.set $$i (i32.add (local.get $$i) (i32.const 1)))
       (br $$loop)))
     (f64.div (local.get $$co) (f64.convert_i32_s (i32.sub (local.get $$n) (i32.const 1))))
+  )
+');
+		parts.push('
+  (func $$window_to_scratch (param $$sid i32) (param $$len i32) (param $$dst i32) (result i32)
+    (local $$n i32) (local $$i i32) (local $$start i32) (local $$j i32)
+    (if (i32.or (i32.le_s (local.get $$len) (i32.const 0))
+          (i32.eqz (global.get $$bar_count)))
+      (then (return (i32.const 0))))
+    (local.set $$n (local.get $$len))
+    (if (i32.gt_s (local.get $$n) (global.get $$bar_count))
+      (then (local.set $$n (global.get $$bar_count))))
+    (local.set $$start (i32.sub (global.get $$bar_count) (local.get $$n)))
+    (local.set $$i (local.get $$start))
+    (local.set $$j (i32.const 0))
+    (block $$done (loop $$loop
+      (br_if $$done (i32.ge_s (local.get $$i) (global.get $$bar_count)))
+      (f64.store (i32.add (local.get $$dst) (i32.shl (local.get $$j) (i32.const 3)))
+        (call $$series_at (local.get $$sid) (local.get $$i)))
+      (local.set $$j (i32.add (local.get $$j) (i32.const 1)))
+      (local.set $$i (i32.add (local.get $$i) (i32.const 1)))
+      (br $$loop)))
+    (local.get $$n)
+  )
+');
+		parts.push('
+  (func $$vec_dot (param $$ba i32) (param $$la i32) (param $$bb i32) (param $$lb i32) (result f64)
+    (local $$i i32) (local $$sum f64) (local $$xa f64) (local $$xb f64)
+    (if (i32.or (i32.le_s (local.get $$la) (i32.const 0)) (i32.ne (local.get $$la) (local.get $$lb)))
+      (then (return (f64.const nan))))
+    (block $$done (loop $$loop
+      (br_if $$done (i32.ge_s (local.get $$i) (local.get $$la)))
+      (local.set $$xa (f64.load (i32.add (local.get $$ba) (i32.shl (local.get $$i) (i32.const 3)))))
+      (local.set $$xb (f64.load (i32.add (local.get $$bb) (i32.shl (local.get $$i) (i32.const 3)))))
+      (if (i32.or (f64.ne (local.get $$xa) (local.get $$xa)) (f64.ne (local.get $$xb) (local.get $$xb)))
+        (then (return (f64.const nan))))
+      (local.set $$sum (f64.add (local.get $$sum) (f64.mul (local.get $$xa) (local.get $$xb))))
+      (local.set $$i (i32.add (local.get $$i) (i32.const 1)))
+      (br $$loop)))
+    (local.get $$sum)
+  )
+');
+		parts.push('
+  (func $$vec_mse (param $$ba i32) (param $$la i32) (param $$bb i32) (param $$lb i32) (result f64)
+    (local $$i i32) (local $$sum f64) (local $$xa f64) (local $$xb f64) (local $$d f64)
+    (if (i32.or (i32.le_s (local.get $$la) (i32.const 0)) (i32.ne (local.get $$la) (local.get $$lb)))
+      (then (return (f64.const nan))))
+    (block $$done (loop $$loop
+      (br_if $$done (i32.ge_s (local.get $$i) (local.get $$la)))
+      (local.set $$xa (f64.load (i32.add (local.get $$ba) (i32.shl (local.get $$i) (i32.const 3)))))
+      (local.set $$xb (f64.load (i32.add (local.get $$bb) (i32.shl (local.get $$i) (i32.const 3)))))
+      (if (i32.or (f64.ne (local.get $$xa) (local.get $$xa)) (f64.ne (local.get $$xb) (local.get $$xb)))
+        (then (return (f64.const nan))))
+      (local.set $$d (f64.sub (local.get $$xa) (local.get $$xb)))
+      (local.set $$sum (f64.add (local.get $$sum) (f64.mul (local.get $$d) (local.get $$d))))
+      (local.set $$i (i32.add (local.get $$i) (i32.const 1)))
+      (br $$loop)))
+    (f64.div (local.get $$sum) (f64.convert_i32_s (local.get $$la)))
+  )
+');
+		parts.push('
+  (func $$vec_mae (param $$ba i32) (param $$la i32) (param $$bb i32) (param $$lb i32) (result f64)
+    (local $$i i32) (local $$sum f64) (local $$xa f64) (local $$xb f64)
+    (if (i32.or (i32.le_s (local.get $$la) (i32.const 0)) (i32.ne (local.get $$la) (local.get $$lb)))
+      (then (return (f64.const nan))))
+    (block $$done (loop $$loop
+      (br_if $$done (i32.ge_s (local.get $$i) (local.get $$la)))
+      (local.set $$xa (f64.load (i32.add (local.get $$ba) (i32.shl (local.get $$i) (i32.const 3)))))
+      (local.set $$xb (f64.load (i32.add (local.get $$bb) (i32.shl (local.get $$i) (i32.const 3)))))
+      (if (i32.or (f64.ne (local.get $$xa) (local.get $$xa)) (f64.ne (local.get $$xb) (local.get $$xb)))
+        (then (return (f64.const nan))))
+      (local.set $$sum (f64.add (local.get $$sum) (f64.abs (f64.sub (local.get $$xa) (local.get $$xb)))))
+      (local.set $$i (i32.add (local.get $$i) (i32.const 1)))
+      (br $$loop)))
+    (f64.div (local.get $$sum) (f64.convert_i32_s (local.get $$la)))
+  )
+');
+		parts.push('
+  (func $$vec_mean (param $$base i32) (param $$len i32) (result f64)
+    (local $$i i32) (local $$sum f64)
+    (if (i32.le_s (local.get $$len) (i32.const 0)) (then (return (f64.const nan))))
+    (block $$done (loop $$loop
+      (br_if $$done (i32.ge_s (local.get $$i) (local.get $$len)))
+      (local.set $$sum (f64.add (local.get $$sum)
+        (f64.load (i32.add (local.get $$base) (i32.shl (local.get $$i) (i32.const 3))))))
+      (local.set $$i (i32.add (local.get $$i) (i32.const 1)))
+      (br $$loop)))
+    (f64.div (local.get $$sum) (f64.convert_i32_s (local.get $$len)))
+  )
+');
+		parts.push('
+  (func $$vec_var (param $$base i32) (param $$len i32) (param $$sample i32) (result f64)
+    (local $$i i32) (local $$mean f64) (local $$m2 f64) (local $$x f64) (local $$d f64) (local $$k f64)
+    (if (i32.le_s (local.get $$len) (i32.const 0)) (then (return (f64.const nan))))
+    (if (i32.and (local.get $$sample) (i32.lt_s (local.get $$len) (i32.const 2)))
+      (then (return (f64.const nan))))
+    (block $$done (loop $$loop
+      (br_if $$done (i32.ge_s (local.get $$i) (local.get $$len)))
+      (local.set $$k (f64.add (local.get $$k) (f64.const 1)))
+      (local.set $$x (f64.load (i32.add (local.get $$base) (i32.shl (local.get $$i) (i32.const 3)))))
+      (local.set $$d (f64.sub (local.get $$x) (local.get $$mean)))
+      (local.set $$mean (f64.add (local.get $$mean) (f64.div (local.get $$d) (local.get $$k))))
+      (local.set $$m2 (f64.add (local.get $$m2)
+        (f64.mul (local.get $$d) (f64.sub (local.get $$x) (local.get $$mean)))))
+      (local.set $$i (i32.add (local.get $$i) (i32.const 1)))
+      (br $$loop)))
+    (if (result f64) (local.get $$sample)
+      (then (f64.div (local.get $$m2) (f64.convert_i32_s (i32.sub (local.get $$len) (i32.const 1)))))
+      (else (f64.div (local.get $$m2) (f64.convert_i32_s (local.get $$len)))))
+  )
+');
+		parts.push('
+  (func $$vec_stdev (param $$base i32) (param $$len i32) (param $$sample i32) (result f64)
+    (f64.sqrt (call $$vec_var (local.get $$base) (local.get $$len) (local.get $$sample)))
+  )
+');
+		parts.push('
+  (func $$vec_cov (param $$ba i32) (param $$la i32) (param $$bb i32) (param $$lb i32) (result f64)
+    (local $$i i32) (local $$meanA f64) (local $$meanB f64) (local $$co f64)
+    (local $$xa f64) (local $$xb f64) (local $$da f64) (local $$k f64)
+    (if (i32.or (i32.ne (local.get $$la) (local.get $$lb)) (i32.lt_s (local.get $$la) (i32.const 2)))
+      (then (return (f64.const nan))))
+    (block $$done (loop $$loop
+      (br_if $$done (i32.ge_s (local.get $$i) (local.get $$la)))
+      (local.set $$k (f64.add (local.get $$k) (f64.const 1)))
+      (local.set $$xa (f64.load (i32.add (local.get $$ba) (i32.shl (local.get $$i) (i32.const 3)))))
+      (local.set $$xb (f64.load (i32.add (local.get $$bb) (i32.shl (local.get $$i) (i32.const 3)))))
+      (local.set $$da (f64.sub (local.get $$xa) (local.get $$meanA)))
+      (local.set $$meanA (f64.add (local.get $$meanA) (f64.div (local.get $$da) (local.get $$k))))
+      (local.set $$meanB (f64.add (local.get $$meanB)
+        (f64.div (f64.sub (local.get $$xb) (local.get $$meanB)) (local.get $$k))))
+      (local.set $$co (f64.add (local.get $$co)
+        (f64.mul (local.get $$da) (f64.sub (local.get $$xb) (local.get $$meanB)))))
+      (local.set $$i (i32.add (local.get $$i) (i32.const 1)))
+      (br $$loop)))
+    (f64.div (local.get $$co) (f64.convert_i32_s (i32.sub (local.get $$la) (i32.const 1))))
+  )
+');
+		parts.push('
+  (func $$vec_corr (param $$ba i32) (param $$la i32) (param $$bb i32) (param $$lb i32) (result f64)
+    (local $$sa f64) (local $$sb f64) (local $$den f64)
+    (if (i32.ne (local.get $$la) (local.get $$lb)) (then (return (f64.const nan))))
+    (local.set $$sa (call $$vec_stdev (local.get $$ba) (local.get $$la) (i32.const 1)))
+    (local.set $$sb (call $$vec_stdev (local.get $$bb) (local.get $$lb) (i32.const 1)))
+    (local.set $$den (f64.mul (local.get $$sa) (local.get $$sb)))
+    (if (i32.or (f64.eq (local.get $$den) (f64.const 0)) (f64.ne (local.get $$den) (local.get $$den)))
+      (then (return (f64.const nan))))
+    (f64.div (call $$vec_cov (local.get $$ba) (local.get $$la) (local.get $$bb) (local.get $$lb)) (local.get $$den))
   )
 ');
 		parts.push('

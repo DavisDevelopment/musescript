@@ -154,7 +154,7 @@ def _host_get(host: Any, name: str) -> Callable[..., Any]:
     return fn
 
 
-STATE_BYTES = 8192
+STATE_BYTES = 22528  # must match StrategyWasmRuntimeWat.STATE_BYTES (rise rings + vec scratch)
 
 
 def _instantiate_strategy(wat: str, host: Any):

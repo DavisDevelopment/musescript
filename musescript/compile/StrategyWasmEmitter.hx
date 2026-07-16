@@ -30,6 +30,7 @@ class StrategyWasmEmitter {
 	var nextTmp:Int = 0;
 	var nextCrossSlot:Int = 0;
 	var nextRiseSlot:Int = 0;
+	var scratchCursor:Int = 0;
 	var usedIndicators:Map<String, Bool> = new Map();
 
 	public function new() {}
@@ -46,6 +47,7 @@ class StrategyWasmEmitter {
 			nextTmp = 0;
 			nextCrossSlot = 0;
 			nextRiseSlot = 0;
+			scratchCursor = StrategyWasmRuntimeWat.VEC_SCRATCH_BASE;
 			usedIndicators = new Map();
 
 			var body = [for (s in stmts) emitStmt(s)].join("\n    ");
@@ -439,39 +441,33 @@ class StrategyWasmEmitter {
 				"i32.const " + rslot + "\n    " + coerceF64(args[0]) + "\n    " + xn
 					+ "\n    call $" + name + "\n    f64.convert_i32_s";
 			case "ml_dot":
-				if (args.length < 2) throw new EmitUnsupported();
-				"f64.const " + watFloat(MlBuiltins.dot(constVector(args[0]), constVector(args[1])));
+				emitMlPairOrFold(args, "vec_dot", function(xs, ys) return MlBuiltins.dot(xs, ys));
 			case "ml_mse":
-				if (args.length < 2) throw new EmitUnsupported();
-				"f64.const " + watFloat(MlBuiltins.mse(constVector(args[0]), constVector(args[1])));
+				emitMlPairOrFold(args, "vec_mse", function(xs, ys) return MlBuiltins.mse(xs, ys));
 			case "ml_mae":
-				if (args.length < 2) throw new EmitUnsupported();
-				"f64.const " + watFloat(MlBuiltins.mae(constVector(args[0]), constVector(args[1])));
+				emitMlPairOrFold(args, "vec_mae", function(xs, ys) return MlBuiltins.mae(xs, ys));
 			case "ml_linear_predict":
-				if (args.length < 2) throw new EmitUnsupported();
-				var weighted = MlBuiltins.dot(constVector(args[0]), constVector(args[1]));
-				"f64.const " + watFloat(weighted) + "\n    "
-					+ (args.length > 2 ? coerceF64(args[2]) : "f64.const 0") + "\n    f64.add";
+				emitMlLinearPredict(args);
 			case "stat_mean":
-				emitStatWindowOrLiteral(args, "stat_window_mean", null, function(xs) return StatsBuiltins.mean(xs));
+				emitStatWindowOrLiteral(args, "stat_window_mean", "vec_mean", null, function(xs) return StatsBuiltins.mean(xs));
 			case "stat_median":
 				if (args.length < 1) throw new EmitUnsupported();
 				"f64.const " + watFloat(StatsBuiltins.median(constVector(args[0])));
 			case "stat_variance":
-				emitStatWindowOrLiteral(args, "stat_window_var", 0, function(xs) return StatsBuiltins.variance(xs));
+				emitStatWindowOrLiteral(args, "stat_window_var", "vec_var", 0, function(xs) return StatsBuiltins.variance(xs));
 			case "stat_sample_variance":
-				emitStatWindowOrLiteral(args, "stat_window_var", 1, function(xs) return StatsBuiltins.sampleVariance(xs));
+				emitStatWindowOrLiteral(args, "stat_window_var", "vec_var", 1, function(xs) return StatsBuiltins.sampleVariance(xs));
 			case "stat_stddev":
-				emitStatWindowOrLiteral(args, "stat_window_stdev", 0, function(xs) return StatsBuiltins.standardDeviation(xs));
+				emitStatWindowOrLiteral(args, "stat_window_stdev", "vec_stdev", 0, function(xs) return StatsBuiltins.standardDeviation(xs));
 			case "stat_sample_stddev":
-				emitStatWindowOrLiteral(args, "stat_window_stdev", 1, function(xs) return StatsBuiltins.sampleStandardDeviation(xs));
+				emitStatWindowOrLiteral(args, "stat_window_stdev", "vec_stdev", 1, function(xs) return StatsBuiltins.sampleStandardDeviation(xs));
 			case "stat_quantile":
 				if (args.length < 2) throw new EmitUnsupported();
 				"f64.const " + watFloat(StatsBuiltins.quantile(constVector(args[0]), constNumber(args[1])));
 			case "stat_covariance":
-				emitStatWindowPairOrLiteral(args, "stat_window_cov", function(xs, ys) return StatsBuiltins.covariance(xs, ys));
+				emitStatWindowPairOrLiteral(args, "stat_window_cov", "vec_cov", function(xs, ys) return StatsBuiltins.covariance(xs, ys));
 			case "stat_correlation":
-				emitStatWindowPairOrLiteral(args, "stat_window_corr", function(xs, ys) return StatsBuiltins.pearson(xs, ys));
+				emitStatWindowPairOrLiteral(args, "stat_window_corr", "vec_corr", function(xs, ys) return StatsBuiltins.pearson(xs, ys));
 			case "stat_skewness":
 				if (args.length < 1) throw new EmitUnsupported();
 				"f64.const " + watFloat(StatsBuiltins.skewness(constVector(args[0])));
@@ -568,9 +564,117 @@ class StrategyWasmEmitter {
 		};
 	}
 
-	function emitStatWindowOrLiteral(
+	function allocScratch(len:Int):Int {
+		if (len <= 0) throw new EmitUnsupported();
+		var bytes = len * 8;
+		var limit = StrategyWasmRuntimeWat.VEC_SCRATCH_BASE + StrategyWasmRuntimeWat.VEC_SCRATCH_BYTES;
+		if (scratchCursor + bytes > limit) throw new EmitUnsupported();
+		var base = scratchCursor;
+		scratchCursor += bytes;
+		return base;
+	}
+
+	function tryConstVector(e:Expr):Null<Array<Float>> {
+		try {
+			return constVector(e);
+		} catch (_:EmitUnsupported) {
+			return null;
+		}
+	}
+
+	/** Spill an array literal (const or scalar runtime elems) into scratch. */
+	function spillArrayDecl(values:Array<Expr>):{prelude:String, baseExpr:String, lenExpr:String} {
+		var base = allocScratch(values.length);
+		var parts:Array<String> = [];
+		for (i in 0...values.length) {
+			parts.push(coerceF64(values[i]) + "\n    i32.const " + (base + i * 8) + "\n    f64.store");
+		}
+		return {
+			prelude: parts.join("\n    "),
+			baseExpr: "i32.const " + base,
+			lenExpr: "i32.const " + values.length
+		};
+	}
+
+	/** Copy a fixed-length window into scratch; length may shrink when history is short. */
+	function spillWindow(window:{sid:Int, lenExpr:String, lenConst:Null<Int>}):{prelude:String, baseExpr:String, lenExpr:String} {
+		if (window.lenConst == null) throw new EmitUnsupported();
+		var base = allocScratch(window.lenConst);
+		var lenLocal = "_vlen_" + (nextTmp++);
+		ensureLocal(lenLocal, "i32");
+		var prelude = "i32.const " + window.sid + "\n    " + window.lenExpr
+			+ "\n    i32.const " + base + "\n    call $window_to_scratch\n    local.set $" + lenLocal;
+		return {
+			prelude: prelude,
+			baseExpr: "i32.const " + base,
+			lenExpr: "local.get $" + lenLocal
+		};
+	}
+
+	function lowerVecOperand(e:Expr):{prelude:String, baseExpr:String, lenExpr:String} {
+		return switch (e) {
+			case EParent(inner):
+				lowerVecOperand(inner);
+			case EArrayDecl(values):
+				spillArrayDecl(values);
+			default:
+				var window = asWindowArg(e);
+				if (window == null) throw new EmitUnsupported();
+				spillWindow(window);
+		};
+	}
+
+	function emitMlPairOrFold(
 		args:Array<Expr>,
 		helper:String,
+		fold:Array<Float>->Array<Float>->Float
+	):String {
+		if (args.length < 2) throw new EmitUnsupported();
+		var leftConst = tryConstVector(args[0]);
+		var rightConst = tryConstVector(args[1]);
+		if (leftConst != null && rightConst != null)
+			return "f64.const " + watFloat(fold(leftConst, rightConst));
+		var left = lowerVecOperand(args[0]);
+		var right = lowerVecOperand(args[1]);
+		var parts:Array<String> = [];
+		if (left.prelude.length > 0) parts.push(left.prelude);
+		if (right.prelude.length > 0) parts.push(right.prelude);
+		parts.push(left.baseExpr);
+		parts.push(left.lenExpr);
+		parts.push(right.baseExpr);
+		parts.push(right.lenExpr);
+		parts.push("call $" + helper);
+		return parts.join("\n    ");
+	}
+
+	function emitMlLinearPredict(args:Array<Expr>):String {
+		if (args.length < 2) throw new EmitUnsupported();
+		var leftConst = tryConstVector(args[0]);
+		var rightConst = tryConstVector(args[1]);
+		var bias = args.length > 2 ? coerceF64(args[2]) : "f64.const 0";
+		if (leftConst != null && rightConst != null) {
+			var weighted = MlBuiltins.dot(leftConst, rightConst);
+			return "f64.const " + watFloat(weighted) + "\n    " + bias + "\n    f64.add";
+		}
+		var left = lowerVecOperand(args[0]);
+		var right = lowerVecOperand(args[1]);
+		var parts:Array<String> = [];
+		if (left.prelude.length > 0) parts.push(left.prelude);
+		if (right.prelude.length > 0) parts.push(right.prelude);
+		parts.push(left.baseExpr);
+		parts.push(left.lenExpr);
+		parts.push(right.baseExpr);
+		parts.push(right.lenExpr);
+		parts.push("call $vec_dot");
+		parts.push(bias);
+		parts.push("f64.add");
+		return parts.join("\n    ");
+	}
+
+	function emitStatWindowOrLiteral(
+		args:Array<Expr>,
+		windowHelper:String,
+		vecHelper:String,
 		sampleFlag:Null<Int>,
 		fold:Array<Float>->Float
 	):String {
@@ -579,14 +683,24 @@ class StrategyWasmEmitter {
 		if (window != null) {
 			var out = "i32.const " + window.sid + "\n    " + window.lenExpr + "\n    ";
 			if (sampleFlag != null) out += "i32.const " + sampleFlag + "\n    ";
-			return out + "call $" + helper;
+			return out + "call $" + windowHelper;
 		}
-		return "f64.const " + watFloat(fold(constVector(args[0])));
+		var consts = tryConstVector(args[0]);
+		if (consts != null) return "f64.const " + watFloat(fold(consts));
+		var vec = lowerVecOperand(args[0]);
+		var parts:Array<String> = [];
+		if (vec.prelude.length > 0) parts.push(vec.prelude);
+		parts.push(vec.baseExpr);
+		parts.push(vec.lenExpr);
+		if (sampleFlag != null) parts.push("i32.const " + sampleFlag);
+		parts.push("call $" + vecHelper);
+		return parts.join("\n    ");
 	}
 
 	function emitStatWindowPairOrLiteral(
 		args:Array<Expr>,
-		helper:String,
+		windowHelper:String,
+		vecHelper:String,
 		fold:Array<Float>->Array<Float>->Float
 	):String {
 		if (args.length < 2) throw new EmitUnsupported();
@@ -596,9 +710,23 @@ class StrategyWasmEmitter {
 			if (left.lenConst != null && right.lenConst != null && left.lenConst != right.lenConst)
 				throw new EmitUnsupported();
 			return "i32.const " + left.sid + "\n    i32.const " + right.sid + "\n    "
-				+ left.lenExpr + "\n    call $" + helper;
+				+ left.lenExpr + "\n    call $" + windowHelper;
 		}
-		return "f64.const " + watFloat(fold(constVector(args[0]), constVector(args[1])));
+		var leftConst = tryConstVector(args[0]);
+		var rightConst = tryConstVector(args[1]);
+		if (leftConst != null && rightConst != null)
+			return "f64.const " + watFloat(fold(leftConst, rightConst));
+		var leftVec = lowerVecOperand(args[0]);
+		var rightVec = lowerVecOperand(args[1]);
+		var parts:Array<String> = [];
+		if (leftVec.prelude.length > 0) parts.push(leftVec.prelude);
+		if (rightVec.prelude.length > 0) parts.push(rightVec.prelude);
+		parts.push(leftVec.baseExpr);
+		parts.push(leftVec.lenExpr);
+		parts.push(rightVec.baseExpr);
+		parts.push(rightVec.lenExpr);
+		parts.push("call $" + vecHelper);
+		return parts.join("\n    ");
 	}
 
 	function emitBinop(op:String, a:Expr, b:Expr):String {
