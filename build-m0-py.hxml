@@ -1,0 +1,3 @@
+extraParams.hxml
+-main musescript.examples.M0GatePy
+-python build/py/m0-gate-py.py

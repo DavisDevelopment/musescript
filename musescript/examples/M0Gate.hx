@@ -15,8 +15,10 @@ import musescript.builtins.TradeBuiltins;
  * across every JS-host runtime the compiler emits — interpreter, compiled JS, compiled WASM on_bar —
  * and asserts the backtest result is IDENTICAL across all three (trades exact, finalEquity/sharpe
  * within a tight float epsilon). If this fails, the "one strategy, one ABI, many runtimes" premise
- * the whole integration plan rests on is broken. The numba (Python-host) leg is the 4th runtime and
- * runs from the build-py target separately — this file is the JS-host tri-runtime leg.
+ * the whole integration plan rests on is broken. The Python-host leg (interp + wasmtime WASM) is
+ * the 4th runtime and runs from the build-m0-py target (M0GatePy.hx) separately — this file is the
+ * JS-host tri-runtime leg, and it writes its results to build/m0_js_host.json so M0GatePy.hx can
+ * do the full 4-way comparison without re-deriving the JS-host numbers.
  */
 class M0Gate {
 	static function runOn(prog, fn:Dynamic, bars):BacktestResult {
@@ -86,6 +88,15 @@ class M0Gate {
 
 		var maxEqDelta = Math.max(Math.abs(ri.finalEquity - rj.finalEquity), Math.abs(rj.finalEquity - rw.finalEquity));
 		Sys.println('max finalEquity delta across runtimes: ${maxEqDelta}');
+
+		// Persist for M0GatePy.hx (Python-host leg) to cross-check against.
+		var out = {
+			interp: { trades: ri.trades, finalEquity: ri.finalEquity, sharpe: ri.sharpe },
+			js: { trades: rj.trades, finalEquity: rj.finalEquity, sharpe: rj.sharpe, backend: jsEx.backend },
+			wasm: { trades: rw.trades, finalEquity: rw.finalEquity, sharpe: rw.sharpe, backend: wasmEx.backend },
+		};
+		sys.io.File.saveContent("build/m0_js_host.json", haxe.Json.stringify(out, null, "  "));
+		Sys.println("wrote build/m0_js_host.json");
 
 		if (tradesOk && eqOk && shOk) {
 			Sys.println("M0 GATE: PASS — interp/js/wasm identical on real tape (trades exact, equity/sharpe delta <= " + eps + ")");

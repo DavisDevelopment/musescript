@@ -7,6 +7,7 @@ build/wasm/
 build/graal/
 build/jvm/
 build/kestrel/
+build/*.json
 dump/
 graal/target/
 .pytest_cache/
