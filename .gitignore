@@ -11,3 +11,11 @@ build/*.json
 dump/
 graal/target/
 .pytest_cache/
+
+# generated from graal/src/main/proto/kestrgraal.proto — regenerate, don't edit or commit:
+#   .venv/Scripts/python -m grpc_tools.protoc -I graal/src/main/proto \
+#     --python_out=graal/src/main/python --grpc_python_out=graal/src/main/python \
+#     graal/src/main/proto/kestrgraal.proto
+graal/src/main/python/kestrgraal_pb2.py
+graal/src/main/python/kestrgraal_pb2_grpc.py
+graal/src/main/python/__pycache__/

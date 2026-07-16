@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package musescript.graal.proto;
+
+option java_package = "musescript.graal.proto";
+option java_multiple_files = true;
+option java_outer_classname = "KestrGraalProto";
+
+// KestrGraal — the bound GraalVM polyglot process that hosts compiled MuseScript
+// WASM strategy modules for fast, repeated backtest/evolve calls from the desktop
+// Muse service. One shared org.graalvm.polyglot.Engine lives for the process
+// lifetime; RPCs reuse it instead of paying per-call JIT/compile warmup.
+service KestrGraal {
+  // Liveness + engine identity (JVM/GraalVM version, uptime) — cheap, no WASM work.
+  rpc Ping(PingRequest) returns (PingReply);
+
+  // Run one backtest of an already-compiled MuseScript on_bar WASM module against a
+  // bar tape. wasm_path/strings_path/csv_path are read once per (path) and cached
+  // per worker thread's Context — repeated calls with the same wasm_path reuse the
+  // already-instantiated module.
+  rpc Backtest(BacktestRequest) returns (BacktestReply);
+}
+
+message PingRequest {}
+
+message PingReply {
+  string jvm_name = 1;
+  string jvm_version = 2;
+  int64 uptime_ms = 3;
+}
+
+message BacktestRequest {
+  string wasm_path = 1;
+  string strings_path = 2;
+  string csv_path = 3;
+  map<string, double> params = 4;   // e.g. {"fast": 10, "slow": 30}
+  bool preloaded = 5;               // false = streaming (push_bar), true = preloaded (on_bar)
+}
+
+message BacktestReply {
+  int32 trades = 1;
+  double final_equity = 2;
+  double sharpe = 3;
+  double elapsed_ms = 4;
+}

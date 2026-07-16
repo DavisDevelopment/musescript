@@ -55,3 +55,38 @@ GRAAL STRESS: PASS
 
 Preloaded mode removes per-bar scalar push overhead and is the preferred path for offline
 backtests; streaming remains the live ABI.
+
+## KestrGraal — the bound persistent-process server (2026-07-15)
+
+Grows this exact harness (`MuseBacktestCore.java`, extracted so both the stress test and the
+server share it byte-for-byte) into a long-lived gRPC server instead of a one-shot `main()`:
+one `Engine` for the process lifetime, one `Context` per worker thread, a per-thread module
+cache keyed by `wasm_path` so repeated calls against the same artifact skip re-eval. Bound to
+`127.0.0.1` only — desktop-local, never exposed on the network. Contract: `src/main/proto/
+kestrgraal.proto` (`Ping`, `Backtest`).
+
+```powershell
+# start the server (port defaults to 51117; second arg is the muse-script root)
+mvn -q -B exec:java -Dexec.mainClass=musescript.graal.KestrGraalServer -Dexec.args="51117 .."
+
+# in another shell — unit + perf test (Python client, generated stubs)
+cd ..
+.venv/Scripts/python -m grpc_tools.protoc -I graal/src/main/proto `
+  --python_out=graal/src/main/python --grpc_python_out=graal/src/main/python `
+  graal/src/main/proto/kestrgraal.proto   # regenerate stubs (gitignored, not committed)
+.venv/Scripts/python test/test_kestrgraal.py
+```
+
+Verified 2026-07-15: `Ping` + `Backtest` (streaming and preloaded) both match the known-good SPY
+MA-cross result (trades=277, finalEquity=725994.1667410003, sharpe=0.5795298962243104) exactly —
+same numbers the M0 gate and this file's own stress harness already established. First call after
+a fresh module load: ~1.3s (module eval + JIT warmup). 50 subsequent warm calls: ~11.7ms/call
+including full gRPC round-trip (~720k bars/sec on 8419-bar SPY, honestly counting network
+overhead — the in-process baseline above has none). The warmup-once/reuse-many story is the
+entire point: a per-request CLI spawn pays that 1.3s on every call, KestrGraal pays it once per
+process lifetime.
+
+**Not yet built:** streaming RPCs for continuous run-event progress (evolve/fit), `Evolve`/
+`Fit` RPCs alongside `Backtest`, GraalVM Auxiliary Engine Caching (persist warmed ASTs across
+process restarts, CE-compatible), PGO (Enterprise-only, licensing decision deferred). See the
+merged execution plan's Phase 1 addendum for the full roadmap.
