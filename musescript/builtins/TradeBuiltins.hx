@@ -38,6 +38,13 @@ class TradeBuiltins {
 		vars.set("rma", rma.bind(harness));
 		vars.set("rising", rising);
 		vars.set("falling", falling);
+		vars.set("window", window.bind(harness));
+		vars.set("ohlcv_window", ohlcvWindow.bind(harness));
+		vars.set("str_len", strLen);
+		vars.set("str_slice", strSlice);
+		vars.set("str_contains", strContains);
+		vars.set("str_concat", strConcat);
+		vars.set("str_to_float", strToFloat);
 
 		vars.set("long", function(?qty:Float) {
 			if (harness.currentBar != null) harness.orders.long(harness.currentBar.close, qty);
@@ -65,6 +72,7 @@ class TradeBuiltins {
 
 		vars.set("clamp", function(x:Float, lo:Float, hi:Float) return Math.max(lo, Math.min(hi, x)));
 		vars.set("zscore", zscore);
+		vars.set("vector_zscore", zscore);
 		vars.set("correlation", correlation);
 		vars.set("sharpe", function(returns:Array<Float>) return musescript.harness.Metrics.sharpe(returns));
 
@@ -153,6 +161,74 @@ class TradeBuiltins {
 		var a = harness.series.get("close");
 		if (a == null) return [];
 		return a.slice(Std.int(Math.max(0, a.length - len)));
+	}
+
+	/** Chronological values ending at the current bar, bounded to `len`. */
+	public static function window(harness:HarnessContext, src:Dynamic, len:Int):Array<Float> {
+		if (len <= 0) return [];
+		return seriesVals(harness, src, len).copy();
+	}
+
+	/**
+	 * Chronological row-major OHLCV values ending at the current bar.
+	 * Each row is `[open, high, low, close, volume]` (stride 5).
+	 */
+	public static function ohlcvWindow(harness:HarnessContext, len:Int):Array<Float> {
+		if (len <= 0) return [];
+		var o = harness.series.get("open");
+		var h = harness.series.get("high");
+		var l = harness.series.get("low");
+		var c = harness.series.get("close");
+		var v = harness.series.get("volume");
+		if (o == null || h == null || l == null || c == null || v == null) return [];
+		var available = Std.int(Math.min(len, c.length));
+		var start = c.length - available;
+		var out:Array<Float> = [];
+		for (i in start...c.length) {
+			out.push(o[i]);
+			out.push(h[i]);
+			out.push(l[i]);
+			out.push(c[i]);
+			out.push(v[i]);
+		}
+		return out;
+	}
+
+	public static function strLen(value:Dynamic):Int {
+		return value == null ? 0 : Std.string(value).length;
+	}
+
+	public static function strSlice(value:Dynamic, start:Int, ?end:Int):String {
+		var s = value == null ? "" : Std.string(value);
+		var from = normalizeStringIndex(start, s.length);
+		var to = end == null ? s.length : normalizeStringIndex(end, s.length);
+		if (to < from) to = from;
+		return s.substr(from, to - from);
+	}
+
+	public static function strContains(value:Dynamic, needle:Dynamic):Bool {
+		var s = value == null ? "" : Std.string(value);
+		var n = needle == null ? "" : Std.string(needle);
+		return s.indexOf(n) >= 0;
+	}
+
+	public static function strConcat(a:Dynamic, b:Dynamic):String {
+		return (a == null ? "" : Std.string(a)) + (b == null ? "" : Std.string(b));
+	}
+
+	public static function strToFloat(value:Dynamic):Float {
+		if (value == null) return Math.NaN;
+		var s = StringTools.trim(Std.string(value));
+		if (!~/^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/.match(s))
+			return Math.NaN;
+		return Std.parseFloat(s);
+	}
+
+	static function normalizeStringIndex(index:Int, length:Int):Int {
+		var n = index < 0 ? length + index : index;
+		if (n < 0) return 0;
+		if (n > length) return length;
+		return n;
 	}
 
 	static function resolveSeries(harness:HarnessContext, src:Dynamic):Array<Float> {
@@ -537,7 +613,7 @@ class TradeBuiltins {
 		return true;
 	}
 
-	static function zscore(xs:Array<Float>):Array<Float> {
+	public static function zscore(xs:Array<Float>):Array<Float> {
 		var mean = 0.0;
 		for (x in xs) mean += x;
 		mean /= xs.length;

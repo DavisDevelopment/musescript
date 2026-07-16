@@ -493,11 +493,20 @@ class JsBackend {
 				TradeBuiltins.rma(harness, args[0], Std.int(args[1]));
 			case "rising": builtinRising(args[0], Std.int(args[1]));
 			case "falling": builtinFalling(args[0], Std.int(args[1]));
+			case "window": TradeBuiltins.window(harness, args[0], Std.int(args[1]));
+			case "ohlcv_window": TradeBuiltins.ohlcvWindow(harness, Std.int(args[0]));
+			case "str_len": TradeBuiltins.strLen(args[0]);
+			case "str_slice":
+				TradeBuiltins.strSlice(args[0], Std.int(args[1]), args.length > 2 ? Std.int(args[2]) : null);
+			case "str_contains": TradeBuiltins.strContains(args[0], args[1]);
+			case "str_concat": TradeBuiltins.strConcat(args[0], args[1]);
+			case "str_to_float": TradeBuiltins.strToFloat(args[0]);
 			case "crossover": TradeBuiltins.crossover(args[0], args[1]);
 			case "crossunder": TradeBuiltins.crossunder(args[0], args[1]);
 			case "clamp": Math.max(args[1], Math.min(args[2], args[0]));
 			// math already on TradeBuiltins.install (harness-free)
 			case "zscore": @:privateAccess TradeBuiltins.zscore(args[0]);
+			case "vector_zscore": TradeBuiltins.zscore(args[0]);
 			case "correlation": @:privateAccess TradeBuiltins.correlation(args[0], args[1]);
 			case "sharpe": Metrics.sharpe(args[0]);
 			// iter helpers — same MuseIters.from + IterDriver path as TradeBuiltins.install
