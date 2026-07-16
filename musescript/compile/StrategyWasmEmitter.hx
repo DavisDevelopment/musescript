@@ -51,6 +51,8 @@ class StrategyWasmEmitter {
 			scratchCursor = StrategyWasmRuntimeWat.VEC_SCRATCH_BASE;
 			vectorLocals = new Map();
 			usedIndicators = new Map();
+			// Softmax/sigmoid helpers call host exp; always provide the import.
+			needImport("exp", "(param f64) (result f64)");
 
 			var body = [for (s in stmts) emitStmt(s)].join("\n    ");
 			var localDecls = [for (n in localOrder)
@@ -464,6 +466,13 @@ class StrategyWasmEmitter {
 				emitMlPairOrFold(args, "vec_mae", function(xs, ys) return MlBuiltins.mae(xs, ys));
 			case "ml_linear_predict":
 				emitMlLinearPredict(args);
+			case "ml_sigmoid":
+				if (args.length < 1) throw new EmitUnsupported();
+				try {
+					"f64.const " + watFloat(MlBuiltins.sigmoid(constNumber(args[0])));
+				} catch (_:EmitUnsupported) {
+					coerceF64(args[0]) + "\n    call $ml_sigmoid";
+				}
 			case "stat_mean":
 				emitStatWindowOrLiteral(args, "stat_window_mean", "vec_mean", null, function(xs) return StatsBuiltins.mean(xs));
 			case "stat_median":
@@ -489,6 +498,9 @@ class StrategyWasmEmitter {
 				"f64.const " + watFloat(StatsBuiltins.skewness(constVector(args[0])));
 			case "stat_zscore" | "sci_cumsum" | "sci_diff" | "sci_normalize" | "ml_softmax":
 				// Vector-producing: only via lowerVecOperand / vector assignment.
+				throw new EmitUnsupported();
+			case "ml_matrix" | "ml_matrix_rows" | "ml_matrix_cols" | "ml_matrix_data" | "ml_matrix_get"
+			   | "ml_ridge_fit" | "ml_ridge_fit_matrix":
 				throw new EmitUnsupported();
 			// Dynamic graph objects/results have no Strategy-WASM ABI yet. Refuse
 			// emission explicitly so MuseCompiler selects its documented host fallback.
@@ -689,6 +701,7 @@ class StrategyWasmEmitter {
 			case "sci_cumsum": "vec_cumsum";
 			case "sci_diff": "vec_diff";
 			case "sci_normalize": "vec_normalize";
+			case "ml_softmax": "vec_softmax";
 			default: null;
 		};
 	}

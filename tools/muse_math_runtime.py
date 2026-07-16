@@ -222,7 +222,7 @@ def load_strategy_module(wat: str, host: Any) -> dict[str, Any]:
     """
     Instantiate a memory-backed StrategyWasm module.
     Returns dict with: reset, push_bar, on_bar, configure_tape, pack_and_configure, memory accessors.
-    Host only supplies side-effect env imports (get_param/long/short/flat/plot*).
+    Host supplies side-effect env imports (get_param/long/short/flat/plot*) plus pure math (exp).
     """
     import numpy as np
 

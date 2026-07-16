@@ -146,8 +146,8 @@ direct array literals (including runtime scalar elements) or fixed-length `windo
 into a state-region scratch arena and reduce over `(ptr, len)`. Assigned scratch vectors are
 first-class inside an `onBar` body as `(base, len)` locals, so
 `xs = window(close, 3); stat_mean(xs)` and transforms such as `stat_zscore` / `sci_cumsum` /
-`sci_diff` / `sci_normalize` (plus const-folded `ml_softmax`) stay on the WASM path. Runtime
-`ml_softmax` over non-const inputs, matrices, strings, and graph objects still fall back.
+`sci_diff` / `sci_normalize` / runtime `ml_softmax` (via host `exp`) stay on the WASM path, as does
+scalar `ml_sigmoid`. Matrices, strings, and graph objects still fall back.
 
 ### Dependency-free ML builtins
 
@@ -174,9 +174,8 @@ when array elements are runtime scalars (spilled to scratch), and also lowers
 `stat_mean` / `stat_variance` / `stat_stddev` / sample variants / `stat_covariance` /
 `stat_correlation` / `ml_dot` / `ml_mse` / `ml_mae` / `ml_linear_predict` when arguments are
 direct `window(series, n)` calls (fixed `n`) or mixtures of windows and array literals.
-Assigned vector locals over scratch `(ptr, len)`, matrices, strings, graph objects, and runtime
-`ml_softmax` still fall back where noted above. This does not change the independent math-only
-array ABI.
+Assigned scratch `(ptr, len)` locals and the transforms above are supported; matrices, strings,
+and graph objects still fall back. This does not change the independent math-only array ABI.
 
 ### In-memory graph runtime
 

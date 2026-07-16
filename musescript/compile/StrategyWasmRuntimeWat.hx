@@ -590,6 +590,57 @@ class StrategyWasmRuntimeWat {
   )
 ');
 		parts.push('
+  (func $$vec_softmax (param $$src i32) (param $$len i32) (param $$dst i32) (result i32)
+    (local $$i i32) (local $$max f64) (local $$x f64) (local $$e f64) (local $$sum f64)
+    (if (i32.le_s (local.get $$len) (i32.const 0)) (then (return (i32.const 0))))
+    (local.set $$max (f64.load (local.get $$src)))
+    (if (f64.ne (local.get $$max) (local.get $$max)) (then (return (i32.const 0))))
+    (local.set $$i (i32.const 1))
+    (block $$mdone (loop $$mloop
+      (br_if $$mdone (i32.ge_s (local.get $$i) (local.get $$len)))
+      (local.set $$x (f64.load (i32.add (local.get $$src) (i32.shl (local.get $$i) (i32.const 3)))))
+      (if (f64.ne (local.get $$x) (local.get $$x)) (then (return (i32.const 0))))
+      (local.set $$max (f64.max (local.get $$max) (local.get $$x)))
+      (local.set $$i (i32.add (local.get $$i) (i32.const 1)))
+      (br $$mloop)))
+    (local.set $$i (i32.const 0))
+    (block $$edone (loop $$eloop
+      (br_if $$edone (i32.ge_s (local.get $$i) (local.get $$len)))
+      (local.set $$e (call $$exp (f64.sub
+        (f64.load (i32.add (local.get $$src) (i32.shl (local.get $$i) (i32.const 3))))
+        (local.get $$max))))
+      (f64.store (i32.add (local.get $$dst) (i32.shl (local.get $$i) (i32.const 3))) (local.get $$e))
+      (local.set $$sum (f64.add (local.get $$sum) (local.get $$e)))
+      (local.set $$i (i32.add (local.get $$i) (i32.const 1)))
+      (br $$eloop)))
+    (if (i32.or (f64.le (local.get $$sum) (f64.const 0)) (f64.ne (local.get $$sum) (local.get $$sum)))
+      (then (return (i32.const 0))))
+    (local.set $$i (i32.const 0))
+    (block $$done (loop $$loop
+      (br_if $$done (i32.ge_s (local.get $$i) (local.get $$len)))
+      (f64.store (i32.add (local.get $$dst) (i32.shl (local.get $$i) (i32.const 3)))
+        (f64.div (f64.load (i32.add (local.get $$dst) (i32.shl (local.get $$i) (i32.const 3))))
+          (local.get $$sum)))
+      (local.set $$i (i32.add (local.get $$i) (i32.const 1)))
+      (br $$loop)))
+    (local.get $$len)
+  )
+');
+		parts.push('
+  (func $$ml_sigmoid (param $$x f64) (result f64)
+    (local $$z f64)
+    (if (f64.ne (local.get $$x) (local.get $$x)) (then (return (f64.const nan))))
+    (if (f64.ge (local.get $$x) (f64.const 0))
+      (then
+        (local.set $$z (call $$exp (f64.neg (local.get $$x))))
+        (return (f64.div (f64.const 1) (f64.add (f64.const 1) (local.get $$z)))))
+      (else
+        (local.set $$z (call $$exp (local.get $$x)))
+        (return (f64.div (local.get $$z) (f64.add (f64.const 1) (local.get $$z))))))
+    (f64.const nan)
+  )
+');
+		parts.push('
   (func $$vec_normalize (param $$src i32) (param $$len i32) (param $$dst i32) (result i32)
     (local $$i i32) (local $$lo f64) (local $$hi f64) (local $$span f64) (local $$x f64)
     (if (i32.le_s (local.get $$len) (i32.const 0)) (then (return (i32.const 0))))

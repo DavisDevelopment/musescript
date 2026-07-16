@@ -13,7 +13,8 @@ import musescript.interp.MuseInterp;
  * Dual execution modes:
  *   streaming  — reset(capacity) + push_bar(o,h,l,c,v,t,i) per bar
  *   preloaded  — host packs OHLCV into memory, configure_tape(...), on_bar(index)
- * Host ABI is side-effects only: get_param / long / short / flat / plot*.
+ * Host ABI is side-effects plus pure math imports:
+ *   get_param / long / short / flat / plot* / exp
  */
 class StrategyWasmBackend {
 	#if js
@@ -111,7 +112,8 @@ class StrategyWasmBackend {
 			},
 			bgcolor: function(cid:Int) {
 				harness.chart.bgcolor(str(cid), bar().index);
-			}
+			},
+			exp: function(x:Float) return Math.exp(x)
 		};
 	}
 

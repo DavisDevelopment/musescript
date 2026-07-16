@@ -1083,11 +1083,38 @@ class TestMlBuiltins extends Test {
 		#end
 	}
 
-	public function testStrategyWasmDynamicVectorsStillFallback() {
-		var prog = new MuseParser().parse('strategy MlDynamicVector {
+	public function testStrategyWasmSoftmaxAndSigmoid() {
+		var prog = new MuseParser().parse('strategy MlSoftmaxSigmoid {
 			onBar {
 				xs = ml_softmax(window(close, 3))
-				score = stat_mean(xs)
+				p0 = xs[0]
+				gate = ml_sigmoid(close - open)
+				when p0 == p0 && gate > 0 && gate < 1: long()
+			}
+		}');
+		var wat = musescript.compile.StrategyWasmBackend.emitWat(prog);
+		Assert.notNull(wat);
+		Assert.isTrue(wat.indexOf("call $vec_softmax") >= 0);
+		Assert.isTrue(wat.indexOf("call $ml_sigmoid") >= 0);
+		Assert.isTrue(wat.indexOf('import "env" "exp"') >= 0);
+		#if (js || python)
+		if (musescript.compile.StrategyWasmBackend.hostReady()) {
+			var feed = BarFeed.synthetic(40, 11);
+			var wasmFn = MuseCompiler.compile(prog, { target: "wasm" });
+			var wasmResult = wasmFn({ feed: feed });
+			TradeBuiltins.resetCrossState();
+			var interpResult = new MuseInterp(new HarnessContext()).runBacktest(prog, BarFeed.synthetic(40, 11));
+			Assert.equals(interpResult.trades, wasmResult.trades);
+			Assert.isTrue(Math.abs(interpResult.finalEquity - wasmResult.finalEquity) < 1e-6);
+		}
+		#end
+	}
+
+	public function testStrategyWasmDynamicVectorsStillFallback() {
+		var prog = new MuseParser().parse('strategy MlMatrixStillFallback {
+			onBar {
+				m = ml_matrix(2, 2, [1, 0, 0, 1])
+				score = ml_matrix_get(m, 0, 0)
 				when score > 0: long()
 			}
 		}');
@@ -1361,12 +1388,12 @@ class TestCompiler extends Test {
 	}
 
 	public function testCompileWasmRejectsRuntimeVectorsAndStrings() {
-		// Runtime softmax still has no Strategy-WASM exp import; assigned windows are supported.
+		// Matrices still have no Strategy-WASM ABI; assigned windows/softmax are supported.
 		var vectors = new MuseParser().parse('{
 			@strategy("vector")
 			@on(bar) {
-				var xs = ml_softmax(window("close", 3));
-				if (xs[0] > 0) long();
+				var m = ml_matrix(2, 2, [1, 2, 3, 4]);
+				if (ml_matrix_get(m, 0, 0) > 0) long();
 			}
 		}');
 		Assert.isNull(musescript.compile.StrategyWasmBackend.emitWat(vectors));
