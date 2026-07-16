@@ -16,6 +16,8 @@ class MuseTypes {
 			case "Series": TSeries;
 			case "Scalar": TScalar;
 			case "Bool": TBool;
+			case "String": TString;
+			case "Vector": TVector;
 			case "Window": TWindow;
 			case "Price": TPrice;
 			case "Void": TVoid;
@@ -35,6 +37,8 @@ class MuseTypes {
 			case TSeries: "Series";
 			case TScalar: "Scalar";
 			case TBool: "Bool";
+			case TString: "String";
+			case TVector: "Vector";
 			case TWindow: "Window";
 			case TPrice: "Price";
 			case TVoid: "Void";

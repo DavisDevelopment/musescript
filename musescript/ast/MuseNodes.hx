@@ -66,6 +66,9 @@ class MuseNodes {
 	public static inline function arrayDecl(values:Array<Expr>):Expr
 		return EArrayDecl(values);
 
+	public static inline function array(e:Expr, index:Expr):Expr
+		return EArray(e, index);
+
 	public static inline function object(fields:Array<{name:String, e:Expr}>):Expr
 		return EObject(fields);
 

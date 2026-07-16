@@ -22,6 +22,7 @@ class StrategyParser {
 	var len:Int;
 	var origin:String;
 	var hoisted:Array<Decl>;
+	var knownSeries:Map<String, Bool>;
 
 	public function new() {}
 
@@ -31,6 +32,7 @@ class StrategyParser {
 		this.i = 0;
 		this.len = source.length;
 		this.hoisted = [];
+		this.knownSeries = new Map();
 		var decls:Array<Decl> = [];
 		var stmts:Array<Stmt> = [];
 		skipWs();
@@ -97,6 +99,7 @@ class StrategyParser {
 				var ibody = parseExpr();
 				match(";");
 				body.push(Assign(iname, ibody));
+				if (kw == "indicator" && isSeriesExpr(ibody)) knownSeries.set(iname, true);
 			} else {
 				body.push(parseStmt());
 			}
@@ -177,7 +180,13 @@ class StrategyParser {
 
 	function parseIndicatorDecl():Decl {
 		expectIdent("indicator");
-		return parseValueDeclAfterKeyword();
+		var d = parseValueDeclAfterKeyword();
+		switch (d) {
+			case IndicatorDecl(name, _, body):
+				if (isSeriesExpr(body)) knownSeries.set(name, true);
+			default:
+		}
+		return d;
 	}
 
 	function parseFeatureDecl():Decl {
@@ -273,7 +282,9 @@ class StrategyParser {
 		var e = parseExpr();
 		match(";");
 		return switch (e) {
-			case EBinop("=", EIdent(n), v): Assign(n, v);
+			case EBinop("=", EIdent(n), v):
+				if (isSeriesExpr(v)) knownSeries.set(n, true);
+				Assign(n, v);
 			case ECall(EIdent("long"), args): Order(Long, args);
 			case ECall(EIdent("short"), args): Order(Short, args);
 			case ECall(EIdent("flat"), args) | ECall(EIdent("close"), args): Order(Flat, args);
@@ -412,7 +423,7 @@ class StrategyParser {
 			} else if (match("[")) {
 				var idx = parseExpr();
 				expect("]");
-				e = MuseNodes.lookback(e, idx);
+				e = shouldLookback(e) ? MuseNodes.lookback(e, idx) : MuseNodes.array(e, idx);
 			} else if (match(".")) {
 				var f = expectIdentValue();
 				e = MuseNodes.field(e, f);
@@ -433,6 +444,15 @@ class StrategyParser {
 		}
 		if (c == '"') return MuseNodes.stringExpr(parseString());
 		if (c == "'") return MuseNodes.stringExpr(parseString());
+		if (c == "[") {
+			i++;
+			var values:Array<Expr> = [];
+			if (!check("]")) {
+				do values.push(parseExpr()) while (match(","));
+			}
+			expect("]");
+			return MuseNodes.arrayDecl(values);
+		}
 		if (isDigit(c) || (c == "." && i + 1 < len && isDigit(src.charAt(i + 1))))
 			return parseNumber();
 		if (c == "{") {
@@ -452,6 +472,34 @@ class StrategyParser {
 	function isBarField(n:String):Bool {
 		return n == "open" || n == "high" || n == "low" || n == "close" || n == "volume"
 			|| n == "time" || n == "bar_index" || n == "hl2" || n == "hlc3" || n == "ohlc4";
+	}
+
+	function shouldLookback(e:Expr):Bool {
+		return switch (e) {
+			case EBarField(_): true;
+			case EIdent(n): knownSeries.exists(n);
+			case ECall(EIdent(n), _): isSeriesCall(n);
+			case EParent(inner): shouldLookback(inner);
+			default: false;
+		};
+	}
+
+	function isSeriesExpr(e:Expr):Bool {
+		return switch (e) {
+			case EBarField(_): true;
+			case EIdent(n): knownSeries.exists(n);
+			case ECall(EIdent(n), _): isSeriesCall(n);
+			case EParent(inner): isSeriesExpr(inner);
+			default: false;
+		};
+	}
+
+	function isSeriesCall(name:String):Bool {
+		return name == "sma" || name == "ema" || name == "rsi" || name == "atr"
+			|| name == "wma" || name == "rma" || name == "stdev"
+			|| name == "highest" || name == "lowest" || name == "mom"
+			|| name == "roc" || name == "change" || name == "pct_change"
+			|| name == "vwap" || name == "hl2" || name == "hlc3" || name == "ohlc4";
 	}
 
 	function parseNumber():Expr {

@@ -189,7 +189,7 @@ class TypeChecker {
 					case CInt(i): MuseTypes.isWindow(i) ? TWindow : TScalar;
 					case CFloat(_): TScalar;
 					case CBool(_): TBool;
-					case CString(_): TUnknown; // may be legacy series key
+					case CString(_): TString;
 					case CNull: TUnknown;
 				}
 			case EIdent(name) | EBarField(name):
@@ -236,12 +236,21 @@ class TypeChecker {
 			case EReturn(ret):
 				ret != null ? infer(ret) : TVoid;
 			case EArray(base, index):
-				infer(base);
-				infer(index);
-				TUnknown;
+				var bt = infer(base);
+				expect(index, TScalar, "array index");
+				if (bt.match(TVector)) TScalar;
+				else if (bt.match(TUnknown)) TUnknown;
+				else {
+					err('array index base must be Vector, got ${MuseTypes.toString(bt)}');
+					TUnknown;
+				}
 			case EArrayDecl(values):
-				for (v in values) infer(v);
-				TUnknown;
+				for (v in values) {
+					var vt = infer(v);
+					if (!MuseTypes.canAssign(vt, TScalar))
+						err('Vector element must be Scalar, got ${MuseTypes.toString(vt)}');
+				}
+				TVector;
 			case EObject(fields):
 				for (f in fields) infer(f.e);
 				TUnknown;
@@ -288,7 +297,11 @@ class TypeChecker {
 			case ">" | "<" | ">=" | "<=" | "==" | "!=":
 				TBool;
 			case "+" | "-" | "*" | "/" | "%":
-				if (lt.match(TSeries) || rt.match(TSeries)) TSeries;
+				if (op == "+" && lt.match(TString) && rt.match(TString)) TString;
+				else if (lt.match(TString) || rt.match(TString)) {
+					err('$op cannot mix String and numeric values; use str_concat');
+					TUnknown;
+				} else if (lt.match(TSeries) || rt.match(TSeries)) TSeries;
 				else TScalar;
 			case "|>":
 				// pipe: left |> right  →  call(right, [left]) when right is ident/call
@@ -328,10 +341,11 @@ class TypeChecker {
 		var minA = sig.minArgs != null ? sig.minArgs : sig.args.length;
 		if (args.length < minA)
 			err('$name expects at least $minA arg(s), got ${args.length}');
-		if (args.length > sig.args.length)
+		if (args.length > sig.args.length && sig.varArgs != true)
 			err('$name expects at most ${sig.args.length} arg(s), got ${args.length}');
 		for (i in 0...args.length) {
-			var want = sig.args[i];
+			if (sig.args.length == 0) break;
+			var want = sig.args[i < sig.args.length ? i : sig.args.length - 1];
 			var got = infer(args[i]);
 			// Legacy: string literal series key is accepted as Series
 			if (want.match(TSeries) && isStringLit(args[i])) continue;

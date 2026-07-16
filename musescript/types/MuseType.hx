@@ -7,6 +7,8 @@ enum MuseType {
 	TSeries;
 	TScalar;
 	TBool;
+	TString;
+	TVector;
 	TWindow;
 	TPrice;
 	TVoid;
