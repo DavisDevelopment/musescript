@@ -569,9 +569,16 @@ class StrategyParser {
 		var start = i;
 		var c = src.charAt(i);
 		if (c == "(") {
+			var arrowArgs = tryParseArrowParams();
+			if (arrowArgs != null) {
+				expect("=>");
+				return stampExpr(start, MuseNodes.efunction(arrowArgs, parseLambdaBody(), Normal, null));
+			}
 			i++;
 			var e = parseExpr();
 			expect(")");
+			if (check("=>"))
+				throw err("arrow parameters must be bare identifiers");
 			return stampExpr(start, MuseNodes.parent(e));
 		}
 		if (c == '"') return stampExpr(start, MuseNodes.stringExpr(parseString()));
@@ -608,8 +615,13 @@ class StrategyParser {
 		if (id == "true") return stampExpr(start, MuseNodes.boolExpr(true));
 		if (id == "false") return stampExpr(start, MuseNodes.boolExpr(false));
 		if (id == "null") return stampExpr(start, MuseNodes.nullExpr());
-		if (id == "function") return stampExpr(start, parseLambda());
+		if (id == "function") return stampExpr(start, parseFunctionLambda());
 		if (isBarField(id)) return stampExpr(start, MuseNodes.barField(id));
+		// Bare-ident arrow: `x => body`
+		if (check("=>")) {
+			expect("=>");
+			return stampExpr(start, MuseNodes.efunction([id], parseLambdaBody(), Normal, null));
+		}
 		return stampExpr(start, MuseNodes.ident(id));
 	}
 
@@ -636,26 +648,70 @@ class StrategyParser {
 		return isObj;
 	}
 
-	/** Anonymous `function(a, b) return expr` / `function(a) { ... }` in expression position. */
-	function parseLambda():Expr {
+	/**
+	 * Anonymous `function(a, b) …` in expression position.
+	 * Fat-arrow forms (`x => …`, `(a, b) => …`) are handled in `parsePrimary`.
+	 */
+	function parseFunctionLambda():Expr {
 		expect("(");
 		var args:Array<String> = [];
 		if (!check(")")) {
 			do args.push(expectIdentValue()) while (match(","));
 		}
 		expect(")");
+		return MuseNodes.efunction(args, parseLambdaBody(), Normal, null);
+	}
+
+	/** Shared body for `function(...)` and `=>` lambdas. */
+	function parseLambdaBody():Expr {
 		skipWs();
-		var body:Expr;
 		if (check("{")) {
 			expect("{");
-			body = MuseNodes.block([for (s in parseStmtListUntil("}")) stmtAsExpr(s)]);
+			var body = MuseNodes.block([for (s in parseStmtListUntil("}")) stmtAsExpr(s)]);
 			expect("}");
-		} else if (matchIdent("return")) {
-			body = MuseNodes.ereturn(parseExpr());
-		} else {
-			body = parseExpr();
+			return body;
 		}
-		return MuseNodes.efunction(args, body, Normal, null);
+		if (matchIdent("return")) return MuseNodes.ereturn(parseExpr());
+		return parseExpr();
+	}
+
+	/**
+	 * Lookahead: `( )` / `(a)` / `(a, b)` followed by `=>`.
+	 * On success consumes through `)` and returns arg names; otherwise restores `i`.
+	 * Non-ident params (e.g. `(a+1) =>`) leave the stream unrestored only when
+	 * the opener looked like a param list then failed — those throw.
+	 */
+	function tryParseArrowParams():Null<Array<String>> {
+		var save = i;
+		skipWs();
+		if (i >= len || src.charAt(i) != "(") return null;
+		i++; // (
+		skipWs();
+		var args:Array<String> = [];
+		if (!check(")")) {
+			while (true) {
+				skipWs();
+				var id = readIdent();
+				if (id == null) {
+					i = save;
+					return null;
+				}
+				args.push(id);
+				skipWs();
+				if (match(",")) continue;
+				break;
+			}
+		}
+		if (!match(")")) {
+			i = save;
+			return null;
+		}
+		skipWs();
+		if (!check("=>")) {
+			i = save;
+			return null;
+		}
+		return args;
 	}
 
 	function shouldLookback(e:Expr):Bool {

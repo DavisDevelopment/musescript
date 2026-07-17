@@ -18,6 +18,7 @@ import musescript.builtins.DictBuiltins;
 import musescript.builtins.SetBuiltins;
 import musescript.runtime.MuseIters;
 import musescript.runtime.IterDriver;
+import musescript.runtime.Callables;
 
 /**
  * Compile MuseProgram to a runnable strategy.
@@ -912,14 +913,14 @@ class JsBackend {
 			case "set_difference": SetBuiltins.setDifference(args[0], args[1]);
 			case "set_to_vector": SetBuiltins.setToVector(args[0]);
 			// iter helpers — same MuseIters.from + IterDriver path as TradeBuiltins.install
-			case "map": IterDriver.map(MuseIters.from(args[0]), args[1]);
-			case "flatMap": IterDriver.flatMap(MuseIters.from(args[0]), args[1]);
-			case "filter": IterDriver.filter(MuseIters.from(args[0]), args[1]);
+			case "map": IterDriver.map(MuseIters.from(args[0]), Callables.asHost1(args[1], harness));
+			case "flatMap": IterDriver.flatMap(MuseIters.from(args[0]), Callables.asHost1(args[1], harness));
+			case "filter": IterDriver.filter(MuseIters.from(args[0]), Callables.asHostPred(args[1], harness));
 			case "take": IterDriver.take(MuseIters.from(args[0]), Std.int(args[1]));
 			case "drop": IterDriver.drop(MuseIters.from(args[0]), Std.int(args[1]));
-			case "takeWhile": IterDriver.takeWhile(MuseIters.from(args[0]), args[1]);
-			case "scan": IterDriver.scan(MuseIters.from(args[0]), args[1], args[2]);
-			case "reduce": IterDriver.reduce(MuseIters.from(args[0]), args[1], args[2]);
+			case "takeWhile": IterDriver.takeWhile(MuseIters.from(args[0]), Callables.asHostPred(args[1], harness));
+			case "scan": IterDriver.scan(MuseIters.from(args[0]), args[1], Callables.asHost2(args[2], harness));
+			case "reduce": IterDriver.reduce(MuseIters.from(args[0]), args[1], Callables.asHost2(args[2], harness));
 			case "range":
 				args.length < 2 || args[1] == null
 					? IterDriver.range(0, Std.int(args[0]))
@@ -927,7 +928,8 @@ class JsBackend {
 			case "enumerate": IterDriver.enumerate(MuseIters.from(args[0]));
 			case "merge": @:privateAccess TradeBuiltins.merge(args[0], args[1]);
 			case "zip": @:privateAccess TradeBuiltins.zip(args[0], args[1]);
-			case "zipWith": @:privateAccess TradeBuiltins.zipWith(args[0], args[1], args[2]);
+			case "zipWith":
+				@:privateAccess TradeBuiltins.zipWith(args[0], args[1], Callables.asHost2(args[2], harness));
 			case "log":
 				var parts:Array<String> = [];
 				for (a in args) if (a != null) parts.push(Std.string(a));
@@ -1156,9 +1158,9 @@ class JsBackend {
 				var kept = musescript.builtins.BagBuiltins.bagMask(curM, args[0], null);
 				harness.portfolio.applyBag(kept.weights, harness.panelPrices, biM, true);
 				null;
-			case "any": IterDriver.any(MuseIters.from(args[0]), args[1]);
-			case "all": IterDriver.all(MuseIters.from(args[0]), args[1]);
-			case "find": IterDriver.find(MuseIters.from(args[0]), args[1]);
+			case "any": IterDriver.any(MuseIters.from(args[0]), Callables.asHostPred(args[1], harness));
+			case "all": IterDriver.all(MuseIters.from(args[0]), Callables.asHostPred(args[1], harness));
+			case "find": IterDriver.find(MuseIters.from(args[0]), Callables.asHost1(args[1], harness));
 			case "sum": IterDriver.sum(MuseIters.from(args[0]));
 			case "count": IterDriver.count(MuseIters.from(args[0]));
 			case "min": IterDriver.min(MuseIters.from(args[0]));

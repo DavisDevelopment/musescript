@@ -3,6 +3,7 @@ package musescript.builtins;
 import musescript.harness.HarnessContext;
 import musescript.runtime.MuseIters;
 import musescript.runtime.IterDriver;
+import musescript.runtime.Callables;
 import musescript.runtime.MuseIter;
 import musescript.runtime.IterResult;
 import musescript.runtime.MergeIter;
@@ -167,23 +168,23 @@ class TradeBuiltins {
 		vars.set("sci_diff", StatsBuiltins.difference);
 		vars.set("sci_normalize", StatsBuiltins.normalize);
 
-		vars.set("map", function(xs:Dynamic, f:Dynamic->Dynamic) {
-			return IterDriver.map(MuseIters.from(xs), f);
+		vars.set("map", function(xs:Dynamic, f:Dynamic) {
+			return IterDriver.map(MuseIters.from(xs), Callables.asHost1(f, harness));
 		});
-		vars.set("flatMap", function(xs:Dynamic, f:Dynamic->Dynamic) {
-			return IterDriver.flatMap(MuseIters.from(xs), f);
+		vars.set("flatMap", function(xs:Dynamic, f:Dynamic) {
+			return IterDriver.flatMap(MuseIters.from(xs), Callables.asHost1(f, harness));
 		});
-		vars.set("filter", function(xs:Dynamic, p:Dynamic->Bool) {
-			return IterDriver.filter(MuseIters.from(xs), p);
+		vars.set("filter", function(xs:Dynamic, p:Dynamic) {
+			return IterDriver.filter(MuseIters.from(xs), Callables.asHostPred(p, harness));
 		});
-		vars.set("any", function(xs:Dynamic, p:Dynamic->Bool) {
-			return IterDriver.any(MuseIters.from(xs), p);
+		vars.set("any", function(xs:Dynamic, p:Dynamic) {
+			return IterDriver.any(MuseIters.from(xs), Callables.asHostPred(p, harness));
 		});
-		vars.set("all", function(xs:Dynamic, p:Dynamic->Bool) {
-			return IterDriver.all(MuseIters.from(xs), p);
+		vars.set("all", function(xs:Dynamic, p:Dynamic) {
+			return IterDriver.all(MuseIters.from(xs), Callables.asHostPred(p, harness));
 		});
-		vars.set("find", function(xs:Dynamic, p:Dynamic->Bool) {
-			return IterDriver.find(MuseIters.from(xs), p);
+		vars.set("find", function(xs:Dynamic, p:Dynamic) {
+			return IterDriver.find(MuseIters.from(xs), Callables.asHost1(p, harness));
 		});
 		vars.set("sum", function(xs:Dynamic) {
 			return IterDriver.sum(MuseIters.from(xs));
@@ -206,14 +207,14 @@ class TradeBuiltins {
 		vars.set("drop", function(xs:Dynamic, n:Int) {
 			return IterDriver.drop(MuseIters.from(xs), n);
 		});
-		vars.set("takeWhile", function(xs:Dynamic, p:Dynamic->Bool) {
-			return IterDriver.takeWhile(MuseIters.from(xs), p);
+		vars.set("takeWhile", function(xs:Dynamic, p:Dynamic) {
+			return IterDriver.takeWhile(MuseIters.from(xs), Callables.asHostPred(p, harness));
 		});
-		vars.set("scan", function(xs:Dynamic, init:Dynamic, f:Dynamic->Dynamic->Dynamic) {
-			return IterDriver.scan(MuseIters.from(xs), init, f);
+		vars.set("scan", function(xs:Dynamic, init:Dynamic, f:Dynamic) {
+			return IterDriver.scan(MuseIters.from(xs), init, Callables.asHost2(f, harness));
 		});
-		vars.set("reduce", function(xs:Dynamic, init:Dynamic, f:Dynamic->Dynamic->Dynamic) {
-			return IterDriver.reduce(MuseIters.from(xs), init, f);
+		vars.set("reduce", function(xs:Dynamic, init:Dynamic, f:Dynamic) {
+			return IterDriver.reduce(MuseIters.from(xs), init, Callables.asHost2(f, harness));
 		});
 		vars.set("range", function(a:Int, ?b:Int) {
 			return b == null ? IterDriver.range(0, a) : IterDriver.range(a, b);
@@ -223,7 +224,9 @@ class TradeBuiltins {
 		});
 		vars.set("merge", merge);
 		vars.set("zip", zip);
-		vars.set("zipWith", zipWith);
+		vars.set("zipWith", function(a:Dynamic, b:Dynamic, f:Dynamic) {
+			return zipWith(a, b, Callables.asHost2(f, harness));
+		});
 
 		vars.set("params", {
 			register: function(name:String, value:Dynamic, ?min:Float, ?max:Float, ?step:Float, ?tune:String) {

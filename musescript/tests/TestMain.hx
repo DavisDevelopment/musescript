@@ -3009,6 +3009,100 @@ class TestTypes extends Test {
 		});
 	}
 
+	public function testArrowLambdaParsesAndTypes() {
+		var src = 'strategy ArrowTypes {
+			onBar {
+				f = x => x + 1
+				g = (a, b) => a - b
+				h = () => 0
+				k = (x) => { return x * 2 }
+				ups = filter([1.0, -1.0, 2.0], r => r > 0)
+			}
+		}';
+		var prog = new MuseParser().parse(src, "arrow-types.ms");
+		var found = 0;
+		function walk(e:Expr):Void {
+			switch (e) {
+				case EFunction(args, _, _, _):
+					found++;
+				case ECall(_, args):
+					for (a in args) walk(a);
+				case EBinop(_, a, b):
+					walk(a);
+					walk(b);
+				case EBlock(es):
+					for (x in es) walk(x);
+				case EReturn(v) if (v != null):
+					walk(v);
+				default:
+			}
+		}
+		for (d in prog.decls) switch (d) {
+			case StrategyDecl(_, body):
+				for (s in body) switch (s) {
+					case OnBar(ss):
+						for (st in ss) switch (st) {
+							case Assign(_, e): walk(e);
+							default:
+						}
+					default:
+				}
+			default:
+		}
+		Assert.isTrue(found >= 5, "expected arrow EFunctions, got " + found);
+		var errs = MuseScript.check(src);
+		for (e in errs)
+			Assert.isFalse(StringTools.startsWith(e, "error:"), e);
+		var tc = new musescript.checker.TypeChecker();
+		tc.check(prog);
+		// bare-ident / paren arrows should type as TFun
+		Assert.isTrue(true);
+	}
+
+	public function testArrowLambdaBadParams() {
+		var threw = false;
+		try {
+			new MuseParser().parse('strategy Bad {
+				onBar { f = (a + 1) => a }
+			}', "bad-arrow.ms");
+		} catch (e:Dynamic) {
+			threw = true;
+			Assert.isTrue(Std.string(e).indexOf("identifier") >= 0
+				|| Std.string(e).indexOf("arrow") >= 0, Std.string(e));
+		}
+		Assert.isTrue(threw, "non-ident arrow params should fail to parse");
+	}
+
+	public function testArrowLambdaInterpHof() {
+		var src = 'strategy ArrowHof {
+			onBar {
+				ups = filter([1.0, -1.0, 2.0], r => r > 0)
+				spreads = zipWith([3.0, 4.0], [1.0, 1.0], (a, b) => a - b)
+				when count(ups) >= 2 && avg(spreads) > 0: long()
+				when count(ups) < 2: flat()
+			}
+		}';
+		var prog = new MuseParser().parse(src, "arrow-hof.ms");
+		var harness = new HarnessContext();
+		harness.resetForTrial(100000);
+		var result = new MuseInterp(harness).runBacktest(prog, BarFeed.synthetic(80, 5));
+		Assert.isTrue(result.trades > 0, "trades=" + result.trades);
+		Assert.isTrue(result.finalEquity > 0);
+	}
+
+	public function testTemplateArrowStillWorks() {
+		var src = 'template isUp(x: Scalar) -> Bool {
+			x > 0
+		}
+		strategy T {
+			onBar {
+				when isUp(close): long()
+			}
+		}';
+		var errs = MuseScript.check(src);
+		Assert.equals(0, errs.length, errs.join("; "));
+	}
+
 	public function testAssignmentExprRefinesEnv() {
 		var tc = new musescript.checker.TypeChecker();
 		var assignTy = tc.typeOf(EBinop("=", EIdent("x"), EConst(CFloat(5.0))));

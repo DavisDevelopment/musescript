@@ -176,7 +176,13 @@ from Haxe/JS until then).
 
 ### Vectors, recent windows, and strings
 
-The typed surface distinguishes numeric `Vector` values from relative Series lookback:
+The typed surface distinguishes numeric `Vector` values from relative Series lookback.
+Lambdas use JS-style fat arrows (or `function(...)` — same AST):
+
+```muse
+ups = filter(rets, r => r > 0)
+spreads = zipWith(fast, slow, (a, b) => a - b)
+```
 
 ```muse
 strategy WindowExample {

@@ -36,12 +36,17 @@ type-hardening work, plus optimize/tune and primitive ML surfaces.
 | `28_two_layer_toy_nn.ms` | tiny MLP | stacked `ml_dot` + `ml_sigmoid` |
 | `29_dot_mse_confidence.ms` | alignment gate | `ml_dot` + `ml_mse` |
 | `30_tune_sigmoid_gate.ms` | tune × NN gate | grid-search over sigmoid threshold |
+| `31_mom_universe_scan.ms` | panel momentum scan | `scan_top` / `rebalance_equal` |
+| `32_bag_pair_sleeve.ms` | bag + pair sleeve | `bag_equal` / `bag_pair` |
+| `33_computed_bag.ms` | computed bag sleeve | `bag_rank_mom` rematerialize |
+| `34_arrow_lambdas.ms` | HOF arrows | `r => …` / `(a,b) => …` |
 
 Kinds `01`–`20` use the strategy surface. `21`–`22` and `23`/`30` use hscript
 `@strategy` blocks to exercise that parse path. The typed surface itself now
-also supports inline lambdas (`function(a, b) return a - b`), `{ field: … }`
-object literals, `return` statements, and `param x = v { min, max, step, tune }`
-grids — the hscript block is a choice, not a workaround.
+supports fat-arrow lambdas (`r => r > 0`, `(a, b) => a - b`), the longer
+`function(a, b) return a - b` form, `{ field: … }` object literals, `return`
+statements, and `param x = v { min, max, step, tune }` grids — the hscript
+block is a choice, not a workaround.
 `24` keeps the typed `pipeline` + `strategy` surface. Example 10 runs a
 `PlanRunner` optimize pass whenever a macro/pipeline is present.
 
