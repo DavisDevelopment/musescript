@@ -105,6 +105,107 @@ class MlBuiltins {
 		return m.data[row * m.cols + col];
 	}
 
+	/** Row-major transpose. Invalid input returns an empty matrix. */
+	public static function matrixTranspose(value:Dynamic):Dynamic {
+		var m = readMatrix(value);
+		if (m == null) return {rows: 0, cols: 0, data: []};
+		var out:Array<Float> = [];
+		for (c in 0...m.cols)
+			for (r in 0...m.rows)
+				out.push(m.data[r * m.cols + c]);
+		return {rows: m.cols, cols: m.rows, data: out};
+	}
+
+	/**
+	 * Determinant via partial-pivot Gaussian elimination.
+	 * Non-square / invalid / oversized → NaN.
+	 */
+	public static function matrixDeterminant(value:Dynamic):Float {
+		var m = readMatrix(value);
+		if (m == null || m.rows != m.cols || m.rows == 0 || m.rows > MAX_FIT_FEATURES)
+			return Math.NaN;
+		var n = m.rows;
+		var a:Array<Array<Float>> = [];
+		for (r in 0...n) {
+			var row:Array<Float> = [];
+			for (c in 0...n) row.push(m.data[r * n + c]);
+			a.push(row);
+		}
+		var det = 1.0;
+		var scale = 0.0;
+		for (row in a)
+			for (v in row)
+				if (Math.abs(v) > scale) scale = Math.abs(v);
+		var tolerance = Math.max(1.0, scale) * 1e-12;
+		for (col in 0...n) {
+			var pivot = col;
+			for (row in col + 1...n)
+				if (Math.abs(a[row][col]) > Math.abs(a[pivot][col])) pivot = row;
+			if (Math.abs(a[pivot][col]) <= tolerance) return 0.0;
+			if (pivot != col) {
+				var swap = a[col];
+				a[col] = a[pivot];
+				a[pivot] = swap;
+				det = -det;
+			}
+			det *= a[col][col];
+			for (row in col + 1...n) {
+				var factor = a[row][col] / a[col][col];
+				for (j in col...n) a[row][j] -= factor * a[col][j];
+			}
+		}
+		return Math.isFinite(det) ? det : Math.NaN;
+	}
+
+	/**
+	 * Inverse via Gauss-Jordan on [A|I]. Singular / non-square / invalid → empty matrix.
+	 */
+	public static function matrixInverse(value:Dynamic):Dynamic {
+		var m = readMatrix(value);
+		if (m == null || m.rows != m.cols || m.rows == 0 || m.rows > MAX_FIT_FEATURES)
+			return {rows: 0, cols: 0, data: []};
+		var n = m.rows;
+		var a:Array<Array<Float>> = [];
+		for (r in 0...n) {
+			var row:Array<Float> = [];
+			for (c in 0...n) row.push(m.data[r * n + c]);
+			for (c in 0...n) row.push(r == c ? 1.0 : 0.0);
+			a.push(row);
+		}
+		var scale = 0.0;
+		for (row in a)
+			for (i in 0...n)
+				if (Math.abs(row[i]) > scale) scale = Math.abs(row[i]);
+		var tolerance = Math.max(1.0, scale) * 1e-12;
+		for (col in 0...n) {
+			var pivot = col;
+			for (row in col + 1...n)
+				if (Math.abs(a[row][col]) > Math.abs(a[pivot][col])) pivot = row;
+			if (Math.abs(a[pivot][col]) <= tolerance) return {rows: 0, cols: 0, data: []};
+			if (pivot != col) {
+				var swap = a[col];
+				a[col] = a[pivot];
+				a[pivot] = swap;
+			}
+			var divisor = a[col][col];
+			for (j in 0...(2 * n)) a[col][j] /= divisor;
+			for (row in 0...n) {
+				if (row == col) continue;
+				var factor = a[row][col];
+				if (factor == 0) continue;
+				for (j in 0...(2 * n)) a[row][j] -= factor * a[col][j];
+			}
+		}
+		var out:Array<Float> = [];
+		for (r in 0...n)
+			for (c in 0...n) {
+				var v = a[r][n + c];
+				if (!Math.isFinite(v)) return {rows: 0, cols: 0, data: []};
+				out.push(v);
+			}
+		return {rows: n, cols: n, data: out};
+	}
+
 	/**
 	 * Fit ridge regression weights from packed row-major features.
 	 *

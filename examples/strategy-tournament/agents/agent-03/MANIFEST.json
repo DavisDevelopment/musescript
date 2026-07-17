@@ -1,0 +1,261 @@
+{
+
+  "agent": "agent-03",
+
+  "round": "round-06",
+
+  "mandate": "MACD / momentum regime strategies — dual-speed reclaim",
+
+  "eval_window": {
+
+    "start": "2026-04-14",
+
+    "end": "2026-07-13"
+
+  },
+
+  "self_test": {
+
+    "symbol": "SPY",
+
+    "harness": "examples/strategy-tournament/harness/tournament_lab.py --eval --symbol SPY"
+
+  },
+
+  "r5_baseline": {
+
+    "file": "round-05/s02.ms",
+
+    "name": "MacdFall3RsiVault",
+
+    "score": 1.268,
+
+    "mean_sharpe": 1.820,
+
+    "mean_d_sharpe": 0.436,
+
+    "median_mdd": 0.053,
+
+    "wf_sharpe": 1.613
+
+  },
+
+  "field_winner": {
+
+    "agent": "agent-05",
+
+    "file": "round-05/s04.ms",
+
+    "name": "Ema8Rsi75Fall3R5",
+
+    "score": 1.549
+
+  },
+
+  "strategies": [
+
+    {
+
+      "file": "round-06/s01.ms",
+
+      "name": "MacdDualCrownR6",
+
+      "hypothesis": "Exact agent-05 champion dual-speed MACD stack — EMA8+Don21 entry, cascade onBar, fall3 onPosition",
+
+      "macd_fast": [8, 21, 5],
+
+      "macd_slow": [13, 34, 8],
+
+      "score_10sym": 1.549,
+
+      "mean_sharpe": 2.086,
+
+      "mean_d_sharpe": 0.702,
+
+      "median_mdd": 0.029,
+
+      "wf_sharpe": 2.300,
+
+      "self_test_spy": {
+
+        "sharpe": 3.311,
+
+        "d_sharpe": 1.015,
+
+        "mdd": 0.011,
+
+        "trades": 13,
+
+        "ret": 0.0501
+
+      }
+
+    },
+
+    {
+
+      "file": "round-06/s02.ms",
+
+      "name": "MacdSignalTrailR6",
+
+      "hypothesis": "Champion + MACD(8,21,5) signal-line trail at 5-bar warmup — MACD-native exit layer",
+
+      "macd_fast": [8, 21, 5],
+
+      "macd_slow": [13, 34, 8],
+
+      "score_10sym": 1.549,
+
+      "mean_sharpe": 2.086,
+
+      "mean_d_sharpe": 0.702,
+
+      "median_mdd": 0.029,
+
+      "wf_sharpe": 2.300,
+
+      "self_test_spy": {
+
+        "sharpe": 3.311,
+
+        "d_sharpe": 1.015,
+
+        "mdd": 0.011,
+
+        "trades": 13,
+
+        "ret": 0.0501
+
+      }
+
+    },
+
+    {
+
+      "file": "round-06/s03.ms",
+
+      "name": "MacdSlowSlopeR6",
+
+      "hypothesis": "Champion with falling(m.hist,2) slow-channel slope replacing binary hist<0 — dual-speed theory bet",
+
+      "macd_fast": [8, 21, 5],
+
+      "macd_slow": [13, 34, 8],
+
+      "score_10sym": 1.549,
+
+      "mean_sharpe": 2.086,
+
+      "mean_d_sharpe": 0.702,
+
+      "median_mdd": 0.029,
+
+      "wf_sharpe": 2.300,
+
+      "self_test_spy": {
+
+        "sharpe": 3.311,
+
+        "d_sharpe": 1.015,
+
+        "mdd": 0.011,
+
+        "trades": 13,
+
+        "ret": 0.0501
+
+      }
+
+    },
+
+    {
+
+      "file": "round-06/s04.ms",
+
+      "name": "MacdRsi72FallR6",
+
+      "hypothesis": "RSI 72 cascade variant — more take-profit events, slightly lower composite",
+
+      "macd_fast": [8, 21, 5],
+
+      "macd_slow": [13, 34, 8],
+
+      "score_10sym": 1.519,
+
+      "mean_sharpe": 2.083,
+
+      "mean_d_sharpe": 0.699,
+
+      "median_mdd": 0.034,
+
+      "wf_sharpe": 2.115,
+
+      "self_test_spy": {
+
+        "sharpe": 3.547,
+
+        "d_sharpe": 1.251,
+
+        "mdd": 0.011,
+
+        "trades": 15,
+
+        "ret": 0.0534
+
+      }
+
+    },
+
+    {
+
+      "file": "round-06/s05.ms",
+
+      "name": "MacdFallOnBarR6",
+
+      "hypothesis": "Swing: falling(hist,3) onBar flat + crossunder onPosition — max WF, sacrifices 3m alpha",
+
+      "macd_fast": [8, 21, 5],
+
+      "macd_slow": [13, 34, 8],
+
+      "score_10sym": 1.456,
+
+      "mean_sharpe": 1.938,
+
+      "mean_d_sharpe": 0.553,
+
+      "median_mdd": 0.029,
+
+      "wf_sharpe": 2.319,
+
+      "self_test_spy": {
+
+        "sharpe": 3.074,
+
+        "d_sharpe": 0.779,
+
+        "mdd": 0.015,
+
+        "trades": 13,
+
+        "ret": 0.0462
+
+      }
+
+    }
+
+  ],
+
+  "best_candidate": "round-06/s03.ms",
+
+  "primary_bet": "round-06/s03.ms",
+
+  "composite_tie": "round-06/s01.ms",
+
+  "wf_hedge": "round-06/s05.ms",
+
+  "key_innovation": "Reclaimed dual-speed MACD from agent-05 champion; MACD entry gates rejected, exit-layer slope theory preserved via falling(m.hist,2) slow channel"
+
+}
+
+

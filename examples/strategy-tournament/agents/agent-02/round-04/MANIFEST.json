@@ -1,0 +1,91 @@
+{
+  "agent": "agent-02",
+  "round": "round-04",
+  "mandate": "EMA crossover systems with trend filters and onPosition risk shells",
+  "eval_window": "2026-04-14..2026-07-13",
+  "r3_plateau_beaten": true,
+  "r3_best_score": 0.964,
+  "r4_best_score": 1.038,
+  "r4_breakthrough": "EMA 8/13 gate (not 8/34) preserves Donchian winner trades while lifting WF Sharpe 1.462 → 1.847",
+  "strategies": [
+    {
+      "file": "s01.ms",
+      "name": "Ema813DonchVaultR4",
+      "hypothesis": "Minimum viable EMA trend filter: e8 > e13 + Donchian 21/13 vault. Matches winner trade set, beats 1.002 plateau via WF lift.",
+      "ema_pair": "8/13 (alignment gate, not crossover event)",
+      "trend_filter": "e8 > e13",
+      "donchian_steal": "21-high entry, 13-low exit",
+      "risk_shell": "time_stop_13 + equity_stop_5pct",
+      "score": 1.038,
+      "mean_sharpe": 1.420,
+      "mean_d_sharpe": 0.035,
+      "median_mdd": 0.081,
+      "wf_mean_sharpe": 1.847
+    },
+    {
+      "file": "s02.ms",
+      "name": "Ema813MacdExitR4",
+      "hypothesis": "EMA 8/13 entry + MACD histogram exit-only (agent-03 pattern). Best vs-BH in EMA family (+0.075 d-Sharpe).",
+      "ema_pair": "8/13",
+      "trend_filter": "e8 > e13",
+      "donchian_steal": "21-high entry, 13-low + MACD hist exit",
+      "risk_shell": "time_stop_13 + equity_stop_5pct",
+      "score": 0.982,
+      "mean_sharpe": 1.459,
+      "mean_d_sharpe": 0.075,
+      "median_mdd": 0.084,
+      "wf_mean_sharpe": 1.310
+    },
+    {
+      "file": "s03.ms",
+      "name": "Ema821DonchHardR4",
+      "hypothesis": "Medium-speed EMA 8/21 gate — slightly fewer entries than s01, strong WF (1.801).",
+      "ema_pair": "8/21",
+      "trend_filter": "e8 > e21",
+      "donchian_steal": "21-high entry, 13-low exit",
+      "risk_shell": "time_stop_13 + equity_stop_5pct",
+      "score": 1.015,
+      "mean_sharpe": 1.395,
+      "mean_d_sharpe": 0.011,
+      "median_mdd": 0.081,
+      "wf_mean_sharpe": 1.801
+    },
+    {
+      "file": "s04.ms",
+      "name": "Ema834Break13HardR4",
+      "hypothesis": "R3 anchor (0.964) carried forward unchanged — conservative 8/34 gate for comparison.",
+      "ema_pair": "8/34",
+      "trend_filter": "e8 > e34",
+      "donchian_steal": "21-high entry, 13-low exit (no EMA cross exit)",
+      "risk_shell": "time_stop_13 + equity_stop_5pct",
+      "score": 0.964,
+      "mean_sharpe": 1.395,
+      "mean_d_sharpe": 0.011,
+      "median_mdd": 0.081,
+      "wf_mean_sharpe": 1.462
+    },
+    {
+      "file": "s05.ms",
+      "name": "Cross813Donch21R4",
+      "hypothesis": "Pure crossover(8,13) event + Donchian confirm — tests discrete cross timing vs continuous e8>e13 gate.",
+      "ema_pair": "8/13 crossover event",
+      "trend_filter": "crossover(8,13) on entry bar",
+      "donchian_steal": "21-high confirm, 13-low exit",
+      "risk_shell": "time_stop_13 + equity_stop_5pct",
+      "score": 0.763,
+      "mean_sharpe": 1.211,
+      "mean_d_sharpe": -0.173,
+      "median_mdd": 0.078,
+      "wf_mean_sharpe": 0.914
+    }
+  ],
+  "best_all_sym": {
+    "file": "s01.ms",
+    "score": 1.038,
+    "mean_sharpe": 1.420,
+    "mean_d_sharpe": 0.035,
+    "median_mdd": 0.081,
+    "wf_mean_sharpe": 1.847,
+    "r3_delta_score": "+0.074 vs R3 cluster (0.964)"
+  }
+}

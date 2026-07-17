@@ -4,8 +4,13 @@ package musescript.harness;
  * Load OHLCV bars from a CSV file.
  * Accepts headered files with columns containing open/high/low/close/volume
  * (case-insensitive). Optional time/date and symbol columns are ignored for pricing.
+ * Extra columns are captured in auxiliaryColumns (indexed by bar index).
  */
 class OhlcvCsv {
+	/** Store auxiliary (non-OHLCV) columns from the last parse, keyed by bar index. */
+	public static var auxiliaryColumns:Map<Int, Map<String, Float>> = new Map();
+	public static var auxiliaryNames:Array<String> = [];
+
 	public static function load(path:String):Array<Bar> {
 		var text = readFile(path);
 		if (text == null || StringTools.trim(text) == "")
@@ -25,6 +30,25 @@ class OhlcvCsv {
 		var start = 0;
 		var col = detectColumns(lines[0]);
 		if (col.hasHeader) start = 1;
+
+		// Clear previous auxiliary column state
+		auxiliaryColumns = new Map();
+		auxiliaryNames = [];
+
+		// Resolve auxiliary (non-OHLCV/time/symbol) header columns ONCE, not per row.
+		var auxCols:Array<{i:Int, name:String}> = [];
+		if (col.hasHeader) {
+			var headerParts = splitCsv(lines[0]);
+			for (i in 0...headerParts.length) {
+				if (i == col.open || i == col.high || i == col.low || i == col.close
+					|| i == col.volume || i == col.time) continue;
+				var hdr = StringTools.trim(headerParts[i]).toLowerCase();
+				if (hdr == "" || hdr == "symbol" || hdr == "date") continue;
+				auxCols.push({ i: i, name: hdr });
+				if (auxiliaryNames.indexOf(hdr) < 0) auxiliaryNames.push(hdr);
+			}
+		}
+
 		var bars:Array<Bar> = [];
 		var idx = 0;
 		for (li in start...lines.length) {
@@ -39,7 +63,20 @@ class OhlcvCsv {
 			var v = col.volume >= 0 && col.volume < parts.length ? parseFloat(parts[col.volume]) : 0;
 			var t = col.time >= 0 && col.time < parts.length ? parseTime(parts[col.time], idx) : (idx:Float);
 			if (!Math.isFinite(o) || !Math.isFinite(h) || !Math.isFinite(l) || !Math.isFinite(c)) continue;
-			bars.push({ open: o, high: h, low: l, close: c, volume: v, time: t, index: idx });
+
+			var auxData:Map<String, Float> = null;
+			for (a in auxCols) {
+				if (a.i >= parts.length) continue;
+				if (auxData == null) auxData = new Map();
+				auxData.set(a.name, parseFloat(parts[a.i]));
+			}
+
+			var bar:Bar = { open: o, high: h, low: l, close: c, volume: v, time: t, index: idx };
+			if (auxData != null) {
+				bar.data = auxData;
+				auxiliaryColumns.set(idx, auxData);
+			}
+			bars.push(bar);
 			idx++;
 		}
 		return bars;
@@ -49,9 +86,14 @@ class OhlcvCsv {
 		var parts = splitCsv(firstLine);
 		var lower = [for (p in parts) StringTools.trim(p).toLowerCase()];
 		function find(names:Array<String>):Int {
+			// Exact matches win over prefix fallback: with auxiliary columns in
+			// play, "volatility" must not hijack volume nor "oi" hijack open.
 			for (i in 0...lower.length)
 				for (n in names)
-					if (lower[i] == n || StringTools.startsWith(lower[i], n)) return i;
+					if (lower[i] == n) return i;
+			for (i in 0...lower.length)
+				for (n in names)
+					if (StringTools.startsWith(lower[i], n)) return i;
 			return -1;
 		}
 		var o = find(["open", "o"]);

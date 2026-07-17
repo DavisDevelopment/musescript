@@ -79,6 +79,14 @@ extraParams.hxml
 
 --next
 extraParams.hxml
+-main musescript.examples.StrategyKinds
+-lib hxnodejs
+-D node
+-D js_es=6
+-js build/js/10-strategy-kinds.js
+
+--next
+extraParams.hxml
 -main musescript.tests.TestMain
 -lib utest
 -lib hxnodejs

@@ -1,0 +1,52 @@
+{
+  "round": "round-07",
+  "domain": "crypto+forex",
+  "execution": "next-open",
+  "rankings": [
+    {
+      "strategy": "s02.ms",
+      "path": "examples/strategy-tournament/agents/agent-04/round-07/s02.ms",
+      "score": 0.6715214913778499,
+      "mean_sharpe": 0.30213315137105184,
+      "mean_d_sharpe": 1.1589805662969543,
+      "median_mdd": 0.00016805813029476755,
+      "wf_mean_sharpe": 0.4063780058749964
+    },
+    {
+      "strategy": "s04.ms",
+      "path": "examples/strategy-tournament/agents/agent-04/round-07/s04.ms",
+      "score": 0.6715214913778499,
+      "mean_sharpe": 0.30213315137105184,
+      "mean_d_sharpe": 1.1589805662969543,
+      "median_mdd": 0.00016805813029476755,
+      "wf_mean_sharpe": 0.4063780058749964
+    },
+    {
+      "strategy": "s05.ms",
+      "path": "examples/strategy-tournament/agents/agent-04/round-07/s05.ms",
+      "score": 0.6715214913778499,
+      "mean_sharpe": 0.30213315137105184,
+      "mean_d_sharpe": 1.1589805662969543,
+      "median_mdd": 0.00016805813029476755,
+      "wf_mean_sharpe": 0.4063780058749964
+    },
+    {
+      "strategy": "s01.ms",
+      "path": "examples/strategy-tournament/agents/agent-04/round-07/s01.ms",
+      "score": 0.6256969711805422,
+      "mean_sharpe": 0.29516062163854184,
+      "mean_d_sharpe": 1.1520080365644443,
+      "median_mdd": 0.00016805813029476755,
+      "wf_mean_sharpe": 0.13109550006715573
+    },
+    {
+      "strategy": "s03.ms",
+      "path": "examples/strategy-tournament/agents/agent-04/round-07/s03.ms",
+      "score": 0.4160899752131246,
+      "mean_sharpe": -0.07860098110871598,
+      "mean_d_sharpe": 0.7782464338171865,
+      "median_mdd": 0.0,
+      "wf_mean_sharpe": 0.3531250613487622
+    }
+  ]
+}

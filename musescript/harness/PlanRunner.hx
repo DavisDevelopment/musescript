@@ -123,7 +123,8 @@ class PlanRunner {
 		var trials = 0;
 
 		if (names.length == 0 || !canEvaluate()) {
-			return { bestParams: bestParams, bestMetric: 0, trials: 0 };
+			// Honest "could not search" — not a zero-sharpe result.
+			return { bestParams: bestParams, bestMetric: Math.NaN, trials: 0 };
 		}
 
 		var baseline = snapshotParams(names);
@@ -182,9 +183,25 @@ class PlanRunner {
 
 	function gridValues(name:String):Array<Float> {
 		var o = harness.params.getOpts(name);
-		var cur = harness.params.get(name);
-		var min = o != null && o.min != null ? o.min : asFloat(cur) - 5;
-		var max = o != null && o.max != null ? o.max : asFloat(cur) + 5;
+		var cur = asFloat(harness.params.get(name));
+		var curInt = Std.int(Math.round(cur));
+		var windowish = musescript.types.MuseTypes.isWindow(curInt)
+			|| name == "fast" || name == "slow" || name == "look"
+			|| (o != null && o.tune != null && musescript.types.MuseTypes.isWindow(curInt));
+
+		// Window params: stay on the Fib ladder (checker rejects off-ladder literals).
+		if (windowish) {
+			var lo = o != null && o.min != null ? o.min : 5;
+			var hi = o != null && o.max != null ? o.max : 55;
+			var out:Array<Float> = [];
+			for (w in musescript.types.MuseTypes.WINDOW_LADDER) {
+				if (w >= lo - 1e-9 && w <= hi + 1e-9) out.push(w);
+			}
+			if (out.length > 0) return out;
+		}
+
+		var min = o != null && o.min != null ? o.min : cur - 5;
+		var max = o != null && o.max != null ? o.max : cur + 5;
 		var step = o != null && o.step != null && o.step > 0 ? o.step : 1;
 		var out:Array<Float> = [];
 		var v = min;
@@ -192,7 +209,7 @@ class PlanRunner {
 			out.push(v);
 			v += step;
 		}
-		return out.length > 0 ? out : [asFloat(cur)];
+		return out.length > 0 ? out : [cur];
 	}
 
 	/**
@@ -200,13 +217,15 @@ class PlanRunner {
 	 * (one param varied at a time from baseline) capped at MAX_TRIALS.
 	 */
 	function buildTrials(names:Array<String>, baseline:Map<String, Dynamic>, method:String):Array<Map<String, Dynamic>> {
+		if (method != "grid" && method != "coordinate")
+			throw 'PlanRunner: unknown search method "$method" (expected grid/coordinate)';
 		var grids:Array<{name:String, values:Array<Float>}> = [];
 		for (name in names) grids.push({ name: name, values: gridValues(name) });
 
 		var product = 1;
 		for (g in grids) product *= g.values.length;
 
-		if (method != "grid") {
+		if (method == "coordinate") {
 			return coordinateTrials(grids, baseline);
 		}
 		if (product <= MAX_TRIALS) {
@@ -252,7 +271,8 @@ class PlanRunner {
 			case "maxDrawdown": -result.maxDrawdown;
 			case "winRate": result.winRate;
 			case "finalEquity": result.finalEquity;
-			default: result.sharpe;
+			default:
+				throw 'PlanRunner: unknown optimize metric "$metric" (expected sharpe/maxDrawdown/winRate/finalEquity)';
 		};
 	}
 

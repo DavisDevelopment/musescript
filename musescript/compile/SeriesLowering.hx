@@ -16,12 +16,15 @@ typedef SeriesLowered = { expr:Expr, binds:Array<Stmt> };
  */
 class SeriesLowering {
 	static var nextId:Int = 0;
+	static var spans:Null<musescript.types.AstSpans> = null;
 
 	public static function lower(prog:MuseProgram):MuseProgram {
 		nextId = 0;
+		spans = prog.spans;
 		return {
 			decls: [for (d in prog.decls) lowerDecl(d)],
-			stmts: lowerStmts(prog.stmts)
+			stmts: lowerStmts(prog.stmts),
+			spans: prog.spans
 		};
 	}
 
@@ -135,9 +138,9 @@ class SeriesLowering {
 						nargs.push(r.expr);
 					}
 				}
-				{ expr: ECall(EIdent(name), nargs), binds: binds };
+				{ expr: keep(e, ECall(EIdent(name), nargs)), binds: binds };
 			case EConst(CString(s)) if (isBarName(s)):
-				{ expr: MuseNodes.barField(s), binds: [] };
+				{ expr: keep(e, MuseNodes.barField(s)), binds: [] };
 			case EBlock(es):
 				var binds:Array<Stmt> = [];
 				var out:Array<Expr> = [];
@@ -146,14 +149,14 @@ class SeriesLowering {
 					binds = binds.concat(r.binds);
 					out.push(r.expr);
 				}
-				{ expr: EBlock(out), binds: binds };
+				{ expr: keep(e, EBlock(out)), binds: binds };
 			case EBinop(op, a, b):
 				var ra = lowerExpr(a);
 				var rb = lowerExpr(b);
-				{ expr: EBinop(op, ra.expr, rb.expr), binds: ra.binds.concat(rb.binds) };
+				{ expr: keep(e, EBinop(op, ra.expr, rb.expr)), binds: ra.binds.concat(rb.binds) };
 			case EUnop(op, p, x):
 				var r = lowerExpr(x);
-				{ expr: EUnop(op, p, r.expr), binds: r.binds };
+				{ expr: keep(e, EUnop(op, p, r.expr)), binds: r.binds };
 			case ECall(c, args):
 				var rc = lowerExpr(c);
 				var binds = rc.binds.copy();
@@ -163,32 +166,41 @@ class SeriesLowering {
 					binds = binds.concat(r.binds);
 					nargs.push(r.expr);
 				}
-				{ expr: ECall(rc.expr, nargs), binds: binds };
+				{ expr: keep(e, ECall(rc.expr, nargs)), binds: binds };
 			case EIf(c, a, b):
 				var rc = lowerExpr(c);
 				var ra = lowerExpr(a);
 				var rb = b != null ? lowerExpr(b) : { expr: null, binds: [] };
-				{ expr: EIf(rc.expr, ra.expr, rb.expr), binds: rc.binds.concat(ra.binds).concat(rb.binds) };
+				{ expr: keep(e, EIf(rc.expr, ra.expr, rb.expr)), binds: rc.binds.concat(ra.binds).concat(rb.binds) };
 			case ELookback(s, n):
 				var binds:Array<Stmt> = [];
 				var series = normalizeSeriesArg(s, binds);
 				var rn = lowerExpr(n);
-				{ expr: ELookback(series, rn.expr), binds: binds.concat(rn.binds) };
+				{ expr: keep(e, ELookback(series, rn.expr)), binds: binds.concat(rn.binds) };
 			case EVar(n, init):
 				if (init == null) return { expr: e, binds: [] };
 				var r = lowerExpr(init);
-				{ expr: EVar(n, r.expr), binds: r.binds };
+				{ expr: keep(e, EVar(n, r.expr)), binds: r.binds };
 			case EParent(x):
 				var r = lowerExpr(x);
-				{ expr: EParent(r.expr), binds: r.binds };
+				{ expr: keep(e, EParent(r.expr)), binds: r.binds };
 			case ETernary(c, a, b):
 				var rc = lowerExpr(c);
 				var ra = lowerExpr(a);
 				var rb = lowerExpr(b);
-				{ expr: ETernary(rc.expr, ra.expr, rb.expr), binds: rc.binds.concat(ra.binds).concat(rb.binds) };
+				{ expr: keep(e, ETernary(rc.expr, ra.expr, rb.expr)), binds: rc.binds.concat(ra.binds).concat(rb.binds) };
 			default:
 				{ expr: e, binds: [] };
 		};
+	}
+
+	/** Copy SourcePos from `from` onto a rewritten node when spans are present. */
+	static function keep(from:Expr, neu:Expr):Expr {
+		if (spans != null && from != null && neu != null) {
+			var p = spans.ofExpr(from);
+			if (p != null) spans.stampExpr(neu, p);
+		}
+		return neu;
 	}
 
 	static function normalizeSeriesArg(a:Expr, binds:Array<Stmt>):Expr {

@@ -10,6 +10,8 @@
     { "include": "#types" },
     { "include": "#builtins" },
     { "include": "#order-calls" },
+    { "include": "#account-fields" },
+    { "include": "#bar-fields" },
     { "include": "#strings" },
     { "include": "#numbers" },
     { "include": "#operators" },
@@ -47,7 +49,7 @@
         },
         {
           "name": "keyword.declaration.musescript",
-          "match": "\\b(strategy|module|template|pipeline|search|param|function|var|use|onBar|onTick|onEvent|on)\\b"
+          "match": "\\b(strategy|module|template|pipeline|search|param|function|var|use|onBar|onPosition|onTick|onEvent|on)\\b"
         },
         {
           "name": "constant.language.boolean.musescript",
@@ -56,11 +58,11 @@
       ]
     },
     "types": {
-      "comment": "the shared type lattice (compiler + checker + no-code legality oracle + MuseGene STGP all share this).",
+      "comment": "musescript/types/MuseType.hx's full lattice -- the shared type surface (compiler + checker + no-code legality oracle + MuseGene STGP all share this).",
       "patterns": [
         {
           "name": "storage.type.musescript",
-          "match": "\\b(Window|Series|Scalar|Bool|String|Void)\\b"
+          "match": "\\b(Window|Series|Scalar|Bool|String|StringArray|Vector|Matrix|Graph|GraphPath|GraphRanks|Price|Void|Metric|Plan|Feature|GraphQuery|Model|Tree|Unknown)\\b"
         }
       ]
     },
@@ -79,6 +81,24 @@
         {
           "name": "support.function.order.musescript",
           "match": "\\b(long|short|flat)\\b(?=\\s*\\()"
+        }
+      ]
+    },
+    "account-fields": {
+      "comment": "TradeBuiltins niladic account/position builtins (position, cash, equity, ...) -- the typed surface calls these bare in `when` conditions (e.g. `when bars_in_trade >= 13`), not just as `foo()`, so no call-paren lookahead here unlike #builtins.",
+      "patterns": [
+        {
+          "name": "support.function.builtin.musescript",
+          "match": "\\b(position|entry_price|bars_in_trade|cash|equity|unrealized_pnl)\\b"
+        }
+      ]
+    },
+    "bar-fields": {
+      "comment": "Current-bar OHLCV series identifiers -- always in scope inside @on(bar)/onBar, no declaration needed.",
+      "patterns": [
+        {
+          "name": "variable.language.musescript",
+          "match": "\\b(open|high|low|close|volume|time|bar_index)\\b"
         }
       ]
     },

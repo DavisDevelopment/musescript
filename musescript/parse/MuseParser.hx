@@ -17,6 +17,9 @@ import musescript.ast.Const as MC;
 import musescript.ast.MuseNodes;
 import musescript.types.BuiltinSigs;
 import musescript.types.MuseType;
+import musescript.types.AstSpans;
+import musescript.types.SourcePos;
+import musescript.types.SourcePositions;
 
 using hscript.Tools;
 
@@ -39,13 +42,30 @@ class MuseParser {
 	public function parse(source:String, ?origin:String):MuseProgram {
 		if (musescript.parse.StrategyParser.looksLike(source))
 			return new musescript.parse.StrategyParser().parse(source, origin);
-		var expr = parser.parseString(source, origin);
-		return lowerProgram(expr);
+		var spans = AstSpans.begin();
+		try {
+			var expr = parser.parseString(source, origin);
+			var prog = lowerProgram(expr);
+			prog.spans = spans;
+			AstSpans.end();
+			return prog;
+		} catch (e:Dynamic) {
+			AstSpans.end();
+			throw e;
+		}
 	}
 
 	public function parseExpr(source:String, ?origin:String):MExpr {
-		var expr = parser.parseString(source, origin);
-		return lowerExpr(expr);
+		var spans = AstSpans.begin();
+		try {
+			var expr = parser.parseString(source, origin);
+			var out = lowerExpr(expr);
+			AstSpans.end();
+			return out;
+		} catch (e:Dynamic) {
+			AstSpans.end();
+			throw e;
+		}
 	}
 
 	/** Raw hscript parse — bootstrap / debugging */
@@ -252,7 +272,7 @@ class MuseParser {
 	}
 
 	function lowerStmt(e:hscript.Expr):Stmt {
-		return switch (Tools.expr(e)) {
+		var out:Stmt = switch (Tools.expr(e)) {
 			case EMeta("on" | ":on", params, body):
 				readOn(params, body);
 			case EMeta("yield" | ":yield", _, body):
@@ -269,19 +289,19 @@ class MuseParser {
 				ForIn(n, lowerExpr(it), lowerStmts(body));
 			case ECall(callee, args):
 				switch (Tools.expr(callee)) {
-					case EIdent("long"): return Order(Long, [for (a in args) lowerExpr(a)]);
-					case EIdent("short"): return Order(Short, [for (a in args) lowerExpr(a)]);
-					case EIdent("flat"): return Order(Flat, [for (a in args) lowerExpr(a)]);
-					case EIdent("close"): return Order(Close, [for (a in args) lowerExpr(a)]);
+					case EIdent("long"): return stampStmtFromHscript(Order(Long, [for (a in args) lowerExpr(a)]), e);
+					case EIdent("short"): return stampStmtFromHscript(Order(Short, [for (a in args) lowerExpr(a)]), e);
+					case EIdent("flat"): return stampStmtFromHscript(Order(Flat, [for (a in args) lowerExpr(a)]), e);
+					case EIdent("close"): return stampStmtFromHscript(Order(Close, [for (a in args) lowerExpr(a)]), e);
 					default:
 				}
 				ExprStmt(lowerExpr(e));
-			// match for x in xs { case ... } via EMeta('match', ...) or special call
 			case EMeta("match" | ":match", params, body):
 				lowerMatchStmt(params, body);
 			default:
 				ExprStmt(lowerExpr(e));
 		};
+		return stampStmtFromHscript(out, e);
 	}
 
 	function lowerMatchStmt(params:Array<hscript.Expr>, body:hscript.Expr):Stmt {
@@ -302,7 +322,7 @@ class MuseParser {
 
 	public function lowerExpr(e:hscript.Expr):MExpr {
 		if (e == null) return MuseNodes.nullExpr();
-		return switch (Tools.expr(e)) {
+		var out:MExpr = switch (Tools.expr(e)) {
 			case EConst(c):
 				switch (c) {
 					case CInt(i): MuseNodes.intExpr(i);
@@ -358,7 +378,6 @@ class MuseParser {
 			case EMeta(name, params, body):
 				MuseNodes.meta(name, params != null ? [for (p in params) lowerExpr(p)] : [], lowerExpr(body));
 			case ESwitch(e, cases, edef):
-				// Lower switch into EMatch with PatLit / PatBind
 				var arms:Array<MatchArm> = [];
 				for (c in cases) {
 					for (v in c.values) {
@@ -370,6 +389,23 @@ class MuseParser {
 			default:
 				throw 'MuseParser: unhandled expr $e';
 		};
+		return stampFromHscript(out, e);
+	}
+
+	function stampFromHscript(out:MExpr, hs:hscript.Expr):MExpr {
+		#if hscriptPos
+		if (AstSpans.active != null && hs != null)
+			AstSpans.active.stampExpr(out, SourcePositions.make(hs.origin, hs.line, hs.pmin, hs.pmax));
+		#end
+		return out;
+	}
+
+	function stampStmtFromHscript(out:Stmt, hs:hscript.Expr):Stmt {
+		#if hscriptPos
+		if (AstSpans.active != null && hs != null)
+			AstSpans.active.stampStmt(out, SourcePositions.make(hs.origin, hs.line, hs.pmin, hs.pmax));
+		#end
+		return out;
 	}
 
 	function readMatchArms(body:hscript.Expr):Array<MatchArm> {

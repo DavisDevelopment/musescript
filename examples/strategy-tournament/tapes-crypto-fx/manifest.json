@@ -1,0 +1,322 @@
+{
+  "domain": "crypto+forex",
+  "eval_window": {
+    "start": "2026-04-14",
+    "end": "2026-07-13",
+    "calendar_months": 3
+  },
+  "execution": {
+    "mode": "next-open",
+    "signal": "bar_t_close",
+    "fill": "bar_t_plus_1_open",
+    "same_bar_fill": false
+  },
+  "official": {
+    "BTCUSD": {
+      "symbol": "BTCUSD",
+      "asset": "crypto",
+      "bars": 91,
+      "start": "2026-04-14",
+      "end": "2026-07-13",
+      "sources": [
+        "binance"
+      ],
+      "provenances": [
+        "ohlc"
+      ],
+      "nonflat_bars": 91,
+      "causal": true,
+      "path": "tapes-crypto-fx/eval_3m_BTCUSD.csv"
+    },
+    "ETHUSD": {
+      "symbol": "ETHUSD",
+      "asset": "crypto",
+      "bars": 91,
+      "start": "2026-04-14",
+      "end": "2026-07-13",
+      "sources": [
+        "binance"
+      ],
+      "provenances": [
+        "ohlc"
+      ],
+      "nonflat_bars": 91,
+      "causal": true,
+      "path": "tapes-crypto-fx/eval_3m_ETHUSD.csv"
+    },
+    "SOLUSD": {
+      "symbol": "SOLUSD",
+      "asset": "crypto",
+      "bars": 91,
+      "start": "2026-04-14",
+      "end": "2026-07-13",
+      "sources": [
+        "binance"
+      ],
+      "provenances": [
+        "ohlc"
+      ],
+      "nonflat_bars": 91,
+      "causal": true,
+      "path": "tapes-crypto-fx/eval_3m_SOLUSD.csv"
+    },
+    "XRPUSD": {
+      "symbol": "XRPUSD",
+      "asset": "crypto",
+      "bars": 91,
+      "start": "2026-04-14",
+      "end": "2026-07-13",
+      "sources": [
+        "binance"
+      ],
+      "provenances": [
+        "ohlc"
+      ],
+      "nonflat_bars": 91,
+      "causal": true,
+      "path": "tapes-crypto-fx/eval_3m_XRPUSD.csv"
+    },
+    "ADAUSD": {
+      "symbol": "ADAUSD",
+      "asset": "crypto",
+      "bars": 91,
+      "start": "2026-04-14",
+      "end": "2026-07-13",
+      "sources": [
+        "binance"
+      ],
+      "provenances": [
+        "ohlc"
+      ],
+      "nonflat_bars": 91,
+      "causal": true,
+      "path": "tapes-crypto-fx/eval_3m_ADAUSD.csv"
+    },
+    "EURUSD": {
+      "symbol": "EURUSD",
+      "asset": "forex",
+      "bars": 65,
+      "start": "2026-04-14",
+      "end": "2026-07-13",
+      "sources": [
+        "yahoo"
+      ],
+      "provenances": [
+        "ohlc"
+      ],
+      "nonflat_bars": 65,
+      "causal": true,
+      "path": "tapes-crypto-fx/eval_3m_EURUSD.csv"
+    },
+    "GBPUSD": {
+      "symbol": "GBPUSD",
+      "asset": "forex",
+      "bars": 65,
+      "start": "2026-04-14",
+      "end": "2026-07-13",
+      "sources": [
+        "yahoo"
+      ],
+      "provenances": [
+        "ohlc"
+      ],
+      "nonflat_bars": 65,
+      "causal": true,
+      "path": "tapes-crypto-fx/eval_3m_GBPUSD.csv"
+    },
+    "USDJPY": {
+      "symbol": "USDJPY",
+      "asset": "forex",
+      "bars": 65,
+      "start": "2026-04-14",
+      "end": "2026-07-13",
+      "sources": [
+        "yahoo"
+      ],
+      "provenances": [
+        "ohlc"
+      ],
+      "nonflat_bars": 65,
+      "causal": true,
+      "path": "tapes-crypto-fx/eval_3m_USDJPY.csv"
+    },
+    "AUDUSD": {
+      "symbol": "AUDUSD",
+      "asset": "forex",
+      "bars": 65,
+      "start": "2026-04-14",
+      "end": "2026-07-13",
+      "sources": [
+        "yahoo"
+      ],
+      "provenances": [
+        "ohlc"
+      ],
+      "nonflat_bars": 65,
+      "causal": true,
+      "path": "tapes-crypto-fx/eval_3m_AUDUSD.csv"
+    },
+    "USDCAD": {
+      "symbol": "USDCAD",
+      "asset": "forex",
+      "bars": 65,
+      "start": "2026-04-14",
+      "end": "2026-07-13",
+      "sources": [
+        "yahoo"
+      ],
+      "provenances": [
+        "ohlc"
+      ],
+      "nonflat_bars": 65,
+      "causal": true,
+      "path": "tapes-crypto-fx/eval_3m_USDCAD.csv"
+    }
+  },
+  "walkforward": {
+    "1:BTCUSD": {
+      "symbol": "BTCUSD",
+      "asset": "crypto",
+      "bars": 90,
+      "start": "2019-01-02",
+      "end": "2019-04-01",
+      "sources": [
+        "binance"
+      ],
+      "provenances": [
+        "ohlc"
+      ],
+      "nonflat_bars": 90,
+      "causal": true,
+      "path": "tapes-crypto-fx/wf_1_BTCUSD_2019-01-02_2019-04-01.csv"
+    },
+    "1:ETHUSD": {
+      "symbol": "ETHUSD",
+      "asset": "crypto",
+      "bars": 90,
+      "start": "2019-01-02",
+      "end": "2019-04-01",
+      "sources": [
+        "binance"
+      ],
+      "provenances": [
+        "ohlc"
+      ],
+      "nonflat_bars": 90,
+      "causal": true,
+      "path": "tapes-crypto-fx/wf_1_ETHUSD_2019-01-02_2019-04-01.csv"
+    },
+    "1:EURUSD": {
+      "symbol": "EURUSD",
+      "asset": "forex",
+      "bars": 65,
+      "start": "2019-01-02",
+      "end": "2019-04-01",
+      "sources": [
+        "yahoo"
+      ],
+      "provenances": [
+        "ohlc"
+      ],
+      "nonflat_bars": 65,
+      "causal": true,
+      "path": "tapes-crypto-fx/wf_1_EURUSD_2019-01-02_2019-04-01.csv"
+    },
+    "2:BTCUSD": {
+      "symbol": "BTCUSD",
+      "asset": "crypto",
+      "bars": 90,
+      "start": "2022-01-03",
+      "end": "2022-04-02",
+      "sources": [
+        "binance"
+      ],
+      "provenances": [
+        "ohlc"
+      ],
+      "nonflat_bars": 90,
+      "causal": true,
+      "path": "tapes-crypto-fx/wf_2_BTCUSD_2022-01-03_2022-04-02.csv"
+    },
+    "2:ETHUSD": {
+      "symbol": "ETHUSD",
+      "asset": "crypto",
+      "bars": 90,
+      "start": "2022-01-03",
+      "end": "2022-04-02",
+      "sources": [
+        "binance"
+      ],
+      "provenances": [
+        "ohlc"
+      ],
+      "nonflat_bars": 90,
+      "causal": true,
+      "path": "tapes-crypto-fx/wf_2_ETHUSD_2022-01-03_2022-04-02.csv"
+    },
+    "2:EURUSD": {
+      "symbol": "EURUSD",
+      "asset": "forex",
+      "bars": 65,
+      "start": "2022-01-03",
+      "end": "2022-03-31",
+      "sources": [
+        "yahoo"
+      ],
+      "provenances": [
+        "ohlc"
+      ],
+      "nonflat_bars": 65,
+      "causal": true,
+      "path": "tapes-crypto-fx/wf_2_EURUSD_2022-01-03_2022-04-02.csv"
+    },
+    "3:BTCUSD": {
+      "symbol": "BTCUSD",
+      "asset": "crypto",
+      "bars": 92,
+      "start": "2024-10-01",
+      "end": "2024-12-31",
+      "sources": [
+        "binance"
+      ],
+      "provenances": [
+        "ohlc"
+      ],
+      "nonflat_bars": 92,
+      "causal": true,
+      "path": "tapes-crypto-fx/wf_3_BTCUSD_2024-10-01_2024-12-31.csv"
+    },
+    "3:ETHUSD": {
+      "symbol": "ETHUSD",
+      "asset": "crypto",
+      "bars": 92,
+      "start": "2024-10-01",
+      "end": "2024-12-31",
+      "sources": [
+        "binance"
+      ],
+      "provenances": [
+        "ohlc"
+      ],
+      "nonflat_bars": 92,
+      "causal": true,
+      "path": "tapes-crypto-fx/wf_3_ETHUSD_2024-10-01_2024-12-31.csv"
+    },
+    "3:EURUSD": {
+      "symbol": "EURUSD",
+      "asset": "forex",
+      "bars": 65,
+      "start": "2024-10-01",
+      "end": "2024-12-31",
+      "sources": [
+        "yahoo"
+      ],
+      "provenances": [
+        "ohlc"
+      ],
+      "nonflat_bars": 65,
+      "causal": true,
+      "path": "tapes-crypto-fx/wf_3_EURUSD_2024-10-01_2024-12-31.csv"
+    }
+  }
+}

@@ -1,0 +1,11 @@
+strategy RsiGateDon21 {
+  onBar {
+    r = rsi(close, 13)
+    when r > 40 && r < 65 && high >= highest(high, 21): long()
+    when low <= lowest(low, 13): flat()
+  }
+  onPosition {
+    when bars_in_trade >= 13: flat()
+    when unrealized_pnl < -0.05 * equity: flat()
+  }
+}

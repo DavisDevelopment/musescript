@@ -1,0 +1,99 @@
+{
+  "agent": "agent-02",
+  "round": "round-02",
+  "mandate": "EMA crossover systems with trend filters and onPosition risk shells",
+  "eval_window": "2026-04-14..2026-07-13",
+  "self_test_symbol": "SPY",
+  "r1_podium": "s02.ms (rank 3, score 0.827, lowest podium MDD 4.3%)",
+  "r1_winner_stolen_from": "agent-05 Donchian 21/13 + 13-bar time stop",
+  "strategies": [
+    {
+      "file": "s01.ms",
+      "name": "Ema834Ema21GateR2",
+      "hypothesis": "R1 podium keeper: EMA 8/34 + EMA 21 gate + 5% equity stop, now with winner's 13-bar time cap.",
+      "ema_pair": "8/34",
+      "trend_filter": "EMA 21",
+      "donchian_steal": "13-bar time stop",
+      "risk_shell": "time_stop_13 + equity_stop_5pct",
+      "spy_3m_sharpe": 2.3788,
+      "spy_3m_mdd": 0.0289,
+      "spy_3m_trades": 2,
+      "all_sym_mean_sharpe": 1.1283,
+      "all_sym_mean_d_sharpe": -0.2562,
+      "all_sym_median_mdd": 0.0433
+    },
+    {
+      "file": "s02.ms",
+      "name": "Ema834Break13Gate",
+      "hypothesis": "Best R2: EMA 8/34 cross + EMA 21 gate + Donchian 13-high breakout confirmation; skips bad entries on AMZN.",
+      "ema_pair": "8/34",
+      "trend_filter": "EMA 21 + highest(high,13)",
+      "donchian_steal": "13-high entry confirm, 13-low exit, 13-bar time",
+      "risk_shell": "time_stop_13 + equity_stop_5pct",
+      "spy_3m_sharpe": 2.3788,
+      "spy_3m_mdd": 0.0289,
+      "spy_3m_trades": 2,
+      "all_sym_mean_sharpe": 1.2458,
+      "all_sym_mean_d_sharpe": -0.1387,
+      "all_sym_median_mdd": 0.0433
+    },
+    {
+      "file": "s03.ms",
+      "name": "Ema834Break21Gate",
+      "hypothesis": "Wider Donchian 21-high breakout gate on EMA 8/34; fewer but higher-conviction entries vs s02.",
+      "ema_pair": "8/34",
+      "trend_filter": "EMA 21 + highest(high,21)",
+      "donchian_steal": "21-high entry (winner width), 13-low exit, 13-bar time",
+      "risk_shell": "time_stop_13 + equity_stop_5pct",
+      "spy_3m_sharpe": 2.3788,
+      "spy_3m_mdd": 0.0289,
+      "spy_3m_trades": 2,
+      "all_sym_mean_sharpe": 1.1879,
+      "all_sym_mean_d_sharpe": -0.1967,
+      "all_sym_median_mdd": 0.0433
+    },
+    {
+      "file": "s04.ms",
+      "name": "Ema834Plain13",
+      "hypothesis": "Agent-01 inspired plain EMA 8/34 cross with Donchian 13-bar time + 5% stop only; cross-symbol diversity play.",
+      "ema_pair": "8/34",
+      "trend_filter": "none",
+      "donchian_steal": "13-bar time stop",
+      "risk_shell": "time_stop_13 + equity_stop_5pct",
+      "spy_3m_sharpe": 2.2956,
+      "spy_3m_mdd": 0.0449,
+      "spy_3m_trades": 1,
+      "all_sym_mean_sharpe": 1.1839,
+      "all_sym_mean_d_sharpe": -0.2007,
+      "all_sym_median_mdd": 0.1113
+    },
+    {
+      "file": "s05.ms",
+      "name": "Ema821Ema13Gate",
+      "hypothesis": "Faster EMA 8/21 pair with EMA 13 micro-gate and Donchian 8-low trailing exit for more signals.",
+      "ema_pair": "8/21",
+      "trend_filter": "EMA 13",
+      "donchian_steal": "8-low exit, 13-bar time",
+      "risk_shell": "time_stop_13 + equity_stop_5pct",
+      "spy_3m_sharpe": 1.7220,
+      "spy_3m_mdd": 0.0385,
+      "spy_3m_trades": 5,
+      "all_sym_mean_sharpe": 1.0077,
+      "all_sym_mean_d_sharpe": -0.3769,
+      "all_sym_median_mdd": 0.0494
+    }
+  ],
+  "best_all_sym": {
+    "file": "s02.ms",
+    "mean_sharpe": 1.2458,
+    "mean_d_sharpe": -0.1387,
+    "median_mdd": 0.0433,
+    "r1_delta_mean_sharpe": "+0.118 vs R1 s02"
+  },
+  "best_spy_3m": {
+    "file": "s01.ms",
+    "sharpe": 2.3788,
+    "d_sharpe_vs_bh": 0.0832,
+    "mdd": 0.0289
+  }
+}

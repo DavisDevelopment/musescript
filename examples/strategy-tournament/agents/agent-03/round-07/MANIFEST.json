@@ -1,0 +1,91 @@
+{
+  "agent": "agent-03",
+  "theory": "MACD / momentum regime",
+  "round": "round-07",
+  "domain": "crypto+forex",
+  "execution": "next-open",
+  "eval_window": "2026-04-14..2026-07-13",
+  "flagship": "s03.ms",
+  "rankings": [
+    "s03.ms",
+    "s01.ms",
+    "s05.ms",
+    "s04.ms",
+    "s02.ms"
+  ],
+  "strategies": [
+    {
+      "file": "s01.ms",
+      "name": "MacdHistRegime",
+      "hypothesis": "Baseline MACD histogram zero-line regime with 8% equity hard stop for crypto vol",
+      "macd": "8/21/5",
+      "score": 0.361,
+      "mean_sharpe": -0.126,
+      "mean_d_sharpe": 0.731,
+      "median_mdd": 0.041,
+      "wf_mean_sharpe": 0.246,
+      "highlights": {
+        "BTCUSD": { "sharpe": -0.087, "d_sharpe": 1.493, "trades": 5 },
+        "SOLUSD": { "sharpe": 1.078, "d_sharpe": 1.556, "trades": 6 }
+      }
+    },
+    {
+      "file": "s02.ms",
+      "name": "MacdCrossMomentum",
+      "hypothesis": "Classic MACD line/signal crossover — no dual-MACD cascade",
+      "macd": "8/21/5",
+      "score": -0.018,
+      "mean_sharpe": -0.714,
+      "mean_d_sharpe": 0.143,
+      "median_mdd": 0.041,
+      "wf_mean_sharpe": 0.270,
+      "highlights": {
+        "BTCUSD": { "sharpe": -0.042, "d_sharpe": 1.538, "trades": 3 }
+      }
+    },
+    {
+      "file": "s03.ms",
+      "name": "MacdRisingEntry",
+      "hypothesis": "Enter on rising histogram (5/13/8); exit via falling(hist,3,5) gated by minBars",
+      "macd": "5/13/8",
+      "score": 0.462,
+      "mean_sharpe": 0.055,
+      "mean_d_sharpe": 0.912,
+      "median_mdd": 0.033,
+      "wf_mean_sharpe": 0.124,
+      "highlights": {
+        "BTCUSD": { "sharpe": 0.231, "d_sharpe": 1.811, "trades": 6 },
+        "SOLUSD": { "sharpe": 1.078, "d_sharpe": 1.556, "trades": 6 }
+      }
+    },
+    {
+      "file": "s04.ms",
+      "name": "MacdDonchianFusion",
+      "hypothesis": "Donchian 21/13 breakout entry; MACD hist exit-only; TrailingStop+TimeStop stmt templates",
+      "macd": "8/21/5",
+      "score": -0.030,
+      "mean_sharpe": -0.485,
+      "mean_d_sharpe": 0.372,
+      "median_mdd": 0.027,
+      "wf_mean_sharpe": -0.823,
+      "highlights": {
+        "BTCUSD": { "sharpe": 1.050, "d_sharpe": 2.630, "trades": 2 },
+        "EURUSD": { "sharpe": 2.080, "d_sharpe": 5.341, "trades": 2 }
+      }
+    },
+    {
+      "file": "s05.ms",
+      "name": "MacdRisingCascadeExit",
+      "hypothesis": "Single MACD rising entry; falling(hist,3,8) profit take; HardStop stmt template",
+      "macd": "8/21/5",
+      "score": 0.107,
+      "mean_sharpe": -0.502,
+      "mean_d_sharpe": 0.355,
+      "median_mdd": 0.041,
+      "wf_mean_sharpe": 0.185,
+      "highlights": {
+        "BTCUSD": { "sharpe": -0.610, "d_sharpe": 0.970, "trades": 3 }
+      }
+    }
+  ]
+}

@@ -7,6 +7,7 @@ import utest.Test;
 
 import musescript.MuseScript;
 import musescript.parse.MuseParser;
+import musescript.harness.OhlcvCsv;
 import musescript.interp.MuseInterp;
 import musescript.runtime.CallFrame;
 import musescript.runtime.CallStack;
@@ -36,6 +37,7 @@ import musescript.builtins.StringBuiltins;
 import musescript.builtins.StatsBuiltins;
 import musescript.builtins.MlBuiltins;
 import musescript.checker.MuseChecker;
+import musescript.harness.Metrics;
 import musescript.plan.MusePlanner;
 import musescript.plan.MuseIR;
 import musescript.compile.MuseCompiler;
@@ -51,12 +53,17 @@ class TestMain {
 		runner.addCase(new TestPattern());
 		runner.addCase(new TestIter());
 		runner.addCase(new TestBacktest());
+		runner.addCase(new TestAuxData());
 		runner.addCase(new TestOptimize());
 		runner.addCase(new TestTradeBuiltins());
 		runner.addCase(new TestStatsBuiltins());
 		runner.addCase(new TestMlBuiltins());
 		runner.addCase(new TestPositionHooks());
 		runner.addCase(new TestGraphBuiltins());
+		runner.addCase(new TestDictSetBuiltins());
+		runner.addCase(new TestPortfolioPanel());
+		runner.addCase(new TestBagPortfolio());
+		runner.addCase(new TestInstrumentation());
 		runner.addCase(new TestPlanner());
 		runner.addCase(new TestChecker());
 		runner.addCase(new TestCompiler());
@@ -71,6 +78,7 @@ class TestMain {
 		runner.addCase(new TestOnTick());
 		runner.addCase(new TestTypes());
 		runner.addCase(new TestTypedSurface());
+		runner.addCase(new TestStrategyKinds());
 		runner.addCase(new TestMetaTier());
 		Report.create(runner);
 		runner.run();
@@ -610,6 +618,115 @@ class TestBacktest extends Test {
 		Assert.isTrue(result.equity.length > 0);
 		Assert.isTrue(result.finalEquity != null);
 	}
+
+	/**
+	 * PreludeVars hoisting regression: `fast`/`slow` are prelude locals
+	 * (unconditional strategy-body assigns → hoist-eligible), while `spread`
+	 * is BOTH a prelude local AND reused as a lambda parameter name inside
+	 * the on-bar body — which must force PreludeVars' escape-analysis bail
+	 * for `spread` specifically (fast/slow stay eligible). The `ignored` map
+	 * call has no effect on trade logic; it exists only to exercise the
+	 * escape path. JS-backend and interp must agree exactly regardless of
+	 * which names actually got hoisted.
+	 */
+	public function testPreludeHoistEscapeSafety() {
+		var source = '
+			@strategy("hoist-escape")
+			@on(bar) {
+				fast = ema(close, 5);
+				slow = ema(close, 13);
+				spread = fast - slow;
+				var ignored = map([1.0, 2.0], function(spread) return spread + 1.0);
+				if (crossover(fast, slow) && spread > -1000000.0) long();
+				if (crossunder(fast, slow)) flat();
+			}
+		';
+		var feed = BarFeed.synthetic(300, 11);
+
+		var interpHarness = new HarnessContext();
+		var interpProg = new MuseParser().parse(source);
+		var interpResult = new MuseInterp(interpHarness).runBacktest(interpProg, feed);
+
+		#if js
+		var jsHarness = new HarnessContext();
+		var jsProg = new MuseParser().parse(source);
+		Reflect.setField(jsHarness, "feed", feed);
+		var ex = MuseCompiler.compileEx(jsProg, { target: "js", strict: true });
+		Assert.equals("js", ex.backend);
+		var jsResult = ex.fn(jsHarness);
+		Assert.equals(interpResult.trades, jsResult.trades);
+		Assert.floatEquals(interpResult.finalEquity, jsResult.finalEquity);
+		#end
+		Assert.isTrue(interpResult.trades >= 0);
+	}
+}
+
+class TestAuxData extends Test {
+	public function testCsvAuxColumnsParsed() {
+		var csv = "date,open,high,low,close,volume,sentiment,volatility\n"
+			+ "2026-01-01,10,11,9,10.5,100,0.2,1.5\n"
+			+ "2026-01-02,10.5,12,10,11.5,110,-0.3,1.6\n"
+			+ "2026-01-03,11.5,13,11,12.5,120,0.7,1.7\n";
+		var bars = OhlcvCsv.parse(csv);
+		Assert.equals(3, bars.length);
+		// "volatility" must NOT hijack the volume column (exact match wins)
+		Assert.floatEquals(110.0, bars[1].volume);
+		Assert.notNull(bars[1].data);
+		Assert.floatEquals(-0.3, bars[1].data.get("sentiment"));
+		Assert.floatEquals(1.6, bars[1].data.get("volatility"));
+		Assert.isTrue(OhlcvCsv.auxiliaryNames.indexOf("sentiment") >= 0);
+	}
+
+	static function auxBars(sentiments:Array<Float>):Array<musescript.harness.Bar> {
+		return [for (i in 0...sentiments.length) ({
+			open: 10.0 + i,
+			high: 11.0 + i,
+			low: 9.0 + i,
+			close: 10.5 + i,
+			volume: 100.0,
+			time: (i : Float),
+			index: i,
+			data: [ "sentiment" => sentiments[i] ]
+		} : musescript.harness.Bar)];
+	}
+
+	public function testAuxSeriesCausalDelivery() {
+		// long() fires only when the CURRENT bar's sentiment is positive; the
+		// only positive value is the LAST bar, so exactly one trade may open.
+		// A lookahead (preloaded aux column) would expose the final +1 from
+		// bar 0 through tail-indexed series reads and trade immediately.
+		var source = '
+			@strategy("aux")
+			@on(bar) {
+				var s = sma("sentiment", 1);
+				if (s > 0) long();
+			}
+		';
+		var harness = new HarnessContext();
+		var prog = new MuseParser().parse(source);
+		var interp = new MuseInterp(harness);
+		var result = interp.runBacktest(prog, new BarFeed(auxBars([-1, -1, -1, -1, 1])));
+		Assert.equals(1, result.trades);
+	}
+
+	public function testAuxSeriesNoLookahead() {
+		// sma("sentiment", 3) needs 3 CAUSALLY-arrived values: with 5 bars it
+		// is NaN on bars 0-1 and defined from bar 2 on. Count defined bars.
+		var source = '
+			@strategy("aux2")
+			@on(bar) {
+				var s = sma("sentiment", 3);
+				if (!na(s)) long();
+			}
+		';
+		var harness = new HarnessContext();
+		var prog = new MuseParser().parse(source);
+		var interp = new MuseInterp(harness);
+		var result = interp.runBacktest(prog, new BarFeed(auxBars([0.1, 0.2, 0.3, 0.4, 0.5])));
+		// long() opens once at bar 2 (later calls are no-ops while positioned)
+		Assert.equals(1, result.trades);
+		Assert.equals(5, harness.series.get("sentiment").length);
+	}
 }
 
 class TestTradeBuiltins extends Test {
@@ -851,6 +968,23 @@ class TestStatsBuiltins extends Test {
 		Assert.isTrue(near(StatsBuiltins.pearson(xs, [8.0, 6.0, 4.0, 2.0]), -1.0));
 		Assert.isTrue(near(StatsBuiltins.skewness([-2.0, -1.0, 0.0, 1.0, 2.0]), 0.0));
 		Assert.isTrue(StatsBuiltins.skewness([1.0, 1.0, 1.0, 4.0]) > 0.0);
+		Assert.isTrue(StatsBuiltins.kurtosis([1.0, 2.0, 3.0, 4.0, 5.0]) < 0.0);
+		Assert.isTrue(Math.isNaN(StatsBuiltins.kurtosis([1.0, 2.0, 3.0])));
+	}
+
+	public function testRankSortRegressionAutocorr() {
+		Assert.equals(2.0, StatsBuiltins.rank([10.0, 20.0, 30.0], 20.0));
+		Assert.equals(1.0, StatsBuiltins.rank([10.0, 20.0, 30.0], 5.0));
+		Assert.equals(2.5, StatsBuiltins.rank([1.0, 2.0, 2.0, 3.0], 2.0));
+		Assert.isTrue(near(StatsBuiltins.percentileRank([1.0, 2.0, 3.0, 4.0], 3.0), 50.0));
+		Assert.same([1.0, 2.0, 3.0], StatsBuiltins.sort([3.0, 1.0, 2.0]));
+		Assert.same([1.0, 2.0, 0.0], StatsBuiltins.argsort([3.0, 1.0, 2.0]));
+		var reg:Dynamic = StatsBuiltins.regression([1.0, 2.0, 3.0, 4.0]);
+		Assert.isTrue(near(reg.slope, 1.0));
+		Assert.isTrue(near(reg.intercept, 1.0));
+		Assert.isTrue(near(reg.r2, 1.0));
+		Assert.isTrue(near(StatsBuiltins.autocorr([1.0, 2.0, 3.0, 4.0, 5.0], 1), 1.0));
+		Assert.isTrue(Math.isNaN(StatsBuiltins.autocorr([1.0, 2.0], 2)));
 	}
 
 	public function testVectorScienceHelpers() {
@@ -877,10 +1011,25 @@ class TestStatsBuiltins extends Test {
 		Assert.isTrue(Math.isNaN(StatsBuiltins.covariance([1.0, 2.0], [1.0])));
 		Assert.isTrue(Math.isNaN(StatsBuiltins.pearson([1.0, 1.0], [2.0, 3.0])));
 		Assert.isTrue(Math.isNaN(StatsBuiltins.skewness([1.0, 2.0])));
+		Assert.isTrue(Math.isNaN(StatsBuiltins.kurtosis([1.0, 2.0, 3.0])));
+		Assert.isTrue(Math.isNaN(StatsBuiltins.rank([], 1.0)));
 		Assert.equals(0, StatsBuiltins.zScores([]).length);
 		Assert.equals(0, StatsBuiltins.cumulativeSum([]).length);
 		Assert.equals(0, StatsBuiltins.difference([1.0]).length);
 		Assert.equals(0, StatsBuiltins.normalize([]).length);
+	}
+
+	public function testSortinoMaxDrawdownAndEwm() {
+		Assert.equals(0.25, Metrics.maxDrawdown([100.0, 120.0, 90.0, 95.0]));
+		var returns = [0.01, -0.02, 0.015, -0.01, 0.005];
+		Assert.isTrue(Math.isFinite(Metrics.sortino(returns)));
+		Assert.isTrue(Metrics.sortino([0.01, 0.02, 0.03]) == 0); // no downside
+		var h = new HarnessContext();
+		h.series.set("close", [1.0, 2.0, 3.0, 4.0, 5.0]);
+		var v = TradeBuiltins.ewmVar(h, "close", 3);
+		var s = TradeBuiltins.ewmStdev(h, "close", 3);
+		Assert.isTrue(v >= 0 && Math.isFinite(v));
+		Assert.isTrue(near(s, Math.sqrt(v)));
 	}
 
 	public function testInstalledGlobalsAndCompiledJsDispatch() {
@@ -970,6 +1119,28 @@ class TestMlBuiltins extends Test {
 		Assert.isTrue(Math.abs(weights[0] - 1.0) < 1e-9);
 		Assert.isTrue(Math.abs(weights[1] - 2.0) < 1e-9);
 		Assert.equals(0, MlBuiltins.ridgeFitMatrix(MlBuiltins.matrix(2, 2, [1.0]), [1.0, 2.0]).length);
+	}
+
+	public function testMatrixTransposeInverseDeterminant() {
+		var m = MlBuiltins.matrix(2, 3, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+		var t = MlBuiltins.matrixTranspose(m);
+		Assert.equals(3, MlBuiltins.matrixRows(t));
+		Assert.equals(2, MlBuiltins.matrixCols(t));
+		Assert.same([1.0, 4.0, 2.0, 5.0, 3.0, 6.0], MlBuiltins.matrixData(t));
+
+		var sq = MlBuiltins.matrix(2, 2, [4.0, 7.0, 2.0, 6.0]);
+		Assert.isTrue(Math.abs(MlBuiltins.matrixDeterminant(sq) - 10.0) < 1e-9);
+		var inv = MlBuiltins.matrixInverse(sq);
+		Assert.equals(2, MlBuiltins.matrixRows(inv));
+		Assert.isTrue(Math.abs(MlBuiltins.matrixGet(inv, 0, 0) - 0.6) < 1e-9);
+		Assert.isTrue(Math.abs(MlBuiltins.matrixGet(inv, 0, 1) - (-0.7)) < 1e-9);
+		Assert.isTrue(Math.abs(MlBuiltins.matrixGet(inv, 1, 0) - (-0.2)) < 1e-9);
+		Assert.isTrue(Math.abs(MlBuiltins.matrixGet(inv, 1, 1) - 0.4) < 1e-9);
+
+		var singular = MlBuiltins.matrix(2, 2, [1.0, 2.0, 2.0, 4.0]);
+		Assert.equals(0.0, MlBuiltins.matrixDeterminant(singular));
+		Assert.equals(0, MlBuiltins.matrixRows(MlBuiltins.matrixInverse(singular)));
+		Assert.isTrue(Math.isNaN(MlBuiltins.matrixDeterminant(m)));
 	}
 
 	public function testInterpreterAndJsDispatch() {
@@ -1198,6 +1369,37 @@ class TestPositionHooks extends Test {
 		Assert.equals(100, h.orders.entryPrice);
 		Assert.equals(2, h.orders.barsInTrade(7));
 		Assert.isTrue(h.orders.unrealizedPnl(102) > 0);
+	}
+
+	public function testNextOpenExecutionQueuesWithoutLookahead() {
+		var h = new HarnessContext();
+		h.orders.executionMode = "next-open";
+		h.orders.long(999, 10, 5);
+		Assert.equals(0, h.orders.positionSize());
+		Assert.isTrue(h.orders.hasPendingOrder());
+
+		// The signal's same-bar price is ignored; fill occurs at the next bar open.
+		h.orders.beginBar(101, 6);
+		Assert.equals(10, h.orders.positionSize());
+		Assert.equals(101, h.orders.entryPrice);
+		Assert.equals(6, h.orders.entryBar);
+		Assert.isFalse(h.orders.hasPendingOrder());
+
+		h.orders.flat(777, 6);
+		Assert.equals(10, h.orders.positionSize());
+		h.orders.beginBar(103, 7);
+		Assert.equals(0, h.orders.positionSize());
+		Assert.equals(100020.0, h.orders.cash);
+	}
+
+	public function testNextOpenLastSignalWins() {
+		var h = new HarnessContext();
+		h.orders.executionMode = "next-open";
+		h.orders.long(100, 10, 1);
+		h.orders.flat(100, 1);
+		h.orders.beginBar(102, 2);
+		Assert.equals(0, h.orders.positionSize());
+		Assert.equals(0, h.orders.trades);
 	}
 }
 
@@ -2691,9 +2893,18 @@ class TestTypes extends Test {
 			tc.typeOf(new MuseParser().parseExpr('graph_bfs(g, "A")[0]')),
 			musescript.types.MuseType.TString
 		));
+		Assert.isTrue(switch (tc.typeOf(new MuseParser().parseExpr('graph_shortest_path(g, "A", "B")'))) {
+			case TObject(fields):
+				fields.length == 2
+					&& fields[0].name == "nodes"
+					&& Type.enumEq(fields[0].ty, musescript.types.MuseType.TStringArray)
+					&& fields[1].name == "distance"
+					&& Type.enumEq(fields[1].ty, musescript.types.MuseType.TScalar);
+			default: false;
+		});
 		Assert.isTrue(Type.enumEq(
-			tc.typeOf(new MuseParser().parseExpr('graph_shortest_path(g, "A", "B")')),
-			musescript.types.MuseType.TGraphPath
+			tc.typeOf(new MuseParser().parseExpr('graph_shortest_path(g, "A", "B").distance')),
+			musescript.types.MuseType.TScalar
 		));
 		Assert.isTrue(Type.enumEq(
 			tc.typeOf(new MuseParser().parseExpr('graph_pagerank(g)')),
@@ -2704,11 +2915,12 @@ class TestTypes extends Test {
 			@on(bar) {
 				var graph = { directed: true, nodes: ["A", "B"], edges: [{from: "A", to: "B"}] };
 				var path = graph_shortest_path(graph, "A", "B");
-				if (graph_has_edge(graph, "A", "B") && str_len(graph_bfs(graph, "A")[0]) > 0) long();
+				if (graph_has_edge(graph, "A", "B") && str_len(graph_bfs(graph, "A")[0]) > 0 && path.distance >= 0) long();
 			}
 		}');
 		Assert.isFalse(hasErr(errs, "Vector/StringArray"));
 		Assert.isFalse(hasErr(errs, "expected"));
+		Assert.isFalse(hasErr(errs, "field"));
 	}
 
 	public function testRuntimeBuiltinsHaveTypedSignatures() {
@@ -2718,6 +2930,41 @@ class TestTypes extends Test {
 			if (Reflect.isFunction(value))
 				Assert.notNull(musescript.types.BuiltinSigs.get(name), 'missing BuiltinSig for $name');
 		}
+		var gvars:Map<String, Dynamic> = new Map();
+		musescript.builtins.GraphBuiltins.install(gvars);
+		for (name => value in gvars) {
+			if (Reflect.isFunction(value))
+				Assert.notNull(musescript.types.BuiltinSigs.get(name), 'missing BuiltinSig for graph $name');
+		}
+		var mvars:Map<String, Dynamic> = new Map();
+		musescript.builtins.macro.MacroBuiltins.install(mvars, new HarnessContext());
+		for (name => value in mvars) {
+			if (Reflect.isFunction(value))
+				Assert.notNull(musescript.types.BuiltinSigs.get(name), 'missing BuiltinSig for macro $name');
+		}
+
+		// Reverse: every runtime-callable BuiltinSig must be installed somewhere.
+		var installed = new Map<String, Bool>();
+		for (name => value in vars) if (Reflect.isFunction(value)) installed.set(name, true);
+		for (name => value in gvars) if (Reflect.isFunction(value)) installed.set(name, true);
+		for (name => value in mvars) if (Reflect.isFunction(value)) installed.set(name, true);
+		for (name in musescript.types.BuiltinSigs.all().keys()) {
+			if (musescript.types.BuiltinSigs.isPaletteOnly(name)) continue;
+			Assert.isTrue(installed.exists(name), 'BuiltinSig $name not installed on Trade/Graph/Macro');
+		}
+
+		// Trade+Graph install → JsBackend.dispatchBuiltin (macro markers are planner-side).
+		#if js
+		var onBarInstalled = new Map<String, Bool>();
+		for (name => value in vars) if (Reflect.isFunction(value)) onBarInstalled.set(name, true);
+		for (name => value in gvars) if (Reflect.isFunction(value)) onBarInstalled.set(name, true);
+		for (name in onBarInstalled.keys()) {
+			Assert.isTrue(
+				JsBackend.knowsDispatchedBuiltin(name),
+				'JsBackend missing dispatch for installed $name'
+			);
+		}
+		#end
 	}
 
 	public function testWindowLadderReject() {
@@ -2728,8 +2975,505 @@ class TestTypes extends Test {
 		Assert.isTrue(hasErr(errs, "Fib ladder") || hasErr(errs, "Window"));
 	}
 
+	public function testFnDeclGetsCallableType() {
+		var errs = MuseScript.check('{
+			function add1(x) { return x + 1; }
+			@strategy("x")
+			@on(bar) {
+				var y = add1(close);
+				var z = add1(1, 2);
+			}
+		}');
+		Assert.isTrue(hasErr(errs, "expects 1 arg"));
+		Assert.isFalse(hasErr(errs, "infinite"));
+	}
+
+	public function testRecursiveFnDeclDoesNotLoop() {
+		var errs = MuseScript.check('{
+			function fact(n) {
+				if (n <= 1) return 1;
+				return n * fact(n - 1);
+			}
+			@strategy("x")
+			@on(bar) { var y = fact(3); }
+		}');
+		Assert.isFalse(hasErr(errs, "expects"));
+	}
+
+	public function testEFunctionInfersTFun() {
+		var tc = new musescript.checker.TypeChecker();
+		var ty = tc.typeOf(new MuseParser().parseExpr("function(x) { return x + 1; }"));
+		Assert.isTrue(switch (ty) {
+			case TFun(args, _): args.length == 1;
+			default: false;
+		});
+	}
+
+	public function testAssignmentExprRefinesEnv() {
+		var tc = new musescript.checker.TypeChecker();
+		var assignTy = tc.typeOf(EBinop("=", EIdent("x"), EConst(CFloat(5.0))));
+		Assert.isTrue(Type.enumEq(assignTy, musescript.types.MuseType.TScalar));
+		Assert.isTrue(Type.enumEq(tc.typeOf(EIdent("x")), musescript.types.MuseType.TScalar));
+	}
+
+	public function testObjectFieldTypoCaught() {
+		var errs = MuseScript.check('{
+			@strategy("x")
+			@on(bar) {
+				var m = macd(close);
+				var bad = m.hitst;
+			}
+		}');
+		Assert.isTrue(hasErr(errs, 'field "hitst"'));
+	}
+
+	public function testMacdHistFieldOk() {
+		var errs = MuseScript.check('{
+			@strategy("x")
+			@on(bar) {
+				var m = macd(close);
+				var h = m.hist;
+				if (h > 0) long();
+			}
+		}');
+		Assert.isFalse(hasErr(errs, "field"));
+	}
+
+	public function testStructuralObjectInferred() {
+		var tc = new musescript.checker.TypeChecker();
+		var ty = tc.typeOf(EObject([
+			{name: "a", e: EConst(CFloat(1.0))},
+			{name: "b", e: EConst(CBool(true))}
+		]));
+		Assert.isTrue(switch (ty) {
+			case TObject(fields):
+				fields.length == 2
+					&& fields[0].name == "a"
+					&& Type.enumEq(fields[0].ty, musescript.types.MuseType.TScalar)
+					&& fields[1].name == "b"
+					&& Type.enumEq(fields[1].ty, musescript.types.MuseType.TBool);
+			default: false;
+		});
+		Assert.equals(
+			"Dict",
+			musescript.types.MuseTypes.toString(musescript.types.MuseType.TDict)
+		);
+		Assert.isTrue(Type.enumEq(
+			musescript.types.MuseTypes.parseName("Set"),
+			musescript.types.MuseType.TSet
+		));
+	}
+
+	public function testObjectWidthSubtyping() {
+		var wide = musescript.types.MuseType.TObject([
+			{name: "a", ty: musescript.types.MuseType.TScalar},
+			{name: "b", ty: musescript.types.MuseType.TBool}
+		]);
+		var narrow = musescript.types.MuseType.TObject([
+			{name: "a", ty: musescript.types.MuseType.TScalar}
+		]);
+		Assert.isTrue(musescript.types.MuseTypes.canAssign(wide, narrow));
+		Assert.isFalse(musescript.types.MuseTypes.canAssign(narrow, wide));
+	}
+
+	public function testPlanBuiltinVarargs() {
+		var errs = MuseScript.check('{
+			@strategy("x")
+			@param("fast", 8)
+			@param("slow", 21)
+			@macro("m") {
+				tune(fast, slow);
+				sample(universe, 10);
+				optimize(sharpe, [fast, slow]);
+			}
+			@on(bar) { if (crossover(sma(close, fast), sma(close, slow))) long(); }
+		}');
+		Assert.isFalse(hasErr(errs, "expects at most"));
+		Assert.isFalse(hasErr(errs, "expects at least"));
+	}
+
+	public function testNaAcceptsSeries() {
+		var errs = MuseScript.check('{
+			@strategy("x")
+			@on(bar) {
+				if (na(close) || na(sma(close, 8))) flat();
+			}
+		}');
+		Assert.isFalse(hasErr(errs, "expected"));
+	}
+
+	public function testStrictModeRejectsUnknownWires() {
+		var src = '{
+			@strategy("x")
+			@on(bar) {
+				if (mysteryValue > 0) long();
+			}
+		}';
+		// Default mode: warning only.
+		var lax = MuseScript.check(src);
+		Assert.isFalse(hasErr(lax, "unknown identifier"));
+		var warned = false;
+		for (e in lax) if (e.indexOf("warning:") == 0 && e.indexOf("mysteryValue") >= 0) warned = true;
+		Assert.isTrue(warned);
+		// Strict mode: hard error.
+		var strict = MuseScript.check(src, null, { strict: true });
+		Assert.isTrue(hasErr(strict, 'unknown identifier "mysteryValue"'));
+
+		// TUnknown wire into a concrete slot: dict_values is honestly Unknown.
+		var wire = '{
+			@strategy("x")
+			@on(bar) {
+				var d = dict_new();
+				var vs = dict_values(d);
+				if (stat_mean(vs) > 0) long();
+			}
+		}';
+		Assert.isFalse(hasErr(MuseScript.check(wire), "stat_mean arg 1"));
+		Assert.isTrue(hasErr(MuseScript.check(wire, null, { strict: true }), "stat_mean arg 1"));
+	}
+
+	public function testDiagnosticSourcePositions() {
+		var src = '{
+			@strategy("pos")
+			@on(bar) {
+				if (mysteryDuck > 0) long();
+			}
+		}';
+		var diags = MuseScript.checkEx(src, "duck.ms", { strict: true });
+		var hit = false;
+		for (d in diags) {
+			if (d.msg.indexOf("mysteryDuck") < 0) continue;
+			Assert.notNull(d.pos, "diagnostic should carry SourcePos");
+			Assert.equals("duck.ms", d.pos.file);
+			Assert.isTrue(d.pos.line != null && d.pos.line > 1, "line should be set");
+			Assert.isTrue(d.pos.pmin != null, "pmin should be set");
+			var s = musescript.checker.Diagnostics.toString(d);
+			Assert.isTrue(s.indexOf("duck.ms:") >= 0, s);
+			hit = true;
+		}
+		Assert.isTrue(hit, "expected positioned mysteryDuck diagnostic");
+
+		var surface = 'strategy PosSurface {
+			onBar {
+				when nopeIdent > 0: long()
+			}
+		}';
+		var sdiags = MuseScript.checkEx(surface, "surf.ms", { strict: true });
+		var shit = false;
+		for (d in sdiags) {
+			if (d.msg.indexOf("nopeIdent") < 0) continue;
+			Assert.notNull(d.pos);
+			Assert.equals("surf.ms", d.pos.file);
+			Assert.isTrue(d.pos.line != null && d.pos.line >= 2);
+			shit = true;
+		}
+		Assert.isTrue(shit, "strategy-surface unknown ident should be positioned");
+	}
+
+	public function testTickEventHostBindingsStrict() {
+		// price/size/bid are legal inside on(tick) under strict mode.
+		var tickOk = MuseScript.check('{
+			@strategy("t")
+			@on(tick) {
+				if (price > bid && size > 0) flat();
+			}
+		}', null, { strict: true });
+		Assert.isFalse(hasErr(tickOk, "unknown identifier"));
+		Assert.isFalse(hasErr(tickOk, "price"));
+
+		// Unknown still fails inside on(tick).
+		var tickBad = MuseScript.check('{
+			@strategy("t")
+			@on(tick) {
+				if (ghostTick > 0) flat();
+			}
+		}', null, { strict: true });
+		Assert.isTrue(hasErr(tickBad, 'unknown identifier "ghostTick"'));
+
+		// Event host: kind / px / qty.
+		var eventOk = MuseScript.check('{
+			@strategy("e")
+			@on(fills) {
+				if (kind == "Filled" && px > 0 && qty > 0) flat();
+			}
+		}', null, { strict: true });
+		Assert.isFalse(hasErr(eventOk, "unknown identifier"));
+		Assert.isFalse(hasErr(eventOk, "unknown call"));
+
+		// Typed surface onTick / onEvent.
+		var surf = MuseScript.check('strategy TickSurf {
+			onTick {
+				when price > 0 && size > 0: flat()
+			}
+			onEvent(fills) {
+				when kind == "Filled": flat()
+			}
+		}', null, { strict: true });
+		Assert.isFalse(hasErr(surf, "unknown identifier"));
+	}
+
+	public function testStrictUnknownCallAndCodes() {
+		var diags = MuseScript.checkEx('{
+			@strategy("x")
+			@on(bar) {
+				mysteryFn(1);
+			}
+		}', "call.ms", { strict: true });
+		var hit = false;
+		for (d in diags) {
+			if (d.msg.indexOf("unknown call") < 0) continue;
+			Assert.equals(musescript.checker.DiagCodes.UNKNOWN_CALL, d.code);
+			Assert.notNull(d.pos);
+			hit = true;
+		}
+		Assert.isTrue(hit, "strict mode should error unknown calls with E_UNKNOWN_CALL");
+
+		// Not-callable: Scalar used as function.
+		var nc = MuseScript.checkEx('{
+			@strategy("x")
+			@on(bar) {
+				var n = 1;
+				n(2);
+			}
+		}', null, { strict: true });
+		Assert.isTrue(hasCode(nc, musescript.checker.DiagCodes.NOT_CALLABLE));
+	}
+
+	public function testSurfaceForInParsesAndTypes() {
+		var src = 'strategy ForSurf {
+			onBar {
+				xs = window(close, 8)
+				acc = 0.0
+				for (x in xs) {
+					acc = acc + x
+				}
+				when acc > 0: long()
+			}
+		}';
+		var errs = MuseScript.check(src, null, { strict: true });
+		Assert.isFalse(hasErr(errs, "unknown identifier"));
+		var prog = new MuseParser().parse(src);
+		var found = false;
+		function walk(ss:Array<Stmt>):Void {
+			for (s in ss) switch (s) {
+				case ForIn("x", _, _): found = true;
+				case OnBar(b) | Block(b) | When(_, b): walk(b);
+				default:
+			}
+		}
+		for (d in prog.decls) switch (d) {
+			case StrategyDecl(_, body): walk(body);
+			default:
+		}
+		Assert.isTrue(found, "for-in should parse on strategy surface");
+	}
+
+	public function testInterpBindEventParity() {
+		var prog = new MuseParser().parse('{
+			@strategy("ev")
+			@on(orderFlow) {
+				note(kind);
+				note(price);
+			}
+		}');
+		var harness = new HarnessContext();
+		var seen:Array<Dynamic> = [];
+		var interp = new MuseInterp(harness);
+		interp.globals.set("note", function(v:Dynamic) seen.push(v));
+		interp.executeProgram(prog);
+		interp.dispatchEvents("orderFlow", MuseIters.from([
+			{ kind: "Filled", px: 100.0, qty: 50 },
+			{ kind: "Rejected", px: 102.0, reason: "limit" }
+		]));
+		Assert.equals(4, seen.length);
+		Assert.equals("Filled", seen[0]);
+		Assert.equals(100.0, seen[1]);
+		Assert.equals("Rejected", seen[2]);
+		Assert.equals(102.0, seen[3]);
+	}
+
+	function hasCode(diags:Array<musescript.checker.Diagnostic>, code:String):Bool {
+		for (d in diags) if (d.code == code) return true;
+		return false;
+	}
+
+	public function testCanAssignStrictRefusesUnknown() {
+		Assert.isTrue(musescript.types.MuseTypes.canAssign(
+			musescript.types.MuseType.TUnknown, musescript.types.MuseType.TBool));
+		Assert.isFalse(musescript.types.MuseTypes.canAssignStrict(
+			musescript.types.MuseType.TUnknown, musescript.types.MuseType.TBool));
+		Assert.isFalse(musescript.types.MuseTypes.canAssignStrict(
+			musescript.types.MuseType.TBool, musescript.types.MuseType.TUnknown));
+		Assert.isTrue(musescript.types.MuseTypes.canAssignStrict(
+			musescript.types.MuseType.TSeries, musescript.types.MuseType.TScalar));
+	}
+
+	public function testHostObjectMemberTyping() {
+		// Typo on Math is a real diagnostic now.
+		Assert.isTrue(hasErr(MuseScript.check('{
+			@strategy("x")
+			@on(bar) { var y = Math.abss(close); }
+		}'), '"abss"'));
+		// Typo on params too.
+		Assert.isTrue(hasErr(MuseScript.check('{
+			@strategy("x")
+			@on(bar) { var v = params.geet("fast"); }
+		}'), '"geet"'));
+		// Legit member calls stay clean and correctly typed.
+		var ok = MuseScript.check('{
+			@strategy("x")
+			@on(bar) {
+				if (Math.isNaN(close) || Math.abs(close - open) > Math.pow(2, 3)) flat();
+			}
+		}');
+		Assert.isFalse(hasErr(ok, "expected"));
+		Assert.isFalse(hasErr(ok, "not found"));
+		// Arity is enforced on host members.
+		Assert.isTrue(hasErr(MuseScript.check('{
+			@strategy("x")
+			@on(bar) { var y = Math.pow(2); }
+		}'), "Math.pow expects 2 arg(s)"));
+	}
+
+	public function testZscoreIsVectorBuiltin() {
+		var sig = musescript.types.BuiltinSigs.get("zscore");
+		Assert.notNull(sig);
+		Assert.isTrue(Type.enumEq(sig.ret, musescript.types.MuseType.TVector));
+		Assert.equals(1, sig.args.length);
+		Assert.isTrue(Type.enumEq(sig.args[0], musescript.types.MuseType.TVector));
+	}
+
+	public function testStringArrayLiteralAndMatrixFields() {
+		var tc = new musescript.checker.TypeChecker();
+		Assert.isTrue(Type.enumEq(
+			tc.typeOf(new MuseParser().parseExpr('["a", "b"]')),
+			musescript.types.MuseType.TStringArray
+		));
+		Assert.isTrue(Type.enumEq(
+			tc.typeOf(new MuseParser().parseExpr('ml_matrix(2, 2, [1, 2, 3, 4]).rows')),
+			musescript.types.MuseType.TScalar
+		));
+		var errs = MuseScript.check('{
+			@strategy("x")
+			@on(bar) {
+				var m = ml_matrix(2, 2, [1, 2, 3, 4]);
+				var bad = m.rowz;
+			}
+		}');
+		Assert.isTrue(hasErr(errs, 'field "rowz"'));
+	}
+
+	public function testDictGetPropagatesDefaultType() {
+		var tc = new musescript.checker.TypeChecker();
+		Assert.isTrue(Type.enumEq(
+			tc.typeOf(new MuseParser().parseExpr('dict_get(dict_new(), "k", 0.0)')),
+			musescript.types.MuseType.TScalar
+		));
+	}
+
+	public function testForInElementTypes() {
+		var errs = MuseScript.check('{
+			@strategy("x")
+			@on(bar) {
+				var xs = [1.0, 2.0, 3.0];
+				for (x in xs) {
+					if (x > 0) long();
+				}
+				var labels = ["a", "b"];
+				for (s in labels) {
+					if (str_len(s) > 0) long();
+				}
+			}
+		}');
+		Assert.isFalse(hasErr(errs, "expected"));
+	}
+
+	public function testFnDeclArgTypesInferredFromBody() {
+		var errs = MuseScript.check('{
+			function positive(x) { return x > 0; }
+			@strategy("x")
+			@on(bar) {
+				if (positive("bad")) long();
+			}
+		}');
+		Assert.isTrue(hasErr(errs, "expected Scalar"));
+	}
+
+	public function testIterPredicateAndReturnRefinement() {
+		var tc = new musescript.checker.TypeChecker();
+		Assert.isTrue(Type.enumEq(
+			tc.typeOf(new MuseParser().parseExpr('find([1, 2, 3], function(x) return x > 1)')),
+			musescript.types.MuseType.TScalar
+		));
+		Assert.isTrue(Type.enumEq(
+			tc.typeOf(new MuseParser().parseExpr('reduce([1, 2, 3], 0.0, function(acc, x) return acc + x)')),
+			musescript.types.MuseType.TScalar
+		));
+
+		var errs = MuseScript.check('{
+			@strategy("x")
+			@on(bar) {
+				var xs = [1.0, 2.0, 3.0];
+				var bad = filter(xs, function(x) return x + 1);
+				var labels = ["a", "b"];
+				var n = sum(labels);
+			}
+		}');
+		Assert.isTrue(hasErr(errs, "predicate"));
+		Assert.isTrue(hasErr(errs, "numeric iterable"));
+	}
+
+	public function testStringCollectionResultType() {
+		var tc = new musescript.checker.TypeChecker();
+		Assert.isTrue(Type.enumEq(
+			tc.typeOf(new MuseParser().parseExpr('take(["a", "b"], 1)[0]')),
+			musescript.types.MuseType.TString
+		));
+	}
+
+	public function testZipMergeEnumerateTyping() {
+		var errs = MuseScript.check('{
+			@strategy("x")
+			@on(bar) {
+				var xs = [1.0, 2.0];
+				var ys = [3.0, 4.0];
+				var z = zip(xs, ys);
+				var m = merge(xs, ys);
+				var pairs = zipWith(xs, ys, function(a, b) return a + b);
+				for (e in enumerate(xs)) {
+					if (e.i >= 0 && e.v > 0) long();
+				}
+				var bad = zip(dict_new(), xs);
+			}
+		}');
+		Assert.isFalse(hasErr(errs, "combiner"));
+		Assert.isTrue(hasErr(errs, "iterable"));
+	}
+
+	public function testUnknownIdentWarned() {
+		var errs = MuseScript.check('{
+			@strategy("x")
+			@on(bar) {
+				if (totallyMissingThing > 0) long();
+			}
+		}');
+		Assert.isTrue(hasWarn(errs, 'unknown identifier "totallyMissingThing"'));
+	}
+
+	public function testSeriesAssignableToScalar() {
+		Assert.isTrue(musescript.types.MuseTypes.canAssign(
+			musescript.types.MuseType.TSeries,
+			musescript.types.MuseType.TScalar
+		));
+	}
+
 	function hasErr(errs:Array<String>, needle:String):Bool {
 		for (e in errs) if (e.indexOf("error:") == 0 && e.indexOf(needle) >= 0) return true;
+		return false;
+	}
+
+	function hasWarn(errs:Array<String>, needle:String):Bool {
+		for (e in errs) if (e.indexOf("warning:") == 0 && e.indexOf(needle) >= 0) return true;
 		return false;
 	}
 }
@@ -2763,6 +3507,151 @@ strategy MaCross {
 		}');
 		var printed = new musescript.compile.MusePrinter().printProgram(prog);
 		Assert.isTrue(printed.indexOf("sma") >= 0);
+	}
+
+	public function testScientificNotationAndEwmLookback() {
+		var prog = new MuseParser().parse('strategy Sci {
+			param lam: Scalar = 1e-6
+			onBar {
+				v = ewm_stdev(close, 8)
+				when v[1] < v && lam < 1: long()
+			}
+		}');
+		var hasLookback = false;
+		var lamOk = false;
+		function walk(e:musescript.ast.Expr):Void {
+			if (e == null) return;
+			switch (e) {
+				case ELookback(_, _): hasLookback = true;
+				case ECall(_, args): for (a in args) walk(a);
+				case EBinop(_, a, b): walk(a); walk(b);
+				case EUnop(_, _, a): walk(a);
+				case EField(o, _): walk(o);
+				case EArray(b, i): walk(b); walk(i);
+				case EBlock(es): for (x in es) walk(x);
+				case EParent(x): walk(x);
+				default:
+			}
+		}
+		for (d in prog.decls) switch (d) {
+			case ParamDecl("lam", def, _):
+				switch (def) {
+					case EConst(CFloat(v)):
+						lamOk = Math.abs(v - 1e-6) < 1e-18;
+					default:
+				}
+			case StrategyDecl(_, body):
+				for (s in body) switch (s) {
+					case Assign(_, e): walk(e);
+					case OnBar(ss):
+						for (st in ss) switch (st) {
+							case When(c, _): walk(c);
+							case Assign(_, e): walk(e);
+							default:
+						}
+					default:
+				}
+			default:
+		}
+		Assert.isTrue(lamOk, "1e-6 param default");
+		Assert.isTrue(hasLookback, "ewm_stdev(...)[1] should be lookback, not array index");
+	}
+
+	public function testSurfaceLambdaParsesAndRuns() {
+		#if js
+		var src = 'strategy LambdaSurface {
+			param look: Window = 13
+			onBar {
+				rets = sci_diff(window(close, look))
+				ups = filter(rets, function(r) return r > 0)
+				spreads = zipWith(window(ema(close, 8), look), window(ema(close, 21), look), function(a, b) return a - b)
+				when count(ups) > 6 && avg(spreads) > 0: long()
+				when count(ups) < 4: flat()
+			}
+		}';
+		var errs = MuseScript.check(src);
+		for (e in errs)
+			Assert.isFalse(StringTools.startsWith(e, "error:"), e);
+		var prog = new MuseParser().parse(src);
+		var harness = new HarnessContext();
+		Reflect.setField(harness, "feed", BarFeed.synthetic(120, 7));
+		TradeBuiltins.resetCrossState();
+		var ex = MuseCompiler.compileEx(prog, { target: "js", strict: true });
+		var result:Dynamic = ex.fn(harness);
+		Assert.isTrue(Math.isFinite(result.finalEquity));
+		#else
+		Assert.isTrue(true);
+		#end
+	}
+
+	public function testSurfaceObjectLiteralAndFieldTypo() {
+		var src = 'strategy ObjSurface {
+			onBar {
+				o = { slope: 1.0, level: close }
+				when o.slope > 0: long()
+			}
+		}';
+		var errs = MuseScript.check(src);
+		for (e in errs)
+			Assert.isFalse(StringTools.startsWith(e, "error:"), e);
+
+		var bad = MuseScript.check('strategy ObjTypo {
+			onBar {
+				o = { slope: 1.0 }
+				when o.slop > 0: long()
+			}
+		}');
+		var found = false;
+		for (e in bad) if (e.indexOf("error:") == 0 && e.indexOf('"slop"') >= 0) found = true;
+		Assert.isTrue(found, "field typo on surface object literal should error");
+	}
+
+	public function testSurfaceReturnInFunctionDecl() {
+		#if js
+		var src = 'strategy FnReturn {
+			onBar {
+				when isPos(mom(close, 8)): long()
+				when !isPos(mom(close, 8)): flat()
+			}
+		}
+
+		function isPos(x) {
+			return x > 0;
+		}';
+		var prog = new MuseParser().parse(src);
+		var hasFn = false;
+		for (d in prog.decls) switch (d) {
+			case FnDecl("isPos", _, _, _): hasFn = true;
+			default:
+		}
+		Assert.isTrue(hasFn, "top-level function decl with return should parse");
+		var harness = new HarnessContext();
+		Reflect.setField(harness, "feed", BarFeed.synthetic(100, 5));
+		TradeBuiltins.resetCrossState();
+		var ex = MuseCompiler.compileEx(prog, { target: "js", strict: false });
+		var result:Dynamic = ex.fn(harness);
+		Assert.isTrue(Math.isFinite(result.finalEquity));
+		#else
+		Assert.isTrue(true);
+		#end
+	}
+
+	public function testTypedParamSearchBounds() {
+		var prog = new MuseParser().parse('strategy Bound {
+			param fast: Window = 8 { min: 5, max: 21, step: 8, tune: grid }
+			onBar { when rising(close, fast): long() }
+		}');
+		var found = false;
+		for (d in prog.decls) switch (d) {
+			case ParamDecl("fast", _, opts):
+				found = true;
+				Assert.equals(5, opts.min);
+				Assert.equals(21, opts.max);
+				Assert.equals(8, opts.step);
+				Assert.equals("grid", opts.tune);
+			default:
+		}
+		Assert.isTrue(found);
 	}
 
 	public function testModuleUse() {
@@ -2802,6 +3691,34 @@ strategy S {
 			@on(bar) { var x = sma("close", fast); }
 		}');
 		Assert.isTrue(prog.decls.length >= 1);
+	}
+}
+
+class TestStrategyKinds extends Test {
+	public function testStrategyKindsTypeCheckAndRun() {
+		var dir = "examples/strategy-kinds";
+		Assert.isTrue(sys.FileSystem.exists(dir), "missing strategy-kinds dir");
+		var names = sys.FileSystem.readDirectory(dir);
+		names = [for (n in names) if (StringTools.endsWith(n, ".ms")) n];
+		names.sort(function(a, b) return Reflect.compare(a, b));
+		Assert.isTrue(names.length >= 30, 'expected >= 30 kinds, got ${names.length}');
+		for (name in names) {
+			var path = dir + "/" + name;
+			var source = sys.io.File.getContent(path);
+			var errs = MuseScript.check(source, path);
+			for (e in errs) {
+				if (StringTools.startsWith(e, "error:"))
+					Assert.fail('$name: $e');
+			}
+			var prog = new MuseParser().parse(source, path);
+			var harness = new HarnessContext();
+			Reflect.setField(harness, "feed", BarFeed.synthetic(120, 9));
+			TradeBuiltins.resetCrossState();
+			var ex = MuseCompiler.compileEx(prog, { target: "js", strict: true });
+			var result:Dynamic = ex.fn(harness);
+			Assert.isTrue(result != null, name);
+			Assert.isTrue(Math.isFinite(result.finalEquity), name + " equity");
+		}
 	}
 }
 

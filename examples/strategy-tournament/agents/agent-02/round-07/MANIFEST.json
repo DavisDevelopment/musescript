@@ -1,0 +1,67 @@
+{
+  "agent": "agent-02",
+  "round": "round-07",
+  "domain": "crypto+forex",
+  "execution": "next-open",
+  "eval_window": "2026-04-14..2026-07-13",
+  "self_test_symbols": ["BTCUSD", "EURUSD"],
+  "target_score": 0.0,
+  "strategies": [
+    {
+      "file": "s01.ms",
+      "name": "S01_Ema834Gate21R7",
+      "hypothesis": "Flagship EMA 8/34 OR-broaden + SMA(21) trend gate — defensive trend follow on causal next-open",
+      "score": 0.379,
+      "mean_3m_sharpe": 0.032,
+      "mean_d_sharpe": 0.889,
+      "median_mdd": 0.023,
+      "wf_mean_sharpe": -0.339
+    },
+    {
+      "file": "s02.ms",
+      "name": "S02_Ema889SlowTrendR7",
+      "hypothesis": "Slow EMA 8/89 level trend + close > e89 anchor — sustained trend diversifier",
+      "score": 0.100,
+      "mean_3m_sharpe": -0.355,
+      "mean_d_sharpe": 0.502,
+      "median_mdd": 0.046,
+      "wf_mean_sharpe": -0.495
+    },
+    {
+      "file": "s03.ms",
+      "name": "S03_Ema1334RisingBurstR7",
+      "hypothesis": "EMA 13/34 OR-broaden + rising spread + EMA(55) gate — mid-speed momentum burst",
+      "score": 0.216,
+      "mean_3m_sharpe": -0.247,
+      "mean_d_sharpe": 0.609,
+      "median_mdd": 0.023,
+      "wf_mean_sharpe": -0.216
+    },
+    {
+      "file": "s04.ms",
+      "name": "S04_Ema821Gate21R7",
+      "hypothesis": "Faster EMA 8/21 trigger + SMA(21) gate — more FX events, near-flagship score",
+      "score": 0.354,
+      "mean_3m_sharpe": 0.008,
+      "mean_d_sharpe": 0.865,
+      "median_mdd": 0.023,
+      "wf_mean_sharpe": -0.409
+    },
+    {
+      "file": "s05.ms",
+      "name": "S05_Ema834CrownFlagshipR7",
+      "hypothesis": "s01 core + EMA(13) trail exit + position latch + falling(spread,5,8) layered risk",
+      "score": 0.295,
+      "mean_3m_sharpe": -0.090,
+      "mean_d_sharpe": 0.767,
+      "median_mdd": 0.025,
+      "wf_mean_sharpe": -0.370
+    }
+  ],
+  "best_score": {
+    "file": "s01.ms",
+    "score": 0.379
+  },
+  "primary_bet": "s01.ms",
+  "key_innovation": "OR-broadened EMA level entries with SMA(21) (not 55/89) trend gate — re-earns EMA trend identity on causal crypto+FX by sitting out whipsaw"
+}

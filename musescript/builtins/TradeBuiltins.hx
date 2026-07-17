@@ -34,10 +34,24 @@ class TradeBuiltins {
 		vars.set("roc", roc.bind(harness));
 		vars.set("mom", mom.bind(harness));
 		vars.set("stdev", stdev.bind(harness));
+		vars.set("ewm_var", ewmVar.bind(harness));
+		vars.set("ewm_stdev", ewmStdev.bind(harness));
 		vars.set("wma", wma.bind(harness));
 		vars.set("rma", rma.bind(harness));
-		vars.set("rising", rising);
-		vars.set("falling", falling);
+		vars.set("rising", function(x:Float, n:Int, ?minBars:Int = 0) {
+			if (minBars > 0) {
+				var bi = harness.currentBar != null ? harness.currentBar.index : -1;
+				if (harness.orders.barsInTrade(bi) < minBars) return false;
+			}
+			return rising(x, n);
+		});
+		vars.set("falling", function(x:Float, n:Int, ?minBars:Int = 0) {
+			if (minBars > 0) {
+				var bi = harness.currentBar != null ? harness.currentBar.index : -1;
+				if (harness.orders.barsInTrade(bi) < minBars) return false;
+			}
+			return falling(x, n);
+		});
 		vars.set("window", window.bind(harness));
 		vars.set("ohlcv_window", ohlcvWindow.bind(harness));
 		vars.set("str_len", strLen);
@@ -69,6 +83,9 @@ class TradeBuiltins {
 		vars.set("ml_matrix_cols", MlBuiltins.matrixCols);
 		vars.set("ml_matrix_data", MlBuiltins.matrixData);
 		vars.set("ml_matrix_get", MlBuiltins.matrixGet);
+		vars.set("ml_matrix_transpose", MlBuiltins.matrixTranspose);
+		vars.set("ml_matrix_inverse", MlBuiltins.matrixInverse);
+		vars.set("ml_matrix_determinant", MlBuiltins.matrixDeterminant);
 		vars.set("ml_ridge_fit_matrix", MlBuiltins.ridgeFitMatrix);
 
 		vars.set("long", function(?qty:Float) {
@@ -99,6 +116,14 @@ class TradeBuiltins {
 			return harness.orders.unrealizedPnl(px);
 		});
 
+		vars.set("log", function(?a:Dynamic, ?b:Dynamic, ?c:Dynamic, ?d:Dynamic) {
+			var parts:Array<String> = [];
+			if (a != null) parts.push(Std.string(a));
+			if (b != null) parts.push(Std.string(b));
+			if (c != null) parts.push(Std.string(c));
+			if (d != null) parts.push(Std.string(d));
+			harness.pushLog(parts.join(" "));
+		});
 		vars.set("plot", function(series:Float, label:String, ?color:String) {
 			var bi = harness.currentBar != null ? harness.currentBar.index : 0;
 			harness.chart.plot(series, label, color, bi);
@@ -118,6 +143,8 @@ class TradeBuiltins {
 		vars.set("vector_zscore", zscore);
 		vars.set("correlation", correlation);
 		vars.set("sharpe", function(returns:Array<Float>) return musescript.harness.Metrics.sharpe(returns));
+		vars.set("sortino", function(returns:Array<Float>) return musescript.harness.Metrics.sortino(returns));
+		vars.set("max_drawdown", function(equity:Array<Float>) return musescript.harness.Metrics.maxDrawdown(equity));
 		vars.set("stat_mean", StatsBuiltins.mean);
 		vars.set("stat_median", StatsBuiltins.median);
 		vars.set("stat_variance", StatsBuiltins.variance);
@@ -128,6 +155,13 @@ class TradeBuiltins {
 		vars.set("stat_covariance", StatsBuiltins.covariance);
 		vars.set("stat_correlation", StatsBuiltins.pearson);
 		vars.set("stat_skewness", StatsBuiltins.skewness);
+		vars.set("stat_kurtosis", StatsBuiltins.kurtosis);
+		vars.set("stat_rank", StatsBuiltins.rank);
+		vars.set("stat_percentile_rank", StatsBuiltins.percentileRank);
+		vars.set("stat_regression", StatsBuiltins.regression);
+		vars.set("stat_autocorr", StatsBuiltins.autocorr);
+		vars.set("sort", StatsBuiltins.sort);
+		vars.set("argsort", StatsBuiltins.argsort);
 		vars.set("stat_zscore", StatsBuiltins.zScores);
 		vars.set("sci_cumsum", StatsBuiltins.cumulativeSum);
 		vars.set("sci_diff", StatsBuiltins.difference);
@@ -203,6 +237,10 @@ class TradeBuiltins {
 			get: function(name:String) return harness.indicators.get(name)
 		});
 		GraphBuiltins.install(vars);
+		DictBuiltins.install(vars);
+		SetBuiltins.install(vars);
+		PortfolioBuiltins.install(vars, harness);
+		BagBuiltins.install(vars, harness);
 		vars.set("universe", harness.universe);
 		vars.set("Math", Math);
 	}
@@ -283,6 +321,35 @@ class TradeBuiltins {
 		return harness.series.exists("close") ? harness.series.get("close") : [];
 	}
 
+	// --- incremental indicator columns ---------------------------------------
+	// Full-history indicators (ema/rma/macd/stoch/vwap/atr) used to refold the
+	// entire tape prefix on every bar — O(n²) per backtest. Each unique callsite
+	// (indicator, series, params) now keeps a value column that is extended only
+	// by the bars that arrived since its last call, with the exact same fold
+	// order / window arithmetic as the old per-bar recompute, so results stay
+	// bit-identical. Columns are keyed by series NAME; raw-array sources bypass
+	// the cache (no stable identity to extend against). A call under
+	// withSeriesOffset sees a truncated prefix and just reads column[len-1] —
+	// prefixes are immutable, so time-travel needs no invalidation.
+	// Columns + callsite state live on the harness (runtime/IndicatorColumns.hx)
+	// so interleaved harnesses / future multi-symbol universes can't thrash a
+	// process-global cache. numeric indicator kinds for slot verification:
+	static inline var K_EMA = 1;
+	static inline var K_RMA = 2;
+	static inline var K_MACD = 3;
+	static inline var K_STOCH = 4;
+	static inline var K_VWAP = 5;
+	static inline var K_ATR = 6;
+	static inline var K_EWM = 7;
+
+	/** Cache name for `src` if it denotes a named harness series; null → bypass. */
+	static function seriesCacheName(src:Dynamic):Null<String> {
+		if (src == null) return "close";
+		if (Std.isOfType(src, Array)) return null;
+		if (Std.isOfType(src, String)) return cast src;
+		return "close"; // bar-field sugar resolves to close history
+	}
+
 	public static function sma(harness:HarnessContext, src:Dynamic, len:Int):Float {
 		var a = resolveSeries(harness, src);
 		if (a.length < len) return Math.NaN;
@@ -294,10 +361,21 @@ class TradeBuiltins {
 	public static function ema(harness:HarnessContext, src:Dynamic, len:Int):Float {
 		var a = resolveSeries(harness, src);
 		if (a.length == 0) return Math.NaN;
+		var name = seriesCacheName(src);
+		if (name == null) { // raw array: legacy full fold
+			var k = 2 / (len + 1);
+			var e = a[0];
+			for (i in 1...a.length) e = a[i] * k + e * (1 - k);
+			return e;
+		}
+		var col = harness.indCols.get(K_EMA, name, len, a);
 		var k = 2 / (len + 1);
-		var e = a[0];
-		for (i in 1...a.length) e = a[i] * k + e * (1 - k);
-		return e;
+		if (col.a.length == 0) col.a.push(a[0]);
+		while (col.a.length < a.length) {
+			var i = col.a.length;
+			col.a.push(a[i] * k + col.a[i - 1] * (1 - k));
+		}
+		return col.a[a.length - 1];
 	}
 
 	public static function rsi(harness:HarnessContext, src:Dynamic, len:Int):Float {
@@ -318,14 +396,17 @@ class TradeBuiltins {
 		var l = harness.series.get("low");
 		var c = harness.series.get("close");
 		if (h == null || l == null || c == null || c.length < 2) return Math.NaN;
-		var trs = [];
-		for (i in 1...c.length) {
-			var tr = Math.max(h[i] - l[i], Math.max(Math.abs(h[i] - c[i - 1]), Math.abs(l[i] - c[i - 1])));
-			trs.push(tr);
+		// col.a[i-1] = true range at bar i (extends incrementally); the trailing
+		// window average below is the same fresh O(len) scan as before.
+		var col = harness.indCols.get(K_ATR, "", 0, c);
+		while (col.a.length < c.length - 1) {
+			var i = col.a.length + 1;
+			col.a.push(Math.max(h[i] - l[i], Math.max(Math.abs(h[i] - c[i - 1]), Math.abs(l[i] - c[i - 1]))));
 		}
-		if (trs.length < len) return Math.NaN;
+		var m = c.length - 1;
+		if (m < len) return Math.NaN;
 		var sum = 0.0;
-		for (i in (trs.length - len)...trs.length) sum += trs[i];
+		for (i in (m - len)...m) sum += col.a[i];
 		return sum / len;
 	}
 
@@ -401,6 +482,53 @@ class TradeBuiltins {
 		return Math.sqrt(var_ / len);
 	}
 
+	/**
+	 * EWMA variance with α = 2/(len+1), paired mean/variance recursion
+	 * (pandas `ewm(..., adjust=False).var()` style). Returns current-bar value.
+	 */
+	public static function ewmVar(harness:HarnessContext, src:Dynamic, len:Int):Float {
+		return ewmMoment(harness, src, len, false);
+	}
+
+	/** `sqrt(ewm_var(...))`. */
+	public static function ewmStdev(harness:HarnessContext, src:Dynamic, len:Int):Float {
+		return ewmMoment(harness, src, len, true);
+	}
+
+	static function ewmMoment(harness:HarnessContext, src:Dynamic, len:Int, asStd:Bool):Float {
+		var a = resolveSeries(harness, src);
+		if (a.length == 0 || len <= 0) return Math.NaN;
+		var alpha = 2.0 / (len + 1);
+		var name = seriesCacheName(src);
+		if (name == null) {
+			var mean = a[0];
+			var v = 0.0;
+			for (i in 1...a.length) {
+				var delta = a[i] - mean;
+				mean = alpha * a[i] + (1 - alpha) * mean;
+				v = (1 - alpha) * (v + alpha * delta * delta);
+			}
+			return asStd ? Math.sqrt(v) : v;
+		}
+		var col = harness.indCols.get(K_EWM, name, len, a);
+		if (col.a.length == 0) {
+			col.a.push(0.0); // variance column
+			col.b.push(a[0]); // mean column
+		}
+		while (col.a.length < a.length) {
+			var i = col.a.length;
+			var prevMean = col.b[i - 1];
+			var prevVar = col.a[i - 1];
+			var delta = a[i] - prevMean;
+			var mean = alpha * a[i] + (1 - alpha) * prevMean;
+			var v = (1 - alpha) * (prevVar + alpha * delta * delta);
+			col.b.push(mean);
+			col.a.push(v);
+		}
+		var last = col.a[a.length - 1];
+		return asStd ? Math.sqrt(last) : last;
+	}
+
 	/** Weighted MA; weights 1..len (oldest→newest). βαρέσι σταθμοῖς ἁρμονία. */
 	public static function wma(harness:HarnessContext, src:Dynamic, len:Int):Float {
 		var a = resolveSeries(harness, src);
@@ -422,23 +550,48 @@ class TradeBuiltins {
 	public static function rma(harness:HarnessContext, src:Dynamic, len:Int):Float {
 		var a = resolveSeries(harness, src);
 		if (a.length == 0 || len <= 0) return Math.NaN;
-		var alpha = 1.0 / len;
-		if (a.length >= len) {
-			var sum = 0.0;
-			for (i in 0...len) sum += a[i];
-			var r = sum / len;
-			for (i in len...a.length) r = alpha * a[i] + (1 - alpha) * r;
+		var name = seriesCacheName(src);
+		if (name == null) { // raw array: legacy full fold
+			var alpha = 1.0 / len;
+			if (a.length >= len) {
+				var sum = 0.0;
+				for (i in 0...len) sum += a[i];
+				var r = sum / len;
+				for (i in len...a.length) r = alpha * a[i] + (1 - alpha) * r;
+				return r;
+			}
+			var r = a[0];
+			for (i in 1...a.length) r = alpha * a[i] + (1 - alpha) * r;
 			return r;
 		}
-		var r = a[0];
-		for (i in 1...a.length) r = alpha * a[i] + (1 - alpha) * r;
-		return r;
+		// col.a[i] = rma over prefix a[0..i]; f0 = short-prefix EMA-like fold,
+		// f1 = seeded Wilder recurrence once the prefix reaches `len`.
+		var col = harness.indCols.get(K_RMA, name, len, a);
+		var alpha = 1.0 / len;
+		while (col.a.length < a.length) {
+			var i = col.a.length;
+			if (i == 0) col.f0 = a[0];
+			else col.f0 = alpha * a[i] + (1 - alpha) * col.f0;
+			var v:Float;
+			if (i + 1 < len) v = col.f0;
+			else if (i + 1 == len) {
+				var sum = 0.0;
+				for (j in 0...len) sum += a[j];
+				col.f1 = sum / len;
+				v = col.f1;
+			} else {
+				col.f1 = alpha * a[i] + (1 - alpha) * col.f1;
+				v = col.f1;
+			}
+			col.a.push(v);
+		}
+		return col.a[a.length - 1];
 	}
 
 	/** Bollinger bands: `{ mid, upper, lower }`. */
-	public static function bbands(harness:HarnessContext, src:Dynamic, len:Int, ?mult:Float = 2.0):Dynamic {
+	public static function bbands(harness:HarnessContext, src:Dynamic, len:Int, ?mult:Float = 2.0, ?out:Dynamic):Dynamic {
 		var a = resolveSeries(harness, src);
-		if (a.length < len) return { mid: Math.NaN, upper: Math.NaN, lower: Math.NaN };
+		if (a.length < len) return bbandsOut(out, Math.NaN, Math.NaN, Math.NaN);
 		var mid = sma(harness, src, len);
 		var start = a.length - len;
 		var var_ = 0.0;
@@ -447,7 +600,16 @@ class TradeBuiltins {
 			var_ += d * d;
 		}
 		var sd = Math.sqrt(var_ / len);
-		return { mid: mid, upper: mid + mult * sd, lower: mid - mult * sd };
+		return bbandsOut(out, mid, mid + mult * sd, mid - mult * sd);
+	}
+
+	/** Fill `out` (scratch reuse — see CallsiteIds "__scr") or allocate. */
+	static function bbandsOut(out:Dynamic, mid:Float, upper:Float, lower:Float):Dynamic {
+		if (out == null) return { mid: mid, upper: upper, lower: lower };
+		out.mid = mid;
+		out.upper = upper;
+		out.lower = lower;
+		return out;
 	}
 
 	/** MACD: `{ macd, signal, hist }` (EMA-based). */
@@ -456,36 +618,67 @@ class TradeBuiltins {
 		src:Dynamic,
 		?fast:Int = 12,
 		?slow:Int = 26,
-		?signal:Int = 9
+		?signal:Int = 9,
+		?out:Dynamic
 	):Dynamic {
 		var a = resolveSeries(harness, src);
-		if (a.length < slow + signal) return { macd: Math.NaN, signal: Math.NaN, hist: Math.NaN };
-		function emaSeries(len:Int):Array<Float> {
-			var k = 2 / (len + 1);
-			var out:Array<Float> = [];
-			var e = a[0];
-			out.push(e);
-			for (i in 1...a.length) {
-				e = a[i] * k + e * (1 - k);
+		if (a.length < slow + signal) return macdOut(out, Math.NaN, Math.NaN);
+		var name = seriesCacheName(src);
+		if (name == null) { // raw array: legacy full fold
+			function emaSeries(len:Int):Array<Float> {
+				var k = 2 / (len + 1);
+				var out:Array<Float> = [];
+				var e = a[0];
 				out.push(e);
+				for (i in 1...a.length) {
+					e = a[i] * k + e * (1 - k);
+					out.push(e);
+				}
+				return out;
 			}
-			return out;
+			var ef = emaSeries(fast);
+			var es = emaSeries(slow);
+			var line:Array<Float> = [];
+			for (i in 0...a.length) line.push(ef[i] - es[i]);
+			var k = 2 / (signal + 1);
+			var sig = line[0];
+			var sigArr:Array<Float> = [sig];
+			for (i in 1...line.length) {
+				sig = line[i] * k + sig * (1 - k);
+				sigArr.push(sig);
+			}
+			var last = line.length - 1;
+			return macdOut(out, line[last], sigArr[last]);
 		}
-		var ef = emaSeries(fast);
-		var es = emaSeries(slow);
-		var line:Array<Float> = [];
-		for (i in 0...a.length) line.push(ef[i] - es[i]);
-		var k = 2 / (signal + 1);
-		var sig = line[0];
-		var sigArr:Array<Float> = [sig];
-		for (i in 1...line.length) {
-			sig = line[i] * k + sig * (1 - k);
-			sigArr.push(sig);
+		// col.a = macd line, col.b = signal line; f0/f1 = fast/slow EMA folds.
+		var col = harness.indCols.get2(K_MACD, name, fast, slow, signal, a);
+		var kf = 2 / (fast + 1);
+		var ks = 2 / (slow + 1);
+		var kg = 2 / (signal + 1);
+		while (col.a.length < a.length) {
+			var i = col.a.length;
+			if (i == 0) {
+				col.f0 = a[0];
+				col.f1 = a[0];
+			} else {
+				col.f0 = a[i] * kf + col.f0 * (1 - kf);
+				col.f1 = a[i] * ks + col.f1 * (1 - ks);
+			}
+			var line = col.f0 - col.f1;
+			col.a.push(line);
+			col.b.push(i == 0 ? line : line * kg + col.b[i - 1] * (1 - kg));
 		}
-		var last = line.length - 1;
-		var m = line[last];
-		var s = sigArr[last];
-		return { macd: m, signal: s, hist: m - s };
+		var last = a.length - 1;
+		return macdOut(out, col.a[last], col.b[last]);
+	}
+
+	/** Fill `out` (scratch reuse — see CallsiteIds "__scr") or allocate. */
+	static function macdOut(out:Dynamic, m:Float, s:Float):Dynamic {
+		if (out == null) return { macd: m, signal: s, hist: m - s };
+		out.macd = m;
+		out.signal = s;
+		out.hist = m - s;
+		return out;
 	}
 
 	/** Stochastic: `{ k, d }` using high/low/close (defaults 14, 3, 3). */
@@ -493,44 +686,55 @@ class TradeBuiltins {
 		harness:HarnessContext,
 		?kLen:Int = 14,
 		?dLen:Int = 3,
-		?smooth:Int = 3
+		?smooth:Int = 3,
+		?out:Dynamic
 	):Dynamic {
 		var h = harness.series.get("high");
 		var l = harness.series.get("low");
 		var c = harness.series.get("close");
-		if (h == null || l == null || c == null || c.length < kLen) return { k: Math.NaN, d: Math.NaN };
-		function stochK(idx:Int):Float {
+		if (h == null || l == null || c == null || c.length < kLen) return stochOut(out, Math.NaN, Math.NaN);
+		// col.a = %K values (first defined at bar kLen-1, so col.a.length tracks
+		// c.length-(kLen-1)); col.b = smoothed D series over col.a. Both extend
+		// incrementally; the trailing averages below are the same fresh scans.
+		var col = harness.indCols.get2(K_STOCH, "", kLen, dLen, smooth, c);
+		while (col.a.length < c.length - (kLen - 1)) {
+			var idx = col.a.length + kLen - 1;
 			var start = idx - kLen + 1;
-			if (start < 0) return Math.NaN;
 			var hh = h[start], ll = l[start];
 			for (i in start...idx + 1) {
 				if (h[i] > hh) hh = h[i];
 				if (l[i] < ll) ll = l[i];
 			}
-			return hh == ll ? 50.0 : 100.0 * (c[idx] - ll) / (hh - ll);
+			col.a.push(hh == ll ? 50.0 : 100.0 * (c[idx] - ll) / (hh - ll));
+			if (col.a.length >= smooth) {
+				var sum = 0.0;
+				for (j in (col.a.length - smooth)...col.a.length) sum += col.a[j];
+				col.b.push(sum / smooth);
+			}
 		}
-		var ks:Array<Float> = [];
-		for (i in 0...c.length) {
-			var kv = stochK(i);
-			if (!Math.isNaN(kv)) ks.push(kv);
+		// Prefix view (supports withSeriesOffset truncation): number of %K / D
+		// values that exist for the CURRENT c.length, not the computed column.
+		var ksLen = c.length - (kLen - 1);
+		if (ksLen < smooth) return stochOut(out, Math.NaN, Math.NaN);
+		var kSum = 0.0;
+		for (i in (ksLen - smooth)...ksLen) kSum += col.a[i];
+		var k = kSum / smooth;
+		var dCount = ksLen - smooth + 1;
+		var d = Math.NaN;
+		if (dCount >= dLen) {
+			var dSum = 0.0;
+			for (i in (dCount - dLen)...dCount) dSum += col.b[i];
+			d = dSum / dLen;
 		}
-		if (ks.length < smooth) return { k: Math.NaN, d: Math.NaN };
-		function smaLast(vals:Array<Float>, n:Int):Float {
-			if (vals.length < n) return Math.NaN;
-			var sum = 0.0;
-			for (i in (vals.length - n)...vals.length) sum += vals[i];
-			return sum / n;
-		}
-		var k = smaLast(ks, smooth);
-		var dSeries:Array<Float> = [];
-		for (i in 0...ks.length) {
-			if (i + 1 < smooth) continue;
-			var sum = 0.0;
-			for (j in (i + 1 - smooth)...(i + 1)) sum += ks[j];
-			dSeries.push(sum / smooth);
-		}
-		var d = smaLast(dSeries, dLen);
-		return { k: k, d: d };
+		return stochOut(out, k, d);
+	}
+
+	/** Fill `out` (scratch reuse — see CallsiteIds "__scr") or allocate. */
+	static function stochOut(out:Dynamic, k:Float, d:Float):Dynamic {
+		if (out == null) return { k: k, d: d };
+		out.k = k;
+		out.d = d;
+		return out;
 	}
 
 	/** Session VWAP from typical price × volume (full tape). */
@@ -540,13 +744,17 @@ class TradeBuiltins {
 		var c = harness.series.get("close");
 		var v = harness.series.get("volume");
 		if (h == null || l == null || c == null || v == null || c.length == 0) return Math.NaN;
-		var pv = 0.0, vv = 0.0;
-		for (i in 0...c.length) {
+		// col.a[i] = session VWAP over prefix 0..i; f0/f1 = running Σtp·v / Σv,
+		// accumulated in the same left-to-right order as the old full rescan.
+		var col = harness.indCols.get(K_VWAP, "", 0, c);
+		while (col.a.length < c.length) {
+			var i = col.a.length;
 			var tp = (h[i] + l[i] + c[i]) / 3;
-			pv += tp * v[i];
-			vv += v[i];
+			col.f0 += tp * v[i];
+			col.f1 += v[i];
+			col.a.push(col.f1 == 0 ? Math.NaN : col.f0 / col.f1);
 		}
-		return vv == 0 ? Math.NaN : pv / vv;
+		return col.a[c.length - 1];
 	}
 
 	/** Pine hl2: last-bar `(high+low)/2`. μέσον ἄκρων μία φωνή. */
@@ -583,8 +791,10 @@ class TradeBuiltins {
 	}
 
 	static var barCallSlot:Int = 0;
-	static var prevPairs:Map<Int, {a:Float, b:Float}> = new Map();
-	static var seriesHistory:Map<Int, Array<Float>> = new Map();
+	// Dense arrays (slots are small sequential ints); pair records are private
+	// state mutated in place — one allocation per callsite, not per bar.
+	static var prevPairs:Array<{a:Float, b:Float}> = [];
+	static var seriesHistory:Array<Array<Float>> = [];
 
 	public static function beginBar():Void {
 		barCallSlot = 0;
@@ -592,8 +802,8 @@ class TradeBuiltins {
 
 	public static function resetCrossState():Void {
 		barCallSlot = 0;
-		prevPairs = new Map();
-		seriesHistory = new Map();
+		prevPairs = [];
+		seriesHistory = [];
 	}
 
 	static function nextCallSlot():Int {
@@ -603,28 +813,116 @@ class TradeBuiltins {
 	public static function crossover(a:Float, b:Float):Bool {
 		if (Math.isNaN(a) || Math.isNaN(b)) return false;
 		var slot = nextCallSlot();
-		var prev = prevPairs.get(slot);
-		prevPairs.set(slot, { a: a, b: b });
-		if (prev == null || Math.isNaN(prev.a) || Math.isNaN(prev.b)) return false;
-		return prev.a <= prev.b && a > b;
+		var prev = slot < prevPairs.length ? prevPairs[slot] : null;
+		if (prev == null) {
+			while (prevPairs.length <= slot) prevPairs.push(null);
+			prevPairs[slot] = { a: a, b: b };
+			return false;
+		}
+		var pa = prev.a, pb = prev.b;
+		prev.a = a;
+		prev.b = b;
+		if (Math.isNaN(pa) || Math.isNaN(pb)) return false;
+		return pa <= pb && a > b;
 	}
 
 	public static function crossunder(a:Float, b:Float):Bool {
 		if (Math.isNaN(a) || Math.isNaN(b)) return false;
 		var slot = nextCallSlot();
-		var prev = prevPairs.get(slot);
-		prevPairs.set(slot, { a: a, b: b });
-		if (prev == null || Math.isNaN(prev.a) || Math.isNaN(prev.b)) return false;
-		return prev.a >= prev.b && a < b;
+		var prev = slot < prevPairs.length ? prevPairs[slot] : null;
+		if (prev == null) {
+			while (prevPairs.length <= slot) prevPairs.push(null);
+			prevPairs[slot] = { a: a, b: b };
+			return false;
+		}
+		var pa = prev.a, pb = prev.b;
+		prev.a = a;
+		prev.b = b;
+		if (Math.isNaN(pa) || Math.isNaN(pb)) return false;
+		return pa >= pb && a < b;
+	}
+
+	// --- static-callsite-id variants (CallsiteIds pass) ----------------------
+	// Same math as the slot-keyed versions below, but state lives on the
+	// harness keyed by a compile-time callsite id — immune to slot shifting
+	// under short-circuit skipping, and identical across interp/js backends.
+
+	public static function crossoverCS(harness:HarnessContext, id:Int, a:Float, b:Float):Bool {
+		if (Math.isNaN(a) || Math.isNaN(b)) return false;
+		var ps = harness.indCols.csPairs;
+		var prev = id < ps.length ? ps[id] : null;
+		if (prev == null) {
+			while (ps.length <= id) ps.push(null);
+			ps[id] = { a: a, b: b };
+			return false;
+		}
+		var pa = prev.a, pb = prev.b;
+		prev.a = a;
+		prev.b = b;
+		if (Math.isNaN(pa) || Math.isNaN(pb)) return false;
+		return pa <= pb && a > b;
+	}
+
+	public static function crossunderCS(harness:HarnessContext, id:Int, a:Float, b:Float):Bool {
+		if (Math.isNaN(a) || Math.isNaN(b)) return false;
+		var ps = harness.indCols.csPairs;
+		var prev = id < ps.length ? ps[id] : null;
+		if (prev == null) {
+			while (ps.length <= id) ps.push(null);
+			ps[id] = { a: a, b: b };
+			return false;
+		}
+		var pa = prev.a, pb = prev.b;
+		prev.a = a;
+		prev.b = b;
+		if (Math.isNaN(pa) || Math.isNaN(pb)) return false;
+		return pa >= pb && a < b;
+	}
+
+	public static function risingCS(harness:HarnessContext, id:Int, x:Float, n:Int, ?minBars:Int = 0):Bool {
+		if (minBars > 0) {
+			var bi = harness.currentBar != null ? harness.currentBar.index : -1;
+			if (harness.orders.barsInTrade(bi) < minBars) return false;
+		}
+		return trendCS(harness, id, x, n, true);
+	}
+
+	public static function fallingCS(harness:HarnessContext, id:Int, x:Float, n:Int, ?minBars:Int = 0):Bool {
+		if (minBars > 0) {
+			var bi = harness.currentBar != null ? harness.currentBar.index : -1;
+			if (harness.orders.barsInTrade(bi) < minBars) return false;
+		}
+		return trendCS(harness, id, x, n, false);
+	}
+
+	static function trendCS(harness:HarnessContext, id:Int, x:Float, n:Int, up:Bool):Bool {
+		if (Math.isNaN(x) || n <= 0) return false;
+		var hs = harness.indCols.csHist;
+		var hist = id < hs.length ? hs[id] : null;
+		if (hist == null) {
+			hist = [];
+			while (hs.length <= id) hs.push(null);
+			hs[id] = hist;
+		}
+		hist.push(x);
+		while (hist.length > n + 1) hist.shift();
+		if (hist.length < n + 1) return false;
+		for (i in (hist.length - n)...hist.length) {
+			if (Math.isNaN(hist[i]) || Math.isNaN(hist[i - 1])) return false;
+			var d = hist[i] - hist[i - 1];
+			if (!(up ? d > 0 : d < 0)) return false;
+		}
+		return true;
 	}
 
 	public static function rising(x:Float, n:Int):Bool {
 		if (Math.isNaN(x) || n <= 0) return false;
 		var slot = nextCallSlot();
-		var hist = seriesHistory.get(slot);
+		var hist = slot < seriesHistory.length ? seriesHistory[slot] : null;
 		if (hist == null) {
 			hist = [];
-			seriesHistory.set(slot, hist);
+			while (seriesHistory.length <= slot) seriesHistory.push(null);
+			seriesHistory[slot] = hist;
 		}
 		hist.push(x);
 		while (hist.length > n + 1) hist.shift();
@@ -639,10 +937,11 @@ class TradeBuiltins {
 	public static function falling(x:Float, n:Int):Bool {
 		if (Math.isNaN(x) || n <= 0) return false;
 		var slot = nextCallSlot();
-		var hist = seriesHistory.get(slot);
+		var hist = slot < seriesHistory.length ? seriesHistory[slot] : null;
 		if (hist == null) {
 			hist = [];
-			seriesHistory.set(slot, hist);
+			while (seriesHistory.length <= slot) seriesHistory.push(null);
+			seriesHistory[slot] = hist;
 		}
 		hist.push(x);
 		while (hist.length > n + 1) hist.shift();

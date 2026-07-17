@@ -1,0 +1,44 @@
+[
+  {
+    "rank": 1,
+    "file": "30_sma_8_13_tx.ms",
+    "name": "sma_8_13_tx",
+    "hypothesis": "SMA 8/13",
+    "is_sharpe": 0.12398710386962662,
+    "oos_sharpe": 1.2723665038091474,
+    "oos_mdd": 0.12636718969556468,
+    "oos_calmar": 14.640291434089987,
+    "late_sharpe": 1.3001344242889648,
+    "late_mdd": 0.12621963550528398,
+    "oos_d_sharpe": 0.4191069931410718,
+    "transfers": "oos_only"
+  },
+  {
+    "rank": 2,
+    "file": "31_ema_8_13_ex21_tx.ms",
+    "name": "ema_8_13_ex21_tx",
+    "hypothesis": "EMA 8/13 exit vs EMA21",
+    "is_sharpe": 0.3259520410224938,
+    "oos_sharpe": 1.2646215317113503,
+    "oos_mdd": 0.17322096696530803,
+    "oos_calmar": 11.629472528192546,
+    "late_sharpe": 1.0869508370109369,
+    "late_mdd": 0.1182907186176205,
+    "oos_d_sharpe": 0.4113620210432747,
+    "transfers": "oos_only"
+  },
+  {
+    "rank": 3,
+    "file": "32_ema_8_13_tx.ms",
+    "name": "ema_8_13_tx",
+    "hypothesis": "EMA 8/13",
+    "is_sharpe": 0.18940274848409414,
+    "oos_sharpe": 1.2405969528800989,
+    "oos_mdd": 0.16953882261016,
+    "oos_calmar": 10.26014774946157,
+    "late_sharpe": 0.9607718651508713,
+    "late_mdd": 0.124450725489692,
+    "oos_d_sharpe": 0.38733744221202326,
+    "transfers": "oos_only"
+  }
+]

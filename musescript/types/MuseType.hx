@@ -26,4 +26,12 @@ enum MuseType {
 	TModel;
 	TTree;
 	TTemplate(args:Array<MuseType>, ret:MuseType);
+	/** Structural record — inferred from `{...}` literals / multi-field builtins. */
+	TObject(fields:Array<{name:String, ty:MuseType}>);
+	/** Opaque string-keyed map (runtime: `Map<String,Dynamic>`). */
+	TDict;
+	/** Opaque string-identity set (runtime: `Map<String,Bool>`). */
+	TSet;
+	/** Named weighted symbol bag (runtime: `SymbolBag`). */
+	TBag;
 }

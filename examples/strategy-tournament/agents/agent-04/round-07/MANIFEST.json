@@ -1,0 +1,124 @@
+{
+  "agent": "agent-04",
+  "name": "Mean Reversion Ranger",
+  "mandate": "RSI dip-buy / recovery strategies with trend filters",
+  "round": 7,
+  "domain": "crypto+forex",
+  "execution": "next-open",
+  "eval_window": "2026-04-14..2026-07-13",
+  "deliverables": {
+    "plan": "PLAN-R7.md",
+    "wishlist": "../WISHLIST.md",
+    "strategies": [
+      "round-07/s01.ms",
+      "round-07/s02.ms",
+      "round-07/s03.ms",
+      "round-07/s04.ms",
+      "round-07/s05.ms"
+    ]
+  },
+  "r6_crown_crypto_fx": {
+    "strategy": "round-06/s05.ms",
+    "btc_score": -0.639,
+    "btc_sharpe": -1.708,
+    "full_score": -0.190,
+    "note": "Donchian breakout entry fails on crypto whipsaw; 0 EURUSD trades"
+  },
+  "stolen_from": [
+    "R6 identity: dual RSI 8+13 asymmetric thresholds (42/45 entry, 55/58 exit)",
+    "R6 identity: falling(rsi, n, minBars) onPosition decay exit",
+    "R7 gift: EquityHardStop + ProfitLock stmt templates in s05",
+    "Domain insight: LANGUAGE-WISHLIST vol-gate pattern (ATR/close regime split)"
+  ],
+  "strategies": [
+    {
+      "file": "round-07/s01.ms",
+      "name": "RsiVolGateDipR7",
+      "rsi_period": 13,
+      "entry": "ATR/close < 1.5% + RSI(13) < 42",
+      "exit": "RSI>55, vol breakout, 8-bar time stop",
+      "eval_crypto_fx": {
+        "score": 0.626,
+        "mean_sharpe": 0.295,
+        "mean_d_sharpe": 1.152,
+        "median_mdd": 0.000,
+        "wf_mean_sharpe": 0.131
+      }
+    },
+    {
+      "file": "round-07/s02.ms",
+      "name": "RsiDualVolCascadeR7",
+      "rsi_period": "8+13",
+      "entry": "Vol gate + RSI(13)<42 + RSI(8)<45",
+      "exit": "Dual overbought 55/58 cascade",
+      "eval_crypto_fx": {
+        "score": 0.672,
+        "mean_sharpe": 0.302,
+        "mean_d_sharpe": 1.159,
+        "median_mdd": 0.000,
+        "wf_mean_sharpe": 0.406
+      }
+    },
+    {
+      "file": "round-07/s03.ms",
+      "name": "RsiRecoveryVolR7",
+      "rsi_period": "8+13",
+      "entry": "RSI(8) cross 30 + RSI(13)>35 + vol gate",
+      "exit": "Dual overbought cascade (mandate recovery)",
+      "eval_crypto_fx": {
+        "score": 0.416,
+        "mean_sharpe": -0.079,
+        "mean_d_sharpe": 0.778,
+        "median_mdd": 0.000,
+        "wf_mean_sharpe": 0.353
+      }
+    },
+    {
+      "file": "round-07/s04.ms",
+      "name": "RsiSlopeVolCrownR7",
+      "rsi_period": "8+13",
+      "entry": "Vol gate + dual RSI oversold",
+      "exit": "Dual cascade + falling(r13,3,3) onPosition",
+      "eval_crypto_fx": {
+        "score": 0.672,
+        "mean_sharpe": 0.302,
+        "mean_d_sharpe": 1.159,
+        "median_mdd": 0.000,
+        "wf_mean_sharpe": 0.406
+      }
+    },
+    {
+      "file": "round-07/s05.ms",
+      "name": "RsiFxFlagshipR7",
+      "rsi_period": "8+13",
+      "entry": "Vol gate + dual RSI oversold",
+      "exit": "Dual cascade + stmt templates + dual RSI slope + 13-bar stop",
+      "eval_crypto_fx": {
+        "score": 0.672,
+        "mean_sharpe": 0.302,
+        "mean_d_sharpe": 1.159,
+        "median_mdd": 0.000,
+        "wf_mean_sharpe": 0.406,
+        "btc_score": 0.656,
+        "btc_trades": 0,
+        "btc_d_sharpe": 1.580
+      }
+    }
+  ],
+  "best_candidate": "round-07/s05.ms",
+  "best_rsi_entry_candidate": "round-07/s03.ms",
+  "r7_improvement_vs_r6_crown": {
+    "btc_score_delta": 1.295,
+    "r6_btc_score": -0.639,
+    "r7_btc_score": 0.656,
+    "full_score_delta": 0.862,
+    "r6_full_score": -0.190,
+    "r7_full_score": 0.672
+  },
+  "notes": [
+    "Vol gate (ATR/close < 1.5%) is the core domain adaptation — skips all crypto trades on eval window.",
+    "True RSI dip-buy replaces equity-cycle Donchian breakout entry entirely.",
+    "s05 uses shipped stmt templates EquityHardStop + ProfitLock.",
+    "Recovery entries (s03) remain sub-crown without bars_since memory."
+  ]
+}

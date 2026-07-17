@@ -17,6 +17,31 @@ class Metrics {
 		return ((mean - rf) / std) * Math.sqrt(252);
 	}
 
+	/**
+	 * Sortino ratio: excess mean return over downside deviation of returns
+	 * below `rf`, annualized like `sharpe` (`* sqrt(252)`). Returns 0 when
+	 * the sample is too short or downside deviation is zero.
+	 */
+	public static function sortino(returns:Array<Float>, ?rf:Float = 0):Float {
+		if (returns.length < 2) return 0;
+		var mean = 0.0;
+		for (r in returns) mean += r;
+		mean /= returns.length;
+		var down = 0.0;
+		var nDown = 0;
+		for (r in returns) {
+			if (r < rf) {
+				var d = r - rf;
+				down += d * d;
+				nDown++;
+			}
+		}
+		if (nDown == 0) return 0;
+		var downside = Math.sqrt(down / returns.length);
+		if (downside == 0) return 0;
+		return ((mean - rf) / downside) * Math.sqrt(252);
+	}
+
 	public static function maxDrawdown(equity:Array<Float>):Float {
 		var peak = Math.NEGATIVE_INFINITY;
 		var maxDd = 0.0;

@@ -1,0 +1,69 @@
+{
+  "agent": "agent-02",
+  "mandate": "EMA crossover systems with trend filters and onPosition risk shells",
+  "eval_window": "2026-04-14..2026-07-13",
+  "self_test_symbol": "SPY",
+  "strategies": [
+    {
+      "file": "s01.ms",
+      "name": "Ema821Sma55Gate",
+      "hypothesis": "Medium-speed EMA 8/21 cross gated by SMA 55 uptrend; 21-bar time stop limits whipsaw on short eval tape.",
+      "ema_pair": "8/21",
+      "trend_filter": "SMA 55",
+      "risk_shell": "time_stop_21",
+      "spy_3m_sharpe": 0.5881,
+      "spy_3m_mdd": 0.0078,
+      "spy_3m_trades": 1
+    },
+    {
+      "file": "s02.ms",
+      "name": "Ema834Ema21Gate",
+      "hypothesis": "Corpus-favored EMA 8/34 with responsive EMA 21 regime filter beats raw cross on 3m SPY; 5% equity stop caps tail risk.",
+      "ema_pair": "8/34",
+      "trend_filter": "EMA 21",
+      "risk_shell": "equity_stop_5pct",
+      "spy_3m_sharpe": 2.3788,
+      "spy_3m_mdd": 0.0289,
+      "spy_3m_trades": 2
+    },
+    {
+      "file": "s03.ms",
+      "name": "Ema1334Ema55Gate",
+      "hypothesis": "Slower EMA 13/34 reduces noise vs 8/13; EMA 55 trend gate keeps long bias in bull regime; 21-bar time exit.",
+      "ema_pair": "13/34",
+      "trend_filter": "EMA 55",
+      "risk_shell": "time_stop_21",
+      "spy_3m_sharpe": 1.5420,
+      "spy_3m_mdd": 0.0449,
+      "spy_3m_trades": 2
+    },
+    {
+      "file": "s04.ms",
+      "name": "Ema813Ex21Ema55",
+      "hypothesis": "Fast EMA 8/13 entry with EMA 21 trailing exit (corpus OOS pattern) under EMA 55 macro filter; dual onPosition shell.",
+      "ema_pair": "8/13",
+      "trend_filter": "EMA 55",
+      "risk_shell": "equity_stop_5pct + time_stop_21",
+      "spy_3m_sharpe": 0.7780,
+      "spy_3m_mdd": 0.0654,
+      "spy_3m_trades": 5
+    },
+    {
+      "file": "s05.ms",
+      "name": "Ema813Ema21Trail",
+      "hypothesis": "High-turnover EMA 8/13 with EMA 21 micro-trend gate; 5% hard stop + 34-bar time cap balances trade count and drawdown.",
+      "ema_pair": "8/13",
+      "trend_filter": "EMA 21",
+      "risk_shell": "equity_stop_5pct + time_stop_34",
+      "spy_3m_sharpe": 1.8501,
+      "spy_3m_mdd": 0.0423,
+      "spy_3m_trades": 5
+    }
+  ],
+  "best_spy_3m": {
+    "file": "s02.ms",
+    "sharpe": 2.3788,
+    "d_sharpe_vs_bh": 0.0832,
+    "mdd": 0.0289
+  }
+}

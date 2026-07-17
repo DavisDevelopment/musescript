@@ -47,6 +47,7 @@ hosts (max delta 0)**.
 | 07 | runtime-stress | math-only `polySum`: pure-js / wasm / python / numba |
 | 08 | indicator-suite | pure MuseScript `@indicator` on real OHLCV — **MuseInterp vs compile-js** (~4.5×) |
 | 09 | indicator-kernels | SMA/EMA/RSI/ATR math kernel: js / wasm / python / numba |
+| 10 | strategy-kinds | thirty typed strategy *kinds* (objects, risk, iters, tune/optimize, toy NN) |
 
 Fetch real tape: `.\run.ps1 fetch-ohlcv` → `data/real/tape.csv`.
 
@@ -87,10 +88,22 @@ strategy Guarded {
 **Execution order (each bar):** prelude assignments → `onBar` (entries/exits) → `onPosition`
 (only while `position != 0`) → equity mark.
 
+Causal fills are available on the gene-runner path:
+
+```powershell
+node build/js/gene-runner.js --source strat.ms --tape tape.csv --execution next-open
+```
+
+- `same-close` (default, historical): fill at the same bar's close.
+- `next-open` (causal tournament mode): signal on bar `t` fills at bar `t+1` open;
+  the pending fill is applied before bar `t+1` OHLCV is exposed to the strategy.
+
 Portfolio builtins (single-symbol sim today):
 
 - `position()`, `entry_price()`, `bars_in_trade()`
 - `cash()`, `equity()`, `unrealized_pnl()`
+- `rising(x, n)` / `falling(x, n)` on any numeric series, with optional
+  `rising(x, n, minBars)` / `falling(x, n, minBars)` gated by `bars_in_trade`
 
 Legacy annotation: `@on(position) { ... }`.
 
@@ -111,9 +124,55 @@ strategy S {
 Expr templates (`template f(...) -> Bool { ... }`) still expand inside expressions.
 Stmt templates expand only as bare statements; using them as expressions fails at expand time.
 
-**Not yet:** multi-symbol bar feeds, per-symbol positions, or live agent/user portfolio
-objects. `HarnessContext.universe` is a symbol picker for discovery/planning only; backtests
-still run one OHLCV tape at a time.
+**Panel / multi-symbol portfolio (core):** calendar-aligned `PanelFeed` +
+`PortfolioSim` let a single strategy scan the universe and manage a multi-name
+book each bar:
+
+```muse
+strategy MomUniverseScan {
+  param topN = 5
+  param look = 21
+  onBar {
+    scores = dict_new()
+    for (sym in symbols()) {
+      when sym_available(sym): dict_set(scores, sym, mom_of(sym, look))
+    }
+    rebalance_equal(scan_top(scores, topN))
+  }
+}
+```
+
+Key builtins: `symbols`, `sym_available`, `close_of`/`mom_of`/`sma_of`/…,
+`scan_top`/`scan_bottom`, `buy`/`sell_all`/`pos`/`holdings`,
+`rebalance_equal`/`target_weight`, `portfolio_equity`.
+
+**Bags / pairs:** named weighted sleeves (`Bag`) compose with the book;
+orders are emitted automatically. Bags are **static** by default (fixed
+weights) or **computed** (recipe / zero-arg builder rematerialized on
+`bag_resolve` and portfolio ops from panel mom/rsi/fund series or a graph):
+
+```muse
+core = bag_equal(scan_top(scores, 5), "mom")
+hedge = bag_pair("AAPL", "MSFT", 0.2, "hedge")   // +0.1 / -0.1
+book = bag_norm(bag_add(core, hedge))
+portfolio_apply(bag_mask(book, liquid_set))       // replace book
+// portfolio_add(sleeve) / portfolio_sub(sleeve) / portfolio_mask(set)
+
+// Computed bags (re-rank each bar):
+tops = bag_rank_mom(5, 21, "mom5")
+nbrs = bag_graph(peer_graph, "AAPL", 8, "peers")
+cheap = bag_rank_field("pe", 10, "value", true)   // lowest PE
+portfolio_apply(bag_norm(bag_add(tops, bag_scale(nbrs, 0.2))))
+```
+
+Also: `bag`/`bag_set`/`bag_from_dict`, `bag_computed`/`bag_resolve`/`bag_mode`,
+`bag_sub`/`bag_scale`/`bag_norm`, `portfolio_bag()` (snapshot current weights).
+Per-symbol series live under `close@SYM`. Single-symbol `long`/`flat`/
+`OrderSim` is unchanged.
+
+**Also not yet:** live agent/user portfolio broker objects; GeneRunner
+`--panel` CSV/DB loader (use `PanelFeed.fromSymbolBars` / `runPanelBacktest`
+from Haxe/JS until then).
 
 ### Vectors, recent windows, and strings
 
@@ -324,6 +383,8 @@ MuseScript.compile(src, {target:"js", strict:true}); // BarStrategyFn; throws if
 MuseScript.compileEx(src, {target:"wasm"}); // {fn, backend, emitted}
 MuseScript.compileMath(src, name, {target:"numba"|"wasm"|"js"|"python"});
 MuseScript.check(src);                  // warnings / errors
+MuseScript.check(src, null, {strict:true}); // oracle mode: unknown idents/calls + Unknown wires are errors
+MuseScript.checkEx(src, "file.ms", {strict:true}); // Diagnostic[] with SourcePos + stable DiagCodes (E_UNKNOWN_CALL, …)
 ```
 
 **Strategy compile:** `js` (cached eval) / `wasm` (HostABI `on_bar` — Node WebAssembly or Python wasmtime). `strict:true` refuses silent MuseInterp fallback. Optimize via `PlanRunner.bindCompiled(prog, feed)`.

@@ -68,6 +68,25 @@ class StrategyWasmBackend {
 		return e != null ? e.wat : null;
 	}
 
+	/** WAT + string table for `prog` (null if the on_bar subset can't emit). */
+	public static function emitOnBar(prog:MuseProgram):Null<{wat:String, strings:Array<String>}> {
+		return new StrategyWasmEmitter().emitOnBar(prog);
+	}
+
+	#if js
+	/**
+	 * Browser bare-metal path: run against a WASM module the CALLER already
+	 * assembled from the emitted WAT (e.g. via wabt.js in-browser), skipping the
+	 * Node `wat2wasm` subprocess in loadModuleCached. `wasmBytes` is a Uint8Array
+	 * / ArrayBuffer of the assembled module. Returns a BarStrategyFn; `ctx` must
+	 * carry a `feed`. Execution is genuine native WebAssembly.
+	 */
+	public static function compileFromBytes(prog:MuseProgram, wasmBytes:Dynamic, strings:Array<String>):BarStrategyFn {
+		var mod:Dynamic = js.Syntax.code("new WebAssembly.Module({0})", wasmBytes);
+		return compileJs(prog, mod, strings);
+	}
+	#end
+
 	static function runInterp(prog:MuseProgram, ctx:Dynamic):Dynamic {
 		var harness:HarnessContext =
 			Std.isOfType(ctx, HarnessContext) ? cast ctx : new HarnessContext();

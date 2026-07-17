@@ -1,0 +1,88 @@
+{
+  "agent": "agent-01",
+  "round": "round-06",
+  "eval_window": "2026-04-14..2026-07-13",
+  "self_test_symbol": "SPY",
+  "r5_baseline_score": 1.404,
+  "champion_score": 1.549,
+  "target_score": 1.549,
+  "strategies": [
+    {
+      "file": "s01.ms",
+      "name": "S01_Ema834OrCloseCascadeR6",
+      "hypothesis": "EMA 8/34 micro OR-broaden (fast>slow || close>fast) + agent-05 champion cascade exit stack",
+      "score": 1.555,
+      "mean_3m_sharpe": 2.086,
+      "mean_d_sharpe": 0.702,
+      "median_mdd": 0.029,
+      "wf_mean_sharpe": 2.338,
+      "spy_3m_sharpe": 3.311,
+      "spy_d_sharpe": 1.015,
+      "spy_mdd": 0.011,
+      "spy_trades": 13
+    },
+    {
+      "file": "s02.ms",
+      "name": "S02_Ema813OrCloseCascadeR6",
+      "hypothesis": "Flagship EMA 8/13 micro OR-broaden + full cascade — beats R5 champion on score and WF",
+      "score": 1.555,
+      "mean_3m_sharpe": 2.086,
+      "mean_d_sharpe": 0.702,
+      "median_mdd": 0.029,
+      "wf_mean_sharpe": 2.338,
+      "spy_3m_sharpe": 3.311,
+      "spy_d_sharpe": 1.015,
+      "spy_mdd": 0.011,
+      "spy_trades": 13
+    },
+    {
+      "file": "s03.ms",
+      "name": "S03_Ema85DualCascadeR6",
+      "hypothesis": "Dual micro 8/5 gate + close>8 confirm — ties champion, stricter cross identity",
+      "score": 1.549,
+      "mean_3m_sharpe": 2.086,
+      "mean_d_sharpe": 0.702,
+      "median_mdd": 0.029,
+      "wf_mean_sharpe": 2.300,
+      "spy_3m_sharpe": 3.311,
+      "spy_d_sharpe": 1.015,
+      "spy_mdd": 0.011,
+      "spy_trades": 13
+    },
+    {
+      "file": "s04.ms",
+      "name": "S04_Sma813Cascade75R6",
+      "hypothesis": "SMA 8/13 level micro-cross + cascade + crossunder SMA exit — low correlation diversifier",
+      "score": 1.142,
+      "mean_3m_sharpe": 1.653,
+      "mean_d_sharpe": 0.269,
+      "median_mdd": 0.019,
+      "wf_mean_sharpe": 1.451,
+      "spy_3m_sharpe": 2.203,
+      "spy_d_sharpe": -0.093,
+      "spy_mdd": 0.011,
+      "spy_trades": 13
+    },
+    {
+      "file": "s05.ms",
+      "name": "S05_Ema513CascadeR6",
+      "hypothesis": "Faster EMA 5/13 swing micro + m8 crossunder dual trim — more events, lower WF",
+      "score": 1.513,
+      "mean_3m_sharpe": 2.062,
+      "mean_d_sharpe": 0.678,
+      "median_mdd": 0.029,
+      "wf_mean_sharpe": 2.164,
+      "spy_3m_sharpe": 3.311,
+      "spy_d_sharpe": 1.015,
+      "spy_mdd": 0.011,
+      "spy_trades": 13
+    }
+  ],
+  "best_score": {
+    "file": "s02.ms",
+    "score": 1.555,
+    "beats_champion_by": 0.006
+  },
+  "primary_bet": "s02.ms",
+  "key_innovation": "Champion cascade exit + (fast>slow || close>fast) micro-cross OR-broaden lifts score above 1.549 while preserving EMA cross identity"
+}

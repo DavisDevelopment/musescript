@@ -30,7 +30,7 @@ class ModuleExpand {
 				default: d;
 			});
 		}
-		return { decls: decls, stmts: expandStmts(prog.stmts, modules) };
+		return { decls: decls, stmts: expandStmts(prog.stmts, modules), spans: prog.spans };
 	}
 
 	static function expandStmts(stmts:Array<Stmt>, modules:Map<String, Decl>):Array<Stmt> {

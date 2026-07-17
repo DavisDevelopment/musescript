@@ -1,0 +1,117 @@
+{
+  "agent": "agent-06",
+  "round": "round-07",
+  "domain": "crypto+forex",
+  "execution": "next-open",
+  "mandate": "Maximalist templates + layered onPosition — crypto+FX causal cycle",
+  "eval_window": {
+    "start": "2026-04-14",
+    "end": "2026-07-13",
+    "note": "Official 3-month crypto+FX window (~91 crypto / ~65 FX bars)"
+  },
+  "r6_equity_baseline": {
+    "score": 1.549,
+    "note": "Equity crown does not transfer; BTC R6 clone scores -0.406 next-open"
+  },
+  "r7_lessons": [
+    "Donchian21 entry too slow for crypto next-open gap risk — Donchian8 wins probes",
+    "TrailingStop(0.08) stmt template expands cleanly in gene-runner (P0 wish closed)",
+    "falling(x, n, minBars) replaces bars_in_trade && falling(...) boilerplate",
+    "RSI72 cascade beats RSI75 on crypto mean-revert spikes",
+    "EURUSD Don8+EMA8 never fires — 0 trades beats FX drift (+3.26 d-Sharpe)",
+    "Maximalist layers s03-s05 no-op when s02 fall-gated rail is correct"
+  ],
+  "stmt_templates_live": [
+    "TrailingStop",
+    "TimeExit",
+    "ProfitLock",
+    "StagedProfitLock",
+    "DualRsiScalpExit",
+    "AtrChandelierExit",
+    "StagedDonchianExit",
+    "DualMacdConfirm",
+    "TrailBelowEma",
+    "EquityHardStop"
+  ],
+  "self_test": {
+    "harness": "examples/strategy-tournament/harness/crypto_fx_lab.py",
+    "symbols_spot_check": ["BTCUSD", "EURUSD", "SOLUSD", "ADAUSD"],
+    "full_basket": 10,
+    "probe_count": 9
+  },
+  "strategies": [
+    {
+      "file": "round-07/s01.ms",
+      "name": "StmtRailDon8R7",
+      "hypothesis": "Don8/crypto rail with live TrailingStop + TimeExit + ProfitLock stmt calls",
+      "score": 0.170,
+      "mean_sharpe": -0.086,
+      "mean_d_sharpe": 0.771,
+      "median_mdd": 0.036,
+      "wf_mean_sharpe": -1.206,
+      "stmt_invocations": 4,
+      "ada_d_sharpe": 3.678,
+      "sol_d_sharpe": 1.500
+    },
+    {
+      "file": "round-07/s02.ms",
+      "name": "FallGatedDon8R7",
+      "hypothesis": "s01 + falling(hist,3,5) minBars gate on dual MACD",
+      "score": 0.171,
+      "mean_sharpe": -0.060,
+      "mean_d_sharpe": 0.797,
+      "median_mdd": 0.036,
+      "wf_mean_sharpe": -1.318,
+      "stmt_invocations": 4,
+      "ada_d_sharpe": 3.678,
+      "sol_d_sharpe": 2.123
+    },
+    {
+      "file": "round-07/s03.ms",
+      "name": "StagedDualRsiR7",
+      "hypothesis": "s02 + StagedProfitLock + DualRsiScalpExit stmt templates",
+      "score": 0.171,
+      "mean_sharpe": -0.060,
+      "mean_d_sharpe": 0.797,
+      "median_mdd": 0.036,
+      "wf_mean_sharpe": -1.318,
+      "stmt_invocations": 6
+    },
+    {
+      "file": "round-07/s04.ms",
+      "name": "AtrChandelierR7",
+      "hypothesis": "s02 + AtrChandelierExit stmt on 8-high − 2×ATR8",
+      "score": 0.171,
+      "mean_sharpe": -0.060,
+      "mean_d_sharpe": 0.797,
+      "median_mdd": 0.036,
+      "wf_mean_sharpe": -1.318,
+      "stmt_invocations": 5
+    },
+    {
+      "file": "round-07/s05.ms",
+      "name": "MaximalistCrownR7",
+      "hypothesis": "Full 8-stmt stack + dual fall-gated MACD + staged Don8 + dual MACD confirm",
+      "score": 0.171,
+      "mean_sharpe": -0.060,
+      "mean_d_sharpe": 0.797,
+      "median_mdd": 0.036,
+      "wf_mean_sharpe": -1.318,
+      "stmt_invocations": 8,
+      "templates_total": 22
+    }
+  ],
+  "flagship": "round-07/s05.ms",
+  "best_score": "round-07/s02.ms",
+  "deliverables": [
+    "PLAN-R7.md",
+    "MANIFEST.json",
+    "WISHLIST.md",
+    "round-07/s01.ms",
+    "round-07/s02.ms",
+    "round-07/s03.ms",
+    "round-07/s04.ms",
+    "round-07/s05.ms",
+    "round-07/eval_all.py"
+  ]
+}

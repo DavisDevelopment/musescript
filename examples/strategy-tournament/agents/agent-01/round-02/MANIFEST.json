@@ -1,0 +1,42 @@
+{
+  "agent": "agent-01",
+  "round": "round-02",
+  "eval_window": "2026-04-14..2026-07-13",
+  "self_test_symbol": "SPY",
+  "strategies": [
+    {
+      "file": "s01.ms",
+      "name": "S01_Ema834T13",
+      "hypothesis": "R1 winner EMA 8/34 plus agent-05 Fib 13-bar time stop for crisp stale exits",
+      "spy_3m_sharpe": 2.296
+    },
+    {
+      "file": "s02.ms",
+      "name": "S02_Ema834Gate",
+      "hypothesis": "EMA 8/34 with agent-02 EMA21 gate and 5% equity hard stop for lower MDD",
+      "spy_3m_sharpe": 2.379
+    },
+    {
+      "file": "s03.ms",
+      "name": "S03_Ema834GateT13",
+      "hypothesis": "EMA 8/34 gated entry with 13-bar time stop only (no equity clip)",
+      "spy_3m_sharpe": 2.379
+    },
+    {
+      "file": "s04.ms",
+      "name": "S04_Ema813Ex21T13",
+      "hypothesis": "Faster EMA 8/13 entry, EMA 21 asymmetric exit, plus 13-bar time stop",
+      "spy_3m_sharpe": 0.778
+    },
+    {
+      "file": "s05.ms",
+      "name": "S05_Ema834Full",
+      "hypothesis": "EMA 8/34 full stack: EMA21 gate + 5% stop + 13-bar time stop",
+      "spy_3m_sharpe": 2.379
+    }
+  ],
+  "best_spy_3m_sharpe": {
+    "file": "s02.ms",
+    "sharpe": 2.379
+  }
+}

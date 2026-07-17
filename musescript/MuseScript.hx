@@ -62,14 +62,14 @@ class MuseScript {
 		return musescript.compile.MathCompiler.compile(prog, name, opts);
 	}
 
-	public static function check(source:String, ?origin:String):Array<String> {
+	public static function check(source:String, ?origin:String, ?opts:{?strict:Bool}):Array<String> {
 		var prog = lower(source, origin);
-		return new MuseChecker().check(prog);
+		return new MuseChecker({ strict: opts != null && opts.strict == true }).check(prog);
 	}
 
-	public static function checkEx(source:String, ?origin:String):Array<musescript.checker.Diagnostic> {
+	public static function checkEx(source:String, ?origin:String, ?opts:{?strict:Bool}):Array<musescript.checker.Diagnostic> {
 		var prog = lower(source, origin);
-		return new MuseChecker().checkEx(prog);
+		return new MuseChecker({ strict: opts != null && opts.strict == true }).checkEx(prog);
 	}
 
 	public static function format(source:String, ?origin:String):String {

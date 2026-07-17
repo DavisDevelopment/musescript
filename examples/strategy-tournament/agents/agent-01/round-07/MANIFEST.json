@@ -1,0 +1,75 @@
+{
+  "agent": "agent-01",
+  "round": "round-07",
+  "domain": "crypto+forex",
+  "execution": "next-open",
+  "eval_window": "2026-04-14..2026-07-13",
+  "equity_baseline_score": -0.406,
+  "equity_baseline_note": "R6 s02 on BTCUSD causal next-open",
+  "strategies": [
+    {
+      "file": "s01.ms",
+      "name": "S01_Ema813AnchorCascadeR7",
+      "hypothesis": "EMA 8/13 micro OR-broaden gated by close > ema34 — crypto uptrend filter",
+      "score": -0.013,
+      "mean_3m_sharpe": -0.501,
+      "mean_d_sharpe": 0.356,
+      "median_mdd": 0.037,
+      "wf_mean_sharpe": -0.629
+    },
+    {
+      "file": "s02.ms",
+      "name": "S02_Ema813HybridAtrR7",
+      "hypothesis": "EMA 8/13 micro + (don13 || close > ema21) hybrid gate + ATR profit lock for FX ranges",
+      "score": 0.020,
+      "mean_3m_sharpe": -0.440,
+      "mean_d_sharpe": 0.417,
+      "median_mdd": 0.036,
+      "wf_mean_sharpe": -0.676
+    },
+    {
+      "file": "s03.ms",
+      "name": "S03_Ema513RisingCascadeR7",
+      "hypothesis": "Fast EMA 5/13 micro + rising(spread,3) burst entry + cascade exit",
+      "score": -0.186,
+      "mean_3m_sharpe": -0.694,
+      "mean_d_sharpe": 0.163,
+      "median_mdd": 0.023,
+      "wf_mean_sharpe": -0.965
+    },
+    {
+      "file": "s04.ms",
+      "name": "S04_Sma813RisingFxR7",
+      "hypothesis": "SMA 8/13 micro + rising(spread,2) — best cross-asset vs-BH diversifier",
+      "score": 0.209,
+      "mean_3m_sharpe": -0.198,
+      "mean_d_sharpe": 0.659,
+      "median_mdd": 0.026,
+      "wf_mean_sharpe": -0.479
+    },
+    {
+      "file": "s05.ms",
+      "name": "S05_Ema834RiseDon21R7",
+      "hypothesis": "Flagship EMA 8/34 micro + don21 + rising(spread,2) — selective low-MDD survivor",
+      "score": 0.420,
+      "mean_3m_sharpe": 0.013,
+      "mean_d_sharpe": 0.870,
+      "median_mdd": 0.012,
+      "wf_mean_sharpe": -0.001,
+      "btc_sharpe": 0.546,
+      "btc_d_sharpe": 2.126,
+      "btc_mdd": 0.014,
+      "btc_trades": 4,
+      "sol_sharpe": 2.434,
+      "sol_d_sharpe": 2.911,
+      "sol_mdd": 0.009,
+      "sol_trades": 4
+    }
+  ],
+  "best_score": {
+    "file": "s05.ms",
+    "score": 0.420
+  },
+  "primary_bet": "s05.ms",
+  "key_innovation": "EMA 8/34 micro-cross + don21 + rising(spread,2) selectivity survives crypto whipsaw with 1.2% MDD; beats buy-hold on 8/10 symbols despite sparse FX entries"
+}

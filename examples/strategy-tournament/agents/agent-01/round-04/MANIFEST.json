@@ -1,0 +1,62 @@
+{
+  "agent": "agent-01",
+  "round": "round-04",
+  "eval_window": "2026-04-14..2026-07-13",
+  "self_test_symbol": "SPY",
+  "r3_baseline_spy_sharpe": 1.968,
+  "r3_baseline_spy_d_sharpe": -0.328,
+  "strategies": [
+    {
+      "file": "s01.ms",
+      "name": "S01_Ema834MacdPosExit",
+      "hypothesis": "EMA 8/34 level gate + Donchian 21/13; MACD hist exit only in onPosition (stolen from agent-03 s04); no EMA crossunder clip",
+      "spy_3m_sharpe": 2.545,
+      "spy_d_sharpe": 0.249,
+      "spy_mdd": 0.022,
+      "spy_trades": 5
+    },
+    {
+      "file": "s02.ms",
+      "name": "S02_Ema834CrossDonchian",
+      "hypothesis": "crossover(ema8, ema34) event entry at Donchian break; structural exit only — tests whether MACD hook is necessary",
+      "spy_3m_sharpe": 2.340,
+      "spy_d_sharpe": 0.045,
+      "spy_mdd": 0.030,
+      "spy_trades": 2
+    },
+    {
+      "file": "s03.ms",
+      "name": "S03_Ema834CrossMacdPos",
+      "hypothesis": "crossover entry + MACD position exit — combines R1 crossover precision with agent-03 exit-only MACD",
+      "spy_3m_sharpe": 2.885,
+      "spy_d_sharpe": 0.589,
+      "spy_mdd": 0.019,
+      "spy_trades": 2
+    },
+    {
+      "file": "s04.ms",
+      "name": "S04_Ema813MacdPosExit",
+      "hypothesis": "faster EMA 8/13 micro pair with same Donchian + MACD pos shell for cross-symbol diversification",
+      "spy_3m_sharpe": 2.545,
+      "spy_d_sharpe": 0.249,
+      "spy_mdd": 0.022,
+      "spy_trades": 5
+    },
+    {
+      "file": "s05.ms",
+      "name": "S05_Ema834MomMacdPos",
+      "hypothesis": "lazy dual momentum exit — flat only when MACD hist < 0 AND mom(8) < 0 in onPosition (agent-03 s02 pattern)",
+      "spy_3m_sharpe": 2.004,
+      "spy_d_sharpe": -0.291,
+      "spy_mdd": 0.036,
+      "spy_trades": 3
+    }
+  ],
+  "best_spy_3m_sharpe": {
+    "file": "s03.ms",
+    "sharpe": 2.885,
+    "d_sharpe": 0.589
+  },
+  "primary_bet": "s03.ms",
+  "key_innovation": "Move MACD exit from onBar to onPosition; remove EMA crossunder from onBar flat"
+}

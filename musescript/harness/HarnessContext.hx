@@ -10,6 +10,8 @@ class HarnessContext implements IHarness {
 	public var indicators:IndicatorRegistry;
 	public var chart:ChartSink;
 	public var orders:OrderSim;
+	/** Multi-symbol book used by panel / scanner strategies. */
+	public var portfolio:PortfolioSim;
 	public var engine:BacktestEngine;
 	public var currentBar:Null<Bar>;
 	/** Array view of each series; same object as SeriesBuffer.data for TradeBuiltins / JsBackend. */
@@ -19,6 +21,22 @@ class HarnessContext implements IHarness {
 	public var eventLog:EventLog;
 	/** Optional bar feed for compiled strategy entry (JS/Python HostABI). */
 	public var feed:Null<BarFeed>;
+	/** Active panel (null in single-symbol mode). */
+	public var panel:Null<PanelFeed>;
+	/** Universe symbols for the active panel run. */
+	public var panelSymbols:Array<String>;
+	/** Latest session closes keyed by symbol (panel mode). */
+	public var panelPrices:Map<String, Float>;
+	/**
+	 * Optional user-fn caller for computed bags (`bag_computed` closures).
+	 * MuseInterp / JsBackend set this during a run so recipes can invoke
+	 * MuseScript or host functions without a hard interp dependency.
+	 */
+	public var invokeUserFn:Null<Dynamic->Array<Dynamic>->Dynamic>;
+	/** Per-run indicator columns + stateful-callsite state (see IndicatorColumns). */
+	public var indCols:musescript.runtime.IndicatorColumns;
+	/** Per-bar console output from the strategy's `log()`/`trace` calls (IDE console pane). */
+	public var logs:Array<{bar:Int, msg:String}>;
 
 	public function new() {
 		universe = new SymbolUniverse();
@@ -26,6 +44,7 @@ class HarnessContext implements IHarness {
 		indicators = new IndicatorRegistry();
 		chart = new ChartSink();
 		orders = new OrderSim();
+		portfolio = new PortfolioSim();
 		engine = new BacktestEngine(orders, chart);
 		currentBar = null;
 		series = new Map();
@@ -33,18 +52,139 @@ class HarnessContext implements IHarness {
 		eventStreams = new Map();
 		eventLog = new EventLog();
 		feed = null;
+		panel = null;
+		panelSymbols = [];
+		panelPrices = new Map();
+		invokeUserFn = null;
+		indCols = new musescript.runtime.IndicatorColumns();
+		logs = [];
+	}
+
+	/** Latest panel close for `sym`, or NaN. */
+	public function panelPrice(sym:String):Float {
+		if (panelPrices == null || sym == null) return Math.NaN;
+		return panelPrices.exists(sym) ? panelPrices.get(sym) : Math.NaN;
+	}
+
+	/** Append a console line tagged with the current bar index (IDE console). */
+	public function pushLog(msg:String):Void {
+		var bi = currentBar != null ? currentBar.index : -1;
+		logs.push({ bar: bi, msg: msg });
 	}
 
 	public function runBacktest(onBar:Bar->Void, feed:BarFeed):BacktestResult {
+		panel = null;
+		panelSymbols = [];
+		panelPrices = new Map();
+		// Hoist the five OHLCV buffers out of the per-bar closure (one map
+		// lookup each per bar adds up at millions of bars).
+		var bO = getOrCreateBuffer("open");
+		var bH = getOrCreateBuffer("high");
+		var bL = getOrCreateBuffer("low");
+		var bC = getOrCreateBuffer("close");
+		var bV = getOrCreateBuffer("volume");
 		return engine.run(feed, function(bar) {
 			currentBar = bar;
-			pushSeries("open", bar.open);
-			pushSeries("high", bar.high);
-			pushSeries("low", bar.low);
-			pushSeries("close", bar.close);
-			pushSeries("volume", bar.volume);
+			bO.push(bar.open);
+			bH.push(bar.high);
+			bL.push(bar.low);
+			bC.push(bar.close);
+			bV.push(bar.volume);
+			pushAuxData(bar, bC.data.length);
 			onBar(bar);
 		});
+	}
+
+	/**
+	 * Multi-symbol panel backtest: each session pushes per-symbol series
+	 * (`close@SYM`, …), exposes `panelPrices` / `symbols()`, and marks the
+	 * shared `portfolio` book. Single-symbol `orders` is left untouched.
+	 */
+	public function runPanelBacktest(onBar:Bar->Void, panelFeed:PanelFeed):BacktestResult {
+		this.panel = panelFeed;
+		this.panelSymbols = panelFeed.symbols.copy();
+		this.panelPrices = new Map();
+		universe = new SymbolUniverse(panelFeed.symbols.copy());
+		var session = panelFeed.asBarFeed();
+		var bO = getOrCreateBuffer("open");
+		var bH = getOrCreateBuffer("high");
+		var bL = getOrCreateBuffer("low");
+		var bC = getOrCreateBuffer("close");
+		var bV = getOrCreateBuffer("volume");
+		session.reset();
+		var t = 0;
+		musescript.runtime.IterDriver.each(session, function(item) {
+			var bar:Bar = cast item;
+			currentBar = bar;
+			bO.push(bar.open);
+			bH.push(bar.high);
+			bL.push(bar.low);
+			bC.push(bar.close);
+			bV.push(bar.volume);
+			musescript.builtins.PortfolioBuiltins.observePanel(this, panelFeed, t);
+			pushAuxData(bar, bC.data.length);
+			onBar(bar);
+			portfolio.mark(panelPrices);
+			t++;
+		});
+		var rets = Metrics.returnsFromEquity(portfolio.equity);
+		return {
+			equity: portfolio.equity,
+			returns: rets,
+			trades: portfolio.trades,
+			sharpe: Metrics.sharpe(rets),
+			maxDrawdown: Metrics.maxDrawdown(portfolio.equity),
+			winRate: Metrics.winRate(portfolio.wins, portfolio.trades),
+			finalEquity: portfolio.equity.length > 0
+				? portfolio.equity[portfolio.equity.length - 1]
+				: portfolio.cash
+		};
+	}
+
+	/**
+	 * Per-bar series bookkeeping for an externally-driven (debug) step — mirrors
+	 * the inline body of `runBacktest`'s fast loop exactly (currentBar, OHLCV
+	 * push in O/H/L/C/V order, then aux). The fast loop hoists the five buffers
+	 * for speed; the debugger doesn't need speed, so this re-fetches them, but
+	 * the resulting series state is identical. A parity test pins step-run ==
+	 * full-run values at every bar.
+	 */
+	public function observeBar(bar:Bar):Void {
+		currentBar = bar;
+		var bC = getOrCreateBuffer("close");
+		getOrCreateBuffer("open").push(bar.open);
+		getOrCreateBuffer("high").push(bar.high);
+		getOrCreateBuffer("low").push(bar.low);
+		bC.push(bar.close);
+		getOrCreateBuffer("volume").push(bar.volume);
+		pushAuxData(bar, bC.data.length);
+	}
+
+	/** Names of Bar.data auxiliary series seen so far this run. */
+	var auxKeys:Array<String> = [];
+
+	/**
+	 * Causally push a bar's auxiliary data fields as named series. A key seen
+	 * for the first time is NaN-backfilled so its series stays index-aligned
+	 * with OHLCV; bars missing a known key push NaN. Values enter one bar at a
+	 * time — never preloaded — so a strategy at bar t can only ever see aux
+	 * values from bars ≤ t (same leak firewall as price series).
+	 */
+	function pushAuxData(bar:Bar, barCount:Int):Void {
+		if (bar.data == null && auxKeys.length == 0) return;
+		if (bar.data != null) {
+			for (k in bar.data.keys()) {
+				if (auxKeys.indexOf(k) < 0) {
+					auxKeys.push(k);
+					var buf = getOrCreateBuffer(k);
+					while (buf.data.length < barCount - 1) buf.push(Math.NaN);
+				}
+			}
+		}
+		for (k in auxKeys) {
+			var v = bar.data != null && bar.data.exists(k) ? bar.data.get(k) : Math.NaN;
+			pushSeries(k, v);
+		}
 	}
 
 	function getOrCreateBuffer(name:String):SeriesBuffer {
@@ -104,11 +244,19 @@ class HarnessContext implements IHarness {
 	/** Clear per-trial simulator / series / chart state for independent backtests. */
 	public function resetForTrial(?initialCash:Float = 100000):Void {
 		orders.reset(initialCash);
+		portfolio.reset(initialCash);
 		series = new Map();
 		seriesBuffers = new Map();
 		chart.commands = [];
 		currentBar = null;
+		panel = null;
+		panelSymbols = [];
+		panelPrices = new Map();
+		invokeUserFn = null;
 		eventLog.reset();
+		indCols.reset();
+		auxKeys = [];
+		logs = [];
 		TradeBuiltins.resetCrossState();
 	}
 

@@ -1,0 +1,15 @@
+strategy S04Candidate {
+  onBar {
+    r = rsi(close, 13)
+    e8 = ema(close, 8)
+    e34 = ema(close, 34)
+    div = close > close[8] && r < r[8]
+    rec = r > 36 && r[1] <= 36
+    when e8 > e34 && div && rec: long()
+    when low <= lowest(low, 13) || r > 65 || e8 < e34: flat()
+  }
+  onPosition {
+    when bars_in_trade >= 13: flat()
+    when unrealized_pnl < -0.05 * equity: flat()
+  }
+}

@@ -19,7 +19,7 @@ class TailCallPass {
 				FnDecl(name, args, rewriteTail(name, args, body), kind);
 			case other: other;
 		}];
-		return { decls: decls, stmts: prog.stmts };
+		return { decls: decls, stmts: prog.stmts, spans: prog.spans };
 	}
 
 	static function rewriteTail(name:String, args:Array<String>, body:Expr):Expr {

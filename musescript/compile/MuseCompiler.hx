@@ -33,6 +33,10 @@ class MuseCompiler {
 		prog = SeriesLowering.lower(prog);
 		prog = GeneratorLower.lower(prog);
 		prog = TailCallPass.transform(prog);
+		// Static identities for stateful callsites (crossover/rising/...) so
+		// conditional evaluation can't alias state and backends agree. Runs
+		// after template expansion so each instantiation gets its own id.
+		prog = CallsiteIds.assign(prog);
 		var result = switch (target) {
 			case "haxe":
 				var fn = HaxeBackend.compile(prog);

@@ -1,0 +1,4 @@
+extraParams.hxml
+-main musescript.runtime.MuseRuntime
+-D js_es=6
+-js build/js/muse-runtime.js

@@ -57,6 +57,11 @@ switch ($Target) {
     Write-Host "`n--- Indicator kernels Python/numba/WASM ---"
     & $Py build/py/09-indicator-kernels.py
   }
+  "10" {
+    Build-Js
+    Write-Host "`n--- Strategy kinds (typed surfaces) ---"
+    node build/js/10-strategy-kinds.js
+  }
   "vpvr" {
     Write-Host "Building deterministic VPVR exporter..."
     haxe build-vpvr.hxml

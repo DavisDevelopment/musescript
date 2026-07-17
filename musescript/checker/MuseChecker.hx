@@ -11,6 +11,8 @@ import musescript.ast.OrderKind;
 import musescript.ast.ParamOpts;
 import musescript.ast.Pattern;
 import musescript.types.MuseType;
+import musescript.types.AstSpans;
+import musescript.types.SourcePos;
 
 /**
  * Static checks: series lookback direction, macro context, match exhaustiveness hints,
@@ -24,15 +26,17 @@ class MuseChecker {
 	var generatorYieldSeen:Bool;
 	var typed:Bool;
 	var typeChecker:TypeChecker;
+	var spans:Null<AstSpans>;
 
-	public function new(?opts:{?typed:Bool}) {
+	public function new(?opts:{?typed:Bool, ?strict:Bool}) {
 		diags = [];
 		inMacro = false;
 		inOnBar = false;
 		generatorDepth = 0;
 		generatorYieldSeen = false;
 		typed = opts == null || opts.typed != false;
-		typeChecker = new TypeChecker();
+		typeChecker = new TypeChecker({ strict: opts != null && opts.strict == true });
+		spans = null;
 	}
 
 	/** Back-compat: string diagnostics. */
@@ -42,6 +46,7 @@ class MuseChecker {
 
 	public function checkEx(prog:MuseProgram):Array<Diagnostic> {
 		diags = [];
+		spans = prog.spans;
 		for (d in prog.decls) checkDecl(d);
 		for (s in prog.stmts) checkStmt(s);
 		checkCompileCoverage(prog);
@@ -179,10 +184,10 @@ class MuseChecker {
 			case EUnop(_, _, operand):
 				checkExpr(operand);
 			case ECall(EIdent("tune") | EIdent("optimize") | EIdent("sample"), args) if (!inMacro):
-				warn("macro builtin used outside @macro context");
+				warn("macro builtin used outside @macro context", null, DiagCodes.MACRO_CTX);
 				for (a in args) checkExpr(a);
 			case ECall(EIdent("tune") | EIdent("optimize") | EIdent("sample") | EIdent("distill") | EIdent("pickBest"), args) if (inOnBar):
-				err("macro builtin cannot be used inside on bar");
+				err("macro builtin cannot be used inside on bar", null, DiagCodes.MACRO_CTX);
 				for (a in args) checkExpr(a);
 			case ECall(callee, args):
 				checkExpr(callee);
@@ -280,7 +285,7 @@ class MuseChecker {
 
 	function checkLookbackIndex(n:Expr):Void {
 		var neg = negativeLookback(n);
-		if (neg != null) err("Negative lookback (future bar) is not allowed: close[" + neg + "]");
+		if (neg != null) err("Negative lookback (future bar) is not allowed: close[" + neg + "]", n, DiagCodes.LOOKAHEAD);
 	}
 
 	function negativeLookback(n:Expr):Null<Int> {
@@ -313,6 +318,13 @@ class MuseChecker {
 		if (e != null) checkExpr(e);
 	}
 
-	function err(msg:String):Void diags.push(Diagnostics.error(msg));
-	function warn(msg:String):Void diags.push(Diagnostics.warning(msg));
+	function err(msg:String, ?at:Expr, ?code:String):Void {
+		diags.push(Diagnostics.error(msg, posOfExpr(at), code));
+	}
+	function warn(msg:String, ?at:Expr, ?code:String):Void {
+		diags.push(Diagnostics.warning(msg, posOfExpr(at), code));
+	}
+	function posOfExpr(e:Null<Expr>):Null<SourcePos> {
+		return e == null || spans == null ? null : spans.ofExpr(e);
+	}
 }

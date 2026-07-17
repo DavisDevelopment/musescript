@@ -32,6 +32,9 @@ class MuseTypes {
 			case "GraphQuery": TGraphQuery;
 			case "Model": TModel;
 			case "Tree": TTree;
+			case "Dict": TDict;
+			case "Set": TSet;
+			case "Bag": TBag;
 			case "Unknown": TUnknown;
 			default: null;
 		};
@@ -59,6 +62,11 @@ class MuseTypes {
 			case TGraphQuery: "GraphQuery";
 			case TModel: "Model";
 			case TTree: "Tree";
+			case TDict: "Dict";
+			case TSet: "Set";
+			case TBag: "Bag";
+			case TObject(fields):
+				"{" + [for (f in fields) f.name + ": " + toString(f.ty)].join(", ") + "}";
 			case TFun(args, ret):
 				"(" + [for (a in args) toString(a)].join(", ") + ") -> " + toString(ret);
 			case TTemplate(args, ret):
@@ -76,6 +84,31 @@ class MuseTypes {
 			case [TFeature, TScalar]: true;
 			case [TModel, TFeature]: true;
 			case [TTree, TModel]: true;
+			case [TSeries, TScalar]: true; // current-bar leaf of a series
+			case [TObject(fa), TGraphPath]:
+				canAssign(TObject(fa), TObject([
+					{name: "nodes", ty: TStringArray},
+					{name: "distance", ty: TScalar}
+				]));
+			case [TGraphPath, TObject(fb)]:
+				canAssign(TObject([
+					{name: "nodes", ty: TStringArray},
+					{name: "distance", ty: TScalar}
+				]), TObject(fb));
+			case [TObject(fa), TObject(fb)]:
+				// Width-subtyping: `from` must have at least `to`'s fields.
+				for (tb in fb) {
+					var found = false;
+					for (ta in fa) {
+						if (ta.name == tb.name) {
+							if (!canAssign(ta.ty, tb.ty)) return false;
+							found = true;
+							break;
+						}
+					}
+					if (!found) return false;
+				}
+				true;
 			case [TFun(fa, fr), TFun(ta, tr)]:
 				if (fa.length != ta.length) return false;
 				for (i in 0...fa.length)
@@ -85,6 +118,15 @@ class MuseTypes {
 				canAssign(TFun(fa, fr), TFun(ta, tr));
 			default: false;
 		};
+	}
+
+	/**
+	 * Oracle-grade assignability: an Unknown on either side is a refusal,
+	 * not a free pass. Forge/Swarm use this to reject unprovable wires.
+	 */
+	public static function canAssignStrict(from:MuseType, to:MuseType):Bool {
+		if (from.match(TUnknown) || to.match(TUnknown)) return false;
+		return canAssign(from, to);
 	}
 
 	public static function unify(a:MuseType, b:MuseType):MuseType {

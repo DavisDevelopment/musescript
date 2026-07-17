@@ -1,0 +1,78 @@
+{
+  "agent": "agent-01",
+  "round": "round-05",
+  "eval_window": "2026-04-14..2026-07-13",
+  "self_test_symbol": "SPY",
+  "r4_baseline_score": 1.019,
+  "r4_baseline_mean_d_sharpe": 0.011,
+  "target_score": 1.427,
+  "strategies": [
+    {
+      "file": "s01.ms",
+      "name": "S01_Ema834CascadeCrownR5",
+      "hypothesis": "EMA 8/34 level gate + Donchian 21/13 entry; full CascadeCrown onPosition exit stack stolen from agent-06 s05",
+      "mean_3m_sharpe": 1.983,
+      "mean_d_sharpe": 0.599,
+      "median_mdd": 0.069,
+      "spy_3m_sharpe": 3.547,
+      "spy_d_sharpe": 1.251,
+      "spy_mdd": 0.011,
+      "spy_trades": 15
+    },
+    {
+      "file": "s02.ms",
+      "name": "S02_Cross813FallR5",
+      "hypothesis": "crossover(ema8, ema13) faster micro events + falling(hist,2) + RSI vault; low-trade precision",
+      "mean_3m_sharpe": 1.453,
+      "mean_d_sharpe": 0.068,
+      "median_mdd": 0.048,
+      "spy_3m_sharpe": 2.663,
+      "spy_d_sharpe": 0.367,
+      "spy_mdd": 0.009,
+      "spy_trades": 2
+    },
+    {
+      "file": "s03.ms",
+      "name": "S03_CrossFallRsiVaultR5",
+      "hypothesis": "crossover(ema8, ema34) R4 identity + agent-03 falling(3) cascade + profit-lock + RSI TP",
+      "mean_3m_sharpe": 1.715,
+      "mean_d_sharpe": 0.330,
+      "median_mdd": 0.048,
+      "spy_3m_sharpe": 2.663,
+      "spy_d_sharpe": 0.367,
+      "spy_mdd": 0.009,
+      "spy_trades": 2
+    },
+    {
+      "file": "s04.ms",
+      "name": "S04_Ema813CascadeR5",
+      "hypothesis": "softer EMA 8/13 micro pair + full cascade exits for WF/cross-symbol diversification",
+      "mean_3m_sharpe": 1.849,
+      "mean_d_sharpe": 0.464,
+      "median_mdd": 0.069,
+      "spy_3m_sharpe": 3.547,
+      "spy_d_sharpe": 1.251,
+      "spy_mdd": 0.011,
+      "spy_trades": 15
+    },
+    {
+      "file": "s05.ms",
+      "name": "S05_Ema834LazyCascadeR5",
+      "hypothesis": "EMA 8/34 level + lazy MACD+mom dual exit under cascade shell — ride winners longer",
+      "mean_3m_sharpe": 1.818,
+      "mean_d_sharpe": 0.433,
+      "median_mdd": 0.069,
+      "spy_3m_sharpe": 3.547,
+      "spy_d_sharpe": 1.251,
+      "spy_mdd": 0.011,
+      "spy_trades": 15
+    }
+  ],
+  "best_mean_3m_sharpe": {
+    "file": "s01.ms",
+    "sharpe": 1.983,
+    "d_sharpe": 0.599
+  },
+  "primary_bet": "s01.ms",
+  "key_innovation": "Micro-cross entry + stolen CascadeCrown exit-only stack lifts mean d-Sharpe from +0.011 to +0.599"
+}

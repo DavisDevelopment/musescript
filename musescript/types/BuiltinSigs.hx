@@ -79,17 +79,33 @@ class BuiltinSigs {
 		ind("roc");
 		fun("change", [TSeries, TWindow], TSeries, 1);
 		fun("pct_change", [TSeries, TWindow], TScalar, 1);
-		fun("bbands", [TSeries, TWindow, TScalar], TUnknown, 2);
-		fun("macd", [TSeries, TWindow, TWindow, TWindow], TUnknown, 1);
-		fun("stoch", [TWindow, TWindow, TWindow], TUnknown, 0);
+		fun("bbands", [TSeries, TWindow, TScalar], TObject([
+			{name: "mid", ty: TScalar},
+			{name: "upper", ty: TScalar},
+			{name: "lower", ty: TScalar}
+		]), 2);
+		fun("macd", [TSeries, TWindow, TWindow, TWindow], TObject([
+			{name: "macd", ty: TScalar},
+			{name: "signal", ty: TScalar},
+			{name: "hist", ty: TScalar}
+		]), 1);
+		fun("stoch", [TWindow, TWindow, TWindow], TObject([
+			{name: "k", ty: TScalar},
+			{name: "d", ty: TScalar}
+		]), 0);
 		fun("vwap", [], TSeries);
 		fun("hl2", [], TSeries);
 		fun("hlc3", [], TSeries);
 		fun("ohlc4", [], TSeries);
-		fun("crossover", [TSeries, TSeries], TBool);
-		fun("crossunder", [TSeries, TSeries], TBool);
-		fun("rising", [TSeries, TWindow], TBool);
-		fun("falling", [TSeries, TWindow], TBool);
+		// Runtime is Float+callsite history (same pattern as rising/falling).
+		fun("crossover", [TScalar, TScalar], TBool);
+		fun("crossunder", [TScalar, TScalar], TBool);
+		// Optional third arg gates the slope test until the position has been
+		// open for `minBars`, avoiding repeated `bars_in_trade >= k && ...`.
+		// Runtime tracks history by callsite from the current scalar leaf (Float),
+		// not from a Series handle — match TradeBuiltins.rising/falling.
+		fun("rising", [TScalar, TWindow, TWindow], TBool, 2);
+		fun("falling", [TScalar, TWindow, TWindow], TBool, 2);
 		fun("long", [TScalar], TVoid, 0);
 		fun("short", [TScalar], TVoid, 0);
 		fun("flat", [], TVoid);
@@ -99,13 +115,75 @@ class BuiltinSigs {
 		fun("cash", [], TScalar);
 		fun("equity", [], TScalar);
 		fun("unrealized_pnl", [], TScalar);
+		// Multi-symbol panel / portfolio surface
+		fun("symbols", [], TStringArray);
+		fun("sym_available", [TString], TBool);
+		fun("close_of", [TString, TWindow], TScalar, 1);
+		fun("open_of", [TString, TWindow], TScalar, 1);
+		fun("high_of", [TString, TWindow], TScalar, 1);
+		fun("low_of", [TString, TWindow], TScalar, 1);
+		fun("volume_of", [TString, TWindow], TScalar, 1);
+		fun("sma_of", [TString, TWindow], TScalar);
+		fun("ema_of", [TString, TWindow], TScalar);
+		fun("mom_of", [TString, TWindow], TScalar);
+		fun("rsi_of", [TString, TWindow], TScalar);
+		fun("scan_top", [TDict, TScalar], TStringArray);
+		fun("scan_bottom", [TDict, TScalar], TStringArray);
+		fun("buy", [TString, TScalar], TVoid, 1);
+		fun("sell_all", [TString], TVoid);
+		fun("pos", [TString], TScalar);
+		fun("entry_of", [TString], TScalar);
+		fun("weight_of", [TString], TScalar);
+		fun("holdings", [], TStringArray);
+		fun("rebalance_equal", [TStringArray], TVoid);
+		fun("target_weight", [TString, TScalar], TVoid);
+		fun("portfolio_equity", [], TScalar);
+		fun("portfolio_cash", [], TScalar);
+		fun("portfolio_unrealized", [], TScalar);
+		// Named weighted bags / pairs → portfolio composition
+		fun("bag", [TString], TBag, 0);
+		fun("bag_new", [TString], TBag, 0);
+		fun("bag_set", [TBag, TString, TScalar], TBag);
+		fun("bag_get", [TBag, TString], TScalar);
+		fun("bag_has", [TBag, TString], TBool);
+		fun("bag_delete", [TBag, TString], TBag);
+		fun("bag_name", [TBag], TString);
+		fun("bag_rename", [TBag, TString], TBag);
+		fun("bag_symbols", [TBag], TStringArray);
+		fun("bag_size", [TBag], TScalar);
+		fun("bag_equal", [TStringArray, TString], TBag, 1);
+		fun("bag_pair", [TString, TString, TScalar, TString], TBag, 2);
+		fun("bag_from_dict", [TDict, TString], TBag, 1);
+		fun("bag_from_scan", [TDict, TScalar, TString, TBool], TBag, 2);
+		fun("bag_to_dict", [TBag], TDict);
+		fun("bag_mode", [TBag], TString);
+		fun("bag_is_static", [TBag], TBool);
+		fun("bag_is_computed", [TBag], TBool);
+		fun("bag_computed", [TUnknown, TUnknown], TBag, 1);
+		fun("bag_resolve", [TBag], TBag);
+		fun("bag_rank_mom", [TScalar, TScalar, TString], TBag, 1);
+		fun("bag_rank_rsi", [TScalar, TScalar, TString, TBool], TBag, 1);
+		fun("bag_rank_field", [TString, TScalar, TString, TBool], TBag, 2);
+		fun("bag_graph", [TGraph, TString, TScalar, TString], TBag, 2);
+		fun("bag_add", [TBag, TBag, TString], TBag, 2);
+		fun("bag_sub", [TBag, TBag, TString], TBag, 2);
+		fun("bag_mask", [TBag, TUnknown, TString], TBag, 2);
+		fun("bag_scale", [TBag, TScalar, TString], TBag, 2);
+		fun("bag_norm", [TBag, TString], TBag, 1);
+		fun("portfolio_bag", [TString], TBag, 0);
+		fun("portfolio_apply", [TBag], TVoid);
+		fun("portfolio_add", [TBag], TVoid);
+		fun("portfolio_sub", [TBag], TVoid);
+		fun("portfolio_mask", [TUnknown], TVoid);
 		// note: do not register `close` as Void — it is a Series bar field
+		fun("log", [TUnknown, TUnknown, TUnknown, TUnknown], TVoid, 0);
 		fun("plot", [TScalar, TString, TString], TVoid, 1);
 		fun("plotshape", [TString], TVoid);
 		fun("hline", [TScalar, TString], TVoid);
 		fun("bgcolor", [TString], TVoid);
-		fun("nz", [TScalar, TScalar], TScalar, 1);
-		fun("na", [TScalar], TBool);
+		fun("nz", [TUnknown, TScalar], TScalar, 1);
+		// Runtime accepts any Dynamic (null/NaN/series leaf); TUnknown is the honest arg type.
+		fun("na", [TUnknown], TBool);
 		fun("clamp", [TScalar, TScalar, TScalar], TScalar);
 		fun("window", [TSeries, TWindow], TVector);
 		fun("ohlcv_window", [TWindow], TVector);
@@ -138,8 +216,15 @@ class BuiltinSigs {
 		fun("ml_matrix_cols", [TMatrix], TScalar);
 		fun("ml_matrix_data", [TMatrix], TVector);
 		fun("ml_matrix_get", [TMatrix, TScalar, TScalar], TScalar);
+		fun("ml_matrix_transpose", [TMatrix], TMatrix);
+		fun("ml_matrix_inverse", [TMatrix], TMatrix);
+		fun("ml_matrix_determinant", [TMatrix], TScalar);
 		fun("ml_ridge_fit_matrix", [TMatrix, TVector, TScalar], TVector, 2);
 		fun("vector_zscore", [TVector], TVector);
+		// `zscore` is the vector builtin at runtime (same as vector_zscore). The old
+		// Feature-pipeline signature was a palette lie — keep feature transforms named
+		// distinctly if/when they land.
+		fun("zscore", [TVector], TVector);
 		fun("correlation", [TVector, TVector], TScalar);
 		fun("sharpe", [TVector], TScalar);
 		fun("stat_mean", [TVector], TScalar);
@@ -152,6 +237,21 @@ class BuiltinSigs {
 		fun("stat_covariance", [TVector, TVector], TScalar);
 		fun("stat_correlation", [TVector, TVector], TScalar);
 		fun("stat_skewness", [TVector], TScalar);
+		fun("stat_kurtosis", [TVector], TScalar);
+		fun("stat_rank", [TVector, TScalar], TScalar);
+		fun("stat_percentile_rank", [TVector, TScalar], TScalar);
+		fun("stat_regression", [TVector], TObject([
+			{name: "slope", ty: TScalar},
+			{name: "intercept", ty: TScalar},
+			{name: "r2", ty: TScalar}
+		]));
+		fun("stat_autocorr", [TVector, TScalar], TScalar);
+		fun("sort", [TVector], TVector);
+		fun("argsort", [TVector], TVector);
+		fun("sortino", [TVector], TScalar);
+		fun("max_drawdown", [TVector], TScalar);
+		fun("ewm_var", [TSeries, TWindow], TSeries);
+		fun("ewm_stdev", [TSeries, TWindow], TSeries);
 		fun("stat_zscore", [TVector], TVector);
 		fun("sci_cumsum", [TVector], TVector);
 		fun("sci_diff", [TVector], TVector);
@@ -177,13 +277,18 @@ class BuiltinSigs {
 		fun("merge", [TUnknown, TUnknown], TVector);
 		fun("zip", [TUnknown, TUnknown], TVector);
 		fun("zipWith", [TUnknown, TUnknown, TUnknown], TVector);
-		fun("sample", [TUnknown], TPlan, 0);
-		fun("tune", [TUnknown], TPlan, 0);
-		fun("optimize", [TMetric], TPlan, 0);
-		fun("distill", [TUnknown], TPlan, 0);
-		fun("pickBest", [TUnknown], TPlan, 0);
+		// Plan/macro builtins are multi-arg in real strategies (`tune(fast, slow)`,
+		// `sample(universe, 10)`, `optimize(sharpe, [fast, slow])`).
+		fun("sample", [TUnknown], TPlan, 0, true);
+		fun("tune", [TUnknown], TPlan, 0, true);
+		fun("optimize", [TUnknown, TUnknown], TPlan, 1);
+		fun("distill", [TUnknown], TPlan, 0, true);
+		fun("pickBest", [TUnknown], TPlan, 0, true);
+		fun("plan", [TUnknown], TPlan, 0);
+		fun("ensemble", [TUnknown, TScalar], TModel, 0);
+		fun("DecisionTreeEnsemble", [TUnknown, TScalar], TModel, 0);
 		fun("feature", [TString], TFeature);
-		fun("zscore", [TFeature, TWindow], TFeature);
+		fun("feature_zscore", [TFeature, TWindow], TFeature);
 		fun("xscore", [TFeature], TFeature);
 		fun("gscore", [TFeature], TFeature);
 		fun("model_score", [TString], TFeature);
@@ -201,8 +306,50 @@ class BuiltinSigs {
 		fun("graph_has_edge", [TGraph, TString, TString, TString], TBool, 3);
 		fun("graph_bfs", [TGraph, TString, TScalar, TScalar], TStringArray, 2);
 		fun("graph_reachable", [TGraph, TString, TString, TScalar, TScalar], TBool, 3);
-		fun("graph_shortest_path", [TGraph, TString, TString, TBool, TScalar], TGraphPath, 3);
+		// Runtime shape `{nodes: StringArray, distance: Scalar}` — typed as TObject so
+		// `path.distance` / `path.nodes` field access is checked (TGraphPath alias kept
+		// for parseName / editors; canAssign via Unknown-adjacent paths still works).
+		fun("graph_shortest_path", [TGraph, TString, TString, TBool, TScalar], TObject([
+			{name: "nodes", ty: TStringArray},
+			{name: "distance", ty: TScalar}
+		]), 3);
 		fun("graph_pagerank", [TGraph, TScalar, TScalar, TScalar], TGraphRanks, 1);
+		// Opaque Dict / Set bookkeeping (string keys / string identity).
+		fun("dict_new", [], TDict);
+		// Keys are coerced with Std.string at runtime — accept any key type.
+		fun("dict_set", [TDict, TUnknown, TUnknown], TDict);
+		fun("dict_get", [TDict, TUnknown, TUnknown], TUnknown, 2);
+		fun("dict_has", [TDict, TUnknown], TBool);
+		fun("dict_delete", [TDict, TUnknown], TBool);
+		fun("dict_keys", [TDict], TStringArray);
+		// Values are `Array<Dynamic>` at runtime, not guaranteed numeric.
+		fun("dict_values", [TDict], TUnknown);
+		fun("dict_size", [TDict], TScalar);
+		fun("set_new", [], TSet);
+		fun("set_add", [TSet, TUnknown], TSet);
+		fun("set_has", [TSet, TUnknown], TBool);
+		fun("set_remove", [TSet, TUnknown], TBool);
+		fun("set_size", [TSet], TScalar);
+		fun("set_union", [TSet, TSet], TSet);
+		fun("set_intersect", [TSet, TSet], TSet);
+		fun("set_difference", [TSet, TSet], TSet);
+		fun("set_to_vector", [TSet], TVector);
+		fun("set_jaccard", [TSet, TSet], TScalar);
+	}
+
+	/**
+	 * Palette / planner-only names that are intentionally not TradeBuiltins
+	 * installables (feature/model stubs, or MacroBuiltins-only markers).
+	 */
+	public static function isPaletteOnly(name:String):Bool {
+		return switch (name) {
+			case "feature" | "feature_zscore" | "xscore" | "gscore" | "model_score"
+				| "mlp" | "gbdt" | "tree" | "tree_value" | "tree_bit"
+				| "graph_query" | "graph_metric":
+				true;
+			default:
+				false;
+		};
 	}
 
 	static function ind(name:String):Void {

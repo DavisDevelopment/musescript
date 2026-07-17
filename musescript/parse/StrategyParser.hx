@@ -9,6 +9,10 @@ import musescript.ast.OrderKind;
 import musescript.ast.ParamOpts;
 import musescript.ast.FnKind;
 import musescript.ast.MuseNodes;
+import musescript.types.BuiltinSigs;
+import musescript.types.MuseType;
+import musescript.types.AstSpans;
+import musescript.types.SourcePositions;
 
 /**
  * Hand-rolled recursive-descent parser for the braced typed surface:
@@ -23,6 +27,7 @@ class StrategyParser {
 	var origin:String;
 	var hoisted:Array<Decl>;
 	var knownSeries:Map<String, Bool>;
+	var spans:AstSpans;
 
 	public function new() {}
 
@@ -33,40 +38,48 @@ class StrategyParser {
 		this.len = source.length;
 		this.hoisted = [];
 		this.knownSeries = new Map();
-		var decls:Array<Decl> = [];
-		var stmts:Array<Stmt> = [];
-		skipWs();
-		while (i < len) {
-			var kw = peekIdent();
-			switch (kw) {
-				case "strategy":
-					decls.push(parseStrategy());
-				case "module":
-					decls.push(parseModule());
-				case "template":
-					decls.push(parseTemplate());
-				case "pipeline" | "search":
-					decls.push(parsePipeline());
-				case "param":
-					decls.push(parseParamDecl());
-				case "feature":
-					decls.push(parseFeatureDecl());
-				case "indicator":
-					decls.push(parseIndicatorDecl());
-				case "function":
-					decls.push(parseFnDecl());
-				default:
-					stmts = stmts.concat(parseStmtListUntil(null));
-					break;
-			}
+		this.spans = AstSpans.begin();
+		try {
+			var decls:Array<Decl> = [];
+			var stmts:Array<Stmt> = [];
 			skipWs();
+			while (i < len) {
+				var kw = peekIdent();
+				switch (kw) {
+					case "strategy":
+						decls.push(parseStrategy());
+					case "module":
+						decls.push(parseModule());
+					case "template":
+						decls.push(parseTemplate());
+					case "pipeline" | "search":
+						decls.push(parsePipeline());
+					case "param":
+						decls.push(parseParamDecl());
+					case "feature":
+						decls.push(parseFeatureDecl());
+					case "indicator":
+						decls.push(parseIndicatorDecl());
+					case "function":
+						decls.push(parseFnDecl());
+					default:
+						stmts = stmts.concat(parseStmtListUntil(null));
+						break;
+				}
+				skipWs();
+			}
+			var prog:MuseProgram = { decls: hoisted.concat(decls), stmts: stmts, spans: spans };
+			AstSpans.end();
+			return prog;
+		} catch (e:Dynamic) {
+			AstSpans.end();
+			throw e;
 		}
-		return { decls: hoisted.concat(decls), stmts: stmts };
 	}
 
 	/** True when source looks like the new surface (not `{ @strategy ... }`). */
 	public static function looksLike(source:String):Bool {
-		var s = StringTools.ltrim(source);
+		var s = skipLeadingComments(StringTools.ltrim(source));
 		return StringTools.startsWith(s, "strategy")
 			|| StringTools.startsWith(s, "module")
 			|| StringTools.startsWith(s, "template")
@@ -77,6 +90,25 @@ class StrategyParser {
 			|| StringTools.startsWith(s, "feature ")
 			|| StringTools.startsWith(s, "feature\t")
 			|| StringTools.startsWith(s, "indicator ");
+	}
+
+	/** Strip leading line/block comments and blank lines so looksLike sees the first keyword. */
+	static function skipLeadingComments(s:String):String {
+		var t = StringTools.ltrim(s);
+		while (t.length > 0) {
+			if (StringTools.startsWith(t, "//")) {
+				var nl = t.indexOf("\n");
+				t = StringTools.ltrim(nl >= 0 ? t.substr(nl + 1) : "");
+				continue;
+			}
+			if (StringTools.startsWith(t, "/*")) {
+				var end = t.indexOf("*/");
+				t = StringTools.ltrim(end >= 0 ? t.substr(end + 2) : "");
+				continue;
+			}
+			break;
+		}
+		return t;
 	}
 
 	function parseStrategy():Decl {
@@ -180,9 +212,46 @@ class StrategyParser {
 		if (match(":")) ty = expectIdentValue();
 		var def:Null<Expr> = null;
 		if (match("=")) def = parseExpr();
-		match(";");
 		var opts:ParamOpts = { ty: ty };
+		if (match("{")) {
+			if (!check("}")) {
+				do {
+					var key = expectIdentValue();
+					expect(":");
+					var val = parseExpr();
+					switch (key) {
+						case "min": opts.min = constNum(val);
+						case "max": opts.max = constNum(val);
+						case "step": opts.step = constNum(val);
+						case "tune": opts.tune = constStr(val);
+						default:
+							throw err('unknown param option "$key" (expected min/max/step/tune)');
+					}
+				} while (match(","));
+			}
+			expect("}");
+		}
+		match(";");
 		return ParamDecl(name, def, opts);
+	}
+
+	function constNum(e:Expr):Null<Float> {
+		return switch (e) {
+			case EConst(CInt(n)): n;
+			case EConst(CFloat(n)): n;
+			case EUnop("-", true, inner):
+				var v = constNum(inner);
+				v != null ? -v : null;
+			default: null;
+		};
+	}
+
+	function constStr(e:Expr):Null<String> {
+		return switch (e) {
+			case EConst(CString(s)): s;
+			case EIdent(s): s;
+			default: null;
+		};
 	}
 
 	function parseIndicatorDecl():Decl {
@@ -244,24 +313,40 @@ class StrategyParser {
 
 	function parseStmt():Stmt {
 		skipWs();
+		var stmtStart = i;
 		if (matchIdent("onBar") || matchIdent("on")) {
 			if (peekIdent() == "bar") expectIdentValue();
 			expect("{");
 			var body = parseStmtListUntil("}");
 			expect("}");
-			return OnBar(body);
+			return stampStmt(stmtStart, OnBar(body));
 		}
 		if (matchIdent("onPosition")) {
 			expect("{");
 			var body = parseStmtListUntil("}");
 			expect("}");
-			return OnPosition(body);
+			return stampStmt(stmtStart, OnPosition(body));
 		}
+		var tickStart = i;
 		if (matchIdent("onTick")) {
 			expect("{");
 			var body = parseStmtListUntil("}");
 			expect("}");
-			return OnTick(body);
+			return stampStmt(tickStart, OnTick(body));
+		}
+		var eventStart = i;
+		if (matchIdent("onEvent")) {
+			var stream = "events";
+			if (match("(")) {
+				skipWs();
+				if (check('"') || check("'")) stream = parseString();
+				else stream = expectIdentValue();
+				expect(")");
+			}
+			expect("{");
+			var body = parseStmtListUntil("}");
+			expect("}");
+			return stampStmt(eventStart, OnEvent(stream, body));
 		}
 		if (matchIdent("when")) {
 			var cond = parseExpr();
@@ -274,7 +359,28 @@ class StrategyParser {
 			} else {
 				body = [parseStmt()];
 			}
-			return When(cond, body);
+			return stampStmt(stmtStart, When(cond, body));
+		}
+		if (matchIdent("for")) {
+			expect("(");
+			var name = expectIdentValue();
+			expectIdent("in");
+			var iter = parseExpr();
+			expect(")");
+			expect("{");
+			var body = parseStmtListUntil("}");
+			expect("}");
+			return stampStmt(stmtStart, ForIn(name, iter, body));
+		}
+		if (matchIdent("return")) {
+			skipWs();
+			if (check("}") || check(";")) {
+				match(";");
+				return stampStmt(stmtStart, Return(null));
+			}
+			var e = parseExpr();
+			match(";");
+			return stampStmt(stmtStart, Return(e));
 		}
 		if (matchIdent("use")) {
 			var mod = expectIdentValue();
@@ -320,12 +426,15 @@ class StrategyParser {
 	function stmtAsExpr(s:Stmt):Expr {
 		return switch (s) {
 			case ExprStmt(e): e;
+			case Return(e): MuseNodes.ereturn(e);
 			case Assign(n, e): MuseNodes.binop("=", MuseNodes.ident(n), e);
 			case Order(kind, args):
 				var n = switch (kind) { case Long: "long"; case Short: "short"; case Flat: "flat"; case Close: "close"; };
 				MuseNodes.call(MuseNodes.ident(n), args);
 			case When(c, body):
 				MuseNodes.eif(c, MuseNodes.block([for (x in body) stmtAsExpr(x)]), null);
+			case ForIn(name, iter, body):
+				MuseNodes.efor(name, iter, MuseNodes.block([for (x in body) stmtAsExpr(x)]));
 			case Block(ss):
 				MuseNodes.block([for (x in ss) stmtAsExpr(x)]);
 			default:
@@ -340,18 +449,20 @@ class StrategyParser {
 	}
 
 	function parseAssign():Expr {
+		var start = i;
 		var left = parsePipe();
 		if (match("=")) {
-			return MuseNodes.binop("=", left, parseAssign());
+			return stampExpr(start, MuseNodes.binop("=", left, parseAssign()));
 		}
 		return left;
 	}
 
 	function parsePipe():Expr {
+		var start = i;
 		var left = parseOr();
 		while (match("|>")) {
 			var right = parseOr();
-			left = desugarPipe(left, right);
+			left = stampExpr(start, desugarPipe(left, right));
 		}
 		return left;
 	}
@@ -365,65 +476,72 @@ class StrategyParser {
 	}
 
 	function parseOr():Expr {
+		var start = i;
 		var left = parseAnd();
 		while (true) {
-			if (match("||")) left = MuseNodes.binop("||", left, parseAnd());
+			if (match("||")) left = stampExpr(start, MuseNodes.binop("||", left, parseAnd()));
 			else break;
 		}
 		return left;
 	}
 
 	function parseAnd():Expr {
+		var start = i;
 		var left = parseCmp();
 		while (true) {
-			if (match("&&")) left = MuseNodes.binop("&&", left, parseCmp());
+			if (match("&&")) left = stampExpr(start, MuseNodes.binop("&&", left, parseCmp()));
 			else break;
 		}
 		return left;
 	}
 
 	function parseCmp():Expr {
+		var start = i;
 		var left = parseAdd();
 		while (true) {
-			if (match(">=")) left = MuseNodes.binop(">=", left, parseAdd());
-			else if (match("<=")) left = MuseNodes.binop("<=", left, parseAdd());
-			else if (match("==")) left = MuseNodes.binop("==", left, parseAdd());
-			else if (match("!=")) left = MuseNodes.binop("!=", left, parseAdd());
-			else if (match(">")) left = MuseNodes.binop(">", left, parseAdd());
-			else if (match("<")) left = MuseNodes.binop("<", left, parseAdd());
+			if (match(">=")) left = stampExpr(start, MuseNodes.binop(">=", left, parseAdd()));
+			else if (match("<=")) left = stampExpr(start, MuseNodes.binop("<=", left, parseAdd()));
+			else if (match("==")) left = stampExpr(start, MuseNodes.binop("==", left, parseAdd()));
+			else if (match("!=")) left = stampExpr(start, MuseNodes.binop("!=", left, parseAdd()));
+			else if (match(">")) left = stampExpr(start, MuseNodes.binop(">", left, parseAdd()));
+			else if (match("<")) left = stampExpr(start, MuseNodes.binop("<", left, parseAdd()));
 			else break;
 		}
 		return left;
 	}
 
 	function parseAdd():Expr {
+		var start = i;
 		var left = parseMul();
 		while (true) {
-			if (match("+")) left = MuseNodes.binop("+", left, parseMul());
-			else if (match("-")) left = MuseNodes.binop("-", left, parseMul());
+			if (match("+")) left = stampExpr(start, MuseNodes.binop("+", left, parseMul()));
+			else if (match("-")) left = stampExpr(start, MuseNodes.binop("-", left, parseMul()));
 			else break;
 		}
 		return left;
 	}
 
 	function parseMul():Expr {
+		var start = i;
 		var left = parseUnary();
 		while (true) {
-			if (match("*")) left = MuseNodes.binop("*", left, parseUnary());
-			else if (match("/")) left = MuseNodes.binop("/", left, parseUnary());
-			else if (match("%")) left = MuseNodes.binop("%", left, parseUnary());
+			if (match("*")) left = stampExpr(start, MuseNodes.binop("*", left, parseUnary()));
+			else if (match("/")) left = stampExpr(start, MuseNodes.binop("/", left, parseUnary()));
+			else if (match("%")) left = stampExpr(start, MuseNodes.binop("%", left, parseUnary()));
 			else break;
 		}
 		return left;
 	}
 
 	function parseUnary():Expr {
-		if (match("!")) return MuseNodes.unop("!", true, parseUnary());
-		if (match("-")) return MuseNodes.unop("-", true, parseUnary());
+		var start = i;
+		if (match("!")) return stampExpr(start, MuseNodes.unop("!", true, parseUnary()));
+		if (match("-")) return stampExpr(start, MuseNodes.unop("-", true, parseUnary()));
 		return parsePostfix();
 	}
 
 	function parsePostfix():Expr {
+		var start = i;
 		var e = parsePrimary();
 		while (true) {
 			if (match("(")) {
@@ -432,14 +550,14 @@ class StrategyParser {
 					do args.push(parseExpr()) while (match(","));
 				}
 				expect(")");
-				e = MuseNodes.call(e, args);
+				e = stampExpr(start, MuseNodes.call(e, args));
 			} else if (match("[")) {
 				var idx = parseExpr();
 				expect("]");
-				e = shouldLookback(e) ? MuseNodes.lookback(e, idx) : MuseNodes.array(e, idx);
+				e = stampExpr(start, shouldLookback(e) ? MuseNodes.lookback(e, idx) : MuseNodes.array(e, idx));
 			} else if (match(".")) {
 				var f = expectIdentValue();
-				e = MuseNodes.field(e, f);
+				e = stampExpr(start, MuseNodes.field(e, f));
 			} else break;
 		}
 		return e;
@@ -448,15 +566,16 @@ class StrategyParser {
 	function parsePrimary():Expr {
 		skipWs();
 		if (i >= len) throw err("unexpected end of input");
+		var start = i;
 		var c = src.charAt(i);
 		if (c == "(") {
 			i++;
 			var e = parseExpr();
 			expect(")");
-			return MuseNodes.parent(e);
+			return stampExpr(start, MuseNodes.parent(e));
 		}
-		if (c == '"') return MuseNodes.stringExpr(parseString());
-		if (c == "'") return MuseNodes.stringExpr(parseString());
+		if (c == '"') return stampExpr(start, MuseNodes.stringExpr(parseString()));
+		if (c == "'") return stampExpr(start, MuseNodes.stringExpr(parseString()));
 		if (c == "[") {
 			i++;
 			var values:Array<Expr> = [];
@@ -464,27 +583,79 @@ class StrategyParser {
 				do values.push(parseExpr()) while (match(","));
 			}
 			expect("]");
-			return MuseNodes.arrayDecl(values);
+			return stampExpr(start, MuseNodes.arrayDecl(values));
 		}
 		if (isDigit(c) || (c == "." && i + 1 < len && isDigit(src.charAt(i + 1))))
-			return parseNumber();
+			return stampExpr(start, parseNumber());
 		if (c == "{") {
 			i++;
+			if (looksLikeObjectLiteral()) {
+				var fields:Array<{name:String, e:Expr}> = [];
+				do {
+					skipWs();
+					var fname = expectIdentValue();
+					expect(":");
+					fields.push({ name: fname, e: parseExpr() });
+				} while (match(","));
+				expect("}");
+				return stampExpr(start, MuseNodes.object(fields));
+			}
 			var es = [for (s in parseStmtListUntil("}")) stmtAsExpr(s)];
 			expect("}");
-			return MuseNodes.block(es);
+			return stampExpr(start, MuseNodes.block(es));
 		}
 		var id = expectIdentValue();
-		if (id == "true") return MuseNodes.boolExpr(true);
-		if (id == "false") return MuseNodes.boolExpr(false);
-		if (id == "null") return MuseNodes.nullExpr();
-		if (isBarField(id)) return MuseNodes.barField(id);
-		return MuseNodes.ident(id);
+		if (id == "true") return stampExpr(start, MuseNodes.boolExpr(true));
+		if (id == "false") return stampExpr(start, MuseNodes.boolExpr(false));
+		if (id == "null") return stampExpr(start, MuseNodes.nullExpr());
+		if (id == "function") return stampExpr(start, parseLambda());
+		if (isBarField(id)) return stampExpr(start, MuseNodes.barField(id));
+		return stampExpr(start, MuseNodes.ident(id));
 	}
 
 	function isBarField(n:String):Bool {
 		return n == "open" || n == "high" || n == "low" || n == "close" || n == "volume"
 			|| n == "time" || n == "bar_index" || n == "hl2" || n == "hlc3" || n == "ohlc4";
+	}
+
+	/**
+	 * After consuming `{`: object literal iff next tokens are `ident :`.
+	 * Statement openers (`when cond:` …) put non-`:` tokens after the first
+	 * ident, so blocks keep parsing as blocks. Position is restored.
+	 */
+	function looksLikeObjectLiteral():Bool {
+		var save = i;
+		skipWs();
+		var id = readIdent();
+		var isObj = false;
+		if (id != null) {
+			skipWs();
+			isObj = i < len && src.charAt(i) == ":";
+		}
+		i = save;
+		return isObj;
+	}
+
+	/** Anonymous `function(a, b) return expr` / `function(a) { ... }` in expression position. */
+	function parseLambda():Expr {
+		expect("(");
+		var args:Array<String> = [];
+		if (!check(")")) {
+			do args.push(expectIdentValue()) while (match(","));
+		}
+		expect(")");
+		skipWs();
+		var body:Expr;
+		if (check("{")) {
+			expect("{");
+			body = MuseNodes.block([for (s in parseStmtListUntil("}")) stmtAsExpr(s)]);
+			expect("}");
+		} else if (matchIdent("return")) {
+			body = MuseNodes.ereturn(parseExpr());
+		} else {
+			body = parseExpr();
+		}
+		return MuseNodes.efunction(args, body, Normal, null);
 	}
 
 	function shouldLookback(e:Expr):Bool {
@@ -507,19 +678,33 @@ class StrategyParser {
 		};
 	}
 
+	/** True when a call returns Series so `x[1]` should desugar to lookback. */
 	function isSeriesCall(name:String):Bool {
-		return name == "sma" || name == "ema" || name == "rsi" || name == "atr"
-			|| name == "wma" || name == "rma" || name == "stdev"
-			|| name == "highest" || name == "lowest" || name == "mom"
-			|| name == "roc" || name == "change" || name == "pct_change"
-			|| name == "vwap" || name == "hl2" || name == "hlc3" || name == "ohlc4";
+		var sig = BuiltinSigs.get(name);
+		return sig != null && sig.ret.match(TSeries);
 	}
 
 	function parseNumber():Expr {
 		var start = i;
 		while (i < len && (isDigit(src.charAt(i)) || src.charAt(i) == ".")) i++;
+		// Scientific notation: 1e-6 / 2.5E+3 (hscript parity).
+		if (i < len) {
+			var ec = src.charAt(i);
+			if (ec == "e" || ec == "E") {
+				var j = i + 1;
+				if (j < len) {
+					var s = src.charAt(j);
+					if (s == "+" || s == "-") j++;
+				}
+				if (j < len && isDigit(src.charAt(j))) {
+					i = j;
+					while (i < len && isDigit(src.charAt(i))) i++;
+				}
+			}
+		}
 		var s = src.substring(start, i);
-		if (s.indexOf(".") >= 0) return MuseNodes.floatExpr(Std.parseFloat(s));
+		var hasFrac = s.indexOf(".") >= 0 || s.indexOf("e") >= 0 || s.indexOf("E") >= 0;
+		if (hasFrac) return MuseNodes.floatExpr(Std.parseFloat(s));
 		return MuseNodes.intExpr(Std.parseInt(s));
 	}
 
@@ -640,6 +825,18 @@ class StrategyParser {
 	function isDigit(c:String):Bool {
 		var code = c.charCodeAt(0);
 		return code >= 48 && code <= 57;
+	}
+
+	function stampExpr(start:Int, e:Expr):Expr {
+		if (spans != null)
+			spans.stampExpr(e, SourcePositions.fromOffset(src, start, origin, i));
+		return e;
+	}
+
+	function stampStmt(start:Int, s:Stmt):Stmt {
+		if (spans != null)
+			spans.stampStmt(s, SourcePositions.fromOffset(src, start, origin, i));
+		return s;
 	}
 
 	function err(msg:String):String {

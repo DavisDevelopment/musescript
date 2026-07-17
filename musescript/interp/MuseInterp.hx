@@ -46,6 +46,8 @@ class MuseInterp {
 	var genResume:Null<GenResume>;
 	var onBarHandlers:Array<Array<Stmt>>;
 	var onPositionHandlers:Array<Array<Stmt>>;
+	/** Strategy-body assigns re-executed before handlers on every bar. */
+	var preludeStmts:Array<Stmt>;
 	var onTickHandlers:Array<Array<Stmt>>;
 	var onEventHandlers:Array<{stream:String, body:Array<Stmt>}>;
 	var strategyName:Null<String>;
@@ -62,6 +64,7 @@ class MuseInterp {
 		this.genResume = null;
 		this.onBarHandlers = [];
 		this.onPositionHandlers = [];
+		this.preludeStmts = [];
 		this.onTickHandlers = [];
 		this.onEventHandlers = [];
 		this.strategyName = null;
@@ -73,6 +76,9 @@ class MuseInterp {
 		globals.set("true", true);
 		globals.set("false", false);
 		globals.set("trace", function(v:Dynamic) {
+			// Route into the IDE console buffer (bar-tagged) as well as stdout,
+			// so `trace(...)` output is visible in the Studio console pane.
+			harness.pushLog(Std.string(v));
 			#if js
 			untyped console.log(v);
 			#else
@@ -108,6 +114,7 @@ class MuseInterp {
 			var feed = BarFeed.synthetic(300, 7);
 			return harness.runBacktest(function(bar) {
 				bindBar(bar);
+				for (st in preludeStmts) execStmt(st);
 				for (h in onBarHandlers) {
 					for (st in h) execStmt(st);
 				}
@@ -122,18 +129,47 @@ class MuseInterp {
 	}
 
 	public function runBacktest(prog:MuseProgram, feed:BarFeed):Dynamic {
+		setupRun(prog);
+		return harness.runBacktest(function(bar) execBar(bar), feed);
+	}
+
+	/**
+	 * Setup half of a backtest run: reset handler lists, register decls, execute
+	 * top-level statements (collecting @on(bar)/@on(position) handlers + the
+	 * per-bar prelude). Shared by runBacktest and the debugger (MuseDebugSession)
+	 * so stepped and full runs are guaranteed to execute identical code.
+	 */
+	public function setupRun(prog:MuseProgram):Void {
 		onBarHandlers = [];
 		onPositionHandlers = [];
 		onTickHandlers = [];
 		onEventHandlers = [];
+		preludeStmts = [];
+		var self = this;
+		harness.invokeUserFn = function(f:Dynamic, args:Array<Dynamic>):Dynamic {
+			return self.callValue(f, args != null ? args : []);
+		};
 		for (d in prog.decls) registerDecl(d);
 		for (s in prog.stmts) execStmt(s);
-		return harness.runBacktest(function(bar) {
-			bindBar(bar);
-			for (h in onBarHandlers) for (st in h) execStmt(st);
-			if (harness.orders.position != 0)
-				for (h in onPositionHandlers) for (st in h) execStmt(st);
-		}, feed);
+	}
+
+	/**
+	 * Per-bar handler execution: bindBar + prelude + on(bar) + on(position).
+	 * The caller owns the surrounding harness bookkeeping (orders.beginBar,
+	 * series observation, orders.mark) — see HarnessContext.runBacktest (full
+	 * run) and MuseDebugSession.stepBar (stepped run), which drive it identically.
+	 */
+	public function execBar(bar:Bar):Void {
+		bindBar(bar);
+		for (st in preludeStmts) execStmt(st);
+		for (h in onBarHandlers) for (st in h) execStmt(st);
+		if (harness.orders.position != 0 || harness.portfolio.holdings().length > 0)
+			for (h in onPositionHandlers) for (st in h) execStmt(st);
+	}
+
+	public function runPanelBacktest(prog:MuseProgram, panel:musescript.harness.PanelFeed):Dynamic {
+		setupRun(prog);
+		return harness.runPanelBacktest(function(bar) execBar(bar), panel);
 	}
 
 	public function registerDeclPublic(d:Decl):Void {
@@ -144,7 +180,7 @@ class MuseInterp {
 		switch (d) {
 			case StrategyDecl(name, body):
 				strategyName = name;
-				for (s in body) execStmt(s);
+				registerStrategyBody(body);
 			case ParamDecl(name, def, opts):
 				var v = def != null ? evalExpr(def) : 0;
 				harness.params.register(name, v, opts.min, opts.max, opts.step, opts.tune);
@@ -165,8 +201,25 @@ class MuseInterp {
 		}
 	}
 
+	/**
+	 * Register a typed-surface `strategy { ... }` body with JsEmitter-parity
+	 * semantics (collectStrategyHooks): Assign statements are a PER-BAR prelude
+	 * (`fast = ema(close, 5)` must re-evaluate on every bar), hooks register as
+	 * handlers, everything else keeps the historical run-once behavior. Executing
+	 * assigns once at registration bound indicator locals before any bar existed,
+	 * so interp-fallback backtests silently produced 0 trades.
+	 */
+	function registerStrategyBody(body:Array<Stmt>):Void {
+		for (s in body) switch (s) {
+			case Assign(_, _): preludeStmts.push(s);
+			case Block(inner): registerStrategyBody(inner);
+			default: execStmt(s);
+		}
+	}
+
 	function bindBar(bar:Bar):Void {
 		TradeBuiltins.beginBar();
+		harness.indCols.beginBar();
 		globals.set("open", bar.open);
 		globals.set("high", bar.high);
 		globals.set("low", bar.low);
@@ -189,6 +242,26 @@ class MuseInterp {
 		globals.set("ask", tickField(tick, ["ask"], Math.NaN));
 		if (Reflect.hasField(tick, "side")) globals.set("side", Reflect.field(tick, "side"));
 		if (Reflect.hasField(tick, "symbol")) globals.set("symbol", Reflect.field(tick, "symbol"));
+		for (n in harness.params.names()) globals.set(n, harness.params.get(n));
+	}
+
+	/**
+	 * Bind order-flow / custom event fields onto globals (JsBackend.bindEvent parity).
+	 * Exposes event/price/size/time plus kind/id/reason/px/qty/side/symbol when present.
+	 */
+	function bindEvent(event:Dynamic):Void {
+		if (event == null) return;
+		globals.set("event", event);
+		globals.set("price", tickField(event, ["price", "px", "last"], Math.NaN));
+		globals.set("size", tickField(event, ["size", "qty", "volume"], 0));
+		globals.set("time", tickField(event, ["time", "ts", "timestamp"], harnessNow()));
+		if (Reflect.hasField(event, "kind")) globals.set("kind", Reflect.field(event, "kind"));
+		if (Reflect.hasField(event, "id")) globals.set("id", Reflect.field(event, "id"));
+		if (Reflect.hasField(event, "reason")) globals.set("reason", Reflect.field(event, "reason"));
+		if (Reflect.hasField(event, "side")) globals.set("side", Reflect.field(event, "side"));
+		if (Reflect.hasField(event, "symbol")) globals.set("symbol", Reflect.field(event, "symbol"));
+		if (Reflect.hasField(event, "px")) globals.set("px", Reflect.field(event, "px"));
+		if (Reflect.hasField(event, "qty")) globals.set("qty", Reflect.field(event, "qty"));
 		for (n in harness.params.names()) globals.set(n, harness.params.get(n));
 	}
 
@@ -378,6 +451,44 @@ class MuseInterp {
 				o;
 			case ETernary(c, a, b): truthy(evalExpr(c)) ? evalExpr(a) : evalExpr(b);
 			case EParent(x): evalExpr(x);
+			case EMeta("__scr", [EConst(CInt(scrId))], ECall(EIdent(scrName), scrArgs))
+				if (scrName == "macd" || scrName == "bbands" || scrName == "stoch"):
+				// field-only result → per-callsite scratch object (CallsiteIds pass)
+				var scrOut = harness.indCols.scratchObj(scrId);
+				switch (scrName) {
+					case "macd":
+						TradeBuiltins.macd(harness, evalExpr(scrArgs[0]),
+							scrArgs.length > 1 ? Std.int(evalExpr(scrArgs[1])) : 12,
+							scrArgs.length > 2 ? Std.int(evalExpr(scrArgs[2])) : 26,
+							scrArgs.length > 3 ? Std.int(evalExpr(scrArgs[3])) : 9,
+							scrOut);
+					case "bbands":
+						TradeBuiltins.bbands(harness, evalExpr(scrArgs[0]), Std.int(evalExpr(scrArgs[1])),
+							scrArgs.length > 2 ? (evalExpr(scrArgs[2]) : Float) : 2.0,
+							scrOut);
+					default:
+						TradeBuiltins.stoch(harness,
+							scrArgs.length > 0 ? Std.int(evalExpr(scrArgs[0])) : 14,
+							scrArgs.length > 1 ? Std.int(evalExpr(scrArgs[1])) : 3,
+							scrArgs.length > 2 ? Std.int(evalExpr(scrArgs[2])) : 3,
+							scrOut);
+				}
+			case EMeta("__cs", [EConst(CInt(csId))], ECall(EIdent(csName), csArgs))
+				if (csName == "crossover" || csName == "crossunder" || csName == "rising" || csName == "falling"):
+				// static-callsite-id stateful builtin (CallsiteIds pass) — must
+				// route through the same id-keyed state the JS backend uses.
+				switch (csName) {
+					case "crossover":
+						TradeBuiltins.crossoverCS(harness, csId, evalExpr(csArgs[0]), evalExpr(csArgs[1]));
+					case "crossunder":
+						TradeBuiltins.crossunderCS(harness, csId, evalExpr(csArgs[0]), evalExpr(csArgs[1]));
+					case "rising":
+						TradeBuiltins.risingCS(harness, csId, evalExpr(csArgs[0]), Std.int(evalExpr(csArgs[1])),
+							csArgs.length > 2 ? Std.int(evalExpr(csArgs[2])) : 0);
+					default:
+						TradeBuiltins.fallingCS(harness, csId, evalExpr(csArgs[0]), Std.int(evalExpr(csArgs[1])),
+							csArgs.length > 2 ? Std.int(evalExpr(csArgs[2])) : 0);
+				}
 			case EMeta(_, _, x): evalExpr(x);
 			case EMatch(scrutinee, arms): evalMatch(evalExpr(scrutinee), arms);
 			case EYield(x):
@@ -700,30 +811,47 @@ class MuseInterp {
 		});
 	}
 
-	/** Run registered on-event handlers against a MuseIter / EventLog */
+	/** Run registered on-event handlers against a MuseIter / EventLog (bindEvent per item). */
 	public function dispatchEvents(streamName:String, iter:MuseIter):Void {
-		for (h in onEventHandlers) {
-			if (h.stream != streamName && h.stream != "event") continue;
-			for (st in h.body) {
-				switch (st) {
+		if (iter == null) return;
+		var self = this;
+		var handlers = [for (h in onEventHandlers) if (h.stream == streamName || h.stream == "event") h];
+		if (handlers.length == 0) return;
+
+		// Snapshot once so plain per-event handlers and MatchFor can both see events.
+		var events:Array<Dynamic> = MuseIters.toArray(iter);
+
+		for (h in handlers) {
+			var plain:Array<Stmt> = [];
+			var matchers:Array<Stmt> = [];
+			for (st in h.body) switch (st) {
+				case MatchFor(_, _, _): matchers.push(st);
+				default: plain.push(st);
+			}
+			for (event in events) {
+				self.bindEvent(event);
+				for (st in plain) self.execStmt(st);
+			}
+			if (matchers.length > 0) {
+				var replay = MuseIters.from(events);
+				for (st in matchers) switch (st) {
 					case MatchFor(name, _, arms):
-						var sm = new StreamMatcher(matcher);
-						sm.matchFor(iter, arms, function(bindings, body) {
-							var frame = new CallFrame(stack.current(), "event");
+						var sm = new StreamMatcher(self.matcher);
+						sm.matchFor(replay, arms, function(bindings, body) {
+							var frame = new CallFrame(self.stack.current(), "event");
 							for (k => v in bindings) frame.define(k, v);
-							stack.push(frame);
-							evalExpr(body);
-							stack.pop();
+							self.stack.push(frame);
+							self.evalExpr(body);
+							self.stack.pop();
 						}, function(bindings, guard) {
-							var frame = new CallFrame(stack.current(), "guard");
+							var frame = new CallFrame(self.stack.current(), "guard");
 							for (k => v in bindings) frame.define(k, v);
-							stack.push(frame);
-							var ok = truthy(evalExpr(guard));
-							stack.pop();
+							self.stack.push(frame);
+							var ok = self.truthy(self.evalExpr(guard));
+							self.stack.pop();
 							return ok;
 						});
 					default:
-						execStmt(st);
 				}
 			}
 		}

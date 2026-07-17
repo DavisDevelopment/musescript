@@ -1,0 +1,41 @@
+{
+  "agent": "agent-01",
+  "eval_window": "2026-04-14..2026-07-13",
+  "self_test_symbol": "SPY",
+  "strategies": [
+    {
+      "file": "s01.ms",
+      "name": "S01_Sma813",
+      "hypothesis": "SMA 8/13 symmetric micro-cross baseline for short trend bursts",
+      "spy_3m_sharpe": 1.125
+    },
+    {
+      "file": "s02.ms",
+      "name": "S02_Ema813Ex21",
+      "hypothesis": "EMA 8/13 entry with slower EMA 21 exit to let winners run",
+      "spy_3m_sharpe": 0.778
+    },
+    {
+      "file": "s03.ms",
+      "name": "S03_Ema521T21",
+      "hypothesis": "Faster EMA 5/21 cross with 21-bar Fib time stop to cut stale holds",
+      "spy_3m_sharpe": 0.528
+    },
+    {
+      "file": "s04.ms",
+      "name": "S04_Ema813Guard",
+      "hypothesis": "EMA 8/13 with 6% equity hard stop and 34-bar time stop risk shell",
+      "spy_3m_sharpe": 1.430
+    },
+    {
+      "file": "s05.ms",
+      "name": "S05_Ema834",
+      "hypothesis": "EMA 8/34 wider slow leg captures sustained micro-trends with fewer whipsaws",
+      "spy_3m_sharpe": 2.296
+    }
+  ],
+  "best_spy_3m_sharpe": {
+    "file": "s05.ms",
+    "sharpe": 2.296
+  }
+}

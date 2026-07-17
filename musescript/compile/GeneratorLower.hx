@@ -48,7 +48,7 @@ class GeneratorLower {
 			changed = true;
 			stmts = [for (s in stmts) expandYieldStarStmt(s)];
 		}
-		return changed ? { decls: decls, stmts: stmts } : prog;
+		return changed ? { decls: decls, stmts: stmts, spans: prog.spans } : prog;
 	}
 
 	static function lowerDecl(d:Decl):Decl {

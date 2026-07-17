@@ -1,0 +1,139 @@
+{
+  "eval_window": {
+    "start": "2026-04-14",
+    "end": "2026-07-13",
+    "note": "Official tournament scoring \u2014 3 months only"
+  },
+  "symbols": [
+    "SPY",
+    "QQQ",
+    "IWM",
+    "AAPL",
+    "MSFT",
+    "NVDA",
+    "AMD",
+    "META",
+    "AMZN",
+    "GOOGL"
+  ],
+  "tapes": {
+    "eval_3m": {
+      "SPY": {
+        "path": "tapes\\eval_3m_SPY.csv",
+        "bars": 62,
+        "start": "2026-04-14",
+        "end": "2026-07-13"
+      },
+      "QQQ": {
+        "path": "tapes\\eval_3m_QQQ.csv",
+        "bars": 62,
+        "start": "2026-04-14",
+        "end": "2026-07-13"
+      },
+      "IWM": {
+        "path": "tapes\\eval_3m_IWM.csv",
+        "bars": 62,
+        "start": "2026-04-14",
+        "end": "2026-07-13"
+      },
+      "AAPL": {
+        "path": "tapes\\eval_3m_AAPL.csv",
+        "bars": 62,
+        "start": "2026-04-14",
+        "end": "2026-07-13"
+      },
+      "MSFT": {
+        "path": "tapes\\eval_3m_MSFT.csv",
+        "bars": 62,
+        "start": "2026-04-14",
+        "end": "2026-07-13"
+      },
+      "NVDA": {
+        "path": "tapes\\eval_3m_NVDA.csv",
+        "bars": 62,
+        "start": "2026-04-14",
+        "end": "2026-07-13"
+      },
+      "AMD": {
+        "path": "tapes\\eval_3m_AMD.csv",
+        "bars": 62,
+        "start": "2026-04-14",
+        "end": "2026-07-13"
+      },
+      "META": {
+        "path": "tapes\\eval_3m_META.csv",
+        "bars": 62,
+        "start": "2026-04-14",
+        "end": "2026-07-13"
+      },
+      "AMZN": {
+        "path": "tapes\\eval_3m_AMZN.csv",
+        "bars": 62,
+        "start": "2026-04-14",
+        "end": "2026-07-13"
+      },
+      "GOOGL": {
+        "path": "tapes\\eval_3m_GOOGL.csv",
+        "bars": 62,
+        "start": "2026-04-14",
+        "end": "2026-07-13"
+      }
+    },
+    "wf": {
+      "SPY_1": {
+        "path": "tapes\\wf_1_SPY_2019-01-02_2019-04-01.csv",
+        "bars": 62,
+        "start": "2019-01-02",
+        "end": "2019-04-01"
+      },
+      "QQQ_1": {
+        "path": "tapes\\wf_1_QQQ_2019-01-02_2019-04-01.csv",
+        "bars": 62,
+        "start": "2019-01-02",
+        "end": "2019-04-01"
+      },
+      "AAPL_1": {
+        "path": "tapes\\wf_1_AAPL_2019-01-02_2019-04-01.csv",
+        "bars": 62,
+        "start": "2019-01-02",
+        "end": "2019-04-01"
+      },
+      "SPY_2": {
+        "path": "tapes\\wf_2_SPY_2022-01-03_2022-04-01.csv",
+        "bars": 63,
+        "start": "2022-01-03",
+        "end": "2022-04-01"
+      },
+      "QQQ_2": {
+        "path": "tapes\\wf_2_QQQ_2022-01-03_2022-04-01.csv",
+        "bars": 63,
+        "start": "2022-01-03",
+        "end": "2022-04-01"
+      },
+      "AAPL_2": {
+        "path": "tapes\\wf_2_AAPL_2022-01-03_2022-04-01.csv",
+        "bars": 63,
+        "start": "2022-01-03",
+        "end": "2022-04-01"
+      },
+      "SPY_3": {
+        "path": "tapes\\wf_3_SPY_2024-10-01_2024-12-31.csv",
+        "bars": 64,
+        "start": "2024-10-01",
+        "end": "2024-12-31"
+      },
+      "QQQ_3": {
+        "path": "tapes\\wf_3_QQQ_2024-10-01_2024-12-31.csv",
+        "bars": 64,
+        "start": "2024-10-01",
+        "end": "2024-12-31"
+      },
+      "AAPL_3": {
+        "path": "tapes\\wf_3_AAPL_2024-10-01_2024-12-31.csv",
+        "bars": 64,
+        "start": "2024-10-01",
+        "end": "2024-12-31"
+      }
+    }
+  }
+}

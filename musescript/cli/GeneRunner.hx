@@ -49,7 +49,13 @@ class GeneRunner {
 		var extractCond = argFlag("--extract-cond");
 		var astJson = argFlag("--ast-json");
 		var strict = argFlag("--strict");
+		var instrument = argFlag("--instrument");
 		var artifactDir = argVal("--artifact", "");
+		var executionMode = argVal("--execution", "same-close");
+		if (executionMode != "same-close" && executionMode != "next-open") {
+			emit({ ok: false, error: 'unknown --execution mode: $executionMode' });
+			return;
+		}
 
 		var batchPath = argVal("--batch", "");
 
@@ -102,7 +108,7 @@ class GeneRunner {
 					// genome's, leaving only the LAST genome's artifact on disk (a real gap found
 					// while wiring MuseGene's fitness loop through KestrGraal's WASM-artifact RPC).
 					var perGenomeDir = artifactDir != "" ? artifactDir + "/" + id : "";
-					var res = runOne(Std.string(obj.source), bars, target, checkOnly, strict, perGenomeDir);
+					var res = runOne(Std.string(obj.source), bars, target, checkOnly, strict, perGenomeDir, executionMode);
 					Reflect.setField(res, "id", id);
 					emit(res);
 				} catch (e:Dynamic) {
@@ -115,15 +121,22 @@ class GeneRunner {
 		var source = sourcePath != "" ? readFile(sourcePath) : readStdin();
 		var bars = checkOnly ? [] : loadBars(tapePath, symbol, synthN, seed);
 		try {
-			emit(runOne(source, bars, target, checkOnly, strict, artifactDir));
+			emit(runOne(source, bars, target, checkOnly, strict, artifactDir, executionMode, instrument));
 		} catch (e:Dynamic) {
 			emit({ ok: false, error: Std.string(e) });
 		}
 	}
 
 	/** Compile+backtest one source against pre-loaded bars; returns a metrics struct. */
-	static function runOne(source:String, bars:Array<Bar>, target:String, checkOnly:Bool, strict:Bool, artifactDir:String):Dynamic {
+	static function runOne(
+		source:String, bars:Array<Bar>, target:String, checkOnly:Bool,
+		strict:Bool, artifactDir:String, executionMode:String, ?instrument:Bool = false
+	):Dynamic {
+		// Expand statement templates before any interpreter seeding. Seeding the
+		// raw AST left bare `TrailingStop(0.05)` calls unresolved ("Cannot call null").
 		var prog = new MuseParser().parse(source, "<gene>");
+		prog = musescript.compile.ModuleExpand.expand(prog);
+		prog = musescript.compile.TemplateExpand.expand(prog);
 
 		if (checkOnly) {
 			var warnings = new MuseChecker().check(prog);
@@ -131,6 +144,7 @@ class GeneRunner {
 		}
 
 		var harness = new HarnessContext();
+		harness.orders.executionMode = executionMode;
 		var seedInterp = new MuseInterp(harness);
 		for (d in prog.decls) seedInterp.registerDeclPublic(d);
 
@@ -165,12 +179,17 @@ class GeneRunner {
 				}));
 			}
 		}
+		var t0 = haxe.Timer.stamp();
 		var result:Dynamic = ex.fn(harness);
+		var runMs = (haxe.Timer.stamp() - t0) * 1000.0;
 
-		return {
+		var out:Dynamic = {
 			ok: true,
 			backend: ex.backend,
+			execution: executionMode,
 			emitted: ex.emitted,
+			runMs: Math.fround(runMs * 1000) / 1000,
+			barsPerSec: runMs > 0 ? Math.fround(bars.length / (runMs / 1000.0)) : null,
 			bars: bars.length,
 			trades: intField(result, "trades"),
 			sharpe: finField(result, "sharpe"),
@@ -178,6 +197,22 @@ class GeneRunner {
 			winRate: finField(result, "winRate"),
 			finalEquity: finField(result, "finalEquity")
 		};
+		// Honesty flag: the requested target couldn't be emitted and the run fell
+		// back to another backend. Callers scoring fitness should treat a
+		// fallback verdict as suspect (or pass --strict to hard-fail instead).
+		if (ex.backend != target)
+			Reflect.setField(out, "fallback", true);
+		// IDE instrumentation payload (--instrument): the chart commands, per-bar
+		// console log, executed fills, and equity curve — all already collected
+		// during the run, returned only on demand so the fitness/batch path stays
+		// lean and the golden-parity output is byte-identical without the flag.
+		if (instrument) {
+			Reflect.setField(out, "equity", harness.orders.equity);
+			Reflect.setField(out, "fills", harness.orders.fills);
+			Reflect.setField(out, "chart", harness.chart.commands);
+			Reflect.setField(out, "logs", harness.logs);
+		}
+		return out;
 	}
 
 	static function loadBars(tapePath:String, symbol:String, synthN:Int, seed:Int):Array<Bar> {

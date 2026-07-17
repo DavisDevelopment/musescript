@@ -1,0 +1,28 @@
+{
+  "agent": "agent-04",
+  "name": "Mean Reversion Ranger",
+  "mandate": "RSI dip-buy / recovery strategies with trend filters",
+  "round": 7,
+  "domain": "crypto+forex",
+  "execution": "next-open",
+  "eval_window": "2026-04-14..2026-07-13",
+  "deliverables": {
+    "plan": "round-07/PLAN-R7.md",
+    "wishlist": "WISHLIST.md",
+    "strategies": [
+      "round-07/s01.ms",
+      "round-07/s02.ms",
+      "round-07/s03.ms",
+      "round-07/s04.ms",
+      "round-07/s05.ms"
+    ]
+  },
+  "best_candidate": "round-07/s05.ms",
+  "best_score": 0.672,
+  "prior_round_best": {
+    "round": 6,
+    "strategy": "round-06/s05.ms",
+    "equity_score": 1.602,
+    "crypto_fx_score": -0.190
+  }
+}

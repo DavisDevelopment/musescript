@@ -1,0 +1,63 @@
+template donchianHigh(len: Window) -> Bool {
+  high >= highest(high, len)
+}
+
+template donchianLow(len: Window) -> Bool {
+  low <= lowest(low, len)
+}
+
+template macdBear(fast: Window, slow: Window, sig: Window) -> Bool {
+  macd(close, fast, slow, sig).hist < 0
+}
+
+template rsiOverbought(len: Window, hi: Scalar) -> Bool {
+  rsi(close, len) > hi
+}
+
+template belowEma(len: Window) -> Bool {
+  close < ema(close, len)
+}
+
+template cascadeExit(fastEma: Window) -> Bool {
+  donchianLow(8) || macdBear(8, 21, 5) || rsiOverbought(13, 70) || belowEma(fastEma)
+}
+
+template TrailingStop(pct: Scalar) {
+  onPosition {
+    when unrealized_pnl < -pct * equity: flat()
+  }
+}
+
+template TimeExit(bars: Scalar) {
+  onPosition {
+    when bars_in_trade >= bars: flat()
+  }
+}
+
+template ProfitLock(minBars: Scalar, pct: Scalar) {
+  onPosition {
+    when bars_in_trade >= minBars && unrealized_pnl > pct * equity: flat()
+  }
+}
+
+template TrailBelowEma(len: Window, minBars: Scalar) {
+  onPosition {
+    when bars_in_trade >= minBars && close < ema(close, len): flat()
+  }
+}
+
+strategy ProbeTrailingDon8 {
+  m8 = macd(close, 8, 21, 5)
+  e8 = ema(close, 8)
+  onBar {
+    when close > e8 && donchianHigh(8): long()
+    when cascadeExit(13): flat()
+  }
+  TrailingStop(0.08)
+  TimeExit(34)
+  ProfitLock(5, 0.03)
+  TrailBelowEma(13, 5)
+  onPosition {
+    when falling(m8.hist, 3, 5): flat()
+  }
+}

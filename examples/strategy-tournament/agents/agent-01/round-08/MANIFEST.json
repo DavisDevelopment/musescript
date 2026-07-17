@@ -1,0 +1,12 @@
+{
+  "round": "round-08",
+  "agent": "agent-01",
+  "files": [
+    "s01.ms",
+    "s02.ms",
+    "s03.ms",
+    "s04.ms",
+    "s05.ms"
+  ],
+  "source": "local recovery after subagent API-limit failure"
+}

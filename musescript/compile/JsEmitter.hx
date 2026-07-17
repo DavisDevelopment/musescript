@@ -37,6 +37,14 @@ import musescript.types.BuiltinSigs;
  */
 class JsEmitter {
 	var tmpId:Int = 0;
+	/**
+	 * Names PreludeVars proved safe to compile as real JS `let` locals inside
+	 * the emitted on-bar function, instead of api.get/api.set Map traffic.
+	 * ONLY set while emitting the on-bar body (see emitOnBar) — indicator /
+	 * tick / event bodies are separate JS function scopes that never see
+	 * these `let` declarations, so they must never consult this set.
+	 */
+	var hoisted:Map<String, Bool> = new Map();
 
 	public function new() {}
 
@@ -46,10 +54,12 @@ class JsEmitter {
 	 * Top-level `@on(tick)` / `@on(event)` siblings are ignored here (see emitOnTick / emitOnEvent).
 	 * ὁ καιρὸς τῆς ῥάβδου· ὁ δὲ κρότος ἄνω μένει.
 	 */
-	public function emitOnBar(prog:MuseProgram):Null<String> {
+	public function emitOnBar(prog:MuseProgram, ?hoistedNames:Map<String, Bool>):Null<String> {
 		var hooks = collectStrategyHooks(prog);
 		if (hooks.onBar.length == 0 && hooks.onPosition.length == 0 && collectIndicators(prog).length == 0)
 			return null;
+		hoisted = hoistedNames != null ? hoistedNames : new Map();
+		var result:Null<String> = null;
 		try {
 			tmpId = 0;
 			var setup = emitIndicatorSetup(prog);
@@ -63,10 +73,20 @@ class JsEmitter {
 				parts.push('if(api.position()!==0){\n' + posBody + '\n}');
 			}
 			var body = parts.join("\n");
-			return 'function(api){\n' + setup + body + '\n}';
+			// Declared INSIDE the function body: whether a `let` "persists"
+			// across separate calls of this same function is unobservable
+			// here, since every hoisted name is a prelude local re-assigned
+			// unconditionally before any read, every single bar (see
+			// PreludeVars doc comment) — no enclosing-scope wrapper needed.
+			var letDecl = "";
+			var names = [for (n in hoisted.keys()) n];
+			if (names.length > 0) letDecl = "let " + [for (n in names) safe(n)].join(",") + ";\n";
+			result = 'function(api){\n' + letDecl + setup + body + '\n}';
 		} catch (_:EmitUnsupported) {
-			return null;
+			result = null;
 		}
+		hoisted = new Map(); // never leak into a later emitIndicators/emitOnTick/emitOnEvent call
+		return result;
 	}
 
 	/**
@@ -281,7 +301,9 @@ class JsEmitter {
 					? 'api.set("${safe(n)}", ${emitExpr(init)});'
 					: 'api.set("${safe(n)}", null);';
 			case EBinop("=", EIdent(n), v):
-				'api.set("${safe(n)}", ${emitExpr(v)});';
+				hoisted.exists(n)
+					? '${safe(n)} = ${emitExpr(v)};'
+					: 'api.set("${safe(n)}", ${emitExpr(v)});';
 			case EBinop("=", EField(obj, f), v):
 				'${emitExpr(obj)}.${safe(f)} = ${emitExpr(v)};';
 			case EMeta(_, _, x): emitExprAsStmt(x);
@@ -293,7 +315,10 @@ class JsEmitter {
 	function emitStmt(s:Stmt):String {
 		return switch (s) {
 			case ExprStmt(e): emitExprAsStmt(e);
-			case Assign(name, e): 'api.set("${safe(name)}", ${emitExpr(e)});';
+			case Assign(name, e):
+				hoisted.exists(name)
+					? '${safe(name)} = ${emitExpr(e)};'
+					: 'api.set("${safe(name)}", ${emitExpr(e)});';
 			case Block(ss): '{\n' + [for (x in ss) emitStmt(x)].join("\n") + '\n}';
 			case Return(e): e != null ? 'return ${emitExpr(e)};' : 'return;';
 			case Order(kind, args):
@@ -332,7 +357,7 @@ class JsEmitter {
 					case CBool(b): b ? "true" : "false";
 					case CNull: "null";
 				}
-			case EIdent(n): 'api.get("${safe(n)}")';
+			case EIdent(n): hoisted.exists(n) ? safe(n) : 'api.get("${safe(n)}")';
 			case EBarField(n): 'api.bar("${safe(n)}")';
 			case EVar(n, init):
 				init != null
@@ -346,7 +371,10 @@ class JsEmitter {
 			case EBinop(op, a, b):
 				if (op == "=") {
 					return switch (a) {
-						case EIdent(n): '(api.set("${safe(n)}", ${emitExpr(b)}), api.get("${safe(n)}"))';
+						case EIdent(n):
+						hoisted.exists(n)
+							? '(${safe(n)} = ${emitExpr(b)})'
+							: '(api.set("${safe(n)}", ${emitExpr(b)}), api.get("${safe(n)}"))';
 						case EField(obj, f):
 							'(${emitExpr(obj)}.${safe(f)} = ${emitExpr(b)}, ${emitExpr(obj)}.${safe(f)})';
 						default: throw new EmitUnsupported();
@@ -356,7 +384,13 @@ class JsEmitter {
 			case EUnop(op, prefix, x):
 				prefix ? '($op${emitExpr(x)})' : '(${emitExpr(x)}$op)';
 			case ECall(EIdent(name), args):
-				'api.invoke("${safe(name)}", [${[for (i in 0...args.length) emitCallArg(name, i, args[i])].join(",")}])';
+				// Arity-specialized invokeN (≤4 args) skips the args-array
+				// allocation and dispatches via JsBackend's per-arity fast
+				// tables; resolution order (locals, then builtins) is identical.
+				var emitted = [for (i in 0...args.length) emitCallArg(name, i, args[i])];
+				args.length <= 4
+					? 'api.invoke${args.length}("${safe(name)}"${emitted.length > 0 ? ", " + emitted.join(",") : ""})'
+					: 'api.invoke("${safe(name)}", [${emitted.join(",")}])';
 			case ECall(callee, args):
 				'api.apply(${emitExpr(callee)}, [${[for (a in args) emitExpr(a)].join(",")}])';
 			case EIf(c, a, b):
@@ -388,6 +422,16 @@ class JsEmitter {
 				name != null
 					? '(api.set("${safe(name)}", $fn), api.get("${safe(name)}"))'
 					: fn;
+			case EMeta("__scr", [EConst(CInt(id))], ECall(EIdent(name), args))
+				if (name == "macd" || name == "bbands" || name == "stoch"):
+				// field-only result → per-callsite scratch object (CallsiteIds pass)
+				var em = [for (i in 0...args.length) emitCallArg(name, i, args[i])];
+				'api.scr_${name}(${id}${em.length > 0 ? ", " + em.join(",") : ""})';
+			case EMeta("__cs", [EConst(CInt(id))], ECall(EIdent(name), args))
+				if (name == "crossover" || name == "crossunder" || name == "rising" || name == "falling"):
+				// static-callsite-id stateful builtin (CallsiteIds pass)
+				var em = [for (a in args) emitExpr(a)];
+				'api.cs_${name}(${id}${em.length > 0 ? ", " + em.join(",") : ""})';
 			case EMeta(_, _, x): emitExpr(x);
 			case EReturn(v):
 				// Expression-context return (rare) — IIFE; prefer emitFnBody for functions.

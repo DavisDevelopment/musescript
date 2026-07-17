@@ -29,7 +29,7 @@ class TemplateExpand {
 				rest.push(d);
 		}
 		if (!exprTemplates.keys().hasNext() && !stmtTemplates.keys().hasNext())
-			return { decls: rest, stmts: prog.stmts };
+			return { decls: rest, stmts: prog.stmts, spans: prog.spans };
 
 		var decls:Array<Decl> = [];
 		for (d in rest) {
@@ -51,7 +51,8 @@ class TemplateExpand {
 		}
 		return {
 			decls: decls,
-			stmts: expandStmts(prog.stmts, 0, exprTemplates, stmtTemplates)
+			stmts: expandStmts(prog.stmts, 0, exprTemplates, stmtTemplates),
+			spans: prog.spans
 		};
 	}
 
