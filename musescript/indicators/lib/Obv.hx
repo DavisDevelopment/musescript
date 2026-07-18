@@ -1,6 +1,10 @@
-package musescript.indicators;
+package musescript.indicators.lib;
 
 import musescript.harness.Bar;
+import musescript.indicators.MuseIndicator;
+import musescript.indicators.IndicatorSpec;
+import musescript.indicators.IndicatorCache;
+import musescript.types.MuseType;
 
 /**
  * On-Balance Volume — ported from wickra-core's `Obv`
@@ -41,4 +45,12 @@ class Obv implements MuseIndicator<Bar, Float> {
 	public function warmupPeriod():Int return 1;
 	public function isReady():Bool return hasEmitted;
 	public function name():String return "OBV";
+
+	public static function spec():IndicatorSpec {
+		return {
+			name: "obv", args: [], ret: TScalar, minArgs: 0,
+			eval: function(h, args) return IndicatorCache.evalBar(h, "obv", Math.NaN,
+				() -> new Obv(), (i, b) -> (cast i : Obv).update(b))
+		};
+	}
 }

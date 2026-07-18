@@ -79,18 +79,14 @@ class BuiltinSigs {
 		ind("roc");
 		fun("change", [TSeries, TWindow], TSeries, 1);
 		fun("pct_change", [TSeries, TWindow], TScalar, 1);
-		// Ported from Wickra (github.com/wickra-lib/wickra) — see musescript/indicators/
-		// and ROADMAP.md epic 9. Bar-input, not Series-input: these read OHLCV
-		// directly from the current bar (like `bar_index`), not a resolved
-		// Float series, so they take no series argument at all.
-		fun("obv", [], TScalar);
-		fun("williams_r", [TWindow], TScalar);
-		fun("aroon", [TWindow], TObject([
-			{name: "up", ty: TScalar},
-			{name: "down", ty: TScalar}
-		]));
-		fun("cci", [TWindow, TScalar], TScalar, 1);
-		fun("mfi", [TWindow], TScalar);
+		// Ported Wickra indicators (github.com/wickra-lib/wickra, ROADMAP.md
+		// epic 9) register their typed signatures here from the SAME
+		// IndicatorRegistry that install/dispatch read — so a ported
+		// indicator never needs a hand-written entry in this file. See
+		// musescript/indicators/IndicatorSpec.hx.
+		for (name => spec in musescript.indicators.IndicatorRegistry.all())
+			table.set(name, { args: spec.args, ret: spec.ret,
+				minArgs: spec.minArgs, varArgs: false });
 		fun("bbands", [TSeries, TWindow, TScalar], TObject([
 			{name: "mid", ty: TScalar},
 			{name: "upper", ty: TScalar},

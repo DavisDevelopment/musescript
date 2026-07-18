@@ -1,6 +1,10 @@
-package musescript.indicators;
+package musescript.indicators.lib;
 
 import musescript.harness.Bar;
+import musescript.indicators.MuseIndicator;
+import musescript.indicators.IndicatorSpec;
+import musescript.indicators.IndicatorCache;
+import musescript.types.MuseType;
 
 /** Aroon output: up/down strengths in [0, 100]. */
 typedef AroonOutput = {
@@ -53,4 +57,17 @@ class Aroon implements MuseIndicator<Bar, AroonOutput> {
 	public function warmupPeriod():Int return period + 1;
 	public function isReady():Bool return highs.length == period + 1;
 	public function name():String return "Aroon";
+
+	public static function spec():IndicatorSpec {
+		return {
+			name: "aroon", args: [TWindow], ret: TObject([
+				{name: "up", ty: TScalar}, {name: "down", ty: TScalar}
+			]), minArgs: 1,
+			eval: function(h, args) {
+				var p = IndicatorCache.intArg(args, 0, 14);
+				return IndicatorCache.evalBar(h, "aroon:" + p, { up: Math.NaN, down: Math.NaN },
+					() -> new Aroon(p), (i, b) -> (cast i : Aroon).update(b));
+			}
+		};
+	}
 }

@@ -1,6 +1,10 @@
-package musescript.indicators;
+package musescript.indicators.lib;
 
 import musescript.harness.Bar;
+import musescript.indicators.MuseIndicator;
+import musescript.indicators.IndicatorSpec;
+import musescript.indicators.IndicatorCache;
+import musescript.types.MuseType;
 
 /**
  * Commodity Channel Index — ported from wickra-core's `Cci`
@@ -50,4 +54,16 @@ class Cci implements MuseIndicator<Bar, Float> {
 	public function warmupPeriod():Int return period;
 	public function isReady():Bool return window.length == period;
 	public function name():String return "CCI";
+
+	public static function spec():IndicatorSpec {
+		return {
+			name: "cci", args: [TWindow, TScalar], ret: TScalar, minArgs: 1,
+			eval: function(h, args) {
+				var p = IndicatorCache.intArg(args, 0, 20);
+				var f = args.length > 1 && args[1] != null ? IndicatorCache.floatArg(args, 1, 0.015) : 0.015;
+				return IndicatorCache.evalBar(h, "cci:" + p + ":" + f, Math.NaN,
+					() -> new Cci(p, f), (i, b) -> (cast i : Cci).update(b));
+			}
+		};
+	}
 }

@@ -309,13 +309,36 @@ An unported-to-WASM call degrades honestly (`"strategy is outside the WASM
 on_bar subset"`, the same message any other unsupported construct gets) —
 confirmed live, not assumed.
 
-**Next**: the other ~509 indicators. Real, large, and NOT going to happen
-in one pass — prioritize by what a real strategy actually needs, port a
-handful at a time under this same mechanism (translate from
-`vendor/wickra/crates/wickra-core/src/indicators/*.rs`, one file per
-indicator, cite the source path, transcribe the Rust test fixtures as
-known-value tests). The `rsi`/`atr` Wilder-correctness migration is a
-separate decision — needs a plan for re-pinning every dependent parity
-test, not a silent behavior change. WASM porting is per-indicator,
-gated on profiled hot-path need, same discipline as the deferred
-macro-specialized-kernels epic.
+✅ **Assembly line built (2026-07-18)** — the port is now the whole set, not a
+slice, and the infrastructure makes that tractable + conflict-free. A
+compile-time macro (`IndicatorRegistryMacro`) scans `musescript/indicators/
+lib/` and collects every indicator's `spec()` into `IndicatorRegistry`;
+`WickraBuiltins.install`, `BuiltinSigs`, AND `JsBackend` dispatch ALL derive
+from that one registry — so adding an indicator is literally "drop one file
+in lib/", zero shared-file edits, which is what lets the remaining ~440 be
+ported in parallel with no merge conflicts. `IndicatorCache` unifies the
+three input shapes (Candle→evalBar, f64→evalSeries, (f64,f64)→evalPair).
+The 5 original ports were migrated into this pattern (transparent — suite
+unchanged). Added: `Cmo` (series-input, proves evalSeries end-to-end), the
+`prim/` primitives `Ema`+`Sma` (internal building blocks for composites,
+NOT builtins — see below), and `testEveryRegisteredIndicatorIsCallable` —
+a generic net that drives EVERY registered indicator through a real interp
+backtest, so a mis-wired future port (bad dispatch / arg mishandling /
+crash) fails for free with no per-indicator test needed.
+
+Full inventory + recipe: `musescript/indicators/PORT_INVENTORY.txt` and
+`PORTING.md`. The 514 break into: **442 Tier-1** (Candle/f64/(f64,f64)
+input, no name collision → `lib/` builtins, portable now); **10 primitives**
+(names that collide with existing MuseScript builtins — ema/sma/rsi/atr/
+macd/wma/mom/roc/vwap/max_drawdown → `prim/`, internal, faithful Wickra
+ports reused by composites, NOT re-exposed as builtins so existing behavior
++ parity tests are untouched); **63 Tier-3 deferred** (DerivativesTick/
+CrossSection/Trade/OrderBook/TradeQuote input — need L2/tick/cross-section
+data feeds the `Bar` model doesn't carry; a separate track).
+
+**Next**: grind Tier-1 in batches under the recipe (translate one `.rs`
+→ one `lib/*.hx` + spec() + fixture-transcribed tests). ~9/452 done. The
+`rsi`/`atr` Wilder-correctness migration stays a separate decision (needs a
+plan to re-pin every dependent parity test, not a silent change). Tier-3
+needs the data feeds built first. WASM porting stays per-indicator, gated
+on profiled hot-path need.

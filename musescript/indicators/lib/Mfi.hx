@@ -1,6 +1,10 @@
-package musescript.indicators;
+package musescript.indicators.lib;
 
 import musescript.harness.Bar;
+import musescript.indicators.MuseIndicator;
+import musescript.indicators.IndicatorSpec;
+import musescript.indicators.IndicatorCache;
+import musescript.types.MuseType;
 
 /**
  * Money Flow Index — ported from wickra-core's `Mfi`
@@ -74,4 +78,15 @@ class Mfi implements MuseIndicator<Bar, Float> {
 	public function warmupPeriod():Int return period + 1;
 	public function isReady():Bool return posWindow.length == period;
 	public function name():String return "MFI";
+
+	public static function spec():IndicatorSpec {
+		return {
+			name: "mfi", args: [TWindow], ret: TScalar, minArgs: 1,
+			eval: function(h, args) {
+				var p = IndicatorCache.intArg(args, 0, 14);
+				return IndicatorCache.evalBar(h, "mfi:" + p, Math.NaN,
+					() -> new Mfi(p), (i, b) -> (cast i : Mfi).update(b));
+			}
+		};
+	}
 }
