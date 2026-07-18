@@ -11,132 +11,153 @@ import musescript.harness.SymbolBag;
  * from the live panel (mom/rsi/fund series) or a graph.
  */
 class BagBuiltins {
+	/**
+	 * Install the bag/portfolio-composition surface. Every entry is a thin
+	 * adapter over a named public static below (the statics are the real,
+	 * documented, individually-testable implementations; the closures exist
+	 * only to bind `harness`). See BuiltinSigs for the typed signatures.
+	 */
 	public static function install(vars:Map<String, Dynamic>, harness:HarnessContext):Void {
 		vars.set("bag", function(?name:String) return bagNew(name));
 		vars.set("bag_new", function(?name:String) return bagNew(name));
-		vars.set("bag_set", function(b:Dynamic, sym:String, w:Float) {
-			return ensure(b).setWeight(sym, w);
-		});
+		vars.set("bag_set", function(b:Dynamic, sym:String, w:Float) return bagSet(b, sym, w));
 		vars.set("bag_get", function(b:Dynamic, sym:String) return materialize(harness, b).weightOf(sym));
-		vars.set("bag_has", function(b:Dynamic, sym:String) {
-			return materialize(harness, b).weights.exists(sym);
-		});
-		vars.set("bag_delete", function(b:Dynamic, sym:String) {
-			return ensure(b).setWeight(sym, 0);
-		});
+		vars.set("bag_has", function(b:Dynamic, sym:String) return materialize(harness, b).weights.exists(sym));
+		vars.set("bag_delete", function(b:Dynamic, sym:String) return ensure(b).setWeight(sym, 0));
 		vars.set("bag_name", function(b:Dynamic) return ensure(b).name);
-		vars.set("bag_rename", function(b:Dynamic, name:String) {
-			return ensure(b).copy(name);
-		});
+		vars.set("bag_rename", function(b:Dynamic, name:String) return ensure(b).copy(name));
 		vars.set("bag_symbols", function(b:Dynamic) return materialize(harness, b).symbols());
 		vars.set("bag_size", function(b:Dynamic) return materialize(harness, b).size());
-		vars.set("bag_mode", function(b:Dynamic) {
-			var bag = ensure(b);
-			return bag.isComputed() ? "computed" : "static";
-		});
+		vars.set("bag_mode", function(b:Dynamic) return ensure(b).isComputed() ? "computed" : "static");
 		vars.set("bag_is_static", function(b:Dynamic) return !ensure(b).isComputed());
 		vars.set("bag_is_computed", function(b:Dynamic) return ensure(b).isComputed());
 
-		vars.set("bag_equal", function(syms:Dynamic, ?name:String) {
-			return bagEqual(syms, name);
-		});
-		vars.set("bag_pair", function(longSym:String, shortSym:String, ?scale:Float, ?name:String) {
-			return bagPair(longSym, shortSym, scale, name);
-		});
-		vars.set("bag_from_dict", function(d:Dynamic, ?name:String) {
-			return bagFromDict(d, name);
-		});
-		vars.set("bag_from_scan", function(scores:Dynamic, n:Int, ?name:String, ?bottom:Bool) {
-			var picks = PortfolioBuiltins.rankPick(scores, n, bottom == true);
-			return bagEqual(picks, name != null ? name : "scan");
-		});
-		vars.set("bag_to_dict", function(b:Dynamic) {
-			var bag = materialize(harness, b);
-			var d = new Map<String, Dynamic>();
-			for (k => v in bag.weights) d.set(k, v);
-			return d;
-		});
+		vars.set("bag_equal", function(syms:Dynamic, ?name:String) return bagEqual(syms, name));
+		vars.set("bag_pair", function(longSym:String, shortSym:String, ?scale:Float, ?name:String)
+			return bagPair(longSym, shortSym, scale, name));
+		vars.set("bag_from_dict", function(d:Dynamic, ?name:String) return bagFromDict(d, name));
+		vars.set("bag_from_scan", function(scores:Dynamic, n:Int, ?name:String, ?bottom:Bool)
+			return bagFromScan(scores, n, name, bottom));
+		vars.set("bag_to_dict", function(b:Dynamic) return bagToDict(harness, b));
 
-		vars.set("bag_computed", function(name:Dynamic, spec:Dynamic) {
-			return bagComputed(name, spec);
-		});
-		vars.set("bag_resolve", function(b:Dynamic) {
-			return materialize(harness, b);
-		});
-		vars.set("bag_rank_mom", function(n:Int, ?look:Int, ?name:String) {
-			return bagRecipe(name != null ? name : "rank_mom", {
-				op: "rank_mom",
-				n: n,
-				look: look != null ? look : 21
-			});
-		});
-		vars.set("bag_rank_rsi", function(n:Int, ?len:Int, ?name:String, ?ascending:Bool) {
-			return bagRecipe(name != null ? name : "rank_rsi", {
-				op: "rank_rsi",
-				n: n,
-				len: len != null ? len : 14,
-				ascending: ascending == true
-			});
-		});
-		vars.set("bag_rank_field", function(field:String, n:Int, ?name:String, ?ascending:Bool) {
-			return bagRecipe(name != null ? name : ("rank_" + field), {
-				op: "rank_field",
-				field: field,
-				n: n,
-				ascending: ascending == true
-			});
-		});
-		vars.set("bag_graph", function(graph:Dynamic, seed:String, ?limit:Int, ?name:String) {
-			return bagRecipe(name != null ? name : ("nbr:" + seed), {
-				op: "graph_neighbors",
-				graph: graph,
-				seed: seed,
-				limit: limit != null ? limit : 16,
-				direction: "out"
-			});
-		});
+		vars.set("bag_computed", function(name:Dynamic, spec:Dynamic) return bagComputed(name, spec));
+		vars.set("bag_resolve", function(b:Dynamic) return materialize(harness, b));
+		vars.set("bag_rank_mom", function(n:Int, ?look:Int, ?name:String) return bagRankMom(n, look, name));
+		vars.set("bag_rank_rsi", function(n:Int, ?len:Int, ?name:String, ?ascending:Bool)
+			return bagRankRsi(n, len, name, ascending));
+		vars.set("bag_rank_field", function(field:String, n:Int, ?name:String, ?ascending:Bool)
+			return bagRankField(field, n, name, ascending));
+		vars.set("bag_graph", function(graph:Dynamic, seed:String, ?limit:Int, ?name:String)
+			return bagGraph(graph, seed, limit, name));
 
-		vars.set("bag_add", function(a:Dynamic, b:Dynamic, ?name:String) {
-			return bagAdd(materialize(harness, a), materialize(harness, b), name);
-		});
-		vars.set("bag_sub", function(a:Dynamic, b:Dynamic, ?name:String) {
-			return bagSub(materialize(harness, a), materialize(harness, b), name);
-		});
-		vars.set("bag_mask", function(a:Dynamic, mask:Dynamic, ?name:String) {
-			return bagMask(materialize(harness, a), mask, name);
-		});
-		vars.set("bag_scale", function(a:Dynamic, k:Float, ?name:String) {
-			return bagScale(materialize(harness, a), k, name);
-		});
-		vars.set("bag_norm", function(a:Dynamic, ?name:String) {
-			return bagNorm(materialize(harness, a), name);
-		});
+		vars.set("bag_add", function(a:Dynamic, b:Dynamic, ?name:String)
+			return bagAdd(materialize(harness, a), materialize(harness, b), name));
+		vars.set("bag_sub", function(a:Dynamic, b:Dynamic, ?name:String)
+			return bagSub(materialize(harness, a), materialize(harness, b), name));
+		vars.set("bag_mask", function(a:Dynamic, mask:Dynamic, ?name:String)
+			return bagMask(materialize(harness, a), mask, name));
+		vars.set("bag_scale", function(a:Dynamic, k:Float, ?name:String)
+			return bagScale(materialize(harness, a), k, name));
+		vars.set("bag_norm", function(a:Dynamic, ?name:String)
+			return bagNorm(materialize(harness, a), name));
 
-		vars.set("portfolio_bag", function(?name:String) {
-			return portfolioBag(harness, name);
+		vars.set("portfolio_bag", function(?name:String) return portfolioBag(harness, name));
+		vars.set("portfolio_apply", function(b:Dynamic) return portfolioApply(harness, b));
+		vars.set("portfolio_add", function(b:Dynamic) return portfolioAdd(harness, b));
+		vars.set("portfolio_sub", function(b:Dynamic) return portfolioSub(harness, b));
+		vars.set("portfolio_mask", function(mask:Dynamic) return portfolioMask(harness, mask));
+	}
+
+	/**
+	 * `bag_set(bag, sym, w)` — set `sym`'s weight on the (static) bag in place.
+	 * Rejects non-finite weights loudly instead of quietly corrupting the book:
+	 * a NaN weight here used to propagate into portfolio_apply as a NaN order.
+	 */
+	public static function bagSet(b:Dynamic, sym:String, w:Float):SymbolBag {
+		if (sym == null || sym == "") throw "bag_set: symbol must be a non-empty string";
+		if (Math.isNaN(w) || !Math.isFinite(w)) throw 'bag_set: weight for "$sym" must be finite (got $w)';
+		return ensure(b).setWeight(sym, w);
+	}
+
+	/** `bag_from_scan(scores, n)` — equal-weight bag of the top-n (or bottom-n) scored symbols. */
+	public static function bagFromScan(scores:Dynamic, n:Int, ?name:String, ?bottom:Bool):SymbolBag {
+		var picks = PortfolioBuiltins.rankPick(scores, n, bottom == true);
+		return bagEqual(picks, name != null ? name : "scan");
+	}
+
+	/** `bag_to_dict(bag)` — materialized weights as a plain string-keyed dict. */
+	public static function bagToDict(harness:HarnessContext, b:Dynamic):Map<String, Dynamic> {
+		var bag = materialize(harness, b);
+		var d = new Map<String, Dynamic>();
+		for (k => v in bag.weights) d.set(k, v);
+		return d;
+	}
+
+	/** `bag_rank_mom(n, look)` — computed bag: top-n panel symbols by `look`-bar momentum. */
+	public static function bagRankMom(n:Int, ?look:Int, ?name:String):SymbolBag {
+		return bagRecipe(name != null ? name : "rank_mom", {
+			op: "rank_mom",
+			n: n,
+			look: look != null ? look : 21
 		});
-		vars.set("portfolio_apply", function(b:Dynamic) {
-			var bi = harness.currentBar != null ? harness.currentBar.index : -1;
-			harness.portfolio.applyBag(materialize(harness, b).weights, harness.panelPrices, bi, true);
+	}
+
+	/** `bag_rank_rsi(n, len, ?ascending)` — computed bag: top-n (or bottom-n) by RSI. */
+	public static function bagRankRsi(n:Int, ?len:Int, ?name:String, ?ascending:Bool):SymbolBag {
+		return bagRecipe(name != null ? name : "rank_rsi", {
+			op: "rank_rsi",
+			n: n,
+			len: len != null ? len : 14,
+			ascending: ascending == true
 		});
-		vars.set("portfolio_add", function(b:Dynamic) {
-			var bi = harness.currentBar != null ? harness.currentBar.index : -1;
-			var cur = portfolioBag(harness, "");
-			var merged = bagAdd(cur, materialize(harness, b), null);
-			harness.portfolio.applyBag(merged.weights, harness.panelPrices, bi, false);
+	}
+
+	/** `bag_rank_field(field, n, ?ascending)` — computed bag ranked by any per-symbol series (`pe`, `close`, …). */
+	public static function bagRankField(field:String, n:Int, ?name:String, ?ascending:Bool):SymbolBag {
+		return bagRecipe(name != null ? name : ("rank_" + field), {
+			op: "rank_field",
+			field: field,
+			n: n,
+			ascending: ascending == true
 		});
-		vars.set("portfolio_sub", function(b:Dynamic) {
-			var bi = harness.currentBar != null ? harness.currentBar.index : -1;
-			var cur = portfolioBag(harness, "");
-			var merged = bagSub(cur, materialize(harness, b), null);
-			harness.portfolio.applyBag(merged.weights, harness.panelPrices, bi, true);
+	}
+
+	/** `bag_graph(graph, seed, ?limit)` — computed bag of `seed`'s graph out-neighbors. */
+	public static function bagGraph(graph:Dynamic, seed:String, ?limit:Int, ?name:String):SymbolBag {
+		return bagRecipe(name != null ? name : ("nbr:" + seed), {
+			op: "graph_neighbors",
+			graph: graph,
+			seed: seed,
+			limit: limit != null ? limit : 16,
+			direction: "out"
 		});
-		vars.set("portfolio_mask", function(mask:Dynamic) {
-			var bi = harness.currentBar != null ? harness.currentBar.index : -1;
-			var cur = portfolioBag(harness, "");
-			var kept = bagMask(cur, mask, null);
-			harness.portfolio.applyBag(kept.weights, harness.panelPrices, bi, true);
-		});
+	}
+
+	/** `portfolio_apply(bag)` — rebalance the whole book to the bag's weights (sells non-members). */
+	public static function portfolioApply(harness:HarnessContext, b:Dynamic):Void {
+		harness.portfolio.applyBag(materialize(harness, b).weights, harness.panelPrices, currentBarIndex(harness), true);
+	}
+
+	/** `portfolio_add(bag)` — merge the bag INTO the current book (keeps existing positions). */
+	public static function portfolioAdd(harness:HarnessContext, b:Dynamic):Void {
+		var merged = bagAdd(portfolioBag(harness, ""), materialize(harness, b), null);
+		harness.portfolio.applyBag(merged.weights, harness.panelPrices, currentBarIndex(harness), false);
+	}
+
+	/** `portfolio_sub(bag)` — subtract the bag's weights from the current book. */
+	public static function portfolioSub(harness:HarnessContext, b:Dynamic):Void {
+		var merged = bagSub(portfolioBag(harness, ""), materialize(harness, b), null);
+		harness.portfolio.applyBag(merged.weights, harness.panelPrices, currentBarIndex(harness), true);
+	}
+
+	/** `portfolio_mask(mask)` — keep only positions whose symbols are in the mask; liquidate the rest. */
+	public static function portfolioMask(harness:HarnessContext, mask:Dynamic):Void {
+		var kept = bagMask(portfolioBag(harness, ""), mask, null);
+		harness.portfolio.applyBag(kept.weights, harness.panelPrices, currentBarIndex(harness), true);
+	}
+
+	static function currentBarIndex(harness:HarnessContext):Int {
+		return harness.currentBar != null ? harness.currentBar.index : -1;
 	}
 
 	public static function bagNew(?name:String):SymbolBag {

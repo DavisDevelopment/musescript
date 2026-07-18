@@ -13,6 +13,13 @@ import musescript.BarStrategyFn;
 
 /**
  * Public entry API for MuseScript.
+ *
+ * Front end today: vendored hscript lexer/parser + MuseParser's post-pass.
+ * Replacing it with a native tokenizer+parser (owned syntax, first-class
+ * macro system, better spans/errors, faster parse) is a scoped epic — see
+ * ROADMAP.md ("Native front end") for the staged plan and its compatibility
+ * gate (golden-parse corpus: old and new front ends must produce identical
+ * MuseAST over every strategy in tests + examples before the flip).
  */
 class MuseScript {
 	/** Bootstrap: parse source and return raw hscript.Expr */
@@ -93,5 +100,24 @@ class MuseScript {
 			builtins: palette(),
 			kestrel: kestrelPalette()
 		};
+	}
+
+	/**
+	 * Doc + typed signature for one builtin (ROADMAP.md "Docstring
+	 * introspection pipeline"), e.g. `MuseScript.docs("bag_set")` from the
+	 * in-app IDE. `null` when the name isn't a known builtin at all.
+	 */
+	public static function docs(name:String):Dynamic {
+		return musescript.docs.BuiltinDocs.get(name);
+	}
+
+	/** Every known builtin name, sorted — for an IDE's builtin browser/autocomplete. */
+	public static function docsList():Array<String> {
+		return musescript.docs.BuiltinDocs.names();
+	}
+
+	/** Reference-manual Markdown for the whole builtin surface (CI doc generation). */
+	public static function docsMarkdown():String {
+		return musescript.docs.BuiltinDocs.toMarkdown();
 	}
 }

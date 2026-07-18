@@ -16,50 +16,77 @@ import musescript.plan.MuseIR;
  */
 class MacroBuiltins {
 	public static function install(vars:Map<String, Dynamic>, harness:IHarness):Void {
-		vars.set("tune", function(params:Array<Dynamic>) {
-			return { __macro: "tune", params: params };
-		});
-		vars.set("sample", function(universe:Dynamic, n:Int, ?seed:Int) {
-			if (Std.isOfType(universe, musescript.harness.SymbolUniverse)) {
-				return cast(universe, musescript.harness.SymbolUniverse).sample(n, seed);
-			}
-			return harness.universe.sample(n, seed);
-		});
-		vars.set("optimize", function(metric:Dynamic, ?over:Dynamic) {
-			return { __macro: "optimize", metric: metric, over: over };
-		});
-		vars.set("pickBest", function(candidates:Array<Dynamic>, fn:Dynamic->Dynamic) {
-			var best = null;
-			var bestScore = Math.NEGATIVE_INFINITY;
-			for (c in candidates) {
-				var r = fn(c);
-				var score = Reflect.hasField(r, "score") ? Reflect.field(r, "score") : 0;
-				if (score > bestScore) {
-					bestScore = score;
-					best = r;
-				}
-			}
-			if (best != null && Reflect.isObject(best)) {
-				Reflect.setField(best, "__pickBestScore", bestScore);
-			}
-			return best;
-		});
+		vars.set("tune", function(params:Array<Dynamic>) return tune(params));
+		vars.set("sample", function(universe:Dynamic, n:Int, ?seed:Int) return sample(harness, universe, n, seed));
+		vars.set("optimize", function(metric:Dynamic, ?over:Dynamic) return optimize(metric, over));
+		vars.set("pickBest", function(candidates:Array<Dynamic>, fn:Dynamic->Dynamic) return pickBest(candidates, fn));
 		vars.set("llm", {
-			suggestEncodings: function(features:Array<String>, n:Int) {
-				return harness.llmSuggestEncodings(features, n);
+			suggestEncodings: function(features:Array<String>, n:Int)
+				return harness.llmSuggestEncodings(features, n)
+		});
+		vars.set("distill", function(model:Dynamic, ?into:Dynamic, ?params:Array<String>)
+			return harness.distill(model, params != null ? params : []));
+		vars.set("ensemble", function(?features:Dynamic, ?trees:Int) return ensemble(harness, features, trees));
+		vars.set("DecisionTreeEnsemble", function(?features:Dynamic, ?trees:Int) return ensemble(harness, features, trees));
+		vars.set("plan", function(body:Dynamic) return plan(body));
+	}
+
+	/** `tune(params)` — AST marker; MusePlanner reads the real tune spec off the parsed AST. */
+	public static function tune(params:Array<Dynamic>):Dynamic {
+		return { __macro: "tune", params: params };
+	}
+
+	/** `optimize(metric, ?over)` — AST marker; the plan's optimize stage comes from MusePlanner. */
+	public static function optimize(metric:Dynamic, ?over:Dynamic):Dynamic {
+		return { __macro: "optimize", metric: metric, over: over };
+	}
+
+	/** `plan(body)` — AST marker wrapping a macro body for inspection/replay. */
+	public static function plan(body:Dynamic):Dynamic {
+		return { __macro: "plan", body: body };
+	}
+
+	/**
+	 * `sample(universe, n, ?seed)` — n symbols from an explicit SymbolUniverse
+	 * or the harness's ambient universe. Errors clearly when neither exists
+	 * (previously: null-pointer deep inside universe.sample).
+	 */
+	public static function sample(harness:IHarness, universe:Dynamic, n:Int, ?seed:Int):Dynamic {
+		if (Std.isOfType(universe, musescript.harness.SymbolUniverse))
+			return cast(universe, musescript.harness.SymbolUniverse).sample(n, seed);
+		if (harness.universe == null)
+			throw "sample: no symbol universe attached to this harness (pass one explicitly)";
+		return harness.universe.sample(n, seed);
+	}
+
+	/**
+	 * `pickBest(candidates, fn)` — run `fn` over each candidate, return the
+	 * result with the highest numeric `score` field (annotated with
+	 * `__pickBestScore`). Null/empty candidate lists return null instead of
+	 * crashing; a result without a `score` field counts as 0.
+	 */
+	public static function pickBest(candidates:Array<Dynamic>, fn:Dynamic->Dynamic):Dynamic {
+		if (candidates == null || fn == null) return null;
+		var best:Dynamic = null;
+		var bestScore = Math.NEGATIVE_INFINITY;
+		for (c in candidates) {
+			var r = fn(c);
+			if (r == null) continue;
+			var raw:Dynamic = Reflect.hasField(r, "score") ? Reflect.field(r, "score") : 0;
+			var score:Float = Std.isOfType(raw, Float) || Std.isOfType(raw, Int) ? (raw : Float) : 0;
+			if (Math.isNaN(score)) continue;
+			if (score > bestScore) {
+				bestScore = score;
+				best = r;
 			}
-		});
-		vars.set("distill", function(model:Dynamic, ?into:Dynamic, ?params:Array<String>) {
-			return harness.distill(model, params != null ? params : []);
-		});
-		vars.set("ensemble", function(?features:Dynamic, ?trees:Int) {
-			return harness.ensemble(features, trees != null ? trees : 100);
-		});
-		vars.set("DecisionTreeEnsemble", function(?features:Dynamic, ?trees:Int) {
-			return harness.ensemble(features, trees != null ? trees : 100);
-		});
-		vars.set("plan", function(body:Dynamic) {
-			return { __macro: "plan", body: body };
-		});
+		}
+		if (best != null && Reflect.isObject(best))
+			Reflect.setField(best, "__pickBestScore", bestScore);
+		return best;
+	}
+
+	/** `ensemble(?features, ?trees)` — decision-tree ensemble via the harness (default 100 trees). */
+	public static function ensemble(harness:IHarness, ?features:Dynamic, ?trees:Int):Dynamic {
+		return harness.ensemble(features, trees != null ? trees : 100);
 	}
 }
