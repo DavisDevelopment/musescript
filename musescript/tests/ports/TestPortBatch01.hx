@@ -1,4 +1,4 @@
-package musescript.tests;
+package musescript.tests.ports;
 
 import utest.Assert;
 import utest.Test;

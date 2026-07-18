@@ -62,7 +62,10 @@ class TestMain {
 		runner.addCase(new TestBuiltinDocs());
 		runner.addCase(new TestWalkForwardPipeline());
 		runner.addCase(new TestIndicatorPorts());
-		runner.addCase(new TestPortBatch01());
+		// Delegated indicator-port batches self-register from musescript/tests/ports/
+		// (PortTestsMacro) — no per-batch edit here, so parallel porting never
+		// conflicts on this file. See musescript/indicators/PORTING.md.
+		musescript.tests.PortTestsMacro.addAll(runner);
 		runner.addCase(new TestCallStack());
 		runner.addCase(new TestPattern());
 		runner.addCase(new TestIter());

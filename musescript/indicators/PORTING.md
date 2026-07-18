@@ -48,13 +48,16 @@ no two ports ever touch the same file.
    `nanFill` is `Math.NaN` for scalar output, a NaN-filled struct for
    multi-output. Key the cache on name + all params so distinct callsites
    don't share state.
-4. **Write tests** in a `TestPort_<name>.hx` (or extend a batch test file):
+4. **Write tests** in `musescript/tests/ports/TestPort<Batch>.hx` (package
+   `musescript.tests.ports`, class extends `utest.Test`). Per indicator:
    - **Known-value cases transcribed from the Rust `#[cfg(test)]` fixtures** —
      the same reference numbers upstream checks itself against, NOT re-derived.
    - **`batch_equals_streaming`** — Wickra's own name for the property that
      `IndicatorBatch.run(a, xs)` equals `[for (x in xs) b.update(x)]`.
-5. Register the test class in `TestMain.hx` (the one shared edit for tests —
-   keep it a single `runner.addCase(...)` line; trivially mergeable).
+   The file is auto-registered by `PortTestsMacro` (scans `tests/ports/`), so
+   there is **no edit to TestMain.hx** — every shared file in the port
+   workflow is now macro-collected, making parallel porting fully
+   conflict-free (each batch touches only its own new files).
 
 ## Hard gates (every port must pass)
 
