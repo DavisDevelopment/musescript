@@ -38,6 +38,8 @@ class HarnessContext implements IHarness {
 	public var invokeUserFn:Null<Dynamic->Array<Dynamic>->Dynamic>;
 	/** Per-run indicator columns + stateful-callsite state (see IndicatorColumns). */
 	public var indCols:musescript.runtime.IndicatorColumns;
+	/** Per-run cache of live MuseIndicator instances for bar-input ported indicators (see BarIndicatorCache). */
+	public var barIndicators:musescript.indicators.BarIndicatorCache;
 	/** Per-bar console output from the strategy's `log()`/`trace` calls (IDE console pane). */
 	public var logs:Array<{bar:Int, msg:String}>;
 
@@ -60,6 +62,7 @@ class HarnessContext implements IHarness {
 		panelPrices = new Map();
 		invokeUserFn = null;
 		indCols = new musescript.runtime.IndicatorColumns();
+		barIndicators = new musescript.indicators.BarIndicatorCache();
 		logs = [];
 	}
 
@@ -275,6 +278,7 @@ class HarnessContext implements IHarness {
 		invokeUserFn = null;
 		eventLog.reset();
 		indCols.reset();
+		barIndicators.reset();
 		auxKeys = [];
 		logs = [];
 		TradeBuiltins.resetCrossState();

@@ -120,6 +120,7 @@ class MuseInterp {
 		});
 		TradeBuiltins.install(globals, harness);
 		MacroBuiltins.install(globals, harness);
+		musescript.builtins.WickraBuiltins.install(globals, harness);
 		globals.set("Math", {
 			abs: Math.abs,
 			min: Math.min,

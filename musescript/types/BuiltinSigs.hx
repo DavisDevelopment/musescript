@@ -79,6 +79,18 @@ class BuiltinSigs {
 		ind("roc");
 		fun("change", [TSeries, TWindow], TSeries, 1);
 		fun("pct_change", [TSeries, TWindow], TScalar, 1);
+		// Ported from Wickra (github.com/wickra-lib/wickra) — see musescript/indicators/
+		// and ROADMAP.md epic 9. Bar-input, not Series-input: these read OHLCV
+		// directly from the current bar (like `bar_index`), not a resolved
+		// Float series, so they take no series argument at all.
+		fun("obv", [], TScalar);
+		fun("williams_r", [TWindow], TScalar);
+		fun("aroon", [TWindow], TObject([
+			{name: "up", ty: TScalar},
+			{name: "down", ty: TScalar}
+		]));
+		fun("cci", [TWindow, TScalar], TScalar, 1);
+		fun("mfi", [TWindow], TScalar);
 		fun("bbands", [TSeries, TWindow, TScalar], TObject([
 			{name: "mid", ty: TScalar},
 			{name: "upper", ty: TScalar},

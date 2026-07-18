@@ -732,6 +732,11 @@ class JsBackend {
 			case "ema": TradeBuiltins.ema(harness, args[0], Std.int(args[1]));
 			case "rsi": TradeBuiltins.rsi(harness, args[0], Std.int(args[1]));
 			case "atr": builtinAtr(harness, args[0], Std.int(args[1]));
+			case "obv": musescript.builtins.WickraBuiltins.obv(harness);
+			case "williams_r": musescript.builtins.WickraBuiltins.williamsR(harness, Std.int(args[0]));
+			case "aroon": musescript.builtins.WickraBuiltins.aroon(harness, Std.int(args[0]));
+			case "cci": musescript.builtins.WickraBuiltins.cci(harness, Std.int(args[0]), args.length > 1 ? args[1] : null);
+			case "mfi": musescript.builtins.WickraBuiltins.mfi(harness, Std.int(args[0]));
 			case "bbands":
 				TradeBuiltins.bbands(
 					harness,

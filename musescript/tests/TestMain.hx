@@ -61,6 +61,7 @@ class TestMain {
 		runner.addCase(new TestWatAssembler());
 		runner.addCase(new TestBuiltinDocs());
 		runner.addCase(new TestWalkForwardPipeline());
+		runner.addCase(new TestIndicatorPorts());
 		runner.addCase(new TestCallStack());
 		runner.addCase(new TestPattern());
 		runner.addCase(new TestIter());
@@ -3073,22 +3074,30 @@ class TestTypes extends Test {
 			if (Reflect.isFunction(value))
 				Assert.notNull(musescript.types.BuiltinSigs.get(name), 'missing BuiltinSig for macro $name');
 		}
+		var wvars:Map<String, Dynamic> = new Map();
+		musescript.builtins.WickraBuiltins.install(wvars, new HarnessContext());
+		for (name => value in wvars) {
+			if (Reflect.isFunction(value))
+				Assert.notNull(musescript.types.BuiltinSigs.get(name), 'missing BuiltinSig for wickra $name');
+		}
 
 		// Reverse: every runtime-callable BuiltinSig must be installed somewhere.
 		var installed = new Map<String, Bool>();
 		for (name => value in vars) if (Reflect.isFunction(value)) installed.set(name, true);
 		for (name => value in gvars) if (Reflect.isFunction(value)) installed.set(name, true);
 		for (name => value in mvars) if (Reflect.isFunction(value)) installed.set(name, true);
+		for (name => value in wvars) if (Reflect.isFunction(value)) installed.set(name, true);
 		for (name in musescript.types.BuiltinSigs.all().keys()) {
 			if (musescript.types.BuiltinSigs.isPaletteOnly(name)) continue;
-			Assert.isTrue(installed.exists(name), 'BuiltinSig $name not installed on Trade/Graph/Macro');
+			Assert.isTrue(installed.exists(name), 'BuiltinSig $name not installed on Trade/Graph/Macro/Wickra');
 		}
 
-		// Trade+Graph install → JsBackend.dispatchBuiltin (macro markers are planner-side).
+		// Trade+Graph+Wickra install → JsBackend.dispatchBuiltin (macro markers are planner-side).
 		#if js
 		var onBarInstalled = new Map<String, Bool>();
 		for (name => value in vars) if (Reflect.isFunction(value)) onBarInstalled.set(name, true);
 		for (name => value in gvars) if (Reflect.isFunction(value)) onBarInstalled.set(name, true);
+		for (name => value in wvars) if (Reflect.isFunction(value)) onBarInstalled.set(name, true);
 		for (name in onBarInstalled.keys()) {
 			Assert.isTrue(
 				JsBackend.knowsDispatchedBuiltin(name),

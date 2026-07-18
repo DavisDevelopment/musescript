@@ -252,3 +252,70 @@ and the real `pipeline { }` typed-surface syntax end-to-end (not just the
 gated on "N of M folds individually pass" (closer to PSR/DSR/PBO-style
 robustness than a single averaged number can express) if a real search
 turns out to need it — not built speculatively ahead of that need.
+
+## 9. Wickra indicator port (single implementation, vectorized OR streamed)
+
+*Was:* a user request to reverse-engineer/port Wickra's TA indicator set
+(github.com/wickra-lib/wickra — 514 indicators, Rust core, streaming-first,
+`Indicator` trait + a free `BatchExt` blanket impl for vectorized mode)
+into MuseScript "such that they can be vectorized OR streamed, efficiently,
+from a single implementation," explicitly authorizing engine changes.
+
+Investigation first, before writing 514 indicators' worth of engine
+plumbing: MuseScript's "interp" and "JS" tiers were already ONE shared
+implementation (JsBackend compiles the same Haxe `TradeBuiltins.*`
+functions the interp calls — not a separate hand-written JS layer), so the
+real gap was narrower than it looked — one Haxe implementation plus a
+hand-written WAT implementation for WASM, not three independent copies.
+`IndicatorColumns`/`IndCol` already did real per-callsite incremental
+caching for SOME indicators (`ema` grows its state genuinely O(1) per new
+bar) but not others (`rsi`/`atr` rescan their whole trailing window from
+scratch every call — O(len), not O(1) — and `rsi` isn't even Wilder-smoothed,
+the standard definition). No batch/vectorized mode existed anywhere.
+
+✅ **Mechanism built, scoped to interp+JS (2026-07-18)** — WASM deferred
+per explicit direction, not attempted blind: `musescript/indicators/
+MuseIndicator.hx` is a direct port of Wickra's `Indicator` trait
+(`update`/`reset`/`warmupPeriod`/`isReady`/`name`, `Null<TOut>` instead of
+`Option<TOut>` for warmup). `IndicatorBatch.hx` ports `BatchExt`'s blanket
+impl — batch is free for every `MuseIndicator`, one `update()` loop, never
+a second hand-written vectorized implementation to drift from the
+streaming one. `BarIndicatorCache.hx` (new, on `HarnessContext`) gives
+bar-input indicators the same "one live object per callsite, fed exactly
+once per new bar" caching `IndicatorColumns` already did for series-input
+ones — kept as a SEPARATE cache rather than retrofitted into `IndCol`,
+because the input model genuinely differs (current Bar vs a resolved Float
+series) and conflating them would have obscured both.
+
+Five indicators ported as the proof slice — chosen to cover distinct
+shapes (cumulative/O(1)-always, sliding-window, multi-output, Wilder-style
+paired rolling sums): OBV, Williams %R, Aroon (`{up, down}`, matching the
+existing `macd`/`bbands` multi-output convention), CCI, MFI. Each is a
+line-for-line translation of wickra-core's Rust source, cited by path in
+its own doc comment. New builtin names only (`obv`, `williams_r`, `aroon`,
+`cci`, `mfi`) — deliberately did NOT touch the existing `rsi`/`atr`, whose
+current (non-Wilder, non-incremental) behavior existing corpus strategies
+and pinned parity tests (WASM tier, KestrGraal) depend on; migrating them
+to Wilder-correct/incremental versions is a real, separate, deliberate
+decision this pass flagged but did not make unilaterally.
+
+18 new tests (`TestIndicatorPorts.hx`): known-value cases transcribed
+directly from wickra-core's OWN Rust test fixtures (not re-derived —
+checked against the same numbers upstream checks itself against, e.g.
+MFI's `known_value_period_2` = 1200/23), `batch_equals_streaming` parity
+for every indicator (Wickra's own naming for this exact property), and one
+end-to-end interp<->compiled-JS parity test through the real language.
+An unported-to-WASM call degrades honestly (`"strategy is outside the WASM
+on_bar subset"`, the same message any other unsupported construct gets) —
+confirmed live, not assumed.
+
+**Next**: the other ~509 indicators. Real, large, and NOT going to happen
+in one pass — prioritize by what a real strategy actually needs, port a
+handful at a time under this same mechanism (translate from
+`vendor/wickra/crates/wickra-core/src/indicators/*.rs`, one file per
+indicator, cite the source path, transcribe the Rust test fixtures as
+known-value tests). The `rsi`/`atr` Wilder-correctness migration is a
+separate decision — needs a plan for re-pinning every dependent parity
+test, not a silent behavior change. WASM porting is per-indicator,
+gated on profiled hot-path need, same discipline as the deferred
+macro-specialized-kernels epic.
