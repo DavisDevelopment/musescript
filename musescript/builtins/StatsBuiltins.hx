@@ -1,5 +1,12 @@
 package musescript.builtins;
 
+// Stale-TODO audit 2026-07-18: skewness/kurtosis/autocorr shipped long ago
+// (below); NaN/[]-propagation IS the documented error contract for stats
+// (throwing on short samples would break streaming callers mid-backtest).
+// The macro-generated numeric/vector-type specialization idea is scoped in
+// ROADMAP.md ("Macro-specialized numeric kernels") — not worth doing until a
+// profile shows Array<Float> boxing on a real hot path.
+
 /**
  * Dependency-free descriptive statistics over finite numeric vectors.
  *

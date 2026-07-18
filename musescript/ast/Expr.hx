@@ -1,5 +1,14 @@
 package musescript.ast;
 
+/**
+ * Expression nodes. On the once-floated idea of merging the whole AST enum
+ * constellation (Expr/Stmt/Decl/Const/Pattern/MatchArm/OrderKind/FnKind)
+ * into one file: DECIDED AGAINST. Haxe resolves these per-module regardless,
+ * ~40 sites import them individually, and one-enum-per-file keeps diffs and
+ * blame local. If a real parser rewrite lands (see ROADMAP.md) the AST gets
+ * revisited wholesale then — not as a cosmetic file merge before it.
+ */
+
 enum Expr {
 	EConst(c:Const);
 	EIdent(name:String);

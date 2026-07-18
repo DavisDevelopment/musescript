@@ -25,6 +25,12 @@ class GraphBuiltins {
 	public static inline var DEFAULT_MAX_DEPTH:Int = 32;
 	public static inline var DEFAULT_PAGERANK_ITERATIONS:Int = 20;
 
+	/**
+	 * Install the graph surface (thin closures over the named public statics
+	 * below). Runtime-introspectable docstrings + auto-generated reference
+	 * manual via a Haxe macro pipeline is scoped in ROADMAP.md ("Docstring
+	 * introspection pipeline").
+	 */
 	public static function install(vars:Map<String, Dynamic>):Void {
 		vars.set("graph_neighbors", graphNeighbors);
 		vars.set("graph_degree", graphDegree);

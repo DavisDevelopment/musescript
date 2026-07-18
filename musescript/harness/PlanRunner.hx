@@ -155,7 +155,7 @@ class PlanRunner {
 		harness.resetForTrial();
 		if (onBar != null && feed != null) return harness.runBacktest(onBar, feed);
 		if (compiled != null && feed != null) {
-			Reflect.setField(harness, "feed", feed);
+			harness.feed = feed;
 			return cast compiled(harness);
 		}
 		if (prog != null && interp != null && feed != null) return interp.runBacktest(prog, feed);
