@@ -55,6 +55,7 @@ class GeneRunner {
 		var extractCond = argFlag("--extract-cond");
 		var astJson = argFlag("--ast-json");
 		var emitWatFlag = argFlag("--emit-wat");
+		var emitWasmFilePath = argVal("--emit-wasm-file", "");
 		var docsMdFlag = argFlag("--docs-md");
 		var strict = argFlag("--strict");
 		var instrument = argFlag("--instrument");
@@ -104,6 +105,32 @@ class GeneRunner {
 		// `node gene-runner.js --docs-md > BUILTINS.md`.
 		if (docsMdFlag) {
 			Sys.println(MuseScript.docsMarkdown());
+			return;
+		}
+
+		// --emit-wasm-file <path>: assemble `source`'s on_bar WASM (via WatAssembler,
+		// same path MuseRuntime's in-browser wasm tier uses) and write real .wasm
+		// bytes to <path>, plus <path>.strings.json alongside — the artifact shape
+		// KestrGraalServer's Backtest RPC expects (wasm_path/strings_path). Built
+		// for cross-validating KestrGraal against the same modules the JS tiers run,
+		// with no wat2wasm/Python dependency in the loop.
+		if (emitWasmFilePath != "") {
+			var sourceE = sourcePath != "" ? readFile(sourcePath) : readStdin();
+			try {
+				var progE = new MuseParser().parse(sourceE, "<gene>");
+				progE = musescript.compile.TemplateExpand.expand(progE);
+				var e = musescript.compile.StrategyWasmBackend.emitOnBar(progE);
+				if (e == null) {
+					emit({ ok: false, reason: "strategy is outside the WASM on_bar subset" });
+					return;
+				}
+				var bytes = musescript.compile.WatAssembler.assemble(e.wat);
+				sys.io.File.saveBytes(emitWasmFilePath, bytes);
+				sys.io.File.saveContent(emitWasmFilePath + ".strings.json", haxe.Json.stringify(e.strings));
+				emit({ ok: true, wasmBytes: bytes.length, strings: e.strings.length });
+			} catch (ex:Dynamic) {
+				emit({ ok: false, reason: Std.string(ex) });
+			}
 			return;
 		}
 

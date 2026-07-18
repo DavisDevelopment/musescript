@@ -29,15 +29,18 @@ public final class MuseBacktestCore {
     public static final class OrderSim {
         double position = 0, cash = 100000, entryPrice = 0;
         int trades = 0, wins = 0;
+        int entryBar = -1;
         final List<Double> equity = new ArrayList<>();
 
-        void longOrder(double price, Double qty) {
+        void longOrder(double price, Double qty, int barIndex) {
+            boolean wasFlat = position == 0;
             double q = qty != null ? qty : (position == 0 ? Math.floor(cash / price) : 0);
             if (q <= 0) return;
-            if (position < 0) flat(price);
+            if (position < 0) flat(price, barIndex);
             cash -= q * price;
             position += q;
             entryPrice = price;
+            if (wasFlat && position != 0 && barIndex >= 0) entryBar = barIndex;
             trades++;
         }
 
@@ -46,27 +49,47 @@ public final class MuseBacktestCore {
         // that quietly did nothing on every short() call. Found via a real correctness sweep: 21
         // of 29 randomly-generated genomes scored via KestrGraal diverged from the trusted
         // JS-interp path, and every mismatching genome called short() somewhere in its tree.
-        void shortOrder(double price, Double qty) {
+        void shortOrder(double price, Double qty, int barIndex) {
+            boolean wasFlat = position == 0;
             double q = qty != null ? qty : (position == 0 ? Math.floor(cash / price) : 0);
             if (q <= 0) return;
-            if (position > 0) flat(price);
+            if (position > 0) flat(price, barIndex);
             cash += q * price;
             position -= q;
             entryPrice = price;
+            if (wasFlat && position != 0 && barIndex >= 0) entryBar = barIndex;
             trades++;
         }
 
-        void flat(double price) {
+        void flat(double price, int barIndex) {
             if (position == 0) return;
             double pnl = position * (price - entryPrice);
             if (pnl > 0) wins++;
             cash += position * price;
             position = 0;
+            entryBar = -1;
             trades++;
         }
 
         void mark(double price) {
             equity.add(cash + position * price);
+        }
+
+        // Line-for-line port of OrderSim.hx's barsInTrade/equityAt/unrealizedPnl — the
+        // six get_* host imports below (needed by any @on(position) strategy, and
+        // unconditionally by rising()/falling()'s 3-arg minBars form) read these.
+        int barsInTrade(int currentBar) {
+            if (position == 0 || entryBar < 0 || currentBar < 0) return 0;
+            return currentBar - entryBar;
+        }
+
+        double equityAt(double price) {
+            return cash + position * price;
+        }
+
+        double unrealizedPnl(double price) {
+            if (position == 0) return 0.0;
+            return position * (price - entryPrice);
         }
     }
 
@@ -120,6 +143,7 @@ public final class MuseBacktestCore {
         public final Map<String, Double> params = new HashMap<>();
         final OrderSim sim = new OrderSim();
         double currentClose = Double.NaN;
+        int currentIndex = -1;
     }
 
     public static ProxyObject makeEnv(HostState st, List<String> strings) {
@@ -130,16 +154,16 @@ public final class MuseBacktestCore {
         });
         env.put("long", (ProxyExecutable) args -> {
             double qty = args[0].asDouble();
-            st.sim.longOrder(st.currentClose, Double.isNaN(qty) ? null : qty);
+            st.sim.longOrder(st.currentClose, Double.isNaN(qty) ? null : qty, st.currentIndex);
             return null;
         });
         env.put("short", (ProxyExecutable) args -> {
             double qty = args[0].asDouble();
-            st.sim.shortOrder(st.currentClose, Double.isNaN(qty) ? null : qty);
+            st.sim.shortOrder(st.currentClose, Double.isNaN(qty) ? null : qty, st.currentIndex);
             return null;
         });
         env.put("flat", (ProxyExecutable) args -> {
-            st.sim.flat(st.currentClose);
+            st.sim.flat(st.currentClose, st.currentIndex);
             return null;
         });
         // StrategyWasmEmitter.hx unconditionally imports "exp" on EVERY emitted module (its
@@ -147,11 +171,21 @@ public final class MuseBacktestCore {
         // comment) -- without this, WASM instantiation itself fails for every artifact, not just
         // ones that actually use softmax/sigmoid at runtime. Found via a real batch run: every
         // genome's Backtest RPC failed with "Import module object env does not contain exp" until
-        // this was added. get_position/get_entry_price/get_bars_in_trade/get_cash/get_equity/
-        // get_unrealized_pnl (StrategyWasmEmitter.needPositionImports) are a separate, newer
-        // OnPosition-hook feature not yet wired here -- a genome using an OnPosition hook will
-        // still fail to instantiate against KestrGraal until those are added too.
+        // this was added.
         env.put("exp", (ProxyExecutable) args -> Math.exp(args[0].asDouble()));
+        // Position-hook imports (StrategyWasmEmitter.needPositionImports): needed by any
+        // @on(position) strategy, AND (as of the OrderBook/rising-falling-minBars work)
+        // unconditionally by rising()/falling()'s 3-arg minBars form. Line-for-line ports
+        // of TradeBuiltins/OrderSim.hx's semantics -- was a real, documented gap: a real
+        // parity sweep against 8 corpus strategies over live SPY data found
+        // 06_dual_ma_hard_stop failing outright with "env does not contain get_position"
+        // (7/8 others matched bit-exact; this was the one strategy using @on(position)).
+        env.put("get_position", (ProxyExecutable) args -> st.sim.position);
+        env.put("get_entry_price", (ProxyExecutable) args -> st.sim.entryPrice);
+        env.put("get_bars_in_trade", (ProxyExecutable) args -> (double) st.sim.barsInTrade(st.currentIndex));
+        env.put("get_cash", (ProxyExecutable) args -> st.sim.cash);
+        env.put("get_equity", (ProxyExecutable) args -> st.sim.equityAt(st.currentClose));
+        env.put("get_unrealized_pnl", (ProxyExecutable) args -> st.sim.unrealizedPnl(st.currentClose));
         return ProxyObject.fromMap(Map.of("env", ProxyObject.fromMap(env)));
     }
 
@@ -165,6 +199,7 @@ public final class MuseBacktestCore {
         Value pushBar = exports.getMember("push_bar");
         for (Bar bar : bars) {
             st.currentClose = bar.close();
+            st.currentIndex = (int) bar.index();
             pushBar.execute(
                 bar.open(), bar.high(), bar.low(), bar.close(),
                 bar.volume(), bar.time(), bar.index()
@@ -210,6 +245,7 @@ public final class MuseBacktestCore {
         Value onBar = exports.getMember("on_bar");
         for (int i = 0; i < bars.size(); i++) {
             st.currentClose = bars.get(i).close();
+            st.currentIndex = (int) bars.get(i).index();
             onBar.execute(i);
             st.sim.mark(bars.get(i).close());
         }

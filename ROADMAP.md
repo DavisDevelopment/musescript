@@ -139,5 +139,53 @@ current JS-target numbers (~1M bars/s js tier) suggest it isn't one.
 General non-strategy programs already execute (decls + statements, no @on(bar)
 → value of last statement). "App plugin" support is a **capability surface**
 question (what may a plugin touch: chart? storage? network? orders — surely
-not), not an interpreter question. Design the sandbox contract first; the
-interpreter needs nothing until then.
+not), not an interpreter question. Design decided 2026-07-18: gate by
+declared plugin *kind* (same pattern `BuiltinSigs.isPaletteOnly` already
+uses) — always-allowed read-only compute (bars/series/params/stats/ML/graph
+query), opt-in chart-kind (`plot`/`chart` commands), opt-in scanner-kind
+(universe/panel reads, no order verbs); order verbs (`long`/`short`/`flat`/
+`portfolio_*`) and anything not already in the language (network,
+filesystem, raw Reflect/eval) stay out entirely — start with just the two
+simplest kinds and only add scanner/order kinds if a real plugin author
+hits the wall. Not yet built — no consumer exists yet (nothing in the app
+loads/executes a "plugin" today), so building the capability table now would
+be exactly the KestrGraal mistake below: infrastructure ahead of any real use.
+
+## 7. KestrGraal (Java/GraalVM WASM host) parity audit
+
+*Was not a TODO* — a 2026-07-18 follow-up to the epics above, prompted by
+STORY.md's own thesis: KestrGraal is the fastest execution path in the repo
+(~741k-1.3M bars/sec) and had exactly ONE correctness check on record (a
+single pinned SPY MA-cross number), which is exactly the pattern that let
+KestrGraal's `short()` ship as a silent no-op for a day back in 2026-07-16.
+
+Built a real parity harness (`test/test_kestrgraal.py::test_corpus_parity`,
++ `gene-runner.js --emit-wasm-file` to produce real assembled-via-WatAssembler
+`.wasm` artifacts with no Python/wat2wasm dependency in the loop): 8 corpus
+strategies + a synthetic minBars/`@on(position)` strategy, cross-validated
+against the JS tier over 8419 real SPY bars via the live gRPC server.
+
+**Found (again) exactly the predicted failure**: `MuseBacktestCore.makeEnv`
+was missing `get_position`/`get_entry_price`/`get_bars_in_trade`/`get_cash`/
+`get_equity`/`get_unrealized_pnl` — a gap the code's own comments already
+documented as known but unfixed. `06_dual_ma_hard_stop` (the one corpus
+strategy using `@on(position)`) failed outright with `"env does not contain
+get_position"`, not a graceful degradation. Made strictly worse this session:
+`rising()`/`falling()`'s 3-arg `minBars` form (fixed in the WASM emitter
+earlier today) unconditionally needs `get_bars_in_trade` too, so that gap now
+also broke a *2-arg-adjacent* feature that has nothing to do with position
+hooks. Also found the Java build itself was stale (`target/` held
+protobuf-generated classes inconsistent with the compiled server — `mvn
+clean compile` was required before the server would even start).
+
+**Fixed**: ported `OrderSim.hx`'s `entryBar`/`barsInTrade`/`equityAt`/
+`unrealizedPnl` line-for-line into `MuseBacktestCore.OrderSim` (Java's
+`OrderSim` had never tracked bar index at all), wired the six host imports.
+All 9 parity cases pass bit-exact (trades/finalEquity/sharpe) against the JS
+tier; the 3 pre-existing pinned-number tests still pass unmodified.
+
+**Next**: `test_kestrgraal.py` is not self-starting and not wired into any
+CI/build gate — it requires a running server and is easy to forget to run
+before a KestrGraal-affecting change ships. Worth deciding whether to wire it
+into the same soak-then-gate discipline as the native-parser flip (Epic 1
+Stage C), rather than relying on someone remembering to run it by hand again.
