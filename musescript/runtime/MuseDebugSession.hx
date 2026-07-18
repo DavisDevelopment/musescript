@@ -56,7 +56,7 @@ class MuseDebugSession {
 		bars = toBars(barsArray);
 		try {
 			var prog = parse(source);
-			Reflect.setField(harness, "feed", new BarFeed(bars));
+			harness.feed = new BarFeed(bars);
 			TradeBuiltins.resetCrossState();
 			interp = new MuseInterp(harness);
 			interp.setupRun(prog);
@@ -82,7 +82,7 @@ class MuseDebugSession {
 		if (idx + 1 >= bars.length) return { done: true, index: idx };
 		idx++;
 		var bar = bars[idx];
-		harness.orders.beginBar(bar.open, bar.index);
+		harness.orders.beginBar(bar.open, bar.index, bar.high, bar.low);
 		harness.observeBar(bar);
 		interp.execBar(bar);
 		harness.orders.mark(bar.close);

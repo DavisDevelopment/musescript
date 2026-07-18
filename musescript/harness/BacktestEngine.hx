@@ -17,7 +17,7 @@ class BacktestEngine {
 			var bar:Bar = cast item;
 			// In causal mode, execute bar t-1 signals at bar t open before exposing
 			// any of bar t's OHLCV values to the strategy.
-			orders.beginBar(bar.open, bar.index);
+			orders.beginBar(bar.open, bar.index, bar.high, bar.low);
 			onBar(bar);
 			orders.mark(bar.close);
 		});

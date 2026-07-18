@@ -247,6 +247,9 @@ class JsBackend {
 				if (frames[i].exists(name)) return frames[i].get(name);
 			}
 			if (harness.params.all().exists(name)) return harness.params.get(name);
+			// Auxiliary tape columns (Bar.data) resolve like OHLCV bar fields —
+			// current-bar value, NaN when the bar doesn't carry the field.
+			if (harness.isAuxSeries(name)) return harness.auxValue(name);
 			return null;
 		}
 
@@ -258,6 +261,20 @@ class JsBackend {
 		});
 		Reflect.setField(api, "get", function(name:String):Dynamic {
 			return lookup(name);
+		});
+		// Series-typed builtin arg authored as a FREE identifier (not a hoisted
+		// local): aux tape columns only exist at runtime, so the emitter can't
+		// know statically whether `sma(x, 5)` means a series or a scalar. An
+		// unshadowed aux series resolves to its NAME (full-history semantics,
+		// same as `close`); anything else falls back to the variable's value.
+		Reflect.setField(api, "seriesArg", function(name:String):Dynamic {
+			var i = frames.length;
+			while (i-- > 0) {
+				if (frames[i].exists(name)) return frames[i].get(name);
+			}
+			if (harness.isAuxSeries(name)) return name;
+			if (harness.params.all().exists(name)) return harness.params.get(name);
+			return null;
 		});
 		Reflect.setField(api, "set", function(name:String, v:Dynamic):Dynamic {
 			current().set(name, v);
@@ -685,7 +702,8 @@ class JsBackend {
 			case "volume": harness.currentBar.volume;
 			case "time": harness.currentBar.time;
 			case "bar_index": harness.currentBar.index;
-			default: null;
+			// Auxiliary tape columns — NaN when the bar doesn't carry the field.
+			default: harness.isAuxSeries(name) ? harness.auxValue(name) : null;
 		};
 	}
 
@@ -951,16 +969,19 @@ class JsBackend {
 				harness.chart.bgcolor(args[0], bi);
 				null;
 			case "long":
-				harness.orders.long(harness.currentBar.close, args.length > 0 ? args[0] : null,
-					harness.currentBar.index);
+				harness.orders.submit("long", args.length > 0 ? args[0] : null,
+					harness.currentBar.close, harness.currentBar.index);
 				null;
 			case "short":
-				harness.orders.short(harness.currentBar.close, args.length > 0 ? args[0] : null,
-					harness.currentBar.index);
+				harness.orders.submit("short", args.length > 0 ? args[0] : null,
+					harness.currentBar.close, harness.currentBar.index);
 				null;
 			case "flat" | "close":
-				harness.orders.flat(harness.currentBar.close, harness.currentBar.index);
+				harness.orders.submit("flat", args.length > 0 ? args[0] : null,
+					harness.currentBar.close, harness.currentBar.index);
 				null;
+			case "orders_pending": harness.orders.book.pendingCount();
+			case "orders_cancel_all": harness.orders.book.cancelAll();
 			case "position": harness.orders.positionSize();
 			case "entry_price": harness.orders.entryPrice;
 			case "bars_in_trade": harness.orders.barsInTrade(harness.currentBar.index);
@@ -995,6 +1016,9 @@ class JsBackend {
 				TradeBuiltins.mom(harness, musescript.builtins.PortfolioBuiltins.seriesKey("close", args[0]), Std.int(args[1]));
 			case "rsi_of":
 				TradeBuiltins.rsi(harness, musescript.builtins.PortfolioBuiltins.seriesKey("close", args[0]), Std.int(args[1]));
+			case "fund_of":
+				harness.seriesLookback(musescript.builtins.PortfolioBuiltins.seriesKey(args[1], args[0]),
+					args.length > 2 ? Std.int(args[2]) : 0);
 			case "scan_top":
 				musescript.builtins.PortfolioBuiltins.rankPick(args[0], Std.int(args[1]), false);
 			case "scan_bottom":
