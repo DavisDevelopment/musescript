@@ -29,7 +29,7 @@ class Sma implements MuseIndicator<Float, Float> {
 	}
 
 	public function update(input:Float):Null<Float> {
-		if (!Math.isFinite(input)) return value();
+		if (!Math.isFinite(input)) return isReady() ? value() : null;
 		buf.push(input);
 		sum += input;
 		if (buf.length > period) sum -= buf.shift();
