@@ -84,17 +84,17 @@ P  TODO  wma
 3  DEFER vpin
 
 ## Tier 1 — portable now (name | input)
-1  TODO  abandoned_baby                           Candle
+1  DONE  abandoned_baby                           Candle
 1  TODO  abcd                                     Candle
-1  TODO  acceleration_bands                       Candle
-1  TODO  accelerator_oscillator                   Candle
-1  TODO  ad_oscillator                            Candle
-1  TODO  adaptive_cci                             Candle
+1  DONE  acceleration_bands                       Candle
+1  DONE  accelerator_oscillator                   Candle
+1  DONE  ad_oscillator                            Candle
+1  DONE  adaptive_cci                             Candle
 1  TODO  adaptive_cycle                           f64
 1  TODO  adaptive_laguerre_filter                 f64
 1  TODO  adaptive_rsi                             f64
-1  TODO  adl                                      Candle
-1  TODO  advance_block                            Candle
+1  DONE  adl                                      Candle
+1  DONE  advance_block                            Candle
 1  TODO  adx                                      Candle
 1  TODO  adxr                                     Candle
 1  TODO  alligator                                Candle
@@ -105,7 +105,7 @@ P  TODO  wma
 1  TODO  andrews_pitchfork                        Candle
 1  TODO  apo                                      f64
 1  DONE  aroon                                    Candle
-1  TODO  aroon_oscillator                         Candle
+1  DONE  aroon_oscillator                         Candle
 1  TODO  atr_bands                                Candle
 1  TODO  atr_ratchet                              Candle
 1  TODO  atr_trailing_stop                        Candle
@@ -115,7 +115,7 @@ P  TODO  wma
 1  TODO  average_daily_range                      Candle
 1  TODO  average_drawdown                         f64
 1  TODO  avg_price                                Candle
-1  TODO  awesome_oscillator                       Candle
+1  DONE  awesome_oscillator                       Candle
 1  TODO  awesome_oscillator_histogram             Candle
 1  TODO  balance_of_power                         Candle
 1  TODO  bandpass_filter                          f64
