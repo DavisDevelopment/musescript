@@ -221,7 +221,7 @@ class StrategyWasmEmitter {
 				if (vec != null) return vec;
 				forgetVectorLocal(name);
 				ensureLocal(name);
-				emitValue(e) + "\n    local.set $" + name;
+				coerceF64(e) + "\n    local.set $" + name;
 			case Block(ss):
 				[for (x in ss) emitStmt(x)].join("\n    ");
 			case Return(e):
@@ -280,13 +280,13 @@ class StrategyWasmEmitter {
 				forgetVectorLocal(n);
 				ensureLocal(n);
 				if (init == null) return "f64.const 0\n    local.set $" + n + "\n    local.get $" + n;
-				emitValue(init) + "\n    local.set $" + n + "\n    local.get $" + n;
+				coerceF64(init) + "\n    local.set $" + n + "\n    local.get $" + n;
 			case EBinop("=", EIdent(n), v):
 				var vec = tryAssignVector(n, v);
 				if (vec != null) return vec + "\n    f64.const 0";
 				forgetVectorLocal(n);
 				ensureLocal(n);
-				emitValue(v) + "\n    local.set $" + n + "\n    local.get $" + n;
+				coerceF64(v) + "\n    local.set $" + n + "\n    local.get $" + n;
 			case EBinop(op, a, b):
 				emitBinop(op, a, b);
 			case EUnop("-", true, x):
@@ -496,8 +496,18 @@ class StrategyWasmEmitter {
 			case "rising" | "falling":
 				var rslot = nextRiseSlot++;
 				var xn = args.length > 1 ? asI32(args[1]) : "i32.const 1";
-				"i32.const " + rslot + "\n    " + coerceF64(args[0]) + "\n    " + xn
+				var call = "i32.const " + rslot + "\n    " + coerceF64(args[0]) + "\n    " + xn
 					+ "\n    call $" + name + "\n    f64.convert_i32_s";
+				// `rising(x, n, minBars)` gates on bars-in-trade < minBars → false,
+				// matching TradeBuiltins.rising/falling exactly (was silently
+				// dropped here — a real interp/wasm divergence for any strategy
+				// using the 3-arg form, e.g. `rising(close, 1, minHold)`).
+				if (args.length > 2) {
+					needImport("get_bars_in_trade", "(result f64)");
+					"call $get_bars_in_trade\n    i32.trunc_f64_s\n    " + asI32(args[2])
+						+ "\n    i32.lt_s\n    if (result f64)\n      f64.const 0\n    else\n      "
+						+ call + "\n    end";
+				} else call;
 			case "ml_dot":
 				emitMlPairOrFold(args, "vec_dot", function(xs, ys) return MlBuiltins.dot(xs, ys));
 			case "ml_mse":
@@ -956,8 +966,27 @@ class StrategyWasmEmitter {
 		return coerceF64(a) + "\n    " + coerceF64(b) + "\n    " + instr;
 	}
 
+	/**
+	 * Emit `e` as a value guaranteed to leave f64 on the stack. WASM's compare
+	 * instructions (f64.lt/gt/le/ge/eq/ne) and i32.and/or/eqz ALWAYS produce
+	 * i32, never f64 — every other emitValue case already produces f64, so a
+	 * bare `emitValue(e)` (the historical body of this function) is only
+	 * wrong for boolean-shaped expressions. Concretely: `var ok = a > b;` (an
+	 * EVar init, which local.sets straight into an f64 local) or any boolean
+	 * subexpression reused as an ordinary scalar. Was a real, silent
+	 * WASM-validation failure — asI32Cond's own boolean contexts (if/&&/||)
+	 * are unaffected, they want the raw i32 and already bypass this function.
+	 */
 	function coerceF64(e:Expr):String {
-		return emitValue(e);
+		return switch (e) {
+			case EParent(x): coerceF64(x);
+			case EBinop(op, _, _) if (["<", ">", "<=", ">=", "==", "!=", "&&", "||"].indexOf(op) >= 0):
+				emitValue(e) + "\n    f64.convert_i32_s";
+			case EUnop("!", true, _):
+				emitValue(e) + "\n    f64.convert_i32_s";
+			default:
+				emitValue(e);
+		};
 	}
 
 	function asI32(e:Expr):String {

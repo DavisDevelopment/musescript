@@ -1,5 +1,6 @@
 package musescript.cli;
 
+import musescript.MuseScript;
 import musescript.parse.MuseParser;
 import musescript.compile.MuseCompiler;
 import musescript.checker.MuseChecker;
@@ -39,6 +40,11 @@ class GeneRunner {
 	}
 
 	static function main() {
+		// Native front end soak switch (ROADMAP "Native front end" Stage B):
+		// MUSE_NATIVE_PARSER=1 routes legacy-dialect parses through
+		// NativeParser (counted hscript fallback on unsupported constructs).
+		if (Sys.getEnv("MUSE_NATIVE_PARSER") == "1")
+			musescript.parse.MuseParser.native = true;
 		var sourcePath = argVal("--source", "");
 		var tapePath = argVal("--tape", "");
 		var symbol = argVal("--symbol", "");
@@ -48,6 +54,8 @@ class GeneRunner {
 		var checkOnly = argFlag("--check");
 		var extractCond = argFlag("--extract-cond");
 		var astJson = argFlag("--ast-json");
+		var emitWatFlag = argFlag("--emit-wat");
+		var docsMdFlag = argFlag("--docs-md");
 		var strict = argFlag("--strict");
 		var instrument = argFlag("--instrument");
 		var artifactDir = argVal("--artifact", "");
@@ -87,6 +95,32 @@ class GeneRunner {
 				emit({ ok: true, program: MuseAstJson.programToJson(prog1, checker1) });
 			} catch (e:Dynamic) {
 				emit({ ok: false, reason: Std.string(e) });
+			}
+			return;
+		}
+
+		// --docs-md: print the builtin reference manual as Markdown (ROADMAP.md
+		// "Docstring introspection pipeline") — no source/tape needed. CI-friendly:
+		// `node gene-runner.js --docs-md > BUILTINS.md`.
+		if (docsMdFlag) {
+			Sys.println(MuseScript.docsMarkdown());
+			return;
+		}
+
+		// --emit-wat: dump the StrategyWasmBackend WAT for `source`'s on_bar subset
+		// (debugging / the WatAssembler cross-check tooling — no tape needed).
+		if (emitWatFlag) {
+			var sourceW = sourcePath != "" ? readFile(sourcePath) : readStdin();
+			try {
+				var progW = new MuseParser().parse(sourceW, "<gene>");
+				progW = musescript.compile.TemplateExpand.expand(progW);
+				var e = musescript.compile.StrategyWasmBackend.emitOnBar(progW);
+				if (e == null)
+					emit({ ok: false, reason: "strategy is outside the WASM on_bar subset" });
+				else
+					emit({ ok: true, wat: e.wat, strings: e.strings });
+			} catch (ex:Dynamic) {
+				emit({ ok: false, reason: Std.string(ex) });
 			}
 			return;
 		}
@@ -149,7 +183,7 @@ class GeneRunner {
 		for (d in prog.decls) seedInterp.registerDeclPublic(d);
 
 		var feed = new BarFeed(bars);
-		Reflect.setField(harness, "feed", feed);
+		harness.feed = feed;
 		TradeBuiltins.resetCrossState();
 
 		var ex = MuseCompiler.compileEx(prog, { target: target, strict: strict });

@@ -12,6 +12,12 @@ import musescript.harness.Bar;
 import musescript.interp.MuseInterp;
 import musescript.builtins.TradeBuiltins;
 
+// Execution realism (order-book sim, limit/market/stop kinds, slippage,
+// latency, market impact) is a scoped epic — see ROADMAP.md ("Execution
+// realism"). Today's honest model: close-fill (or fillNextOpen) + per-side
+// bps costs; see OrderKind.hx for why richer order types compose as rules
+// on the sim side rather than new AST verbs.
+
 /**
  * Client-side MuseScript execution engine for the Strategy Studio IDE.
  *
@@ -55,7 +61,11 @@ class MuseRuntime {
 
 			var harness = new HarnessContext();
 			harness.orders.reset(initialCash);
-			Reflect.setField(harness, "feed", feed);
+			// Per-fill slippage (bps, against the trader) for pending-book fills
+			// (limit/stop/market spec orders). Legacy close-fills are unaffected.
+			harness.orders.book.slippageBps = optFloat(opts, "slippageBps", 0);
+
+			harness.feed = feed;
 			TradeBuiltins.resetCrossState();
 
 			var backend:String;
@@ -64,19 +74,41 @@ class MuseRuntime {
 
 			if (tier == "interp") {
 				var seed = new MuseInterp(harness);
-				for (d in prog.decls) seed.registerDeclPublic(d);
+				for (d in prog.decls) 
+					seed.registerDeclPublic(d);
 				applyParamOverrides(harness, opts);
 				result = new MuseInterp(harness).runBacktest(prog, feed);
 				backend = "interp";
 				emitted = false;
-			} else if (tier == "wasm") {
-				return err('wasm tier is not yet available in the browser build '
-					+ '(needs in-browser WAT→WASM assembly); use "js" or "interp", '
-					+ 'or call emitWat + runWasm from the app');
-			} else {
+			} 
+			else if (tier == "wasm") {
+				// In-browser WAT→WASM assembly (ROADMAP "In-browser WASM tier"):
+				// musescript.compile.WatAssembler encodes the module directly —
+				// no wabt.js dependency. Falls back to an honest error for
+				// strategies outside the WASM on_bar subset (same as before).
+				var emittedWat = musescript.compile.StrategyWasmBackend.emitOnBar(prog);
+				if (emittedWat == null)
+					return err('strategy is outside the WASM on_bar subset; use tier "js" or "interp"');
+				var wasmBytes:Dynamic;
+				try {
+					wasmBytes = musescript.compile.WatAssembler.assemble(emittedWat.wat).getData();
+				} catch (ex:Dynamic) {
+					return err('wasm assembly failed: ${Std.string(ex)}');
+				}
+				var seed = new MuseInterp(harness);
+				for (d in prog.decls)
+					seed.registerDeclPublic(d);
+				applyParamOverrides(harness, opts);
+				var fn = musescript.compile.StrategyWasmBackend.compileFromBytes(prog, wasmBytes, emittedWat.strings);
+				result = fn(harness);
+				backend = "wasm";
+				emitted = true;
+			}
+			else {
 				// "js" / "auto": compile + run; MuseCompiler reports the real backend.
 				var seed = new MuseInterp(harness);
-				for (d in prog.decls) seed.registerDeclPublic(d);
+				for (d in prog.decls) 
+					seed.registerDeclPublic(d);
 				applyParamOverrides(harness, opts);
 				var ex = MuseCompiler.compileEx(prog, { target: "js", strict: false });
 				result = ex.fn(harness);
@@ -84,26 +116,12 @@ class MuseRuntime {
 				emitted = ex.emitted;
 			}
 
-			var out:Dynamic = {
-				ok: true,
-				backend: backend,
-				emitted: emitted,
-				bars: feed.length(),
-				trades: intField(result, "trades"),
-				sharpe: finF(fieldF(result, "sharpe")),
-				maxDrawdown: finF(fieldF(result, "maxDrawdown")),
-				winRate: finF(fieldF(result, "winRate")),
-				finalEquity: finF(fieldF(result, "finalEquity"))
-			};
-			if (instrument) {
-				Reflect.setField(out, "equity", harness.orders.equity);
-				Reflect.setField(out, "fills", harness.orders.fills);
-				Reflect.setField(out, "chart", harness.chart.commands);
-				Reflect.setField(out, "logs", harness.logs);
-			}
+			var out = baseResult(backend, emitted, feed.length(), result);
+			if (instrument) attachOrdersInstrumentation(out, harness);
 			attachParams(out, harness);
 			return out;
-		} catch (e:Dynamic) {
+		} 
+		catch (e:Dynamic) {
 			return err(Std.string(e));
 		}
 	}
@@ -125,8 +143,13 @@ class MuseRuntime {
 			var harness = new HarnessContext();
 			harness.orders.reset(initialCash);
 			harness.portfolio.reset(initialCash);
-			Reflect.setField(harness, "panel", panel);
-			Reflect.setField(harness, "feed", panel.asBarFeed());
+			// Honest execution: `fillNextOpen` decides at close[t] but fills at open[t+1], removing
+			// the same-bar close→close lookahead (default false keeps legacy close-fill behavior).
+			harness.panelFillNextOpen = optBool(opts, "fillNextOpen", false);
+			// Per-side transaction cost (bps of traded notional) — commission + spread/slippage proxy.
+			harness.portfolio.tradingCostBps = optFloat(opts, "costBps", 0);
+			harness.panel = panel;
+			harness.feed = panel.asBarFeed();
 			TradeBuiltins.resetCrossState();
 
 			var backend:String;
@@ -151,19 +174,9 @@ class MuseRuntime {
 				emitted = ex.emitted;
 			}
 
-			var out:Dynamic = {
-				ok: true,
-				backend: backend,
-				emitted: emitted,
-				panel: true,
-				symbols: panel.symbols,
-				bars: panel.length(),
-				trades: intField(result, "trades"),
-				sharpe: finF(fieldF(result, "sharpe")),
-				maxDrawdown: finF(fieldF(result, "maxDrawdown")),
-				winRate: finF(fieldF(result, "winRate")),
-				finalEquity: finF(fieldF(result, "finalEquity"))
-			};
+			var out = baseResult(backend, emitted, panel.length(), result);
+			Reflect.setField(out, "panel", true);
+			Reflect.setField(out, "symbols", panel.symbols);
 			if (instrument) {
 				Reflect.setField(out, "equity", harness.portfolio.equity);
 				Reflect.setField(out, "fills", harness.portfolio.fills);
@@ -226,7 +239,7 @@ class MuseRuntime {
 			var feed = new BarFeed(toBars(bars));
 			var harness = new HarnessContext();
 			harness.orders.reset(initialCash);
-			Reflect.setField(harness, "feed", feed);
+			harness.feed = feed;
 			TradeBuiltins.resetCrossState();
 
 			// Register decls so @param defaults land, then apply UI overrides.
@@ -237,23 +250,8 @@ class MuseRuntime {
 			var fn = musescript.compile.StrategyWasmBackend.compileFromBytes(prog, wasmBytes, e.strings);
 			var result:Dynamic = fn(harness);
 
-			var out:Dynamic = {
-				ok: true,
-				backend: "wasm",
-				emitted: true,
-				bars: feed.length(),
-				trades: intField(result, "trades"),
-				sharpe: finF(fieldF(result, "sharpe")),
-				maxDrawdown: finF(fieldF(result, "maxDrawdown")),
-				winRate: finF(fieldF(result, "winRate")),
-				finalEquity: finF(fieldF(result, "finalEquity"))
-			};
-			if (instrument) {
-				Reflect.setField(out, "equity", harness.orders.equity);
-				Reflect.setField(out, "fills", harness.orders.fills);
-				Reflect.setField(out, "chart", harness.chart.commands);
-				Reflect.setField(out, "logs", harness.logs);
-			}
+			var out = baseResult("wasm", true, feed.length(), result);
+			if (instrument) attachOrdersInstrumentation(out, harness);
 			attachParams(out, harness);
 			return out;
 		} catch (e:Dynamic) {
@@ -287,6 +285,33 @@ class MuseRuntime {
 	}
 
 	// --- internals ------------------------------------------------------------
+
+	/**
+	 * The shared success-result envelope every tier returns across the JS
+	 * boundary: { ok, backend, emitted, bars } + the finite-or-null metric
+	 * quintet pulled off a BacktestResult-shaped `result`.
+	 */
+	static function baseResult(backend:String, emitted:Bool, bars:Int, result:Dynamic):Dynamic {
+		return {
+			ok: true,
+			backend: backend,
+			emitted: emitted,
+			bars: bars,
+			trades: intField(result, "trades"),
+			sharpe: finF(fieldF(result, "sharpe")),
+			maxDrawdown: finF(fieldF(result, "maxDrawdown")),
+			winRate: finF(fieldF(result, "winRate")),
+			finalEquity: finF(fieldF(result, "finalEquity"))
+		};
+	}
+
+	/** Single-symbol instrumentation payload (equity/fills from `orders`). */
+	static function attachOrdersInstrumentation(out:Dynamic, harness:HarnessContext):Void {
+		Reflect.setField(out, "equity", harness.orders.equity);
+		Reflect.setField(out, "fills", harness.orders.fills);
+		Reflect.setField(out, "chart", harness.chart.commands);
+		Reflect.setField(out, "logs", harness.logs);
+	}
 
 	/** Apply Studio/UI param overrides after @param registration. Accepts a
 	 * plain object `{ name: value, … }` or an array of `{ name, value }`. */
@@ -345,10 +370,31 @@ class MuseRuntime {
 				close: num(b, "close"),
 				volume: Reflect.hasField(b, "volume") ? num(b, "volume") : 0.0,
 				time: Reflect.hasField(b, "time") ? num(b, "time") : (i : Float),
-				index: i
+				index: i,
+				data: toAuxData(b)
 			});
 		}
 		return out;
+	}
+
+	/**
+	 * Optional per-bar auxiliary fields (e.g. PIT fundamentals) passed as a
+	 * plain `data: {fieldName: number, ...}` object alongside OHLCV — same
+	 * shape/semantics as OhlcvCsv's extra-column `Bar.data` (NaN for a field
+	 * a bar doesn't carry). Absent `data` → null, matching the CLI path.
+	 */
+	static function toAuxData(b:Dynamic):Null<Map<String, Float>> {
+		if (b == null || !Reflect.hasField(b, "data")) return null;
+		var d:Dynamic = Reflect.field(b, "data");
+		if (d == null) return null;
+		var out = new Map<String, Float>();
+		var any = false;
+		for (k in Reflect.fields(d)) {
+			var v:Dynamic = Reflect.field(d, k);
+			out.set(k, v == null ? Math.NaN : (v : Float));
+			any = true;
+		}
+		return any ? out : null;
 	}
 
 	static function num(o:Dynamic, f:String):Float {
