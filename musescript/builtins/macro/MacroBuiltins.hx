@@ -29,6 +29,32 @@ class MacroBuiltins {
 		vars.set("ensemble", function(?features:Dynamic, ?trees:Int) return ensemble(harness, features, trees));
 		vars.set("DecisionTreeEnsemble", function(?features:Dynamic, ?trees:Int) return ensemble(harness, features, trees));
 		vars.set("plan", function(body:Dynamic) return plan(body));
+		vars.set("walkforward", function(folds:Int, ?embargo:Int) return walkforward(folds, embargo));
+		vars.set("promote", function(fn:Dynamic) return promote(fn));
+	}
+
+	/**
+	 * `walkforward(folds, ?embargo)` — AST marker declaring the discovery
+	 * process's validation protocol: a `pipeline`'s `tune`/`optimize` runs
+	 * per-fold on TRAIN only and is scored on TEST (out-of-sample), never
+	 * the reverse. `embargo` bars are purged between train and test to
+	 * avoid indicator-lookback leakage across the split. MusePlanner reads
+	 * the real fold count/embargo off the parsed AST; PlanRunner does the
+	 * actual splitting and per-fold search.
+	 */
+	public static function walkforward(folds:Int, ?embargo:Int):Dynamic {
+		return { __macro: "walkforward", folds: folds, embargo: embargo != null ? embargo : 0 };
+	}
+
+	/**
+	 * `promote(fn(r) => ...)` — AST marker declaring the promotion gate: a
+	 * boolean predicate over the walk-forward's AGGREGATE out-of-sample
+	 * metrics (`r.sharpe`, `r.maxDrawdown`, `r.winRate`, `r.finalEquity`,
+	 * `r.trades`). PlanRunner evaluates it once folds are known — never
+	 * against in-sample numbers, and never before every fold has run.
+	 */
+	public static function promote(fn:Dynamic):Dynamic {
+		return { __macro: "promote", fn: fn };
 	}
 
 	/** `tune(params)` — AST marker; MusePlanner reads the real tune spec off the parsed AST. */

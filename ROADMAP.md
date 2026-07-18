@@ -194,3 +194,61 @@ running the new target twice, not just writing it) a real process-tree leak:
 `taskkill /F /T` (tree kill) was needed. There is still no CI in this repo
 at all (everything is local-dev, `run.ps1`-driven) — this is the local
 equivalent of a gate, not a CI job; revisit if/when CI gets added.
+
+## 8. Pipeline discovery-process construct
+
+*Was:* an unfinished Cursor session (2026-07-18) — a plan for a `pipeline`
+language construct that "significantly expanded the language for actually
+programming the process of identifying the strategy itself." No plan doc
+was ever found on disk (checked both repos, no `.cursor` dirs, nothing
+dated); it may never have been written down. What existed already: a
+`pipeline`/`search { }` keyword in `StrategyParser.hx` that was pure sugar
+for `@macro` (zero new capability), and `MusePlanner`/`PlanRunner`, which
+already turn `sample`/`tune`/`optimize`/`pickBest`/`distill`/`ensemble`
+call shapes inside a macro body into a real, executable `ExecutionPlan` —
+but with a real, unaddressed gap matching this project's oldest, most
+recurring lesson: `PlanRunner.optimizeStep` always searched and scored
+against the SAME single feed. In-sample-only search, baked into the
+language's own optimizer, with nothing stopping an overfit "best" from
+being reported as if it meant something.
+
+✅ **Designed fresh and built (2026-07-18)**: two new discovery-process
+primitives, `walkforward(folds, ?embargo)` and `promote(fn)`, recognized by
+`MusePlanner` as new `PlanStep` variants (`WalkForwardStep`,
+`PromotionGateStep` — deliberately NOT a new `Decl` AST node, which would
+have rippled through the ~18 files that exhaustively switch over `Decl`
+for a change that's purely about the planning/discovery layer, never
+compiled to JS/WASM). `PlanRunner.walkForwardOptimize` does the real work:
+splits the bound feed into expanding-window train/test folds with an
+embargo gap purged at each boundary (same discipline as OrderBook's
+next-bar-only fills, applied to search instead of fills); each fold's
+grid/coordinate search runs ONLY against train, and the winning params are
+measured once against test — the search never sees its own scoring data.
+`promote`'s predicate is evaluated exactly once, against the
+folds-aggregate out-of-sample metrics, never any single fold and never the
+in-sample numbers. A plan with no `walkforward()` step behaves exactly as
+before (confirmed: `opt.walkForward == null`, `testNoWalkforwardStep...`
+pins it) — zero risk to every existing optimize()/run() caller.
+
+Found a real, pre-existing dialect gap while wiring `promote`'s lambda
+argument: arrow lambdas (`(r) => ...`) only exist in the typed surface
+(`StrategyParser`'s own expr grammar); the legacy `@macro`/`@strategy`
+annotation dialect (vendored hscript) reserves `=>` exclusively for match
+arms, so the identical predicate needs `function(r) return ...` there
+instead — not a bug, but undocumented until this pass; now called out
+explicitly in `TestWalkForwardPipeline.hx`'s class doc.
+
+11 new tests (`TestWalkForwardPipeline.hx`): planner recognition, real
+fold-splitting (expanding-window, correct counts), aggregate == mean of
+fold OOS metrics (not a rederived approximation — checked against a
+manually-computed mean), promotion gate pass AND fail cases, no-promote
+leaves `promoted` null (not false — a search that never got a verdict
+asked for is not the same as a search that failed one), legacy behavior
+provably unchanged, honest NaN on insufficient data (no fabricated fold),
+and the real `pipeline { }` typed-surface syntax end-to-end (not just the
+`@macro` alias it lowers through).
+
+**Next**: aggregate-across-folds uses the mean; worth a `promote` variant
+gated on "N of M folds individually pass" (closer to PSR/DSR/PBO-style
+robustness than a single averaged number can express) if a real search
+turns out to need it — not built speculatively ahead of that need.

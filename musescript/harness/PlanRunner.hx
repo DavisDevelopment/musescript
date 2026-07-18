@@ -1,6 +1,7 @@
 package musescript.harness;
 
 import musescript.ast.MuseProgram;
+import musescript.ast.Expr;
 import musescript.interp.MuseInterp;
 import musescript.plan.ExecutionPlan;
 import musescript.plan.PlanStep;
@@ -86,7 +87,7 @@ class PlanRunner {
 					}
 					results.set(id, best);
 				case OptimizeStep(id, target, paramNames, method):
-					var opt = optimizeStep(target, paramNames, method, plan);
+					var opt = optimize(plan, target);
 					results.set(id, opt);
 					for (k => v in opt.bestParams) harness.params.set(k, v);
 				case TrainStep(id, model, features, trees):
@@ -97,6 +98,11 @@ class PlanRunner {
 					results.set(id, harness.distill(model, params));
 				case StrategyStep(id, ref):
 					results.set(id, { strategy: ref });
+				case WalkForwardStep(id, folds, embargo):
+					results.set(id, { folds: folds, embargo: embargo });
+				case PromotionGateStep(id, _):
+					// Consumed by optimize()/walkForwardOptimize() when it scans the plan for a
+					// preceding WalkForwardStep — nothing to do standalone here.
 			}
 		}
 		return results;
@@ -105,15 +111,132 @@ class PlanRunner {
 	public function optimize(plan:ExecutionPlan, metric:String):OptimizeResult {
 		var paramNames:Array<String> = [];
 		var method = "grid";
+		var wfFolds:Null<Int> = null;
+		var wfEmbargo = 0;
+		var promoteCond:Null<Expr> = null;
 		for (step in plan.steps) {
 			switch (step) {
 				case OptimizeStep(_, target, ps, m):
 					paramNames = ps;
 					method = m;
+				case WalkForwardStep(_, folds, embargo):
+					wfFolds = folds;
+					wfEmbargo = embargo;
+				case PromotionGateStep(_, cond):
+					promoteCond = cond;
 				default:
 			}
 		}
+		if (wfFolds != null)
+			return walkForwardOptimize(metric, paramNames, method, wfFolds, wfEmbargo, promoteCond, plan);
 		return optimizeStep(metric, paramNames, method, plan);
+	}
+
+	/**
+	 * The `pipeline` walk-forward primitive's real execution: split the bound
+	 * feed into `folds` expanding-window train/test splits (an `embargo`-bar
+	 * gap purged between each split's train end and test start, guarding
+	 * against indicator-lookback leakage across the boundary — same
+	 * discipline as OrderBook's next-bar-only fills, applied to search
+	 * instead of fills). Each fold's grid/coordinate search runs ONLY against
+	 * TRAIN; the winning params are then measured ONCE against TEST
+	 * (out-of-sample) — the search never sees its own scoring data. Folds
+	 * with too little data on either side are skipped honestly rather than
+	 * padded or faked; if every fold is skipped, returns NaN/null the same
+	 * way `optimizeStep`'s "could not search" path does.
+	 *
+	 * `promoteCond`, if given, is evaluated exactly once against the
+	 * AGGREGATE (mean-across-folds) out-of-sample metrics — never against
+	 * any single fold, and never against the in-sample numbers.
+	 */
+	function walkForwardOptimize(
+		metric:String, explicitParams:Array<String>, method:String,
+		folds:Int, embargo:Int, promoteCond:Null<Expr>, plan:ExecutionPlan
+	):OptimizeResult {
+		var names = resolveParamNames(explicitParams, plan);
+		if (names.length == 0 || !canEvaluate() || feed == null || folds < 1)
+			return { bestParams: snapshotParams(names), bestMetric: Math.NaN, trials: 0 };
+
+		var allBars = feed.all();
+		var n = allBars.length;
+		var segSize = Std.int(n / (folds + 1));
+		var foldResults:Array<musescript.harness.WalkForwardResult.WalkForwardFoldResult> = [];
+		var lastBestParams = snapshotParams(names);
+
+		for (i in 0...folds) {
+			var testStart = (i + 1) * segSize;
+			var testEnd = (i == folds - 1) ? n : testStart + segSize;
+			var trainEnd = testStart - embargo;
+			// Honest skip, not a padded/fabricated fold: too little data on either side.
+			if (trainEnd < 20 || testEnd - testStart < 5) continue;
+
+			var trainFeed = new BarFeed(allBars.slice(0, trainEnd));
+			var testFeed = new BarFeed(allBars.slice(testStart, testEnd));
+
+			var baseline = snapshotParams(names);
+			var combos = buildTrials(names, baseline, method);
+			var bestMetric = Math.NEGATIVE_INFINITY;
+			var bestParams = baseline;
+			for (combo in combos) {
+				applyParams(combo);
+				var score = scoreMetric(evaluateCandidateAgainst(trainFeed), metric);
+				if (score > bestMetric) {
+					bestMetric = score;
+					bestParams = snapshotParams(names);
+				}
+			}
+
+			applyParams(bestParams);
+			var oos = evaluateCandidateAgainst(testFeed);
+			lastBestParams = bestParams;
+
+			foldResults.push({
+				trainBars: trainEnd, testBars: testEnd - testStart, bestParams: bestParams,
+				oosSharpe: oos.sharpe, oosMaxDrawdown: oos.maxDrawdown,
+				oosWinRate: oos.winRate, oosFinalEquity: oos.finalEquity, oosTrades: oos.trades
+			});
+		}
+
+		applyParams(lastBestParams);
+		if (foldResults.length == 0)
+			return { bestParams: lastBestParams, bestMetric: Math.NaN, trials: 0 };
+
+		var aggSharpe = meanOf([for (f in foldResults) f.oosSharpe]);
+		var aggDD = meanOf([for (f in foldResults) f.oosMaxDrawdown]);
+		var aggWin = meanOf([for (f in foldResults) f.oosWinRate]);
+		var aggEq = meanOf([for (f in foldResults) f.oosFinalEquity]);
+
+		var promoted:Null<Bool> = promoteCond != null
+			? evalPromotionGate(promoteCond, {
+				sharpe: aggSharpe, maxDrawdown: aggDD, winRate: aggWin,
+				finalEquity: aggEq, trades: foldResults.length
+			})
+			: null;
+
+		return {
+			bestParams: lastBestParams,
+			bestMetric: aggSharpe,
+			trials: foldResults.length,
+			walkForward: {
+				folds: foldResults, aggregateSharpe: aggSharpe, aggregateMaxDrawdown: aggDD,
+				aggregateWinRate: aggWin, aggregateFinalEquity: aggEq, promoted: promoted
+			}
+		};
+	}
+
+	/** Materializes and calls `cond` (a `fn(r) => ...` lambda AST) against `metrics`. */
+	function evalPromotionGate(cond:Expr, metrics:Dynamic):Bool {
+		var pi = new MuseInterp(harness);
+		if (prog != null) for (d in prog.decls) pi.registerDeclPublic(d);
+		var closure = pi.evalExpr(cond);
+		return pi.callValue(closure, [metrics]) == true;
+	}
+
+	function meanOf(xs:Array<Float>):Float {
+		if (xs.length == 0) return Math.NaN;
+		var s = 0.0;
+		for (x in xs) s += x;
+		return s / xs.length;
 	}
 
 	function optimizeStep(metric:String, paramNames:Array<String>, method:String, plan:ExecutionPlan):OptimizeResult {
@@ -152,13 +275,20 @@ class PlanRunner {
 	}
 
 	function evaluateCandidate():BacktestResult {
+		if (feed == null) throw "PlanRunner: call setStrategy / bindProgram / bindCompiled before optimize()";
+		return evaluateCandidateAgainst(feed);
+	}
+
+	/** Same as evaluateCandidate() but against an arbitrary feed — the walk-forward
+	    train/test splits are never the feed this instance was bound with. */
+	function evaluateCandidateAgainst(f:BarFeed):BacktestResult {
 		harness.resetForTrial();
-		if (onBar != null && feed != null) return harness.runBacktest(onBar, feed);
-		if (compiled != null && feed != null) {
-			harness.feed = feed;
+		if (onBar != null) return harness.runBacktest(onBar, f);
+		if (compiled != null) {
+			harness.feed = f;
 			return cast compiled(harness);
 		}
-		if (prog != null && interp != null && feed != null) return interp.runBacktest(prog, feed);
+		if (prog != null && interp != null) return interp.runBacktest(prog, f);
 		throw "PlanRunner: call setStrategy / bindProgram / bindCompiled before optimize()";
 	}
 

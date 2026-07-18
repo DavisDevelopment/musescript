@@ -67,6 +67,16 @@ class MusePlanner {
 	function planExpr(e:Expr):Array<PlanStep> {
 		var out:Array<PlanStep> = [];
 		switch (e) {
+			case ECall(EIdent("walkforward"), args):
+				var folds = args.length > 0 ? intOf(args[0]) : 5;
+				var embargo = args.length > 1 ? intOf(args[1]) : 0;
+				out.push(WalkForwardStep(nextId("walkforward"), folds, embargo));
+			case ECall(EIdent("promote"), args):
+				// Deliberately does NOT recurse into args[0] (the gate lambda) — it's a pure
+				// predicate over aggregate OOS metrics, evaluated later by PlanRunner against
+				// values that don't exist yet at plan-time, not a sub-pipeline to plan.
+				if (args.length > 0)
+					out.push(PromotionGateStep(nextId("promote"), args[0]));
 			case ECall(EIdent("sample"), args):
 				var n = args.length > 1 ? intOf(args[1]) : 22;
 				var seed = args.length > 2 ? intOf(args[2]) : null;
@@ -129,6 +139,8 @@ class MusePlanner {
 			case TrainStep(id, _, _, _): id;
 			case DistillStep(id, _, _, _): id;
 			case StrategyStep(id, _): id;
+			case WalkForwardStep(id, _, _): id;
+			case PromotionGateStep(id, _): id;
 		};
 	}
 

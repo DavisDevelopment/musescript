@@ -60,6 +60,7 @@ class TestMain {
 		runner.addCase(new TestOrderBook());
 		runner.addCase(new TestWatAssembler());
 		runner.addCase(new TestBuiltinDocs());
+		runner.addCase(new TestWalkForwardPipeline());
 		runner.addCase(new TestCallStack());
 		runner.addCase(new TestPattern());
 		runner.addCase(new TestIter());

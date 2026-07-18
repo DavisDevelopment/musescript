@@ -291,6 +291,11 @@ class BuiltinSigs {
 		fun("distill", [TUnknown], TPlan, 0, true);
 		fun("pickBest", [TUnknown], TPlan, 0, true);
 		fun("plan", [TUnknown], TPlan, 0);
+		// Discovery-process primitives (pipeline construct): folds/embargo are
+		// the walk-forward protocol, not strategy backtest params; the promote
+		// predicate's single arg is the aggregate OOS metrics object.
+		fun("walkforward", [TScalar, TScalar], TPlan, 1);
+		fun("promote", [TUnknown], TPlan, 1);
 		fun("ensemble", [TUnknown, TScalar], TModel, 0);
 		fun("DecisionTreeEnsemble", [TUnknown, TScalar], TModel, 0);
 		fun("feature", [TString], TFeature);

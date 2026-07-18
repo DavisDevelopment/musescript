@@ -21,6 +21,10 @@ class MuseIR {
 					{ kind: "Distill", id: id, from: fromId, into: into, params: params };
 				case StrategyStep(id, ref):
 					{ kind: "Strategy", id: id, ref: ref };
+				case WalkForwardStep(id, folds, embargo):
+					{ kind: "WalkForward", id: id, folds: folds, embargo: embargo };
+				case PromotionGateStep(id, cond):
+					{ kind: "PromotionGate", id: id, cond: musescript.ast.MuseAstJson.exprToJson(cond) };
 			};
 			steps.push(obj);
 		}
