@@ -96,6 +96,60 @@ switch ($Target) {
       Remove-Item Env:MAVEN_OPTS -ErrorAction SilentlyContinue
     }
   }
+  "test-kestrgraal" {
+    # One-command KestrGraal parity gate (test/test_kestrgraal.py): starts the
+    # gRPC server, waits for it to be ready, runs the test, always stops the
+    # server after — whether it passes or fails. Added 2026-07-18 specifically
+    # because the test existed but required manually starting a Java server in
+    # another terminal first, and "hand-run, easy to forget" is exactly how a
+    # real host-import gap (get_position et al.) shipped silently. See
+    # ROADMAP.md #7.
+    Build-Js
+    $graalDir = Join-Path $PSScriptRoot "graal"
+    $env:MAVEN_OPTS = "--sun-misc-unsafe-memory-access=allow"
+    $proc = $null
+    try {
+      Write-Host "Starting KestrGraal server..."
+      # `clean` (not just `compile`) deliberately: a stale target/ (leftover
+      # protobuf-generated classes from before a grpc-java/proto version bump)
+      # made exec:java fail outright with a compile-time addService() mismatch
+      # even though plain `mvn compile` reported success — found live while
+      # building this gate. Slower, but this command exists to be trustworthy.
+      $proc = Start-Process -FilePath "mvn" `
+        -ArgumentList "-q", "-B", "clean", "compile", "exec:java", "-Dexec.mainClass=musescript.graal.KestrGraalServer", "-Dexec.args=`"51117 ..`"" `
+        -WorkingDirectory $graalDir `
+        -PassThru -NoNewWindow `
+        -RedirectStandardOutput (Join-Path $PSScriptRoot "build\kestrgraal_server.log") `
+        -RedirectStandardError (Join-Path $PSScriptRoot "build\kestrgraal_server.err.log")
+
+      $ready = $false
+      for ($i = 0; $i -lt 30; $i++) {
+        Start-Sleep -Seconds 2
+        if ($proc.HasExited) {
+          Write-Host "KestrGraal server exited early (exit code $($proc.ExitCode)) -- see build/kestrgraal_server.err.log"
+          break
+        }
+        if (Get-NetTCPConnection -LocalPort 51117 -ErrorAction SilentlyContinue) { $ready = $true; break }
+      }
+      if (-not $ready) {
+        Write-Host "KestrGraal server did not become ready within 60s."
+        exit 1
+      }
+
+      & $Py test/test_kestrgraal.py
+      if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    } finally {
+      if ($proc -and -not $proc.HasExited) {
+        # `mvn` on Windows is a .cmd wrapper that launches a CHILD java.exe --
+        # Stop-Process on $proc.Id only kills the wrapper and leaks the JVM
+        # (confirmed live: the server was still bound to :51117 after
+        # Stop-Process returned). taskkill /T kills the whole process tree.
+        Write-Host "Stopping KestrGraal server..."
+        taskkill /F /T /PID $proc.Id 2>&1 | Out-Null
+      }
+      Remove-Item Env:MAVEN_OPTS -ErrorAction SilentlyContinue
+    }
+  }
   "venv" {
     Write-Host "venv ready: $Py"
     & $Py -c "import numba,numpy,wasmtime; print('numba', numba.__version__); print('numpy', numpy.__version__)"
