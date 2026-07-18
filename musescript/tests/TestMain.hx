@@ -62,6 +62,7 @@ class TestMain {
 		runner.addCase(new TestBuiltinDocs());
 		runner.addCase(new TestWalkForwardPipeline());
 		runner.addCase(new TestIndicatorPorts());
+		runner.addCase(new TestPortBatch01());
 		runner.addCase(new TestCallStack());
 		runner.addCase(new TestPattern());
 		runner.addCase(new TestIter());
