@@ -1,0 +1,1 @@
+{"ok":true,"program":{"decls":[{"kind":"strategyDecl","name":"logtest","body":[]}],"stmts":[{"kind":"onBar","body":[{"kind":"exprStmt","e":{"kind":"call","callee":{"kind":"ident","name":"log","type":"(Unknown, Unknown, Unknown, Unknown) -> Void"},"args":[{"kind":"const_string","value":"bar","type":"String"},{"kind":"barfield","name":"close","type":"Series"}],"type":"Void"}}]}]}}

@@ -1,0 +1,1 @@
+{"ok":true,"program":{"decls":[{"kind":"indicatorDecl","name":"rsi","args":["src","len"],"body":{"kind":"block","exprs":[{"kind":"return","e":{"kind":"ident","name":"src","type":"Series"},"type":"Series"}],"type":"Series"}}],"stmts":[]}}

@@ -106,9 +106,13 @@ class BuiltinSigs {
 		// not from a Series handle — match TradeBuiltins.rising/falling.
 		fun("rising", [TScalar, TWindow, TWindow], TBool, 2);
 		fun("falling", [TScalar, TWindow, TWindow], TBool, 2);
-		fun("long", [TScalar], TVoid, 0);
-		fun("short", [TScalar], TVoid, 0);
-		fun("flat", [], TVoid);
+		// Arg is a qty Scalar OR an order-spec object {type, px, qty, tifBars}
+		// (OrderBook.hx) — TUnknown is the honest arg type for both.
+		fun("long", [TUnknown], TVoid, 0);
+		fun("short", [TUnknown], TVoid, 0);
+		fun("flat", [TUnknown], TVoid, 0);
+		fun("orders_pending", [], TScalar);
+		fun("orders_cancel_all", [], TScalar);
 		fun("position", [], TScalar);
 		fun("entry_price", [], TScalar);
 		fun("bars_in_trade", [], TScalar);
@@ -127,6 +131,8 @@ class BuiltinSigs {
 		fun("ema_of", [TString, TWindow], TScalar);
 		fun("mom_of", [TString, TWindow], TScalar);
 		fun("rsi_of", [TString, TWindow], TScalar);
+		// Per-symbol auxiliary/fundamental field (PIT-correct, causally-fed panel aux series).
+		fun("fund_of", [TString, TString, TWindow], TScalar, 2);
 		fun("scan_top", [TDict, TScalar], TStringArray);
 		fun("scan_bottom", [TDict, TScalar], TStringArray);
 		fun("buy", [TString, TScalar], TVoid, 1);

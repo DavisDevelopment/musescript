@@ -2,9 +2,10 @@ package musescript.ast;
 
 import musescript.types.AstSpans;
 
-typedef MuseProgram = {
-	var decls:Array<Decl>;
-	var stmts:Array<Stmt>;
+@:structInit
+class MuseProgram {
+	public var decls:Array<Decl> = [];
+	public var stmts:Array<Stmt> = [];
 	/** Optional expr/stmt → SourcePos table filled by parsers. */
-	var ?spans:AstSpans;
+	public var spans:Null<AstSpans> = null;
 }

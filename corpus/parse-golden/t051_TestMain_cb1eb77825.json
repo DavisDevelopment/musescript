@@ -1,0 +1,1 @@
+{"ok":true,"program":{"decls":[{"kind":"strategyDecl","name":"x","body":[]}],"stmts":[{"kind":"onBar","body":[{"kind":"assign","name":"x","e":{"kind":"call","callee":{"kind":"ident","name":"sma","type":"(Series, Window) -> Series"},"args":[{"kind":"const_string","value":"close","type":"String"},{"kind":"const","value":7,"type":"Scalar"}],"type":"Series"}}]}]}}

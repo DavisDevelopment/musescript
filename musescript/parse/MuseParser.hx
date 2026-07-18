@@ -30,6 +30,18 @@ using hscript.Tools;
  * Muse nodes are built only via MuseNodes / MExpr / MC — never bare EIdent for Muse.
  */
 class MuseParser {
+	/**
+	 * ROADMAP.md "Native front end" Stage B flag: when true, the legacy
+	 * annotation dialect is tokenized+parsed by musescript.parse.NativeParser
+	 * instead of the vendored hscript.Parser. Constructs the native parser
+	 * doesn't cover fall back to hscript — COUNTED in `nativeFallbacks`,
+	 * never silent (the golden corpus test asserts zero fallbacks).
+	 */
+	public static var native:Bool = false;
+
+	/** Number of hscript fallbacks taken while `native` was on (see above). */
+	public static var nativeFallbacks:Int = 0;
+
 	var parser:Parser;
 
 	public function new() {
@@ -39,12 +51,24 @@ class MuseParser {
 		parser.allowJSON = true;
 	}
 
+	/** Parse via the flagged front end: native tokenizer+parser or vendored hscript. */
+	function frontParse(source:String, ?origin:String):hscript.Expr {
+		if (native) {
+			try {
+				return new NativeParser().parseString(source, origin);
+			} catch (u:musescript.parse.NativeParser.NativeUnsupported) {
+				nativeFallbacks++;
+			}
+		}
+		return parser.parseString(source, origin);
+	}
+
 	public function parse(source:String, ?origin:String):MuseProgram {
 		if (musescript.parse.StrategyParser.looksLike(source))
 			return new musescript.parse.StrategyParser().parse(source, origin);
 		var spans = AstSpans.begin();
 		try {
-			var expr = parser.parseString(source, origin);
+			var expr = frontParse(source, origin);
 			var prog = lowerProgram(expr);
 			prog.spans = spans;
 			AstSpans.end();
@@ -58,7 +82,7 @@ class MuseParser {
 	public function parseExpr(source:String, ?origin:String):MExpr {
 		var spans = AstSpans.begin();
 		try {
-			var expr = parser.parseString(source, origin);
+			var expr = frontParse(source, origin);
 			var out = lowerExpr(expr);
 			AstSpans.end();
 			return out;

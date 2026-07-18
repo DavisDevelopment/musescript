@@ -584,8 +584,19 @@ class JsEmitter {
 	}
 
 	function emitCallArg(callee:String, index:Int, arg:Expr):String {
-		if (BuiltinSigs.wantsSeries(callee, index) && BuiltinSigs.seriesNameOf(arg) != null)
-			return emitSeriesRef(arg);
+		if (BuiltinSigs.wantsSeries(callee, index)) {
+			if (BuiltinSigs.seriesNameOf(arg) != null)
+				return emitSeriesRef(arg);
+			// Free identifier (not a hoisted local) in a series slot: aux tape
+			// columns are only known at runtime — api.seriesArg passes the
+			// series NAME when it's a live unshadowed aux column, else the
+			// variable's value (see JsBackend). Keeps interp/js parity.
+			switch (arg) {
+				case EIdent(n) if (!hoisted.exists(n)):
+					return 'api.seriesArg("${safe(n)}")';
+				default:
+			}
+		}
 		return emitExpr(arg);
 	}
 

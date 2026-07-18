@@ -1,0 +1,1 @@
+{"ok":true,"program":{"decls":[{"kind":"strategyDecl","name":"charttest","body":[]}],"stmts":[{"kind":"onBar","body":[{"kind":"exprStmt","e":{"kind":"call","callee":{"kind":"ident","name":"plot","type":"(Scalar, String, String) -> Void"},"args":[{"kind":"barfield","name":"close","type":"Series"},{"kind":"const_string","value":"px","type":"String"}],"type":"Void"}}]}]}}

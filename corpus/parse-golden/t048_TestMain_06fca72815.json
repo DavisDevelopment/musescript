@@ -1,0 +1,1 @@
+{"ok":true,"program":{"decls":[{"kind":"strategyDecl","name":"X","body":[{"kind":"onBar","body":[{"kind":"when","cond":{"kind":"const","value":1,"type":"Window"},"body":[{"kind":"order","op":"long","args":[]}]}]}]}],"stmts":[]}}

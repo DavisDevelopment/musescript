@@ -1,0 +1,1 @@
+{"ok":true,"program":{"decls":[{"kind":"strategyDecl","name":"P","body":[{"kind":"onBar","body":[{"kind":"assign","name":"x","e":{"kind":"call","callee":{"kind":"ident","name":"sma","type":"(Series, Window) -> Series"},"args":[{"kind":"barfield","name":"close","type":"Series"},{"kind":"const","value":10,"type":"Scalar"}],"type":"Series"}}]}]}],"stmts":[]}}

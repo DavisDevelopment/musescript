@@ -1,0 +1,1 @@
+{ @strategy("x") @on(bar) { var a = 1; } }

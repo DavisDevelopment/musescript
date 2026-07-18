@@ -89,18 +89,22 @@ class TradeBuiltins {
 		vars.set("ml_matrix_determinant", MlBuiltins.matrixDeterminant);
 		vars.set("ml_ridge_fit_matrix", MlBuiltins.ridgeFitMatrix);
 
-		vars.set("long", function(?qty:Float) {
+		// `long(10)` = legacy immediate close-fill; `long({type:"limit", px:...})`
+		// places on the pending book and fills on future bars (OrderBook.hx).
+		vars.set("long", function(?arg:Dynamic) {
 			if (harness.currentBar != null)
-				harness.orders.long(harness.currentBar.close, qty, harness.currentBar.index);
+				harness.orders.submit("long", arg, harness.currentBar.close, harness.currentBar.index);
 		});
-		vars.set("short", function(?qty:Float) {
+		vars.set("short", function(?arg:Dynamic) {
 			if (harness.currentBar != null)
-				harness.orders.short(harness.currentBar.close, qty, harness.currentBar.index);
+				harness.orders.submit("short", arg, harness.currentBar.close, harness.currentBar.index);
 		});
-		vars.set("flat", function() {
+		vars.set("flat", function(?arg:Dynamic) {
 			if (harness.currentBar != null)
-				harness.orders.flat(harness.currentBar.close, harness.currentBar.index);
+				harness.orders.submit("flat", arg, harness.currentBar.close, harness.currentBar.index);
 		});
+		vars.set("orders_pending", function() return harness.orders.book.pendingCount());
+		vars.set("orders_cancel_all", function() return harness.orders.book.cancelAll());
 		vars.set("position", function() return harness.orders.positionSize());
 		vars.set("entry_price", function() return harness.orders.entryPrice);
 		vars.set("bars_in_trade", function() {
@@ -239,12 +243,21 @@ class TradeBuiltins {
 			register: function(name:String, factory:Dynamic) harness.indicators.register(name, factory),
 			get: function(name:String) return harness.indicators.get(name)
 		});
+
+		/*
+		.install the builtin modules that are not specific to trading, but are useful for general-purpose programming and data analysis. 
+		These include graph algorithms, dictionary and set operations, portfolio management, and bag (multiset) operations.
+		*/
 		GraphBuiltins.install(vars);
 		DictBuiltins.install(vars);
 		SetBuiltins.install(vars);
 		PortfolioBuiltins.install(vars, harness);
 		BagBuiltins.install(vars, harness);
+
+		// yass queen, dat universe :D
 		vars.set("universe", harness.universe);
+
+		// expose the Math object directly... are there other objects we should perhaps expose as well?
 		vars.set("Math", Math);
 	}
 

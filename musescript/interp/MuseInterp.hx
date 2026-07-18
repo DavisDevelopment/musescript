@@ -30,8 +30,41 @@ import musescript.builtins.macro.MacroBuiltins;
 import musescript.types.BuiltinSigs;
 
 /**
- * MuseScript interpreter — CallFrame stack, MuseAST walk, MuseIter for-in.
- * Extends semantics beyond stock hscript.Interp (does not subclass for clarity).
+ * MuseScript tree-walking interpreter — the reference semantics every other
+ * execution tier (JsBackend, WASM) is parity-tested against, and the only
+ * steppable/debuggable tier (MuseDebugSession drives it bar by bar).
+ *
+ * ## Execution model
+ * A program executes in two phases:
+ * 1. **Registration** — `executeProgram` / `setupRun` walks top-level decls and
+ *    statements once. `@on(bar)` / `@on(position)` / `@on(tick)` / `@on(<stream>)`
+ *    bodies are NOT executed; they are collected into handler lists. Other
+ *    top-level strategy-body statements land in `preludeStmts`.
+ * 2. **Per-bar loop** — `execBar(bar)`: `bindBar` refreshes the ambient bar
+ *    bindings (OHLCV + time/bar_index + auxiliary tape columns + @params),
+ *    then prelude statements re-execute, then every @on(bar) body, then
+ *    @on(position) bodies (only while a position/holding exists).
+ *
+ * ## Name resolution (`resolve`, innermost first)
+ * call-stack frame bindings → `globals` (bar fields, builtins, top-level
+ * assigns) → registered @params → null. Locals therefore shadow bar fields
+ * and aux columns; `define` writes to the current frame when one exists,
+ * else to globals.
+ *
+ * ## Series vs scalar arguments
+ * Builtins whose signature wants a Series receive the series NAME (string)
+ * when the argument is authored as a bar field or aux column identifier —
+ * see `evalCallArgs`/`seriesNameOf` — so indicators get full history, not
+ * the current-bar float.
+ *
+ * ## Control flow signals
+ * `returnFlag`/`returnValue` implement early return (checked at the top of
+ * `execStmt`); generators pause/resume via `YieldSignal` + `genResume`
+ * (BlockResume/WhileResume mark the exact AST node to re-enter); pattern
+ * matching delegates to PatternMatcher/StreamMatcher.
+ *
+ * Not a subclass of hscript.Interp — MuseScript semantics (handlers, series,
+ * generators, match) diverge enough that sharing its walk would obscure both.
  */
 class MuseInterp {
 	public var globals:Map<String, Dynamic>;
@@ -105,25 +138,28 @@ class MuseInterp {
 		});
 	}
 
+	/**
+	 * Execute a whole program: register decls, run top-level statements, and —
+	 * when the program declared @on(bar) handlers — immediately run a backtest
+	 * over the harness's attached feed. A harness with no feed gets a
+	 * deterministic synthetic tape (fixed seed) so bare scripts / REPL demos
+	 * stay runnable with no data wired up; every real caller (GeneRunner,
+	 * MuseRuntime, PlanRunner, …) attaches its feed first.
+	 *
+	 * Scope note (was a TODO): general non-strategy programs already execute
+	 * here — decls + arbitrary statements with no @on(bar) simply return the
+	 * last evaluated value. App-plugin support needs a capability surface
+	 * (what a plugin may touch) before it needs anything from this method.
+	 */
 	public function executeProgram(prog:MuseProgram):Dynamic {
-		for (d in prog.decls) registerDecl(d);
-		for (s in prog.stmts) execStmt(s);
+		for (d in prog.decls)
+			registerDecl(d);
+		for (s in prog.stmts)
+			execStmt(s);
 
-		// If we have on bar handlers and a default backtest, run it
 		if (onBarHandlers.length > 0) {
-			var feed = BarFeed.synthetic(300, 7);
-			return harness.runBacktest(function(bar) {
-				bindBar(bar);
-				for (st in preludeStmts) execStmt(st);
-				for (h in onBarHandlers) {
-					for (st in h) execStmt(st);
-				}
-				if (harness.orders.position != 0) {
-					for (h in onPositionHandlers) {
-						for (st in h) execStmt(st);
-					}
-				}
-			}, feed);
+			var feed = harness.feed != null ? harness.feed : BarFeed.synthetic(300, 7);
+			return harness.runBacktest(function(bar) execBar(bar), feed);
 		}
 		return lastValue;
 	}
@@ -145,12 +181,16 @@ class MuseInterp {
 		onTickHandlers = [];
 		onEventHandlers = [];
 		preludeStmts = [];
+
 		var self = this;
 		harness.invokeUserFn = function(f:Dynamic, args:Array<Dynamic>):Dynamic {
 			return self.callValue(f, args != null ? args : []);
 		};
-		for (d in prog.decls) registerDecl(d);
-		for (s in prog.stmts) execStmt(s);
+
+		for (d in prog.decls) 
+			registerDecl(d);
+		for (s in prog.stmts) 
+			execStmt(s);
 	}
 
 	/**
@@ -161,10 +201,14 @@ class MuseInterp {
 	 */
 	public function execBar(bar:Bar):Void {
 		bindBar(bar);
-		for (st in preludeStmts) execStmt(st);
-		for (h in onBarHandlers) for (st in h) execStmt(st);
+		for (st in preludeStmts) 
+			execStmt(st);
+		for (h in onBarHandlers) 
+			for (st in h) 
+				execStmt(st);
 		if (harness.orders.position != 0 || harness.portfolio.holdings().length > 0)
-			for (h in onPositionHandlers) for (st in h) execStmt(st);
+			for (h in onPositionHandlers) 
+				for (st in h) execStmt(st);
 	}
 
 	public function runPanelBacktest(prog:MuseProgram, panel:musescript.harness.PanelFeed):Dynamic {
@@ -181,21 +225,27 @@ class MuseInterp {
 			case StrategyDecl(name, body):
 				strategyName = name;
 				registerStrategyBody(body);
+
 			case ParamDecl(name, def, opts):
 				var v = def != null ? evalExpr(def) : 0;
 				harness.params.register(name, v, opts.min, opts.max, opts.step, opts.tune);
 				globals.set(name, v);
+
 			case FnDecl(name, args, body, kind):
 				var fn = new FnClosure(args, body, stack.current(), name, kind);
-				if (name != null) globals.set(name, fn);
+				if (name != null) 
+					globals.set(name, fn);
+
 			case IndicatorDecl(name, args, body):
 				var closure = new FnClosure(args, body, stack.current(), name, Normal);
 				var instance = new IndicatorInstance(closure, name);
 				globals.set(name, instance);
 				harness.indicators.register(name, instance);
+
 			case MacroDecl(name, body):
 				// Macro bodies executed by planner, not here
 				globals.set('__macro_$name', body);
+
 			case ModuleDecl(_, _, _) | TemplateDecl(_, _, _, _) | StmtTemplateDecl(_, _, _):
 				// Expanded before execution / compile
 		}
@@ -210,10 +260,15 @@ class MuseInterp {
 	 * so interp-fallback backtests silently produced 0 trades.
 	 */
 	function registerStrategyBody(body:Array<Stmt>):Void {
-		for (s in body) switch (s) {
-			case Assign(_, _): preludeStmts.push(s);
-			case Block(inner): registerStrategyBody(inner);
-			default: execStmt(s);
+		for (s in body) {
+			switch (s) {
+				case Assign(_, _): 
+					preludeStmts.push(s);
+				case Block(inner): 
+					registerStrategyBody(inner);
+				default: 
+					execStmt(s);
+			}
 		}
 	}
 
@@ -227,8 +282,15 @@ class MuseInterp {
 		globals.set("volume", bar.volume);
 		globals.set("time", bar.time);
 		globals.set("bar_index", bar.index);
+		// Auxiliary tape columns (extra CSV columns / Bar.data — e.g. PIT
+		// fundamentals) resolve as bare identifiers exactly like OHLCV.
+		// NaN when this bar doesn't carry the field. Without this they
+		// silently evaluated to null → false, faking a 0-trade backtest.
+		for (k in harness.auxSeriesNames())
+			globals.set(k, harness.auxValue(k));
 		// Refresh param bindings
-		for (n in harness.params.names()) globals.set(n, harness.params.get(n));
+		for (n in harness.params.names()) 
+			globals.set(n, harness.params.get(n));
 	}
 
 	/** Bind tick event fields onto globals for on(tick) handlers (live / event path). */
@@ -240,9 +302,15 @@ class MuseInterp {
 		globals.set("time", tickField(tick, ["time", "ts", "timestamp"], harnessNow()));
 		globals.set("bid", tickField(tick, ["bid"], Math.NaN));
 		globals.set("ask", tickField(tick, ["ask"], Math.NaN));
-		if (Reflect.hasField(tick, "side")) globals.set("side", Reflect.field(tick, "side"));
-		if (Reflect.hasField(tick, "symbol")) globals.set("symbol", Reflect.field(tick, "symbol"));
-		for (n in harness.params.names()) globals.set(n, harness.params.get(n));
+		if (Reflect.hasField(tick, "side")) {
+			globals.set("side", Reflect.field(tick, "side"));
+		}
+		if (Reflect.hasField(tick, "symbol")) {
+			globals.set("symbol", Reflect.field(tick, "symbol"));
+		}
+		for (n in harness.params.names()) {
+			globals.set(n, harness.params.get(n));
+		}
 	}
 
 	/**
@@ -250,19 +318,26 @@ class MuseInterp {
 	 * Exposes event/price/size/time plus kind/id/reason/px/qty/side/symbol when present.
 	 */
 	function bindEvent(event:Dynamic):Void {
-		if (event == null) return;
+		if (event == null) 
+			return;
+
 		globals.set("event", event);
 		globals.set("price", tickField(event, ["price", "px", "last"], Math.NaN));
 		globals.set("size", tickField(event, ["size", "qty", "volume"], 0));
 		globals.set("time", tickField(event, ["time", "ts", "timestamp"], harnessNow()));
-		if (Reflect.hasField(event, "kind")) globals.set("kind", Reflect.field(event, "kind"));
-		if (Reflect.hasField(event, "id")) globals.set("id", Reflect.field(event, "id"));
-		if (Reflect.hasField(event, "reason")) globals.set("reason", Reflect.field(event, "reason"));
-		if (Reflect.hasField(event, "side")) globals.set("side", Reflect.field(event, "side"));
-		if (Reflect.hasField(event, "symbol")) globals.set("symbol", Reflect.field(event, "symbol"));
-		if (Reflect.hasField(event, "px")) globals.set("px", Reflect.field(event, "px"));
-		if (Reflect.hasField(event, "qty")) globals.set("qty", Reflect.field(event, "qty"));
-		for (n in harness.params.names()) globals.set(n, harness.params.get(n));
+
+		inline function setIfPresent(field:String):Void {
+			if (Reflect.hasField(event, field)) 
+				globals.set(field, Reflect.field(event, field));
+		}
+		final fields = ["kind", "id", "reason", "px", "qty", "side", "symbol"];
+		for (f in fields) {
+			setIfPresent(f);
+		}
+
+		for (n in harness.params.names()) {
+			globals.set(n, harness.params.get(n));
+		}
 	}
 
 	function tickField(tick:Dynamic, names:Array<String>, def:Dynamic):Dynamic {
@@ -275,6 +350,20 @@ class MuseInterp {
 		return Reflect.hasField(harness, "now") ? Reflect.field(harness, "now") : 0;
 	}
 
+	/**
+	 * Execute one statement for its effects. Statement kinds fall into three
+	 * families (see the class doc for the phase model):
+	 * - **Registration** (OnBar/OnPosition/OnTick/OnEvent): push the body onto
+	 *   the matching handler list — never executed inline.
+	 * - **Control** (Return/Yield/YieldStar/Block/When/For/MatchFor): Return
+	 *   raises `returnFlag` so every enclosing execStmt unwinds without
+	 *   executing further (checked first, below); yields route through the
+	 *   active Generator; loop bodies re-enter execStmt per element.
+	 * - **Effects** (ExprStmt/Order): Order maps Long/Short/Flat onto the
+	 *   order book at the current bar's close.
+	 * `Use` must never reach the interpreter — ModuleExpand resolves imports
+	 * at parse time, so hitting one here is a pipeline bug worth throwing on.
+	 */
 	function execStmt(s:Stmt):Void {
 		if (returnFlag) return;
 		switch (s) {
@@ -321,13 +410,14 @@ class MuseInterp {
 			case YieldStar(e):
 				yieldStar(e);
 			case Order(kind, args):
-				var qty = args.length > 0 ? evalExpr(args[0]) : null;
+				var arg:Dynamic = args.length > 0 ? evalExpr(args[0]) : null;
 				var bi = harness.currentBar != null ? harness.currentBar.index : -1;
-				switch (kind) {
-					case Long: harness.orders.long(harness.currentBar.close, qty, bi);
-					case Short: harness.orders.short(harness.currentBar.close, qty, bi);
-					case Flat | Close: harness.orders.flat(harness.currentBar.close, bi);
-				}
+				var verb = switch (kind) {
+					case Long: "long";
+					case Short: "short";
+					case Flat | Close: "flat";
+				};
+				harness.orders.submit(verb, arg, harness.currentBar.close, bi);
 			case Block(stmts):
 				for (st in stmts) execStmt(st);
 			case When(cond, body):
@@ -509,7 +599,7 @@ class MuseInterp {
 		return switch (callee) {
 			case EIdent(name):
 				[for (i in 0...args.length) {
-					var seriesName = BuiltinSigs.wantsSeries(name, i) ? BuiltinSigs.seriesNameOf(args[i]) : null;
+					var seriesName = BuiltinSigs.wantsSeries(name, i) ? seriesNameOf(args[i]) : null;
 					seriesName != null ? seriesName : evalExpr(args[i]);
 				}];
 			default:
@@ -747,6 +837,23 @@ class MuseInterp {
 		#else
 		return Std.parseFloat(Std.string(v));
 		#end
+	}
+
+	/**
+	 * BuiltinSigs.seriesNameOf plus runtime auxiliary tape columns: a bare
+	 * identifier naming an aux series (and not shadowed by a local binding)
+	 * is passed to series-typed builtin args as the series NAME, so
+	 * `sma(my_fund_col, 5)` sees full history — matching how `close` etc.
+	 * are passed, and killing the old `sma("my_fund_col", 1)` workaround.
+	 */
+	function seriesNameOf(e:Expr):Null<String> {
+		var n = BuiltinSigs.seriesNameOf(e);
+		if (n != null) return n;
+		return switch (e) {
+			case EIdent(id) | EBarField(id) if (stack.resolve(id) == null && harness.isAuxSeries(id)): id;
+			case EParent(inner): seriesNameOf(inner);
+			default: null;
+		};
 	}
 
 	function resolve(name:String):Dynamic {

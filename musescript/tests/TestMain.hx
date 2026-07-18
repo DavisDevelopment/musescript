@@ -47,8 +47,19 @@ import musescript.compile.HaxeBackend;
 
 class TestMain {
 	static function main() {
+		// MUSE_NATIVE_PARSER=1 runs the ENTIRE suite through the native front
+		// end (ROADMAP "Native front end" Stage B) — the flip gate is: suite
+		// green both ways + TestNativeParser corpus parity + zero fallbacks.
+		if (Sys.getEnv("MUSE_NATIVE_PARSER") == "1") {
+			musescript.parse.MuseParser.native = true;
+			Sys.println("[TestMain] native front end ON for this run");
+		}
 		var runner = new Runner();
 		runner.addCase(new TestParse());
+		runner.addCase(new TestNativeParser());
+		runner.addCase(new TestOrderBook());
+		runner.addCase(new TestWatAssembler());
+		runner.addCase(new TestBuiltinDocs());
 		runner.addCase(new TestCallStack());
 		runner.addCase(new TestPattern());
 		runner.addCase(new TestIter());
@@ -81,6 +92,11 @@ class TestMain {
 		runner.addCase(new TestStrategyKinds());
 		runner.addCase(new TestMetaTier());
 		Report.create(runner);
+		runner.onComplete.add(function(_) {
+			if (musescript.parse.MuseParser.native && musescript.parse.MuseParser.nativeFallbacks > 0)
+				Sys.println('[TestMain] WARNING: native front end fell back to hscript '
+					+ musescript.parse.MuseParser.nativeFallbacks + " time(s) this run");
+		});
 		runner.run();
 	}
 }
@@ -268,6 +284,38 @@ class TestParse extends Test {
 			case Assign("tapeFirst", EArray(EIdent("tape"), _)): true;
 			default: false;
 		});
+	}
+
+	/**
+	 * `StrategyParser.looksLike` sniffs only the first keyword to decide typed-surface vs. legacy
+	 * hscript parsing. A file that leads with a helper `function` before its `strategy` block (a
+	 * completely natural way to organize reusable logic) must still route to the typed surface —
+	 * regression for a real bug where such files silently fell into the legacy parser and produced
+	 * confusing, misattributed "Unexpected token" errors on the function body's SECOND statement.
+	 */
+	public function testFunctionBeforeStrategyRoutesTypedSurface() {
+		var src = "
+function helper(x) {
+  a = x + 1
+  b = a * 2
+  b
+}
+strategy UsesHelper {
+  onBar { when helper(close) > 0: long() }
+}";
+		var errs = MuseScript.check(src);
+		for (e in errs) {
+			Assert.isFalse(StringTools.startsWith(e, "error:"), 'unexpected: $e');
+		}
+		var prog = new MuseParser().parse(src, "<test>");
+		var hasFn = false, hasStrategy = false;
+		for (d in prog.decls) switch (d) {
+			case FnDecl("helper", _, _, _): hasFn = true;
+			case StrategyDecl("UsesHelper", _): hasStrategy = true;
+			default:
+		}
+		Assert.isTrue(hasFn, "helper() should parse as a real FnDecl (typed surface), not fall through to legacy hscript");
+		Assert.isTrue(hasStrategy, "strategy UsesHelper should still be present");
 	}
 }
 
@@ -727,6 +775,88 @@ class TestAuxData extends Test {
 		Assert.equals(1, result.trades);
 		Assert.equals(5, harness.series.get("sentiment").length);
 	}
+
+	public function testBareAuxIdentifierResolves() {
+		// Regression: bare identifiers naming aux columns used to silently
+		// evaluate to null → false (only OHLCV names resolved), faking a
+		// 0-trade backtest with no error. `sentiment` must behave like `close`:
+		// current-bar value as a bare ident, full history in series slots.
+		var source = '
+			@strategy("aux-ident")
+			@on(bar) {
+				if (sentiment > 0) long();
+			}
+		';
+		var harness = new HarnessContext();
+		var prog = new MuseParser().parse(source);
+		var result = new MuseInterp(harness).runBacktest(prog, new BarFeed(auxBars([-1, -1, -1, -1, 1])));
+		Assert.equals(1, result.trades);
+	}
+
+	public function testBareAuxIdentifierSeriesSlot() {
+		// sma over a bare aux identifier must see full history (series-name
+		// pass-through), agreeing exactly with the sma("name", n) string form.
+		var src = function(arg:String) return '
+			@strategy("aux-sma")
+			@on(bar) {
+				var s = sma($arg, 3);
+				if (!na(s)) long();
+			}
+		';
+		var vals:Array<Float> = [0.1, 0.2, 0.3, 0.4, 0.5];
+		var h1 = new HarnessContext();
+		var r1 = new MuseInterp(h1).runBacktest(new MuseParser().parse(src("sentiment")), new BarFeed(auxBars(vals)));
+		var h2 = new HarnessContext();
+		var r2 = new MuseInterp(h2).runBacktest(new MuseParser().parse(src('"sentiment"')), new BarFeed(auxBars(vals)));
+		Assert.equals(r2.trades, r1.trades);
+		Assert.floatEquals(r2.finalEquity, r1.finalEquity);
+		Assert.equals(1, r1.trades);
+	}
+
+	public function testBareAuxIdentifierJsParity() {
+		// Compiled JS tier must agree with the interp on bare aux identifiers,
+		// both as a condition scalar and inside a series-typed builtin arg.
+		var source = '
+			@strategy("aux-parity")
+			@on(bar) {
+				var s = sma(sentiment, 2);
+				if (!na(s) && sentiment > 0) long();
+				if (!na(s) && sentiment < 0) flat();
+			}
+		';
+		var vals:Array<Float> = [0.5, -0.2, 0.4, 0.6, -0.1, 0.3, 0.2];
+
+		var interpHarness = new HarnessContext();
+		var interpResult = new MuseInterp(interpHarness).runBacktest(
+			new MuseParser().parse(source), new BarFeed(auxBars(vals)));
+
+		#if js
+		var jsHarness = new HarnessContext();
+		Reflect.setField(jsHarness, "feed", new BarFeed(auxBars(vals)));
+		var ex = MuseCompiler.compileEx(new MuseParser().parse(source), { target: "js", strict: true });
+		Assert.equals("js", ex.backend);
+		var jsResult = ex.fn(jsHarness);
+		Assert.equals(interpResult.trades, jsResult.trades);
+		Assert.floatEquals(interpResult.finalEquity, jsResult.finalEquity);
+		#end
+		Assert.isTrue(interpResult.trades > 0);
+	}
+
+	public function testLocalShadowsAuxColumn() {
+		// A script-local binding with the same name as an aux column must win
+		// (shadowing) — the aux series never leaks through a declared local.
+		var source = '
+			@strategy("aux-shadow")
+			@on(bar) {
+				var sentiment = -1.0;
+				if (sentiment > 0) long();
+			}
+		';
+		var harness = new HarnessContext();
+		var result = new MuseInterp(harness).runBacktest(
+			new MuseParser().parse(source), new BarFeed(auxBars([1, 1, 1, 1, 1])));
+		Assert.equals(0, result.trades);
+	}
 }
 
 class TestTradeBuiltins extends Test {
@@ -1053,7 +1183,7 @@ class TestStatsBuiltins extends Test {
 			}
 		}');
 		var harness = new HarnessContext();
-		Reflect.setField(harness, "feed", BarFeed.synthetic(3, 17));
+		harness.feed = BarFeed.synthetic(3, 17);
 		var ex = MuseCompiler.compileEx(prog, { target: "js", strict: true });
 		var result = ex.fn(harness);
 		Assert.equals("js", ex.backend);
@@ -1175,7 +1305,7 @@ class TestMlBuiltins extends Test {
 			}
 		}');
 		var harness = new HarnessContext();
-		Reflect.setField(harness, "feed", BarFeed.synthetic(3, 17));
+		harness.feed = BarFeed.synthetic(3, 17);
 		var compiled = MuseCompiler.compileEx(prog, { target: "js", strict: true });
 		var result = compiled.fn(harness);
 		Assert.equals("js", compiled.backend);
@@ -1580,7 +1710,7 @@ class TestCompiler extends Test {
 			var harness = new HarnessContext();
 			harness.params.register("fast", 10);
 			harness.params.register("slow", 30);
-			Reflect.setField(harness, "feed", BarFeed.synthetic(80, 3));
+			harness.feed = BarFeed.synthetic(80, 3);
 			var fn = MuseCompiler.compile(prog, { target: "wasm" });
 			var r = fn(harness);
 			Assert.notNull(r);
@@ -1683,7 +1813,7 @@ class TestCompiler extends Test {
 		#if (js || python)
 		if (musescript.compile.StrategyWasmBackend.hostReady()) {
 			var harness = new HarnessContext();
-			Reflect.setField(harness, "feed", BarFeed.synthetic(40, 2));
+			harness.feed = BarFeed.synthetic(40, 2);
 			var fn = MuseCompiler.compile(prog, { target: "wasm" });
 			var r = fn(harness);
 			Assert.notNull(r);
@@ -1718,7 +1848,7 @@ class TestCompiler extends Test {
 		#if (js || python)
 		if (musescript.compile.StrategyWasmBackend.hostReady()) {
 			var harness = new HarnessContext();
-			Reflect.setField(harness, "feed", BarFeed.synthetic(40, 2));
+			harness.feed = BarFeed.synthetic(40, 2);
 			var fn = MuseCompiler.compile(prog, { target: "wasm" });
 			var out = fn(harness);
 			Assert.notNull(out);
@@ -1760,7 +1890,7 @@ class TestCompiler extends Test {
 		#if (js || python)
 		if (musescript.compile.StrategyWasmBackend.hostReady()) {
 			var harness = new HarnessContext();
-			Reflect.setField(harness, "feed", BarFeed.synthetic(40, 2));
+			harness.feed = BarFeed.synthetic(40, 2);
 			var fn = MuseCompiler.compile(prog, { target: "wasm" });
 			var r = fn(harness);
 			Assert.notNull(r);
@@ -1851,7 +1981,7 @@ class TestCompiler extends Test {
 		#if (js || python)
 		if (musescript.compile.StrategyWasmBackend.hostReady()) {
 			var harness = new HarnessContext();
-			Reflect.setField(harness, "feed", BarFeed.synthetic(40, 2));
+			harness.feed = BarFeed.synthetic(40, 2);
 			var fn = MuseCompiler.compile(prog, { target: "wasm" });
 			var out = fn(harness);
 			Assert.notNull(out);
@@ -1882,7 +2012,7 @@ class TestCompiler extends Test {
 		#if (js || python)
 		if (musescript.compile.StrategyWasmBackend.hostReady()) {
 			var harness = new HarnessContext();
-			Reflect.setField(harness, "feed", BarFeed.synthetic(20, 1));
+			harness.feed = BarFeed.synthetic(20, 1);
 			var fn = MuseCompiler.compile(prog, { target: "wasm" });
 			var r = fn(harness);
 			Assert.notNull(r);
@@ -2294,7 +2424,7 @@ class TestEmit extends Test {
 			}
 		}');
 		var harness = new HarnessContext();
-		Reflect.setField(harness, "feed", BarFeed.synthetic(6, 4));
+		harness.feed = BarFeed.synthetic(6, 4);
 		var ex = MuseCompiler.compileEx(prog, { target: "js", strict: true });
 		var result = ex.fn(harness);
 		Assert.equals("js", ex.backend);
@@ -2439,7 +2569,7 @@ class TestEmit extends Test {
 		harness.params.register("slow", 30);
 		harness.params.register("rsiLen", 14);
 		harness.params.register("atrLen", 14);
-		Reflect.setField(harness, "feed", BarFeed.synthetic(60, 5));
+		harness.feed = BarFeed.synthetic(60, 5);
 		var fn = MuseCompiler.compile(prog, { target: "js" });
 		var r = fn(harness);
 		Assert.notNull(r);
@@ -3668,7 +3798,7 @@ strategy MaCross {
 			Assert.isFalse(StringTools.startsWith(e, "error:"), e);
 		var prog = new MuseParser().parse(src);
 		var harness = new HarnessContext();
-		Reflect.setField(harness, "feed", BarFeed.synthetic(120, 7));
+		harness.feed = BarFeed.synthetic(120, 7);
 		TradeBuiltins.resetCrossState();
 		var ex = MuseCompiler.compileEx(prog, { target: "js", strict: true });
 		var result:Dynamic = ex.fn(harness);
@@ -3720,7 +3850,7 @@ strategy MaCross {
 		}
 		Assert.isTrue(hasFn, "top-level function decl with return should parse");
 		var harness = new HarnessContext();
-		Reflect.setField(harness, "feed", BarFeed.synthetic(100, 5));
+		harness.feed = BarFeed.synthetic(100, 5);
 		TradeBuiltins.resetCrossState();
 		var ex = MuseCompiler.compileEx(prog, { target: "js", strict: false });
 		var result:Dynamic = ex.fn(harness);
@@ -3806,9 +3936,13 @@ class TestStrategyKinds extends Test {
 			}
 			var prog = new MuseParser().parse(source, path);
 			var harness = new HarnessContext();
-			Reflect.setField(harness, "feed", BarFeed.synthetic(120, 9));
+			harness.feed = BarFeed.synthetic(120, 9);
 			TradeBuiltins.resetCrossState();
-			var ex = MuseCompiler.compileEx(prog, { target: "js", strict: true });
+			// The "js" backend can only *emit* an executable fn on the JS host; on other hosts
+			// (e.g. the Python test runner) it falls back to MuseInterp by design. Assert strict
+			// emission only where it's satisfiable; everywhere else still exercise parse+check+run
+			// and require finite equity via the interp path.
+			var ex = MuseCompiler.compileEx(prog, { target: "js", strict: #if js true #else false #end });
 			var result:Dynamic = ex.fn(harness);
 			Assert.isTrue(result != null, name);
 			Assert.isTrue(Math.isFinite(result.finalEquity), name + " equity");

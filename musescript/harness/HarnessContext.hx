@@ -27,6 +27,9 @@ class HarnessContext implements IHarness {
 	public var panelSymbols:Array<String>;
 	/** Latest session closes keyed by symbol (panel mode). */
 	public var panelPrices:Map<String, Float>;
+	/** When true, panel fills use the NEXT bar's open (decide@close[t] → fill@open[t+1]),
+	    removing the same-bar close→close lookahead. Default false = legacy close-fill. */
+	public var panelFillNextOpen:Bool = false;
 	/**
 	 * Optional user-fn caller for computed bags (`bag_computed` closures).
 	 * MuseInterp / JsBackend set this during a run so recipes can invoke
@@ -162,6 +165,23 @@ class HarnessContext implements IHarness {
 
 	/** Names of Bar.data auxiliary series seen so far this run. */
 	var auxKeys:Array<String> = [];
+
+	/** Names of Bar.data auxiliary series seen so far this run (read-only view). */
+	public function auxSeriesNames():Array<String> {
+		return auxKeys;
+	}
+
+	/** True when `name` is a known auxiliary (tape extra-column / Bar.data) series. */
+	public function isAuxSeries(name:String):Bool {
+		return auxKeys.indexOf(name) >= 0;
+	}
+
+	/** Current-bar value of aux series `name` (NaN when this bar doesn't carry it). */
+	public function auxValue(name:String):Float {
+		if (currentBar != null && currentBar.data != null && currentBar.data.exists(name))
+			return currentBar.data.get(name);
+		return Math.NaN;
+	}
 
 	/**
 	 * Causally push a bar's auxiliary data fields as named series. A key seen

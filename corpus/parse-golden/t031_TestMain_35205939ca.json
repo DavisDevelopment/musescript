@@ -1,0 +1,1 @@
+{"ok":true,"program":{"decls":[{"kind":"strategyDecl","name":"x","body":[]}],"stmts":[{"kind":"onBar","body":[{"kind":"assign","name":"a","e":{"kind":"const","value":1,"type":"Window"}}]}]}}
