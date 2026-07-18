@@ -184,8 +184,13 @@ clean compile` was required before the server would even start).
 All 9 parity cases pass bit-exact (trades/finalEquity/sharpe) against the JS
 tier; the 3 pre-existing pinned-number tests still pass unmodified.
 
-**Next**: `test_kestrgraal.py` is not self-starting and not wired into any
-CI/build gate — it requires a running server and is easy to forget to run
-before a KestrGraal-affecting change ships. Worth deciding whether to wire it
-into the same soak-then-gate discipline as the native-parser flip (Epic 1
-Stage C), rather than relying on someone remembering to run it by hand again.
+✅ **Closed the loop (2026-07-18, same day)**: `.\run.ps1 test-kestrgraal` now
+starts the server, waits for readiness, runs the full parity suite, and
+always tears the server down after — one command, no more "requires a
+running server in another terminal" friction. Also caught (by actually
+running the new target twice, not just writing it) a real process-tree leak:
+`mvn` on Windows is a `.cmd` wrapper around a child `java.exe`, so
+`Stop-Process` on the wrapper's PID left the JVM bound to the port;
+`taskkill /F /T` (tree kill) was needed. There is still no CI in this repo
+at all (everything is local-dev, `run.ps1`-driven) — this is the local
+equivalent of a gate, not a CI job; revisit if/when CI gets added.
