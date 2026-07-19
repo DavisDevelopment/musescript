@@ -34,7 +34,7 @@ class Fitness {
 			var harness = new HarnessContext();
 			var seed = new MuseInterp(harness);
 			for (d in prog.decls) seed.registerDeclPublic(d);
-			Reflect.setField(harness, "feed", new BarFeed(bars));
+			harness.feed = new BarFeed(bars);
 			TradeBuiltins.resetCrossState();
 			var ex = MuseCompiler.compileEx(prog, { target: target, strict: strict });
 			var result:Dynamic = ex.fn(harness);

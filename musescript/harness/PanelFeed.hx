@@ -19,6 +19,15 @@ class PanelFeed {
 	public var highs:Array<Map<String, Float>>;
 	public var lows:Array<Map<String, Float>>;
 	public var volumes:Array<Map<String, Float>>;
+	/**
+	 * Auxiliary (non-OHLCV) per-symbol fields — e.g. PIT fundamentals — sourced
+	 * from each input Bar's `.data` map, keyed the same way as opens/closes:
+	 * `auxSeries.get(fieldName)[t].get(sym)`. Built once at construction from
+	 * whatever values the loader already forward-filled/NaN-gated per bar
+	 * (this class does no filling of its own); consumed causally, one `t` row
+	 * at a time, by HarnessContext.observePanel — never preloaded in bulk. */
+	public var auxSeries:Map<String, Array<Map<String, Float>>>;
+	public var auxFieldNames:Array<String>;
 	var bars:Array<Bar>;
 	var i:Int;
 
@@ -38,6 +47,8 @@ class PanelFeed {
 		this.lows = lows != null ? lows : [];
 		this.closes = closes != null ? closes : [];
 		this.volumes = volumes != null ? volumes : [];
+		this.auxSeries = new Map();
+		this.auxFieldNames = [];
 		this.bars = buildSessionBars();
 		this.i = 0;
 	}
@@ -150,7 +161,41 @@ class PanelFeed {
 			closes.push(cM);
 			volumes.push(vM);
 		}
-		return new PanelFeed(syms, timeOrder, opens, highs, lows, closes, volumes);
+		var pf = new PanelFeed(syms, timeOrder, opens, highs, lows, closes, volumes);
+
+		// Discover aux field names from any bar's `.data` map, then build one
+		// per-t symbol map per field (NaN where the symbol/bar lacks that key,
+		// e.g. before a fundamental's first filing date — the loader is the
+		// PIT authority; this step only reshapes what it already provided).
+		var auxFieldSet = new Map<String, Bool>();
+		for (sym in syms) {
+			var arr = bySym.get(sym);
+			if (arr == null) continue;
+			for (b in arr) {
+				if (b.data != null) for (k in b.data.keys()) auxFieldSet.set(k, true);
+			}
+		}
+		var auxNames:Array<String> = [for (k in auxFieldSet.keys()) k];
+		auxNames.sort(Reflect.compare);
+		var auxSeries = new Map<String, Array<Map<String, Float>>>();
+		for (name in auxNames) {
+			var perT:Array<Map<String, Float>> = [];
+			for (t in timeOrder) {
+				var key = Std.string(t);
+				var m = new Map<String, Float>();
+				for (sym in syms) {
+					var bm = lookup.get(sym);
+					var b = bm != null ? bm.get(key) : null;
+					var v = (b != null && b.data != null && b.data.exists(name)) ? b.data.get(name) : Math.NaN;
+					m.set(sym, v);
+				}
+				perT.push(m);
+			}
+			auxSeries.set(name, perT);
+		}
+		pf.auxFieldNames = auxNames;
+		pf.auxSeries = auxSeries;
+		return pf;
 	}
 
 	/** Synthetic correlated universe for tests / demos. */

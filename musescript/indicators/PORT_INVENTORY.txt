@@ -7,16 +7,16 @@
 # status: DONE = ported+tested; else TODO. Pick any TODO, port per PORTING.md, one file per indicator.
 
 ## Tier P — primitives (prim/, internal)
-P  TODO  atr
+P  DONE  atr
 P  DONE  ema
 P  TODO  macd
 P  TODO  max_drawdown
 P  TODO  mom
 P  TODO  roc
-P  TODO  rsi
+P  DONE  rsi
 P  DONE  sma
 P  TODO  vwap
-P  TODO  wma
+P  DONE  wma
 
 ## Tier 3 — deferred (need tick/orderbook/cross-section/derivatives feeds)
 3  DEFER absolute_breadth_index
@@ -85,148 +85,148 @@ P  TODO  wma
 
 ## Tier 1 — portable now (name | input)
 1  DONE  abandoned_baby                           Candle
-1  TODO  abcd                                     Candle
+1  DONE  abcd                                     Candle
 1  DONE  acceleration_bands                       Candle
 1  DONE  accelerator_oscillator                   Candle
 1  DONE  ad_oscillator                            Candle
 1  DONE  adaptive_cci                             Candle
-1  TODO  adaptive_cycle                           f64
-1  TODO  adaptive_laguerre_filter                 f64
-1  TODO  adaptive_rsi                             f64
+1  DONE  adaptive_cycle                           f64
+1  DONE  adaptive_laguerre_filter                 f64
+1  DONE  adaptive_rsi                             f64
 1  DONE  adl                                      Candle
 1  DONE  advance_block                            Candle
-1  TODO  adx                                      Candle
-1  TODO  adxr                                     Candle
-1  TODO  alligator                                Candle
-1  TODO  alma                                     f64
-1  TODO  alpha                                    (f64, f64)
-1  TODO  anchored_rsi                             f64
-1  TODO  anchored_vwap                            Candle
-1  TODO  andrews_pitchfork                        Candle
-1  TODO  apo                                      f64
+1  DONE  adx                                      Candle
+1  DONE  adxr                                     Candle
+1  DONE  alligator                                Candle
+1  DONE  alma                                     f64
+1  DONE  alpha                                    (f64, f64)
+1  DONE  anchored_rsi                             f64
+1  DONE  anchored_vwap                            Candle
+1  DONE  andrews_pitchfork                        Candle
+1  DONE  apo                                      f64
 1  DONE  aroon                                    Candle
 1  DONE  aroon_oscillator                         Candle
-1  TODO  atr_bands                                Candle
-1  TODO  atr_ratchet                              Candle
-1  TODO  atr_trailing_stop                        Candle
+1  DONE  atr_bands                                Candle
+1  DONE  atr_ratchet                              Candle
+1  DONE  atr_trailing_stop                        Candle
 1  TODO  auto_fib                                 Candle
-1  TODO  autocorrelation                          f64
+1  DONE  autocorrelation                          f64
 1  TODO  autocorrelation_periodogram              f64
-1  TODO  average_daily_range                      Candle
-1  TODO  average_drawdown                         f64
-1  TODO  avg_price                                Candle
+1  DONE  average_daily_range                      Candle
+1  DONE  average_drawdown                         f64
+1  DONE  avg_price                                Candle
 1  DONE  awesome_oscillator                       Candle
-1  TODO  awesome_oscillator_histogram             Candle
-1  TODO  balance_of_power                         Candle
-1  TODO  bandpass_filter                          f64
+1  DONE  awesome_oscillator_histogram             Candle
+1  DONE  balance_of_power                         Candle
+1  DONE  bandpass_filter                          f64
 1  TODO  bat                                      Candle
-1  TODO  belt_hold                                Candle
-1  TODO  beta                                     (f64, f64)
-1  TODO  beta_neutral_spread                      (f64, f64)
-1  TODO  better_volume                            Candle
-1  TODO  bipower_variation                        f64
-1  TODO  body_size_pct                            Candle
-1  TODO  bollinger                                f64
-1  TODO  bollinger_bandwidth                      f64
+1  DONE  belt_hold                                Candle
+1  DONE  beta                                     (f64, f64)
+1  DONE  beta_neutral_spread                      (f64, f64)
+1  DONE  better_volume                            Candle
+1  DONE  bipower_variation                        f64
+1  DONE  body_size_pct                            Candle
+1  DONE  bollinger                                f64
+1  DONE  bollinger_bandwidth                      f64
 1  TODO  bomar_bands                              f64
 1  TODO  breakaway                                Candle
-1  TODO  burke_ratio                              f64
+1  DONE  burke_ratio                              f64
 1  TODO  butterfly                                Candle
-1  TODO  calmar_ratio                             f64
-1  TODO  camarilla_pivots                         Candle
-1  TODO  candle_volume                            Candle
+1  DONE  calmar_ratio                             f64
+1  DONE  camarilla_pivots                         Candle
+1  DONE  candle_volume                            Candle
 1  DONE  cci                                      Candle
-1  TODO  center_of_gravity                        f64
-1  TODO  central_pivot_range                      Candle
-1  TODO  cfo                                      f64
-1  TODO  chaikin_oscillator                       Candle
-1  TODO  chaikin_volatility                       Candle
-1  TODO  chande_kroll_stop                        Candle
-1  TODO  chandelier_exit                          Candle
-1  TODO  choppiness_index                         Candle
-1  TODO  classic_pivots                           Candle
-1  TODO  close_vs_open                            Candle
-1  TODO  closing_marubozu                         Candle
-1  TODO  cmf                                      Candle
+1  DONE  center_of_gravity                        f64
+1  DONE  central_pivot_range                      Candle
+1  DONE  cfo                                      f64
+1  DONE  chaikin_oscillator                       Candle
+1  DONE  chaikin_volatility                       Candle
+1  DONE  chande_kroll_stop                        Candle
+1  DONE  chandelier_exit                          Candle
+1  DONE  choppiness_index                         Candle
+1  DONE  classic_pivots                           Candle
+1  DONE  close_vs_open                            Candle
+1  DONE  closing_marubozu                         Candle
+1  DONE  cmf                                      Candle
 1  DONE  cmo                                      f64
-1  TODO  coefficient_of_variation                 f64
+1  DONE  coefficient_of_variation                 f64
 1  TODO  cointegration                            (f64, f64)
 1  TODO  common_sense_ratio                       f64
 1  TODO  composite_profile                        Candle
 1  TODO  concealing_baby_swallow                  Candle
-1  TODO  conditional_value_at_risk                f64
-1  TODO  connors_rsi                              f64
-1  TODO  coppock                                  f64
-1  TODO  correlation_trend_indicator              f64
-1  TODO  counterattack                            Candle
+1  DONE  conditional_value_at_risk                f64
+1  DONE  connors_rsi                              f64
+1  DONE  coppock                                  f64
+1  DONE  correlation_trend_indicator              f64
+1  DONE  counterattack                            Candle
 1  TODO  crab                                     Candle
 1  TODO  cup_and_handle                           Candle
 1  TODO  cybernetic_cycle                         f64
 1  TODO  cypher                                   Candle
 1  TODO  day_of_week_profile                      Candle
-1  TODO  decycler                                 f64
+1  DONE  decycler                                 f64
 1  TODO  decycler_oscillator                      f64
-1  TODO  dema                                     f64
+1  DONE  dema                                     f64
 1  TODO  demand_index                             Candle
-1  TODO  demark_pivots                            Candle
+1  DONE  demark_pivots                            Candle
 1  TODO  derivative_oscillator                    f64
-1  TODO  detrended_std_dev                        f64
-1  TODO  disparity_index                          f64
-1  TODO  distance_ssd                             (f64, f64)
-1  TODO  doji                                     Candle
-1  TODO  doji_star                                Candle
-1  TODO  donchian                                 Candle
-1  TODO  donchian_stop                            Candle
-1  TODO  double_bollinger                         f64
+1  DONE  detrended_std_dev                        f64
+1  DONE  disparity_index                          f64
+1  DONE  distance_ssd                             (f64, f64)
+1  DONE  doji                                     Candle
+1  DONE  doji_star                                Candle
+1  DONE  donchian                                 Candle
+1  DONE  donchian_stop                            Candle
+1  DONE  double_bollinger                         f64
 1  TODO  double_top_bottom                        Candle
 1  TODO  downside_gap_three_methods               Candle
-1  TODO  dpo                                      f64
-1  TODO  dragonfly_doji                           Candle
-1  TODO  drawdown_duration                        f64
+1  DONE  dpo                                      f64
+1  DONE  dragonfly_doji                           Candle
+1  DONE  drawdown_duration                        f64
 1  TODO  dumpling_top                             Candle
-1  TODO  dx                                       Candle
+1  DONE  dx                                       Candle
 1  TODO  dynamic_momentum_index                   f64
-1  TODO  ease_of_movement                         Candle
+1  DONE  ease_of_movement                         Candle
 1  TODO  ehlers_stochastic                        f64
-1  TODO  ehma                                     f64
-1  TODO  elder_impulse                            f64
-1  TODO  elder_ray                                Candle
-1  TODO  elder_safezone                           Candle
+1  DONE  ehma                                     f64
+1  DONE  elder_impulse                            f64
+1  DONE  elder_ray                                Candle
+1  DONE  elder_safezone                           Candle
 1  TODO  empirical_mode_decomposition             f64
-1  TODO  engulfing                                Candle
+1  DONE  engulfing                                Candle
 1  TODO  equivolume                               Candle
 1  TODO  even_better_sinewave                     f64
-1  TODO  evening_doji_star                        Candle
-1  TODO  evwma                                    Candle
-1  TODO  ewma_volatility                          f64
-1  TODO  expectancy                               f64
-1  TODO  falling_three_methods                    Candle
+1  DONE  evening_doji_star                        Candle
+1  DONE  evwma                                    Candle
+1  DONE  ewma_volatility                          f64
+1  DONE  expectancy                               f64
+1  DONE  falling_three_methods                    Candle
 1  TODO  fama                                     f64
 1  TODO  fib_arcs                                 Candle
 1  TODO  fib_channel                              Candle
 1  TODO  fib_confluence                           Candle
-1  TODO  fib_extension                            Candle
+1  DONE  fib_extension                            Candle
 1  TODO  fib_fan                                  Candle
 1  TODO  fib_projection                           Candle
-1  TODO  fib_retracement                          Candle
+1  DONE  fib_retracement                          Candle
 1  TODO  fib_time_zones                           Candle
-1  TODO  fibonacci_pivots                         Candle
-1  TODO  fisher_rsi                               f64
-1  TODO  fisher_transform                         f64
+1  DONE  fibonacci_pivots                         Candle
+1  DONE  fisher_rsi                               f64
+1  DONE  fisher_transform                         f64
 1  TODO  flag_pennant                             Candle
-1  TODO  force_index                              Candle
+1  DONE  force_index                              Candle
 1  TODO  fractal_chaos_bands                      Candle
-1  TODO  frama                                    f64
+1  DONE  frama                                    f64
 1  TODO  fry_pan_bottom                           Candle
-1  TODO  gain_loss_ratio                          f64
-1  TODO  gain_to_pain_ratio                       f64
-1  TODO  gap_side_by_side_white                   Candle
+1  DONE  gain_loss_ratio                          f64
+1  DONE  gain_to_pain_ratio                       f64
+1  DONE  gap_side_by_side_white                   Candle
 1  TODO  garch11                                  f64
-1  TODO  garman_klass                             Candle
+1  DONE  garman_klass                             Candle
 1  TODO  gartley                                  Candle
-1  TODO  gator_oscillator                         Candle
-1  TODO  generalized_dema                         f64
-1  TODO  geometric_ma                             f64
+1  DONE  gator_oscillator                         Candle
+1  DONE  generalized_dema                         f64
+1  DONE  geometric_ma                             f64
 1  TODO  golden_pocket                            Candle
 1  TODO  granger_causality                        (f64, f64)
 1  TODO  gravestone_doji                          Candle

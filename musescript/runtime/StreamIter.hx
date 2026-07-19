@@ -1,5 +1,8 @@
 package musescript.runtime;
 
+/*
+daddydaddydaddydaddydaddydaddydaddy c:
+*/
 class StreamIter implements MuseIter {
 	public var buffer:Array<Dynamic>;
 	public var maxDepth:Int;
@@ -30,13 +33,22 @@ class StreamIter implements MuseIter {
 	}
 
 	public function next():IterResult<Dynamic> {
-		if (buffer.length > 0) return Value(buffer.shift());
-		if (closed) return Done;
+		//TODO: it seems like maybe this could be simplified(?)
+		if (buffer.length > 0) 
+			return Value(buffer.shift());
+		if (closed) 
+			return Done;
+
 		var self = this;
-		return Await(function():IterResult<Dynamic> {
-			if (self.buffer.length > 0) return Value(self.buffer.shift());
-			if (self.closed) return Done;
+		function next_work_chunk():IterResult<Dynamic> {
+			if (self.buffer.length > 0) 
+				return Value(self.buffer.shift());
+			if (self.closed) 
+				return Done;
+			
 			return Await(function() return self.next());
-		});
+		}
+
+		return Await(next_work_chunk);
 	}
 }

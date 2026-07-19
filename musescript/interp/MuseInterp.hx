@@ -782,6 +782,7 @@ class MuseInterp {
 		// short-circuit
 		if (op == "&&") return truthy(evalExpr(a)) && truthy(evalExpr(b));
 		if (op == "||") return truthy(evalExpr(a)) || truthy(evalExpr(b));
+
 		if (op == "=") {
 			var right = evalExpr(b);
 			switch (a) {
@@ -797,6 +798,8 @@ class MuseInterp {
 					throw "assignment target must be an identifier or field";
 			}
 		}
+
+		// no short-circuit
 		var left = evalExpr(a);
 		var right = evalExpr(b);
 		return switch (op) {
@@ -832,7 +835,8 @@ class MuseInterp {
 		#if python
 		try {
 			return python.Syntax.code("float({0})", v);
-		} catch (_:Dynamic) {
+		} 
+		catch (_:Dynamic) {
 			return 0;
 		}
 		#else
@@ -859,18 +863,27 @@ class MuseInterp {
 
 	function resolve(name:String):Dynamic {
 		var r = stack.resolve(name);
-		if (r != null) return r.value;
-		if (globals.exists(name)) return globals.get(name);
-		if (harness.params.all().exists(name)) return harness.params.get(name);
+		if (r != null) 
+			return r.value;
+		if (globals.exists(name)) 
+			return globals.get(name);
+		if (harness.params.all().exists(name)) 
+			return harness.params.get(name);
+
 		return null;
 	}
 
 	function define(name:String, value:Dynamic):Void {
 		var cur = stack.current();
 		if (cur != null) {
-			if (cur.bindings.exists(name)) cur.bindings.get(name).value = value;
-			else cur.define(name, value);
-		} else {
+			if (cur.bindings.exists(name)) {
+				cur.bindings.get(name).value = value;
+			} 
+			else {
+				cur.define(name, value);
+			}
+		} 
+		else {
 			globals.set(name, value);
 		}
 	}
@@ -891,26 +904,41 @@ class MuseInterp {
 	public function dispatchTicks(?iter:MuseIter):Void {
 		if (iter == null) {
 			var stream = harness.eventStreams.get("ticks");
-			if (stream == null) return;
+			if (stream == null)
+				return;
 			iter = stream;
 		}
+
 		var self = this;
 		IterDriver.each(iter, function(tick) {
 			self.bindTick(tick);
 			for (h in self.onTickHandlers) {
 				for (st in h) {
 					switch (st) {
+						/*
+						MatchFor arms are evaluated in a fresh CallFrame per tick, so the
+						bindings are isolated and the guard is evaluated in the same frame.
+						*/
 						case MatchFor(name, _, arms):
 							var r = self.matcher.match(tick, arms);
-							if (!r.matched) continue;
+							if (!r.matched)
+								continue;
+
+							// bind onto the matched arm's own CallFrame so the guard sees the bindings
 							var frame = new CallFrame(self.stack.current(), "tick");
-							for (k => v in r.bindings) frame.define(k, v);
+							for (k => v in r.bindings) 
+								frame.define(k, v);
 							self.stack.push(frame);
 							self.define(name, r.bindings.exists(name) ? r.bindings.get(name) : null);
+
+							// that yupstuff
 							var ok = true;
-							if (r.guard != null) ok = self.truthy(self.evalExpr(r.guard));
-							if (ok) self.evalExpr(r.body);
+							if (r.guard != null) 
+								ok = self.truthy(self.evalExpr(r.guard));
+							if (ok) 
+								self.evalExpr(r.body);
 							self.stack.pop();
+
 						default:
 							self.execStmt(st);
 					}
@@ -921,10 +949,13 @@ class MuseInterp {
 
 	/** Run registered on-event handlers against a MuseIter / EventLog (bindEvent per item). */
 	public function dispatchEvents(streamName:String, iter:MuseIter):Void {
-		if (iter == null) return;
+		if (iter == null) 
+			return;
+
 		var self = this;
 		var handlers = [for (h in onEventHandlers) if (h.stream == streamName || h.stream == "event") h];
-		if (handlers.length == 0) return;
+		if (handlers.length == 0) 
+			return;
 
 		// Snapshot once so plain per-event handlers and MatchFor can both see events.
 		var events:Array<Dynamic> = MuseIters.toArray(iter);
@@ -932,34 +963,55 @@ class MuseInterp {
 		for (h in handlers) {
 			var plain:Array<Stmt> = [];
 			var matchers:Array<Stmt> = [];
-			for (st in h.body) switch (st) {
-				case MatchFor(_, _, _): matchers.push(st);
-				default: plain.push(st);
+			for (st in h.body) {
+				switch (st) {
+					case MatchFor(_, _, _): matchers.push(st);
+					default: plain.push(st);
+				}
 			}
+
 			for (event in events) {
 				self.bindEvent(event);
-				for (st in plain) self.execStmt(st);
+				for (st in plain) 
+					self.execStmt(st);
 			}
+
 			if (matchers.length > 0) {
 				var replay = MuseIters.from(events);
-				for (st in matchers) switch (st) {
-					case MatchFor(name, _, arms):
-						var sm = new StreamMatcher(self.matcher);
-						sm.matchFor(replay, arms, function(bindings, body) {
-							var frame = new CallFrame(self.stack.current(), "event");
-							for (k => v in bindings) frame.define(k, v);
-							self.stack.push(frame);
-							self.evalExpr(body);
-							self.stack.pop();
-						}, function(bindings, guard) {
-							var frame = new CallFrame(self.stack.current(), "guard");
-							for (k => v in bindings) frame.define(k, v);
-							self.stack.push(frame);
-							var ok = self.truthy(self.evalExpr(guard));
-							self.stack.pop();
-							return ok;
-						});
-					default:
+				for (st in matchers) {
+					switch (st) {
+						// MatchFor arms are evaluated in a fresh CallFrame per event, so the
+						// bindings are isolated and the guard is evaluated in the same frame.
+						case MatchFor(name, _, arms):
+							var sm = new StreamMatcher(self.matcher);
+
+							/*
+							define the per-arm callbacks for the stream matcher. 
+							The `bb` callback is called when a match is found, 
+							and the `bg` callback is called to evaluate the guard expression.
+							*/
+							function bb(bindings:Map<String, Dynamic>, body:musescript.ast.Expr) {
+								var frame = new CallFrame(self.stack.current(), "event");
+								for (k => v in bindings)
+									frame.define(k, v);
+								self.stack.push(frame);
+								self.evalExpr(body);
+								self.stack.pop();
+							}
+							function bg(bindings:Map<String, Dynamic>, guard:musescript.ast.Expr):Bool {
+								var frame = new CallFrame(self.stack.current(), "guard");
+								for (k => v in bindings)
+									frame.define(k, v);
+								self.stack.push(frame);
+								var ok = self.truthy(self.evalExpr(guard));
+								self.stack.pop();
+								return ok;
+							}
+
+							sm.matchFor(replay, arms, bb, bg);
+
+						default:
+					}
 				}
 			}
 		}

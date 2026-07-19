@@ -36,8 +36,13 @@ class Generator implements MuseIter {
 	public var queue:Array<Dynamic>;
 	/** Called to run or resume the generator body (see advanceBody). */
 	public var evalBody:Null<Generator->Dynamic>;
+
+	/** Delegated iterator to run in collect mode. */
 	var delegated:Null<MuseIter>;
 
+	/*
+	we gon make ourselves a generator, sha
+	*/
 	public function new(?closure:FnClosure, ?frame:CallFrame) {
 		this.closure = closure;
 		this.frame = frame;
@@ -66,7 +71,8 @@ class Generator implements MuseIter {
 				}
 			}
 
-			if (queue.length > 0) return Value(queue.shift());
+			if (queue.length > 0) 
+				return Value(queue.shift());
 
 			if (!bodyComplete) {
 				advanceBody();
@@ -80,22 +86,30 @@ class Generator implements MuseIter {
 
 	function advanceBody():Void {
 		if (bodyComplete || evalBody == null) {
-			if (evalBody == null) bodyComplete = true;
+			if (evalBody == null) {
+				bodyComplete = true;
+			}
 			return;
 		}
-		if (!started) started = true;
+
+		if (!started) 
+			started = true;
 		collecting = true;
+
 		try {
 			evalBody(this);
 			bodyComplete = true;
-		} catch (_:GeneratorYieldPause) {
+		} 
+		catch (_:GeneratorYieldPause) {
 			// stepped pause — resume on next next()
-		} catch (y:YieldSignal) {
+		} 
+		catch (y:YieldSignal) {
 			// legacy throw-style yield — treat as single value
 			queue.push(y.value);
 			if (pauseAfterYield) bodyComplete = false;
 			else bodyComplete = true;
-		} catch (e:Dynamic) {
+		} 
+		catch (e:Dynamic) {
 			collecting = false;
 			done = true;
 			bodyComplete = true;
@@ -106,8 +120,9 @@ class Generator implements MuseIter {
 
 	public function pushYield(value:Dynamic):Void {
 		queue.push(value);
-		if (pauseAfterYield && collecting)
+		if (pauseAfterYield && collecting) {
 			throw new GeneratorYieldPause();
+		}
 	}
 
 	public static function doYield(value:Dynamic):Dynamic {
@@ -115,14 +130,15 @@ class Generator implements MuseIter {
 	}
 
 	/** yield* — drain iter via next() before resuming own body (stepped mode). */
-	public function delegateTo(iter:MuseIter):Void {
+	public inline function delegateTo(iter:MuseIter):Void {
 		delegated = iter;
-		if (pauseAfterYield && collecting)
+		if (pauseAfterYield && collecting) {
 			throw new GeneratorYieldPause();
+		}
 	}
 
 	/** Finite values without evalBody — handy for tests and MuseIters.from. */
-	public static function fromValues(values:Array<Dynamic>):Generator {
+	public static inline function fromValues(values:Array<Dynamic>):Generator {
 		var g = new Generator();
 		g.queue = values != null ? values.copy() : [];
 		g.started = true;
@@ -130,7 +146,7 @@ class Generator implements MuseIter {
 		return g;
 	}
 
-	public static function empty():Generator {
+	public static inline function empty():Generator {
 		return fromValues([]);
 	}
 

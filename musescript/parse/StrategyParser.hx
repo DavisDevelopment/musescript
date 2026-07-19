@@ -80,7 +80,7 @@ class StrategyParser {
 	/** True when source looks like the new surface (not `{ @strategy ... }`). */
 	public static function looksLike(source:String):Bool {
 		var s = skipLeadingComments(StringTools.ltrim(source));
-		return StringTools.startsWith(s, "strategy")
+		if (StringTools.startsWith(s, "strategy")
 			|| StringTools.startsWith(s, "module")
 			|| StringTools.startsWith(s, "template")
 			|| StringTools.startsWith(s, "pipeline")
@@ -89,7 +89,18 @@ class StrategyParser {
 			|| StringTools.startsWith(s, "param\t")
 			|| StringTools.startsWith(s, "feature ")
 			|| StringTools.startsWith(s, "feature\t")
-			|| StringTools.startsWith(s, "indicator ");
+			|| StringTools.startsWith(s, "indicator "))
+			return true;
+		// A file may lead with helper `function` declarations before its `strategy` block — a
+		// natural way to organize reusable logic. Sniffing only the very first token silently
+		// misrouted such files to the legacy hscript parser (confusing, misattributed errors on
+		// the SECOND statement of the first function body, since bare hscript requires `;`/`var`/
+		// `return` that the typed surface doesn't). Peek for a bare top-of-line `strategy Name {`
+		// declaration anywhere in the file; deliberately NOT a plain substring search for
+		// "strategy" so it can't false-positive on the legacy `@strategy("Name")` meta annotation.
+		if (StringTools.startsWith(s, "function"))
+			return ~/(^|[\r\n])[ \t]*strategy[ \t]+[A-Za-z_]/.match(s);
+		return false;
 	}
 
 	/** Strip leading line/block comments and blank lines so looksLike sees the first keyword. */

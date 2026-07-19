@@ -9,6 +9,9 @@ package musescript.harness;
  */
 class PortfolioSim {
 	public var cash:Float;
+	/** Round-trip-agnostic per-side trading cost in basis points of traded notional
+	    (commission + spread/slippage proxy). Charged on every executed delta. 0 = frictionless. */
+	public var tradingCostBps:Float = 0.0;
 	public var positions:Map<String, Float>;
 	public var entryPrices:Map<String, Float>;
 	public var entryBars:Map<String, Int>;
@@ -192,6 +195,7 @@ class PortfolioSim {
 			}
 			var entryBefore = entryOf(sym);
 			cash -= q * price;
+			if (tradingCostBps > 0) cash -= q * price * tradingCostBps / 10000.0;
 			var next = cur + q;
 			positions.set(sym, next);
 			if (cur == 0) {
@@ -224,6 +228,7 @@ class PortfolioSim {
 			var q = cur - tgt;
 			var entryBefore = entryOf(sym);
 			cash += q * price;
+			if (tradingCostBps > 0) cash -= q * price * tradingCostBps / 10000.0;
 			var next = cur - q;
 			var pnl = 0.0;
 			if (cur > 0) {

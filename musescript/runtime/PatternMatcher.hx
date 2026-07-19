@@ -6,9 +6,12 @@ import musescript.ast.MatchArm;
 import musescript.ast.Pattern;
 
 class PatternMatcher {
-	public function new() {}
+	public function new() {
+		/* I AM THE ONE WHO MATCHES THE PATTERNS!!!! */
+	}
 
 	public function match(value:Dynamic, arms:Array<MatchArm>):MatchResult {
+		// boobs
 		for (arm in arms) {
 			var bindings = new Map<String, Dynamic>();
 			var patGuards:Array<Dynamic> = [];
@@ -22,6 +25,8 @@ class PatternMatcher {
 				};
 			}
 		}
+
+		// no match, my man
 		return { matched: false, bindings: new Map() };
 	}
 
@@ -126,7 +131,7 @@ class PatternMatcher {
 		return false;
 	}
 
-	function constEq(c:Const, value:Dynamic):Bool {
+	inline function constEq(c:Const, value:Dynamic):Bool {
 		return switch (c) {
 			case CNull: value == null;
 			case CBool(b): value == b;
@@ -136,7 +141,7 @@ class PatternMatcher {
 		};
 	}
 
-	function typeCheck(value:Dynamic, typeName:String):Bool {
+	inline function typeCheck(value:Dynamic, typeName:String):Bool {
 		return switch (typeName.toLowerCase()) {
 			case "float" | "number": Std.isOfType(value, Float) || Std.isOfType(value, Int);
 			case "int" | "integer": Std.isOfType(value, Int);

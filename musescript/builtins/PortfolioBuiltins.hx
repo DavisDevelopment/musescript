@@ -50,6 +50,13 @@ class PortfolioBuiltins {
 		vars.set("rsi_of", function(sym:String, len:Int) {
 			return TradeBuiltins.rsi(harness, seriesKey("close", sym), len);
 		});
+		// Per-symbol auxiliary field (e.g. PIT fundamentals) — mirrors close_of/etc,
+		// reading the causally-pushed `field@SYM` series (see observePanel below).
+		// NaN before the field's first known value for that symbol (unfiled / not
+		// yet available), by construction of the panel's aux series.
+		vars.set("fund_of", function(sym:String, field:String, ?n:Int = 0) {
+			return lookback(harness, field, sym, n);
+		});
 
 		vars.set("scan_top", function(scores:Dynamic, n:Int) {
 			return rankPick(scores, n, false);
@@ -146,15 +153,21 @@ class PortfolioBuiltins {
 		return out;
 	}
 
+	/**
+	 * Coerce `xs` (a plain Array, a lazy MuseIter/Generator from filter()/map()/take()/…, or a
+	 * bare scalar) into a concrete Array<String>. Was previously Array-only — any lazy iterable
+	 * (e.g. the result of `filter(picks, s => ...)`) fell through to the bare-scalar branch and
+	 * got silently stringified as ONE bogus "symbol" (the iterator object itself), so
+	 * `rebalance_equal(filter(...))` and similar always traded nothing with no error. Route
+	 * through the shared MuseIters coercion (which already materializes iterables and wraps a
+	 * bare scalar as a one-element list) so every xs shape lands here correctly.
+	 */
 	public static function toStringArray(xs:Dynamic):Array<String> {
 		if (xs == null) return [];
-		if (Std.isOfType(xs, Array)) {
-			var arr:Array<Dynamic> = cast xs;
-			var out:Array<String> = [];
-			for (v in arr) out.push(Std.string(v));
-			return out;
-		}
-		return [Std.string(xs)];
+		var arr = musescript.runtime.MuseIters.toArray(musescript.runtime.MuseIters.from(xs));
+		var out:Array<String> = [];
+		for (v in arr) out.push(Std.string(v));
+		return out;
 	}
 
 	static function asFloat(v:Dynamic):Float {
@@ -172,6 +185,10 @@ class PortfolioBuiltins {
 		var lM = t < panel.lows.length ? panel.lows[t] : null;
 		var cM = t < panel.closes.length ? panel.closes[t] : null;
 		var vM = t < panel.volumes.length ? panel.volumes[t] : null;
+		// Fill-price source: default = this bar's close (legacy). When panelFillNextOpen, fills use
+		// the NEXT bar's open so a close[t]-derived signal can't execute at close[t] (no lookahead).
+		// Signal SERIES below always get the causal bar-t values regardless.
+		var noM = (harness.panelFillNextOpen && (t + 1) < panel.opens.length) ? panel.opens[t + 1] : null;
 		var prices = new Map<String, Float>();
 		for (sym in panel.symbols) {
 			var c = cM != null && cM.exists(sym) ? cM.get(sym) : Math.NaN;
@@ -184,9 +201,28 @@ class PortfolioBuiltins {
 			harness.pushSeries(seriesKey("low", sym), l);
 			harness.pushSeries(seriesKey("close", sym), c);
 			harness.pushSeries(seriesKey("volume", sym), v);
-			prices.set(sym, c);
+			var fill = noM != null && noM.exists(sym) ? noM.get(sym) : c;
+			prices.set(sym, fill);
 		}
 		harness.panelPrices = prices;
 		harness.panelSymbols = panel.symbols;
+
+		// Auxiliary fields (e.g. PIT fundamentals): push this session's row of
+		// each known aux series into `field@SYM`, one bar at a time — the same
+		// causal, never-preloaded discipline as pushAuxData for single-symbol
+		// Bar.data. The panel's auxSeries array is fully built at construction
+		// (a reshape of what the loader already gave us per-bar), but only
+		// index `t` is ever read during session `t`, so a strategy at bar t
+		// still cannot observe bar t+1's fundamentals.
+		if (panel.auxFieldNames != null) {
+			for (name in panel.auxFieldNames) {
+				var byT = panel.auxSeries.get(name);
+				var m = (byT != null && t < byT.length) ? byT[t] : null;
+				for (sym in panel.symbols) {
+					var v = (m != null && m.exists(sym)) ? m.get(sym) : Math.NaN;
+					harness.pushSeries(seriesKey(name, sym), v);
+				}
+			}
+		}
 	}
 }

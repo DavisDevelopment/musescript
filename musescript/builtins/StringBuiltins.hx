@@ -1,5 +1,7 @@
 package musescript.builtins;
 
+typedef StringLike = Dynamic;
+
 /**
  * Portable, reflection-free string operations shared by interpreted and
  * compiled-JS strategies.
@@ -8,11 +10,11 @@ package musescript.builtins;
  * verbatim so behavior does not depend on a host's Unicode tables or locale.
  */
 class StringBuiltins {
-	public static function len(value:Dynamic):Int {
+	public static inline function len(value:StringLike):Int {
 		return text(value).length;
 	}
 
-	public static function slice(value:Dynamic, start:Int, ?end:Int):String {
+	public static inline function slice(value:StringLike, start:Int, ?end:Int):String {
 		var s = text(value);
 		var from = normalizeIndex(start, s.length);
 		var to = end == null ? s.length : normalizeIndex(end, s.length);
@@ -20,16 +22,16 @@ class StringBuiltins {
 		return s.substr(from, to - from);
 	}
 
-	public static function contains(value:Dynamic, needle:Dynamic):Bool {
+	public static inline function contains(value:StringLike, needle:StringLike):Bool {
 		return text(value).indexOf(text(needle)) >= 0;
 	}
 
-	public static function concat(a:Dynamic, b:Dynamic):String {
+	public static inline function concat(a:StringLike, b:StringLike):String {
 		return text(a) + text(b);
 	}
 
 	/** Remove leading and trailing ASCII whitespace (space, tab, CR/LF, FF, VT). */
-	public static function trim(value:Dynamic):String {
+	public static inline function trim(value:StringLike):String {
 		var s = text(value);
 		var start = 0;
 		var end = s.length;
@@ -38,21 +40,21 @@ class StringBuiltins {
 		return s.substr(start, end - start);
 	}
 
-	public static function lower(value:Dynamic):String {
+	public static inline function lower(value:StringLike):String {
 		return asciiCase(text(value), true);
 	}
 
-	public static function upper(value:Dynamic):String {
+	public static inline function upper(value:StringLike):String {
 		return asciiCase(text(value), false);
 	}
 
-	public static function startsWith(value:Dynamic, prefix:Dynamic):Bool {
+	public static inline function startsWith(value:StringLike, prefix:StringLike):Bool {
 		var s = text(value);
 		var p = text(prefix);
 		return p.length <= s.length && s.substr(0, p.length) == p;
 	}
 
-	public static function endsWith(value:Dynamic, suffix:Dynamic):Bool {
+	public static inline function endsWith(value:StringLike, suffix:StringLike):Bool {
 		var s = text(value);
 		var p = text(suffix);
 		return p.length <= s.length && s.substr(s.length - p.length, p.length) == p;
@@ -62,7 +64,7 @@ class StringBuiltins {
 	 * Find a literal needle at or after start. Negative start values are relative
 	 * to the end; the resulting position is clamped to the string bounds.
 	 */
-	public static function indexOf(value:Dynamic, needle:Dynamic, ?start:Int = 0):Int {
+	public static inline function indexOf(value:StringLike, needle:StringLike, ?start:Int = 0):Int {
 		var s = text(value);
 		return s.indexOf(text(needle), normalizeIndex(start, s.length));
 	}
@@ -71,7 +73,7 @@ class StringBuiltins {
 	 * Replace every non-overlapping literal occurrence, left to right.
 	 * An empty needle leaves the source unchanged.
 	 */
-	public static function replace(value:Dynamic, needle:Dynamic, replacement:Dynamic):String {
+	public static function replace(value:StringLike, needle:StringLike, replacement:StringLike):String {
 		var s = text(value);
 		var find = text(needle);
 		if (find.length == 0) return s;
@@ -93,14 +95,17 @@ class StringBuiltins {
 	 * Split on a literal separator, preserving empty fields (including trailing
 	 * fields). An empty separator splits into host string indexing units.
 	 */
-	public static function split(value:Dynamic, separator:Dynamic):Array<String> {
+	public static function split(value:StringLike, separator:StringLike):Array<String> {
 		var s = text(value);
 		var sep = text(separator);
 		if (sep.length == 0) {
-			var units:Array<String> = [];
-			for (i in 0...s.length) units.push(s.substr(i, 1));
-			return units;
+			// Split into host string indexing units
+			return s.split("");
 		}
+
+		/*
+		unsure why we're implementing this manually instead of using the built-in String.split, but it seems to be for performance reasons, and to avoid regex overhead. The built-in split can be slower and has different behavior with regex special characters, so this manual implementation ensures consistent behavior across platforms.
+		*/
 		var out:Array<String> = [];
 		var cursor = 0;
 		while (true) {
@@ -114,14 +119,17 @@ class StringBuiltins {
 		}
 	}
 
-	public static function join(values:Array<Dynamic>, separator:Dynamic):String {
-		if (values == null || values.length == 0) return "";
+	public static inline function join(values:Array<StringLike>, separator:StringLike):String {
+		if (values == null || values.length == 0) 
+			return "";
+
 		var sep = text(separator);
 		var out = new StringBuf();
 		for (i in 0...values.length) {
 			if (i > 0) out.add(sep);
 			out.add(text(values[i]));
 		}
+
 		return out.toString();
 	}
 
@@ -130,7 +138,7 @@ class StringBuiltins {
 	 * `[+-]?(digits[.digits?]|.digits)([eE][+-]?digits)?`.
 	 * Invalid input returns NaN.
 	 */
-	public static function toFloat(value:Dynamic):Float {
+	public static function toFloat(value:StringLike):Float {
 		if (value == null) return Math.NaN;
 		var s = trim(value);
 		if (!isDecimal(s)) return Math.NaN;
@@ -138,7 +146,7 @@ class StringBuiltins {
 	}
 
 	/** True only for trimmed, ASCII-case-insensitive "true" or the token "1". */
-	public static function toBool(value:Dynamic):Bool {
+	public static inline function toBool(value: StringLike):Bool {
 		var s = lower(trim(value));
 		return s == "true" || s == "1";
 	}
@@ -150,11 +158,11 @@ class StringBuiltins {
 		return Std.string(value);
 	}
 
-	public static function fromBool(value:Bool):String {
+	public static inline function fromBool(value:Bool):String {
 		return value ? "true" : "false";
 	}
 
-	static inline function text(value:Dynamic):String {
+	static inline function text(value:StringLike):String {
 		return value == null ? "" : Std.string(value);
 	}
 
@@ -181,7 +189,7 @@ class StringBuiltins {
 		return code == 32 || code == 9 || code == 10 || code == 13 || code == 12 || code == 11;
 	}
 
-	static function isDecimal(s:String):Bool {
+	public static function isDecimal(s: String):Bool {
 		if (s.length == 0) return false;
 		var i = 0;
 		var code = s.charCodeAt(i);

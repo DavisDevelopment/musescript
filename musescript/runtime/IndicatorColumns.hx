@@ -54,8 +54,12 @@ class IndicatorColumns {
 
 	/** The reusable result object for scratch callsite `id` (created once). */
 	public function scratchObj(id:Int):Dynamic {
-		while (scratch.length <= id) scratch.push(null);
-		if (scratch[id] == null) scratch[id] = {};
+		// pre-alloc up to id
+		while (scratch.length <= id) 
+			scratch.push(null);
+
+		if (scratch[id] == null) 
+			scratch[id] = {};
 		return scratch[id];
 	}
 
@@ -69,23 +73,26 @@ class IndicatorColumns {
 		var slot = cursor++;
 		if (slot < slots.length) {
 			var hinted = slots[slot];
-			if (hinted != null && hinted.kind == kind && hinted.p1 == p1 && hinted.p2 == p2
-				&& hinted.p3 == p3 && hinted.name == name && hinted.src == src)
+			if (hinted != null && hinted.kind == kind && hinted.p1 == p1 && hinted.p2 == p2 && hinted.p3 == p3 && hinted.name == name && hinted.src == src) {
 				return hinted;
+			}
 		}
-		var key = kind + ":" + name + ":" + p1 + ":" + p2 + ":" + p3;
+
+		final key:String = kind + ":" + name + ":" + p1 + ":" + p2 + ":" + p3;
 		var col = cols.get(key);
+
+		// refresh or create the column if the source series has changed (or never existed)
 		if (col == null || col.src != src) {
 			col = new IndCol(src);
-			col.kind = kind;
-			col.name = name;
-			col.p1 = p1;
-			col.p2 = p2;
-			col.p3 = p3;
+			col.set(kind, name, p1, p2, p3);
 			cols.set(key, col);
 		}
-		while (slots.length <= slot) slots.push(null);
+
+		// pre-allocate & register
+		while (slots.length <= slot) 
+			slots.push(null);
 		slots[slot] = col;
+
 		return col;
 	}
 
@@ -105,6 +112,7 @@ class IndCol {
 	public var b:Array<Float>;
 	public var f0:Float;
 	public var f1:Float;
+	
 	// identity fields for slot-hint verification
 	public var kind:Int;
 	public var name:String;
@@ -123,5 +131,13 @@ class IndCol {
 		p1 = 0;
 		p2 = 0;
 		p3 = 0;
+	}
+
+	public inline function set(kind:Int, name:String, p1:Int, p2:Int, p3:Int):Void {
+		this.kind = kind;
+		this.name = name;
+		this.p1 = p1;
+		this.p2 = p2;
+		this.p3 = p3;
 	}
 }

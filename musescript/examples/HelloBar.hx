@@ -34,7 +34,7 @@ class HelloBar {
 
 		var prog = new MuseParser().parse(source, "01-hello-bar.ms");
 		var feed = BarFeed.synthetic(400, 42);
-		Reflect.setField(harness, "feed", feed);
+		harness.feed = feed;
 
 		TradeBuiltins.resetCrossState();
 		var ex = MuseCompiler.compileEx(prog, { target: "js", strict: true });

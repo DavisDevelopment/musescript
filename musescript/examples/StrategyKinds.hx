@@ -99,7 +99,7 @@ class StrategyKinds {
 					);
 				}
 				var harness = new HarnessContext();
-				Reflect.setField(harness, "feed", feed);
+				harness.feed = feed;
 				TradeBuiltins.resetCrossState();
 				var ex = MuseCompiler.compileEx(prog, { target: "js", strict: true });
 				var result:Dynamic = ex.fn(harness);
