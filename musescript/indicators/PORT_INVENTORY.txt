@@ -128,7 +128,7 @@ P  DONE  wma
 1  DONE  body_size_pct                            Candle
 1  DONE  bollinger                                f64
 1  DONE  bollinger_bandwidth                      f64
-1  TODO  bomar_bands                              f64
+1  DONE  bomar_bands                              f64
 1  TODO  breakaway                                Candle
 1  DONE  burke_ratio                              f64
 1  TODO  butterfly                                Candle
@@ -150,8 +150,8 @@ P  DONE  wma
 1  DONE  cmf                                      Candle
 1  DONE  cmo                                      f64
 1  DONE  coefficient_of_variation                 f64
-1  TODO  cointegration                            (f64, f64)
-1  TODO  common_sense_ratio                       f64
+1  DONE  cointegration                            (f64, f64)
+1  DONE  common_sense_ratio                       f64
 1  TODO  composite_profile                        Candle
 1  TODO  concealing_baby_swallow                  Candle
 1  DONE  conditional_value_at_risk                f64
@@ -185,7 +185,7 @@ P  DONE  wma
 1  DONE  drawdown_duration                        f64
 1  TODO  dumpling_top                             Candle
 1  DONE  dx                                       Candle
-1  TODO  dynamic_momentum_index                   f64
+1  DONE  dynamic_momentum_index                   f64
 1  DONE  ease_of_movement                         Candle
 1  TODO  ehlers_stochastic                        f64
 1  DONE  ehma                                     f64
@@ -201,7 +201,7 @@ P  DONE  wma
 1  DONE  ewma_volatility                          f64
 1  DONE  expectancy                               f64
 1  DONE  falling_three_methods                    Candle
-1  TODO  fama                                     f64
+1  DONE  fama                                     f64
 1  TODO  fib_arcs                                 Candle
 1  TODO  fib_channel                              Candle
 1  TODO  fib_confluence                           Candle
@@ -268,7 +268,7 @@ P  DONE  wma
 1  DONE  inverse_fisher_transform                 f64
 1  DONE  inverted_hammer                          Candle
 1  DONE  jarque_bera                              f64
-1  TODO  jma                                      f64
+1  DONE  jma                                      f64
 1  DONE  jump_indicator                           f64
 1  DONE  k_ratio                                  f64
 1  DONE  kalman_hedge_ratio                       (f64, f64)
@@ -333,44 +333,44 @@ P  DONE  wma
 1  DONE  ou_half_life                             (f64, f64)
 1  TODO  overnight_gap                            Candle
 1  TODO  overnight_intraday_return                Candle
-1  TODO  pain_index                               f64
-1  TODO  pair_spread_zscore                       (f64, f64)
-1  TODO  pairwise_beta                            (f64, f64)
+1  DONE  pain_index                               f64
+1  DONE  pair_spread_zscore                       (f64, f64)
+1  DONE  pairwise_beta                            (f64, f64)
 1  TODO  parkinson                                Candle
-1  TODO  pearson_correlation                      (f64, f64)
-1  TODO  percent_b                                f64
-1  TODO  percentage_trailing_stop                 f64
+1  DONE  pearson_correlation                      (f64, f64)
+1  DONE  percent_b                                f64
+1  DONE  percentage_trailing_stop                 f64
 1  TODO  pgo                                      Candle
 1  TODO  piercing_dark_cloud                      Candle
 1  TODO  pivot_reversal                           Candle
 1  TODO  plus_di                                  Candle
 1  TODO  plus_dm                                  Candle
 1  TODO  pmo                                      f64
-1  TODO  polarized_fractal_efficiency             f64
-1  TODO  ppo                                      f64
-1  TODO  ppo_histogram                            f64
+1  DONE  polarized_fractal_efficiency             f64
+1  DONE  ppo                                      f64
+1  DONE  ppo_histogram                            f64
 1  TODO  profile_shape                            Candle
-1  TODO  profit_factor                            f64
+1  DONE  profit_factor                            f64
 1  TODO  projection_bands                         Candle
 1  TODO  projection_oscillator                    Candle
 1  TODO  psar                                     Candle
 1  TODO  pvi                                      Candle
-1  TODO  qqe                                      f64
+1  DONE  qqe                                      f64
 1  TODO  qstick                                   Candle
-1  TODO  quartile_bands                           f64
-1  TODO  r_squared                                f64
-1  TODO  realized_volatility                      f64
-1  TODO  recovery_factor                          f64
+1  DONE  quartile_bands                           f64
+1  DONE  r_squared                                f64
+1  DONE  realized_volatility                      f64
+1  DONE  recovery_factor                          f64
 1  TODO  rectangle_range                          Candle
-1  TODO  reflex                                   f64
-1  TODO  regime_label                             f64
-1  TODO  relative_strength_ab                     (f64, f64)
-1  TODO  renko_trailing_stop                      f64
+1  DONE  reflex                                   f64
+1  DONE  regime_label                             f64
+1  DONE  relative_strength_ab                     (f64, f64)
+1  DONE  renko_trailing_stop                      f64
 1  TODO  rickshaw_man                             Candle
 1  TODO  rising_three_methods                     Candle
-1  TODO  rmi                                      f64
-1  TODO  rocp                                     f64
-1  TODO  rocr                                     f64
+1  DONE  rmi                                      f64
+1  DONE  rocp                                     f64
+1  DONE  rocr                                     f64
 1  TODO  rocr100                                  f64
 1  TODO  rogers_satchell                          Candle
 1  TODO  rolling_correlation                      (f64, f64)

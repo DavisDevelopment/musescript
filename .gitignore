@@ -19,3 +19,4 @@ graal/target/
 graal/src/main/python/kestrgraal_pb2.py
 graal/src/main/python/kestrgraal_pb2_grpc.py
 graal/src/main/python/__pycache__/
+vendor/
