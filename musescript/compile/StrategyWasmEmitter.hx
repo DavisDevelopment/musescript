@@ -107,6 +107,17 @@ class StrategyWasmEmitter {
 	public function emitOnBar(prog:MuseProgram):Null<{wat:String, strings:Array<String>, escapeRegions:Array<Stmt>, framedNames:Map<String, Int>}> {
 		var hooks = collectStrategyHooks(prog);
 		if (hooks.onBar.length == 0 && hooks.onPosition.length == 0) return null;
+		// A builtin that RETURNS an opaque object (probcloud_from_json → TProbCloud, graph_pagerank
+		// → TGraphRanks, …) produces a value the numeric backend can't lower AND that escape-region
+		// interp thunks can't reconstruct/round-trip: the object reads back as 0/NaN downstream, a
+		// silent mis-emit (probcloud_prob_above returned 0 on WASM vs 0.95 on interp). So if the
+		// strategy calls ANY opaque-RETURNING builtin, force WHOLE-strategy fallback (return null →
+		// js/auto runs it in interp, correct). NOTE: this checks RETURN type only — a builtin that
+		// merely CONSUMES an opaque literal but returns a scalar (e.g. graph_degree(objectLiteral)
+		// → TScalar) still escape-compiles fine, which is why the all-in-onBar graph-object case in
+		// TestGraphBuiltins keeps working. These query builtins are cheap, not the hot numeric path
+		// WASM targets, so nothing is lost by the fallback.
+		if (programProducesOpaqueBuiltin(hooks.prelude.concat(hooks.onBar).concat(hooks.onPosition))) return null;
 		try {
 			locals = new Map();
 			localOrder = [];
@@ -832,6 +843,50 @@ class StrategyWasmEmitter {
 			case EThis:
 			case ESuper(_, args): for (a in args) collectIdents(a, out);
 		}
+	}
+
+	/** Collect every read-position identifier across a statement list (delegates exprs to
+	 *  collectIdents). Used by programUsesOpaqueBuiltin's whole-strategy bail scan. */
+	function collectStmtIdents(stmts:Array<Stmt>, out:Array<String>):Void {
+		for (s in stmts) switch (s) {
+			case OnBar(b) | OnPosition(b) | OnTick(b) | OnEvent(_, b) | Block(b): collectStmtIdents(b, out);
+			case ExprStmt(e) | Assign(_, e) | Yield(e) | YieldStar(e): collectIdents(e, out);
+			case ForIn(_, it, b): collectIdents(it, out); collectStmtIdents(b, out);
+			case MatchFor(_, it, arms):
+				collectIdents(it, out);
+				for (a in arms) { if (a.guard != null) collectIdents(a.guard, out); collectIdents(a.body, out); }
+			case Return(e): if (e != null) collectIdents(e, out);
+			case Order(_, args): for (a in args) collectIdents(a, out);
+			case When(c, b): collectIdents(c, out); collectStmtIdents(b, out);
+			case Use(_, args): for (a in args) collectIdents(a.value, out);
+		}
+	}
+
+	/** True iff the strategy calls any builtin that RETURNS an opaque object type — such a value
+	 *  can't be lowered natively NOR reconstructed by an escape-region interp thunk, so the whole
+	 *  strategy must fall back to interp/js. Checks RETURN type only: a builtin consuming an opaque
+	 *  literal but returning a scalar (graph_degree) still escape-compiles, so it's not flagged. */
+	function programProducesOpaqueBuiltin(stmts:Array<Stmt>):Bool {
+		var idents:Array<String> = [];
+		collectStmtIdents(stmts, idents);
+		for (name in idents) {
+			var sig = musescript.types.BuiltinSigs.get(name);
+			if (sig == null) continue;
+			if (isOpaqueObjectType(sig.ret)) return true;
+		}
+		return false;
+	}
+
+	/** The object-carrying MuseTypes the WASM on-bar backend can neither lower nor round-trip through
+	 *  an escape region. Deliberately EXCLUDES vector/matrix (which the emitter handles) and
+	 *  scalar-ish feature/metric/string types. */
+	static function isOpaqueObjectType(t:musescript.types.MuseType):Bool {
+		return switch (t) {
+			case TProbCloud | TGraph | TGraphPath | TGraphRanks | TModel | TTree
+			   | TStringArray | TDict | TSet | TBag: true;
+			case TObject(_): true;
+			default: false;
+		};
 	}
 
 	function emitStmt(s:Stmt):String {

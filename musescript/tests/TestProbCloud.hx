@@ -268,4 +268,27 @@ class TestProbCloud extends Test {
 		Assert.same(interpVals, jsVals);
 		#end
 	}
+
+	/**
+	 * WASM tier: a strategy calling an opaque-RETURNING builtin (probcloud_from_json → TProbCloud)
+	 * must WHOLE-fall-back — emitOnBar returns null — never a partial-WASM module. Escape regions
+	 * share only the f64 frame, so a probcloud object can't round-trip through them; emitting anyway
+	 * silently produced 0 where interp/js produce 0.95 (the mis-emit this guards against). The
+	 * fallback is honest and correct: js/interp run these cheap query builtins fine.
+	 */
+	public function testProbCloudStrategyFallsBackFromWasm() {
+		var src = probeSrc();
+		var prog = new MuseParser().parse(src);
+		// emitOnBar returns null → StrategyWasmBackend.compile routes to interp/js, never a broken
+		// WASM module. (Both prelude-scoped and on-bar-scoped probcloud use hit this.)
+		var emitted = musescript.compile.StrategyWasmBackend.emitOnBar(prog);
+		Assert.isNull(emitted);
+
+		var onbarSrc = 'strategy PC {\n  onBar {\n'
+			+ '    var cloud = probcloud_from_json(${museStringLiteral(cloudJson())})\n'
+			+ '    var pUp = probcloud_prob_above(cloud, "A", 0.0)\n'
+			+ '    plot(pUp, "p")\n'
+			+ '  }\n}\n';
+		Assert.isNull(musescript.compile.StrategyWasmBackend.emitOnBar(new MuseParser().parse(onbarSrc)));
+	}
 }
