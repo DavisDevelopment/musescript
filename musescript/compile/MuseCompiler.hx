@@ -28,8 +28,22 @@ class MuseCompiler {
 	public static function compileEx(prog:MuseProgram, ?opts:{?target:String, ?strict:Bool}):CompileEx {
 		var target = opts != null && opts.target != null ? opts.target : "js";
 		var strict = opts != null && opts.strict == true;
-		prog = ModuleExpand.expand(prog);
+		// TemplateExpand before ModuleExpand (2026-07-19 hardening pass —
+		// was the other way round): TemplateExpand already knows how to
+		// expand template calls found INSIDE a ModuleDecl's body (its own
+		// decl switch has a ModuleDecl case), and correctly substitutes
+		// template params referenced inside a `use Module(arg = param)`
+		// call's arguments (TemplateExpand.substituteStmt's Use case).
+		// ModuleExpand does NOT have the reverse capability — it never
+		// scans TemplateDecl/StmtTemplateDecl bodies at all, so a `use`
+		// call written INSIDE a template would never be seen by
+		// ModuleExpand if it ran first (by the time TemplateExpand later
+		// inlines that template at its call site, ModuleExpand has
+		// already finished and the ModuleDecl info it needs is gone —
+		// ModuleExpand strips ModuleDecl from `decls` as it collects them,
+		// so a second ModuleExpand pass afterward wouldn't help either).
 		prog = TemplateExpand.expand(prog);
+		prog = ModuleExpand.expand(prog);
 		prog = SeriesLowering.lower(prog);
 		prog = GeneratorLower.lower(prog);
 		prog = TailCallPass.transform(prog);

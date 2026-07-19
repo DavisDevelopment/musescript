@@ -196,8 +196,10 @@ class MuseDebugSession {
 
 	static function parse(source:String):MuseProgram {
 		var prog = new MuseParser().parse(source, "<debug>");
-		prog = ModuleExpand.expand(prog);
+		// Order: see MuseCompiler.compileEx's comment (TemplateExpand
+		// before ModuleExpand — the reverse can't see `use` inside templates).
 		prog = TemplateExpand.expand(prog);
+		prog = ModuleExpand.expand(prog);
 		return prog;
 	}
 

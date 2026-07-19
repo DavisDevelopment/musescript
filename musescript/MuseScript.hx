@@ -34,16 +34,20 @@ class MuseScript {
 	/** Full front-end pipeline: parse → module/template expand → series lower. */
 	public static function lower(source:String, ?origin:String):MuseProgram {
 		var prog = parse(source, origin);
-		prog = musescript.compile.ModuleExpand.expand(prog);
+		// Order: see MuseCompiler.compileEx's comment (TemplateExpand
+		// before ModuleExpand — the reverse can't see `use` inside templates).
 		prog = musescript.compile.TemplateExpand.expand(prog);
+		prog = musescript.compile.ModuleExpand.expand(prog);
 		prog = musescript.compile.SeriesLowering.lower(prog);
 		return prog;
 	}
 
 	public static function plan(source:String, ?origin:String):ExecutionPlan {
 		var prog = parse(source, origin);
-		prog = musescript.compile.ModuleExpand.expand(prog);
+		// Order: see MuseCompiler.compileEx's comment (TemplateExpand
+		// before ModuleExpand — the reverse can't see `use` inside templates).
 		prog = musescript.compile.TemplateExpand.expand(prog);
+		prog = musescript.compile.ModuleExpand.expand(prog);
 		return new MusePlanner().plan(prog);
 	}
 

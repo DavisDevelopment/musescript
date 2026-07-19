@@ -333,6 +333,29 @@ class BuiltinSigs {
 			{name: "distance", ty: TScalar}
 		]), 3);
 		fun("graph_pagerank", [TGraph, TScalar, TScalar, TScalar], TGraphRanks, 1);
+		// Probability-cloud query surface (musescript/kestrel/ProbCloudRuntime.hx)
+		// — a portable, pure-Haxe port of the Python ProbabilityCloud query API,
+		// so it behaves identically on JS (web/mobile) and Python (backtest)
+		// targets. FITTING a cloud is a separate, offline, Python-only concern
+		// (tools/kestrel_bridge.py); `probcloud_from_json` just parses its
+		// already-fitted JSON output — never touches Python at query time.
+		fun("probcloud_from_json", [TString], TProbCloud, 1);
+		fun("probcloud_median", [TProbCloud, TString, TScalar], TScalar, 2);
+		fun("probcloud_quantile", [TProbCloud, TString, TScalar, TScalar], TScalar, 3);
+		fun("probcloud_interval_low", [TProbCloud, TString, TScalar, TScalar], TScalar, 2);
+		fun("probcloud_interval_high", [TProbCloud, TString, TScalar, TScalar], TScalar, 2);
+		fun("probcloud_iqr", [TProbCloud, TString, TScalar], TScalar, 2);
+		fun("probcloud_width", [TProbCloud, TString, TScalar, TScalar], TScalar, 2);
+		fun("probcloud_conviction", [TProbCloud, TString, TScalar], TScalar, 2);
+		fun("probcloud_skew", [TProbCloud, TString, TScalar], TScalar, 2);
+		fun("probcloud_expected_value", [TProbCloud, TString, TScalar], TScalar, 2);
+		fun("probcloud_cdf", [TProbCloud, TString, TScalar, TScalar], TScalar, 3);
+		fun("probcloud_prob_below", [TProbCloud, TString, TScalar, TScalar], TScalar, 3);
+		fun("probcloud_prob_above", [TProbCloud, TString, TScalar, TScalar], TScalar, 3);
+		fun("probcloud_prob_between", [TProbCloud, TString, TScalar, TScalar, TScalar], TScalar, 4);
+		fun("probcloud_prob_up", [TProbCloud, TString, TScalar], TScalar, 2);
+		fun("probcloud_is_calibrated", [TProbCloud], TBool, 1);
+		fun("probcloud_trust_note", [TProbCloud], TString, 1);
 		// Opaque Dict / Set bookkeeping (string keys / string identity).
 		fun("dict_new", [], TDict);
 		// Keys are coerced with Std.string at runtime — accept any key type.

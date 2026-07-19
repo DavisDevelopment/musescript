@@ -196,8 +196,12 @@ class GeneRunner {
 		// Expand statement templates before any interpreter seeding. Seeding the
 		// raw AST left bare `TrailingStop(0.05)` calls unresolved ("Cannot call null").
 		var prog = new MuseParser().parse(source, "<gene>");
-		prog = musescript.compile.ModuleExpand.expand(prog);
+		// TemplateExpand before ModuleExpand — see MuseCompiler.compileEx's
+		// comment: TemplateExpand can see into ModuleDecl bodies, ModuleExpand
+		// can't see into TemplateDecl bodies, so this order is required for a
+		// `use` call written inside a template to ever get expanded.
 		prog = musescript.compile.TemplateExpand.expand(prog);
+		prog = musescript.compile.ModuleExpand.expand(prog);
 
 		if (checkOnly) {
 			var warnings = new MuseChecker().check(prog);

@@ -23,6 +23,7 @@ class MuseTypes {
 			case "Graph": TGraph;
 			case "GraphPath": TGraphPath;
 			case "GraphRanks": TGraphRanks;
+			case "ProbCloud": TProbCloud;
 			case "Window": TWindow;
 			case "Price": TPrice;
 			case "Void": TVoid;
@@ -52,6 +53,7 @@ class MuseTypes {
 			case TGraph: "Graph";
 			case TGraphPath: "GraphPath";
 			case TGraphRanks: "GraphRanks";
+			case TProbCloud: "ProbCloud";
 			case TWindow: "Window";
 			case TPrice: "Price";
 			case TVoid: "Void";

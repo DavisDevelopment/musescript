@@ -1230,6 +1230,40 @@ class JsBackend {
 				var kept = musescript.builtins.BagBuiltins.bagMask(curM, args[0], null);
 				harness.portfolio.applyBag(kept.weights, harness.panelPrices, biM, true);
 				null;
+			case "probcloud_from_json": musescript.builtins.ProbCloudBuiltins.fromJson(args[0]);
+			case "probcloud_median":
+				musescript.builtins.ProbCloudBuiltins.median(args[0], args[1], args.length > 2 ? args[2] : null);
+			case "probcloud_quantile":
+				musescript.builtins.ProbCloudBuiltins.quantileAt(args[0], args[1], args[2], args.length > 3 ? args[3] : null);
+			case "probcloud_interval_low":
+				musescript.builtins.ProbCloudBuiltins.intervalLow(args[0], args[1],
+					args.length > 2 ? args[2] : null, args.length > 3 ? args[3] : null);
+			case "probcloud_interval_high":
+				musescript.builtins.ProbCloudBuiltins.intervalHigh(args[0], args[1],
+					args.length > 2 ? args[2] : null, args.length > 3 ? args[3] : null);
+			case "probcloud_iqr":
+				musescript.builtins.ProbCloudBuiltins.iqr(args[0], args[1], args.length > 2 ? args[2] : null);
+			case "probcloud_width":
+				musescript.builtins.ProbCloudBuiltins.width(args[0], args[1],
+					args.length > 2 ? args[2] : null, args.length > 3 ? args[3] : null);
+			case "probcloud_conviction":
+				musescript.builtins.ProbCloudBuiltins.conviction(args[0], args[1], args.length > 2 ? args[2] : null);
+			case "probcloud_skew":
+				musescript.builtins.ProbCloudBuiltins.skew(args[0], args[1], args.length > 2 ? args[2] : null);
+			case "probcloud_expected_value":
+				musescript.builtins.ProbCloudBuiltins.expectedValue(args[0], args[1], args.length > 2 ? args[2] : null);
+			case "probcloud_cdf":
+				musescript.builtins.ProbCloudBuiltins.cdf(args[0], args[1], args[2], args.length > 3 ? args[3] : null);
+			case "probcloud_prob_below":
+				musescript.builtins.ProbCloudBuiltins.probBelow(args[0], args[1], args[2], args.length > 3 ? args[3] : null);
+			case "probcloud_prob_above":
+				musescript.builtins.ProbCloudBuiltins.probAbove(args[0], args[1], args[2], args.length > 3 ? args[3] : null);
+			case "probcloud_prob_between":
+				musescript.builtins.ProbCloudBuiltins.probBetween(args[0], args[1], args[2], args[3], args.length > 4 ? args[4] : null);
+			case "probcloud_prob_up":
+				musescript.builtins.ProbCloudBuiltins.probUp(args[0], args[1], args.length > 2 ? args[2] : null);
+			case "probcloud_is_calibrated": musescript.builtins.ProbCloudBuiltins.isCalibrated(args[0]);
+			case "probcloud_trust_note": musescript.builtins.ProbCloudBuiltins.trustNote(args[0]);
 			case "any": IterDriver.any(MuseIters.from(args[0]), Callables.asHostPred(args[1], harness));
 			case "all": IterDriver.all(MuseIters.from(args[0]), Callables.asHostPred(args[1], harness));
 			case "find": IterDriver.find(MuseIters.from(args[0]), Callables.asHost1(args[1], harness));

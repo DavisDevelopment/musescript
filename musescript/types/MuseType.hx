@@ -14,6 +14,8 @@ enum MuseType {
 	TGraph;
 	TGraphPath;
 	TGraphRanks;
+	/** Opaque parsed ProbabilityCloud (runtime: ProbCloudRuntime) — see musescript/kestrel/ProbCloudRuntime.hx. */
+	TProbCloud;
 	TWindow;
 	TPrice;
 	TVoid;

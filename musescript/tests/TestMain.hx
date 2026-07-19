@@ -91,6 +91,7 @@ class TestMain {
 		runner.addCase(new TestArrayBuffer());
 		runner.addCase(new TestConstructOnce());
 		runner.addCase(new TestClassStructLowering());
+		runner.addCase(new TestProbCloud());
 		runner.addCase(new TestHybridWasm());
 		runner.addCase(new TestCompiler());
 		runner.addCase(new TestGenerator());
@@ -4097,6 +4098,196 @@ strategy X { onBar { y = boom(1) } }
 			default:
 		}
 		Assert.isTrue(hasMacro);
+	}
+
+	// ── ModuleExpand / TemplateExpand hardening (2026-07-19) ───────────────
+	// ModuleExpand used to be considerably more permissive than TemplateExpand:
+	// a missing required arg silently bound to 0.0, a typo'd arg name was
+	// silently dropped, and there was no recursion depth guard at all (a
+	// self-`use`ing module would stack-overflow instead of erroring cleanly).
+	// Also: ModuleExpand ran BEFORE TemplateExpand, but never scans into
+	// TemplateDecl/StmtTemplateDecl bodies at all — a `use` call written
+	// INSIDE a template was silently never expanded, surfacing later as
+	// "MuseInterp: unresolved use" at RUNTIME instead of a compile-time
+	// error. Fixed by reordering (TemplateExpand first — it already knows
+	// how to expand into ModuleDecl bodies AND substitute template params
+	// referenced inside a `use`'s args) plus real arg/depth validation.
+
+	public function testModuleMissingRequiredArgThrows() {
+		var src = '
+module Guard(pct: Scalar) {
+  onBar { when close < pct: flat(); }
+}
+strategy S {
+  use Guard()
+  onBar { when true: long() }
+}';
+		var threw = false;
+		try {
+			MuseScript.lower(src);
+		} catch (_:Dynamic) {
+			threw = true;
+		}
+		Assert.isTrue(threw);
+	}
+
+	public function testModuleUnknownArgNameThrows() {
+		var src = '
+module Guard(pct: Scalar = 0.05) {
+  onBar { when close < pct: flat(); }
+}
+strategy S {
+  use Guard(pctt = 0.1)
+  onBar { when true: long() }
+}';
+		var threw = false;
+		try {
+			MuseScript.lower(src);
+		} catch (_:Dynamic) {
+			threw = true;
+		}
+		Assert.isTrue(threw);
+	}
+
+	/** ModuleExpand short-circuits entirely (skips the whole tree walk) when
+	 * NO module is declared anywhere in the program — so validating an
+	 * unknown-module `use` needs at least one real ModuleDecl present to
+	 * even reach the per-`use` check at all (a program with zero modules
+	 * and a bogus `use` still eventually fails loudly, just later, when the
+	 * stray `Use` node reaches MuseInterp's "unresolved use" guard instead
+	 * of here at expansion time — a real but low-priority gap, not fixed
+	 * in this pass). */
+	public function testModuleUnknownModuleNameThrows() {
+		var src = '
+module Real(x: Scalar = 1) {
+  onBar { when close < x: flat(); }
+}
+strategy S {
+  use NoSuchModule(x = 1)
+  onBar { when true: long() }
+}';
+		var threw = false;
+		try {
+			MuseScript.lower(src);
+		} catch (_:Dynamic) {
+			threw = true;
+		}
+		Assert.isTrue(threw);
+	}
+
+	/** A module that (indirectly) `use`s itself must fail with a clean
+	 * "expansion depth exceeded" error, not a raw stack overflow. */
+	public function testModuleSelfReferenceThrowsDepthErrorNotStackOverflow() {
+		var src = '
+module Loopy(x: Scalar = 1) {
+  onBar { use Loopy(x = x) }
+}
+strategy S {
+  use Loopy(x = 1)
+  onBar { when true: long() }
+}';
+		var threw = false;
+		var msg = "";
+		try {
+			MuseScript.lower(src);
+		} catch (e:Dynamic) {
+			threw = true;
+			msg = Std.string(e);
+		}
+		Assert.isTrue(threw);
+		Assert.isTrue(StringTools.contains(msg, "depth"));
+	}
+
+	public function testTemplateExprWrongArgCountThrows() {
+		var src = '
+template goldenCross(fast: Window, slow: Window) -> Bool {
+  crossover(sma(close, fast), sma(close, slow))
+}
+strategy X {
+  onBar { when goldenCross(8): long() }
+}';
+		var threw = false;
+		try {
+			MuseScript.lower(src);
+		} catch (_:Dynamic) {
+			threw = true;
+		}
+		Assert.isTrue(threw);
+	}
+
+	public function testTemplateStmtWrongArgCountThrows() {
+		var src = '
+template TrailingStop(pct: Scalar) {
+  onPosition { when unrealized_pnl < -pct * equity: flat() }
+}
+strategy Guarded {
+  TrailingStop(0.05, 99)
+  onBar { when true: long() }
+}';
+		var threw = false;
+		try {
+			MuseScript.lower(src);
+		} catch (_:Dynamic) {
+			threw = true;
+		}
+		Assert.isTrue(threw);
+	}
+
+	/** A `use Module(...)` call written INSIDE a template body must expand
+	 * correctly, with the template's own param correctly substituted into
+	 * the module's arg — the exact scenario the TemplateExpand-before-
+	 * ModuleExpand reorder fixes (ModuleExpand alone never sees inside a
+	 * template body, so this used to reach the interp as an unresolved
+	 * `Use` and throw at RUN time instead of expanding at compile time). */
+	public function testUseInsideTemplateBodyExpandsWithSubstitutedArg() {
+		var src = '
+module Guard(pct: Scalar = 0.05) {
+  onBar { plot(pct, "guard_pct") }
+}
+template UseGuard(p: Scalar) {
+  use Guard(pct = p)
+}
+strategy S {
+  UseGuard(0.25)
+  onBar { when true: long() }
+}';
+		var prog = MuseScript.lower(src);
+		var hasUse = false;
+		for (d in prog.decls) switch (d) {
+			case StrategyDecl(_, body):
+				for (s in body) switch (s) {
+					case Use(_, _): hasUse = true;
+					default:
+				}
+			default:
+		}
+		Assert.isFalse(hasUse); // fully expanded, no leftover Use node
+
+		var feed = BarFeed.synthetic(3, 1);
+		var harness = new HarnessContext();
+		new MuseInterp(harness).runBacktest(prog, feed);
+		for (c in harness.chart.commands) if (c.label == "guard_pct") Assert.floatEquals(0.25, c.series);
+	}
+
+	/** The other direction — a template call written INSIDE a module body —
+	 * was already correctly handled before this pass (TemplateExpand's own
+	 * decl switch has a ModuleDecl case); pinned here as a regression guard
+	 * now that the pass ORDER changed. */
+	public function testTemplateInsideModuleBodyStillExpands() {
+		var src = '
+template Doubled(x: Scalar) -> Scalar { x * 2 }
+module Sized(base: Scalar = 1) {
+  onBar { plot(Doubled(base), "sized") }
+}
+strategy S {
+  use Sized(base = 3)
+  onBar { when true: long() }
+}';
+		var prog = MuseScript.lower(src);
+		var feed = BarFeed.synthetic(3, 1);
+		var harness = new HarnessContext();
+		new MuseInterp(harness).runBacktest(prog, feed);
+		for (c in harness.chart.commands) if (c.label == "sized") Assert.floatEquals(6.0, c.series);
 	}
 
 	public function testPaletteExport() {

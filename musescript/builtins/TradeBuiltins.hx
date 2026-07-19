@@ -253,6 +253,7 @@ class TradeBuiltins {
 		SetBuiltins.install(vars);
 		PortfolioBuiltins.install(vars, harness);
 		BagBuiltins.install(vars, harness);
+		ProbCloudBuiltins.install(vars);
 
 		// yass queen, dat universe :D
 		vars.set("universe", harness.universe);

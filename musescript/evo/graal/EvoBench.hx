@@ -325,8 +325,10 @@ class EvoBench {
 		try {
 			var source = Expand.expand(g);
 			var prog = new MuseParser().parse(source, "<evo>");
-			prog = ModuleExpand.expand(prog);
+			// Order: see MuseCompiler.compileEx's comment (TemplateExpand
+			// before ModuleExpand — the reverse can't see `use` inside templates).
 			prog = TemplateExpand.expand(prog);
+			prog = ModuleExpand.expand(prog);
 			prog = SeriesLowering.lower(prog);
 			return new StrategyWasmEmitter().emitOnBar(prog);
 		} catch (e:Dynamic) {

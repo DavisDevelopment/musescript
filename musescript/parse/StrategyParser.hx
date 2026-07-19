@@ -706,6 +706,13 @@ class StrategyParser {
 			return stampExpr(start, MuseNodes.block(es));
 		}
 		var id = expectIdentValue();
+		// `if (...) { ... }` is not a statement/expression in this grammar (only
+		// `EIf` is EMITTED-side supported, via the legacy decorator parser's own
+		// expression path) — falling through to a bare-identifier read here would
+		// silently misparse `if` as a call to an unknown builtin named "if"
+		// (cryptic "unknown builtin if" / "Cannot call null" at RUN time, far from
+		// this parse site). Fail loudly, at parse time, with the actual fix.
+		if (id == "if") throw err('"if" is not valid here — this syntax uses `when cond: { ... }` for conditionals (e.g. `when close > sma(close, 20): { long() }`)');
 		if (id == "true") return stampExpr(start, MuseNodes.boolExpr(true));
 		if (id == "false") return stampExpr(start, MuseNodes.boolExpr(false));
 		if (id == "null") return stampExpr(start, MuseNodes.nullExpr());
