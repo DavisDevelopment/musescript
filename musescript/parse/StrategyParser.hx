@@ -5,6 +5,8 @@ import musescript.ast.Decl;
 import musescript.ast.Stmt;
 import musescript.ast.Expr;
 import musescript.ast.Const;
+import musescript.ast.Pattern;
+import musescript.ast.MatchArm;
 import musescript.ast.OrderKind;
 import musescript.ast.ParamOpts;
 import musescript.ast.FnKind;
@@ -60,6 +62,10 @@ class StrategyParser {
 						decls.push(parseFeatureDecl());
 					case "indicator":
 						decls.push(parseIndicatorDecl());
+					case "enum":
+						decls.push(parseEnumDecl());
+					case "class":
+						decls.push(parseClassDecl());
 					case "function":
 						decls.push(parseFnDecl());
 					default:
@@ -89,6 +95,10 @@ class StrategyParser {
 			|| StringTools.startsWith(s, "param\t")
 			|| StringTools.startsWith(s, "feature ")
 			|| StringTools.startsWith(s, "feature\t")
+			|| StringTools.startsWith(s, "enum ")
+			|| StringTools.startsWith(s, "enum\t")
+			|| StringTools.startsWith(s, "class ")
+			|| StringTools.startsWith(s, "class\t")
 			|| StringTools.startsWith(s, "indicator "))
 			return true;
 		// A file may lead with helper `function` declarations before its `strategy` block — a
@@ -279,6 +289,79 @@ class StrategyParser {
 	function parseFeatureDecl():Decl {
 		expectIdent("feature");
 		return parseValueDeclAfterKeyword();
+	}
+
+	/** `enum Name { Variant; Variant(arg, ...); ... }` — Haxe-flavored algebraic enum. */
+	function parseEnumDecl():Decl {
+		expectIdent("enum");
+		var name = expectIdentValue();
+		expect("{");
+		var variants:Array<{name:String, args:Array<String>}> = [];
+		skipWs();
+		while (i < len && !check("}")) {
+			var vn = expectIdentValue();
+			var args:Array<String> = [];
+			if (match("(")) {
+				if (!check(")")) {
+					do args.push(expectIdentValue()) while (match(","));
+				}
+				expect(")");
+			}
+			match(";");
+			variants.push({ name: vn, args: args });
+			skipWs();
+		}
+		expect("}");
+		return EnumDecl(name, variants);
+	}
+
+	/**
+	 * `class Name [extends Parent] { field [: Type] [= expr]; new(args) {...} [static] function m(args) {...} ... }`
+	 * P2: `extends` is parsed (so P3 doesn't need a parser change) but `parent` is unused until then.
+	 */
+	function parseClassDecl():Decl {
+		expectIdent("class");
+		var name = expectIdentValue();
+		var parent:Null<String> = null;
+		if (matchIdent("extends")) parent = expectIdentValue();
+		expect("{");
+		var fields:Array<{name:String, def:Null<Expr>}> = [];
+		var methods:Array<{name:String, args:Array<String>, body:Expr, isStatic:Bool}> = [];
+		var ctor:Null<{args:Array<String>, body:Expr}> = null;
+		skipWs();
+		while (i < len && !check("}")) {
+			var isStatic = matchIdent("static");
+			if (matchIdent("new")) {
+				expect("(");
+				var args:Array<String> = [];
+				if (!check(")")) do args.push(expectIdentValue()) while (match(","));
+				expect(")");
+				expect("{");
+				var body = MuseNodes.block([for (s in parseStmtListUntil("}")) stmtAsExpr(s)]);
+				expect("}");
+				ctor = { args: args, body: body };
+			} else if (matchIdent("function")) {
+				var mname = expectIdentValue();
+				expect("(");
+				var args:Array<String> = [];
+				if (!check(")")) do args.push(expectIdentValue()) while (match(","));
+				expect(")");
+				expect("{");
+				var body = MuseNodes.block([for (s in parseStmtListUntil("}")) stmtAsExpr(s)]);
+				expect("}");
+				methods.push({ name: mname, args: args, body: body, isStatic: isStatic });
+			} else {
+				var fname = expectIdentValue();
+				if (match(":")) expectIdentValue(); // type annotation, not tracked yet
+				var def:Null<Expr> = null;
+				if (match("=")) def = parseExpr();
+				match(";");
+				fields.push({ name: fname, def: def });
+			}
+			skipWs();
+		}
+		expect("}");
+		return ClassDecl(name, parent, fields, methods, ctor);
 	}
 
 	function parseValueDeclAfterKeyword():Decl {
@@ -626,7 +709,39 @@ class StrategyParser {
 		if (id == "true") return stampExpr(start, MuseNodes.boolExpr(true));
 		if (id == "false") return stampExpr(start, MuseNodes.boolExpr(false));
 		if (id == "null") return stampExpr(start, MuseNodes.nullExpr());
+		if (id == "this") return stampExpr(start, MuseNodes.ethis());
+		if (id == "super") {
+			var method:Null<String> = null;
+			if (match(".")) method = expectIdentValue();
+			expect("(");
+			var args:Array<Expr> = [];
+			if (!check(")")) {
+				do args.push(parseExpr()) while (match(","));
+			}
+			expect(")");
+			return stampExpr(start, MuseNodes.esuper(method, args));
+		}
+		if (id == "new") {
+			var cname = expectIdentValue();
+			expect("(");
+			var args:Array<Expr> = [];
+			if (!check(")")) {
+				do args.push(parseExpr()) while (match(","));
+			}
+			expect(")");
+			return stampExpr(start, MuseNodes.enew(cname, args));
+		}
 		if (id == "function") return stampExpr(start, parseFunctionLambda());
+		// `match(scrut) [ pat => body, ... ]` — committed only when a `[` follows
+		// the paren group (so a user value/call named `match(x)` stays a call).
+		if (id == "match" && check("(")) {
+			var save = i;
+			expect("(");
+			var scrut = parseExpr();
+			expect(")");
+			if (check("[")) return stampExpr(start, parseMatchArmsExpr(scrut));
+			i = save; // not a match — fall through so postfix `(...)` parses it as a call
+		}
 		if (isBarField(id)) return stampExpr(start, MuseNodes.barField(id));
 		// Bare-ident arrow: `x => body`
 		if (check("=>")) {
@@ -634,6 +749,59 @@ class StrategyParser {
 			return stampExpr(start, MuseNodes.efunction([id], parseLambdaBody(), Normal, null));
 		}
 		return stampExpr(start, MuseNodes.ident(id));
+	}
+
+	/** `[ pat [if guard] => body, ... ]` after `match(scrut)`. */
+	function parseMatchArmsExpr(scrut:Expr):Expr {
+		expect("[");
+		var arms:Array<MatchArm> = [];
+		skipWs();
+		if (!check("]")) {
+			do {
+				skipWs();
+				if (check("]")) break;
+				var pat = parseArmPattern();
+				var guard:Null<Expr> = null;
+				if (matchIdent("if")) guard = parseExpr();
+				expect("=>");
+				var body = parseExpr();
+				arms.push({ pattern: pat, guard: guard, body: body });
+			} while (match(","));
+		}
+		expect("]");
+		return MuseNodes.match(scrut, arms);
+	}
+
+	/**
+	 * One match-arm pattern. Haxe-flavored: a Capitalized identifier is an enum
+	 * tag (nullary, or a constructor when followed by `(...)`); a lowercase
+	 * identifier binds; `_` wildcards; literals match by value.
+	 */
+	function parseArmPattern():Pattern {
+		skipWs();
+		var c = src.charAt(i);
+		if (c == '"' || c == "'") return PatLit(CString(parseString()));
+		if (isDigit(c) || (c == "." && i + 1 < len && isDigit(src.charAt(i + 1)))) {
+			return switch (parseNumber()) {
+				case EConst(cc): PatLit(cc);
+				default: PatWild;
+			};
+		}
+		var id = expectIdentValue();
+		if (id == "_") return PatWild;
+		if (id == "true") return PatLit(CBool(true));
+		if (id == "false") return PatLit(CBool(false));
+		if (id == "null") return PatLit(CNull);
+		if (check("(")) {
+			expect("(");
+			var subs:Array<Pattern> = [];
+			if (!check(")")) do subs.push(parseArmPattern()) while (match(","));
+			expect(")");
+			return PatTag(id, subs);
+		}
+		var first = id.charAt(0);
+		var isTag = first >= "A" && first <= "Z";
+		return isTag ? PatTag(id, []) : PatBind(id);
 	}
 
 	function isBarField(n:String):Bool {

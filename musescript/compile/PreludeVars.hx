@@ -147,6 +147,9 @@ class PreludeVars {
 					}
 				case EYield(x): expr(x);
 				case EYieldStar(x): expr(x);
+				case ENew(_, args): for (a in args) expr(a);
+				case EThis:
+				case ESuper(_, args): for (a in args) expr(a);
 			}
 		}
 		function stmts(ss:Array<Stmt>):Void {
@@ -188,7 +191,9 @@ class PreludeVars {
 					for (a in args) hit(a);
 					expr(body);
 				case MacroDecl(n, body): hit(n); stmts(body);
-				case ModuleDecl(_, _, _) | TemplateDecl(_, _, _, _) | StmtTemplateDecl(_, _, _):
+				case EnumDecl(_, _) | ModuleDecl(_, _, _) | TemplateDecl(_, _, _, _) | StmtTemplateDecl(_, _, _):
+					bail = true;
+				case ClassDecl(_, _, _, _, _):
 					bail = true;
 			}
 		}

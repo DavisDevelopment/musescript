@@ -2,6 +2,8 @@ package musescript.compile;
 
 import musescript.ast.MuseProgram;
 import musescript.ast.Decl;
+import musescript.ast.Stmt;
+import musescript.ast.ConstructOnce;
 import musescript.BarStrategyFn;
 import musescript.harness.HarnessContext;
 import musescript.harness.BarFeed;
@@ -623,6 +625,17 @@ class JsBackend {
 	 */
 	static function installUserFns(api:Dynamic, prog:MuseProgram, seed:MuseInterp):Void {
 		var setFn:String->Dynamic->Dynamic = Reflect.field(api, "set");
+		// Unconditional: JsEmitter routes EVERY `obj.method(...)` call site
+		// through `__method_call` (it can't tell at compile time whether
+		// `obj` will be a class instance or a plain record holding a
+		// callable field), so any program with a field-call needs this
+		// bridge even when it declares no ClassDecl at all.
+		setFn("__method_call", Reflect.makeVarArgs(function(args:Array<Dynamic>):Dynamic {
+			var obj = args[0];
+			var methodName:String = args[1];
+			var rest = args.slice(2);
+			return seed.callInstanceMethodPublic(obj, methodName, rest);
+		}));
 		for (d in prog.decls) switch (d) {
 			case FnDecl(name, _, _, _) if (name != null):
 				var closure:Dynamic = seed.globals.get(name);
@@ -630,6 +643,41 @@ class JsBackend {
 				setFn(name, Reflect.makeVarArgs(function(args:Array<Dynamic>):Dynamic {
 					return seed.callValue(closure, args);
 				}));
+			case EnumDecl(_, variants):
+				// Enum variant constructors/singletons are already registered in
+				// seed.globals (registerEnumVariant); bridge them into the compiled
+				// api so an emitted `Bullish` / `Doji(x)` resolves the same value.
+				for (v in variants) {
+					var val:Dynamic = seed.globals.get(v.name);
+					if (val != null) setFn(v.name, val);
+				}
+			case ClassDecl(name, _, _, _, _):
+				// Construction stays interp-only (P2, see JsEmitter's ENew case)
+				// — `seed` already has `classes` registered (registerDeclPublic
+				// ran ClassDecl), so bridge one constructor closure per class.
+				setFn("new_" + name, Reflect.makeVarArgs(function(args:Array<Dynamic>):Dynamic {
+					return seed.instantiatePublic(name, args);
+				}));
+			case StrategyDecl(_, body):
+				// Construct-once bindings (`c = new Counter()`, ast/ConstructOnce.hx)
+				// were ALREADY instantiated exactly once when `seed.registerDeclPublic`
+				// ran this StrategyDecl (MuseInterp.registerStrategyBody executes
+				// them immediately instead of queueing them as a per-bar prelude
+				// assign) — bridge the RESULTING instance into `api` once, here,
+				// so `api.get(name)` sees the SAME persistent object every bar.
+				// JsEmitter.collectStrategyHooks excludes these from the emitted
+				// on-bar body's prelude, so this is the only place they're set.
+				bridgeConstructOnceAssigns(body, setFn, seed);
+			default:
+		}
+	}
+
+	static function bridgeConstructOnceAssigns(body:Array<Stmt>, setFn:String->Dynamic->Dynamic, seed:MuseInterp):Void {
+		for (s in body) switch (s) {
+			case Assign(name, _) if (ConstructOnce.isConstructOnceAssign(s)):
+				setFn(name, seed.globals.get(name));
+			case Block(inner):
+				bridgeConstructOnceAssigns(inner, setFn, seed);
 			default:
 		}
 	}

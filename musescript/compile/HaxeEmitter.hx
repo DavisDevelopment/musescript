@@ -174,6 +174,11 @@ class HaxeEmitter {
 				emitMatch(scrutinee, arms);
 			case EYield(_) | EYieldStar(_):
 				throw new EmitUnsupported();
+			case ENew(_, _) | EThis | ESuper(_, _):
+				// P2/P3: classes aren't lowered by this backend yet (construction/
+				// method dispatch/super stay interp-only, same as JsEmitter) —
+				// bail so the caller falls back to interp, matching EYield.
+				throw new EmitUnsupported();
 		};
 	}
 
@@ -271,15 +276,15 @@ class HaxeEmitter {
 			"(" + scrutVar + ' != null && (' + scrutVar + '.__tag == "' + t + '" || '
 				+ scrutVar + '.kind == "' + t + '"))'
 		];
-		if (args.length == 1) {
-			parts.push(emitPattern(args[0], scrutVar, binds));
-			return "(" + parts.join(" && ") + ")";
-		}
+		// Enum payload lives in `.args` (canonical `{__tag,args:[...]}`, matching
+		// the interp reference); single-arg legacy `kind`-values fall back to the
+		// whole object.
 		for (i in 0...args.length) {
 			var iv = fresh("g");
+			var fallback = args.length == 1 ? scrutVar : "null";
 			binds.push(
-				"var " + iv + " = (Std.isOfType(" + scrutVar + ".args, Array) ? "
-					+ scrutVar + ".args[" + i + "] : null);"
+				"var " + iv + " = (" + scrutVar + " != null && Std.isOfType(" + scrutVar + ".args, Array) ? "
+					+ scrutVar + ".args[" + i + "] : " + fallback + ");"
 			);
 			parts.push(emitPattern(args[i], iv, binds));
 		}

@@ -137,16 +137,36 @@ class TestGraphBuiltins extends Test {
 		Assert.equals(4.0, path.distance);
 	}
 
-	public function testStrategyWasmExplicitlyFallsBackForGraphObjects() {
-		var prog = new MuseParser().parse('{
+	/**
+	 * F1 (hybrid WASM/interp): graph objects/builtins aren't natively
+	 * lowerable, so every statement here escapes to `host_eval` — this is no
+	 * longer a whole-module fallback to null (the pre-F1 guarantee), it's a
+	 * (degenerately, in this case) all-escaped module that still compiles and
+	 * still behaves correctly end to end via the interp thunk.
+	 */
+	public function testStrategyWasmGraphObjectsCompileViaEscapeRegions() {
+		var source = '{
 			@strategy("graph_dynamic")
 			@on(bar) {
 				var graph = { directed: true, nodes: ["A"], edges: [] };
 				var degree = graph_degree(graph, "A");
 				if (degree == 0) long();
 			}
-		}');
-		Assert.isNull(musescript.compile.StrategyWasmBackend.emitWat(prog));
+		}';
+		var prog = new MuseParser().parse(source);
+		var wat = musescript.compile.StrategyWasmBackend.emitWat(prog);
+		Assert.notNull(wat);
+		Assert.isTrue(StringTools.contains(wat, "host_eval"));
+
+		// End-to-end: hybrid-compiled execution must match plain interp exactly.
+		var feed = musescript.harness.BarFeed.synthetic(80, 3);
+		var interpResult = new musescript.interp.MuseInterp(new musescript.harness.HarnessContext())
+			.runBacktest(new MuseParser().parse(source), feed);
+		var hybridHarness = new musescript.harness.HarnessContext();
+		Reflect.setField(hybridHarness, "feed", feed);
+		var hybridResult = musescript.compile.StrategyWasmBackend.compile(new MuseParser().parse(source))(hybridHarness);
+		Assert.equals(interpResult.trades, hybridResult.trades);
+		Assert.floatEquals(interpResult.finalEquity, hybridResult.finalEquity);
 	}
 
 	static function assertThrows(fn:Void->Void):Void {

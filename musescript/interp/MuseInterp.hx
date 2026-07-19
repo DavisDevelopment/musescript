@@ -10,6 +10,7 @@ import musescript.ast.FnKind;
 import musescript.ast.OrderKind;
 import musescript.ast.ParamOpts;
 import musescript.ast.Pattern;
+import musescript.ast.ConstructOnce;
 import musescript.runtime.CallFrame;
 import musescript.runtime.CallStack;
 import musescript.runtime.FnClosure;
@@ -85,9 +86,26 @@ class MuseInterp {
 	var onEventHandlers:Array<{stream:String, body:Array<Stmt>}>;
 	var strategyName:Null<String>;
 
+	/** Registered `ClassDecl`s, keyed by name. P2: `parent` is stored but unused (P3 wires it). */
+	var classes:Map<String, {parent:Null<String>, fields:Array<{name:String, def:Null<Expr>}>,
+		methods:Array<{name:String, args:Array<String>, body:Expr, isStatic:Bool}>,
+		ctor:Null<{args:Array<String>, body:Expr}>}>;
+	/** Stack of `this` receivers — top is the instance the currently-executing
+	 * method/ctor body sees; empty outside any method. Supports nested/recursive
+	 * method calls. Also backs optional-`this` resolution in `resolve`/`assignName`. */
+	var instanceStack:Array<Dynamic>;
+	/** Parallel to `instanceStack`: the class NAME each active method/ctor
+	 * frame is lexically defined in (its "owner", from `findMethod` — may
+	 * differ from the instance's runtime `__class` for an inherited method).
+	 * `super`/`super.method()` resolve relative to this, not the instance. */
+	var methodClassStack:Array<String>;
+
 	public function new(harness:IHarness) {
 		this.harness = Std.isOfType(harness, HarnessContext) ? cast harness : new HarnessContext();
 		this.globals = new Map();
+		this.classes = new Map();
+		this.instanceStack = [];
+		this.methodClassStack = [];
 		this.stack = new CallStack();
 		this.matcher = new PatternMatcher();
 		this.lastValue = null;
@@ -221,6 +239,79 @@ class MuseInterp {
 		registerDecl(d);
 	}
 
+	/** P2 hybrid: JsBackend bridges `new ClassName(...)` in emitted JS to this
+	 * (construction stays interp-only — see JsEmitter's ENew case). */
+	public function instantiatePublic(className:String, args:Array<Dynamic>):Dynamic {
+		return instantiate(className, args);
+	}
+
+	/**
+	 * P2 hybrid: JsBackend bridges `obj.method(...)` in emitted JS to this
+	 * (dispatch stays interp-only — see JsEmitter's ECall(EField(...)) case).
+	 * Mirrors evalExpr's ECall(EField(...)) branch exactly: a declared class
+	 * method wins; otherwise falls back to calling whatever value the field
+	 * itself holds (the pre-existing "field holds a callable" behavior).
+	 */
+	public function callInstanceMethodPublic(obj:Dynamic, methodName:String, args:Array<Dynamic>):Dynamic {
+		if (obj != null && Reflect.hasField(obj, "__class")) {
+			var m = findMethod(Reflect.field(obj, "__class"), methodName);
+			if (m != null) return callMethod(obj, m, args);
+		}
+		var fieldVal = obj != null ? Reflect.getProperty(obj, methodName) : null;
+		return callValue(fieldVal, args);
+	}
+
+	/**
+	 * Hybrid WASM/interp compilation (F1/F3): run ONE escaped statement from a
+	 * native-compiled strategy's on(bar)/on(position) body, against the SAME
+	 * bar/harness the native side is mid-execution of, so orders/plots/series
+	 * stay coherent across the WASM<->interp boundary. `this` interp instance
+	 * should be a single seed reused across bars (created once per compiled
+	 * strategy, with `prog.decls` already registered), not a fresh one per
+	 * call — matching `StrategyWasmBackend.seedParams`'s existing pattern.
+	 */
+	var lastEscapeBar:Bar = null;
+
+	/**
+	 * F2: when this interp is running as a hybrid escape thunk (see
+	 * `StrategyWasmBackend.makeEnv`), boundary-crossing names get a shared
+	 * linear-memory slot instead of a normal interp global — `frameMap` maps
+	 * name -> byte offset, `frameGetFn`/`frameSetFn` are the host-specific
+	 * accessors (JS Float64Array view / Python wasmtime memory.read/write)
+	 * bound once via `bindFramePublic`. Null/unset for every OTHER interp use
+	 * (plain full-interp runs, MuseGene, tests, …) — zero behavior change
+	 * there, `resolve`/`assignName` just skip the frame check.
+	 */
+	var frameMap:Null<Map<String, Int>> = null;
+	var frameGetFn:Null<Int->Float> = null;
+	var frameSetFn:Null<Int->Float->Void> = null;
+
+	/** Wire this escape interp to the native side's shared variable frame (F2). */
+	public function bindFramePublic(map:Map<String, Int>, getFn:Int->Float, setFn:Int->Float->Void):Void {
+		frameMap = map;
+		frameGetFn = getFn;
+		frameSetFn = setFn;
+	}
+
+	public function runEscapeStmt(bar:Bar, s:Stmt):Void {
+		// `bindBar` includes ONCE-PER-BAR resets (TradeBuiltins.beginBar's
+		// crossover call-slot counter, indCols.beginBar's column cursor) that
+		// assign state by ordinal call POSITION within a bar. A bar can now
+		// produce several host_eval calls (one per escape region), so only the
+		// FIRST call for a given bar (same Bar reference — `barRef[0]` is set
+		// once per bar on the native side, before any host_eval fires) may
+		// re-trigger those resets; later calls in the same bar just refresh
+		// the plain value globals, or the slot counters would rewind mid-bar
+		// and corrupt crossover/indicator state across escape regions.
+		if (bar != lastEscapeBar) {
+			bindBar(bar);
+			lastEscapeBar = bar;
+		} else {
+			refreshBarGlobals(bar);
+		}
+		execStmt(s);
+	}
+
 	function registerDecl(d:Decl):Void {
 		switch (d) {
 			case StrategyDecl(name, body):
@@ -247,8 +338,37 @@ class MuseInterp {
 				// Macro bodies executed by planner, not here
 				globals.set('__macro_$name', body);
 
+			case EnumDecl(_, variants):
+				for (v in variants) registerEnumVariant(v.name, v.args.length);
+
+			case ClassDecl(name, parent, fields, methods, ctor):
+				classes.set(name, { parent: parent, fields: fields, methods: methods, ctor: ctor });
+
 			case ModuleDecl(_, _, _) | TemplateDecl(_, _, _, _) | StmtTemplateDecl(_, _, _):
 				// Expanded before execution / compile
+		}
+	}
+
+	/**
+	 * Bind one enum variant as a global. `tag`/`arity` are passed by value (not
+	 * closed over from a loop var) so the constructor captures the correct tag —
+	 * the loop-closure-capture footgun documented in [[musescript-hardening]].
+	 * Nullary → a shared singleton; n-ary → a varargs constructor. Both produce
+	 * the canonical `{ __tag, args:[...] }` PatternMatcher reads.
+	 */
+	function registerEnumVariant(tag:String, arity:Int):Void {
+		if (arity == 0) {
+			var singleton:Dynamic = {};
+			Reflect.setField(singleton, "__tag", tag);
+			Reflect.setField(singleton, "args", []);
+			globals.set(tag, singleton);
+		} else {
+			globals.set(tag, Reflect.makeVarArgs(function(a:Array<Dynamic>):Dynamic {
+				var rec:Dynamic = {};
+				Reflect.setField(rec, "__tag", tag);
+				Reflect.setField(rec, "args", a);
+				return rec;
+			}));
 		}
 	}
 
@@ -259,15 +379,26 @@ class MuseInterp {
 	 * handlers, everything else keeps the historical run-once behavior. Executing
 	 * assigns once at registration bound indicator locals before any bar existed,
 	 * so interp-fallback backtests silently produced 0 trades.
+	 *
+	 * EXCEPT construct-once bindings (`c = new Counter()`, ast/ConstructOnce.hx)
+	 * — `ENew` allocates NEW state, so treating it as an ordinary per-bar
+	 * prelude assign would silently reconstruct (and thus reset) a stateful
+	 * class instance every single bar, discarding whatever its methods
+	 * accumulated. These run here, at REGISTRATION time, exactly once —
+	 * matching how ParamDecl defaults are also evaluated once before any bar
+	 * exists (same accepted limitation: a ctor reading bar fields like
+	 * `close` sees null here, since no bar is bound yet).
 	 */
 	function registerStrategyBody(body:Array<Stmt>):Void {
 		for (s in body) {
 			switch (s) {
-				case Assign(_, _): 
+				case Assign(_, _) if (ConstructOnce.isConstructOnceAssign(s)):
+					execStmt(s);
+				case Assign(_, _):
 					preludeStmts.push(s);
-				case Block(inner): 
+				case Block(inner):
 					registerStrategyBody(inner);
-				default: 
+				default:
 					execStmt(s);
 			}
 		}
@@ -276,6 +407,13 @@ class MuseInterp {
 	function bindBar(bar:Bar):Void {
 		TradeBuiltins.beginBar();
 		harness.indCols.beginBar();
+		refreshBarGlobals(bar);
+	}
+
+	/** The idempotent, value-only half of `bindBar` — safe to re-run for a
+	 * bar already bound (see `runEscapeStmt`), unlike the call-slot resets
+	 * `bindBar` itself also performs. */
+	function refreshBarGlobals(bar:Bar):Void {
 		globals.set("open", bar.open);
 		globals.set("high", bar.high);
 		globals.set("low", bar.low);
@@ -290,7 +428,7 @@ class MuseInterp {
 		for (k in harness.auxSeriesNames())
 			globals.set(k, harness.auxValue(k));
 		// Refresh param bindings
-		for (n in harness.params.names()) 
+		for (n in harness.params.names())
 			globals.set(n, harness.params.get(n));
 	}
 
@@ -375,7 +513,7 @@ class MuseInterp {
 			case ExprStmt(e): lastValue = evalExpr(e);
 			case Assign(name, e):
 				var v = evalExpr(e);
-				define(name, v);
+				assignName(name, v);
 				if (Std.isOfType(v, Float) || Std.isOfType(v, Int))
 					harness.pushSeries(name, v);
 				lastValue = v;
@@ -487,7 +625,41 @@ class MuseInterp {
 					default: v;
 				}
 			case ECall(callee, args):
-				callValue(evalExpr(callee), evalCallArgs(callee, args));
+				switch (callee) {
+					// Optional `this` for METHOD CALLS: a bare `speak()` inside
+					// another method (no `this.`/receiver prefix) must ALSO
+					// dispatch to the current instance's class — resolve() only
+					// covers optional-this for FIELD reads, methods aren't
+					// stored as instance fields at all (never copied per-
+					// instance), so this needs its own check here. A real local
+					// binding of the same name still wins (matches Haxe scoping).
+					case EIdent(name) if (stack.resolve(name) == null):
+						var inst = currentInstance();
+						if (inst != null) {
+							var m = findMethod(Reflect.field(inst, "__class"), name);
+							if (m != null) return callMethod(inst, m, [for (a in args) evalExpr(a)]);
+						}
+						callValue(evalExpr(callee), evalCallArgs(callee, args));
+					case EField(objExpr, methodName):
+						var obj = evalExpr(objExpr);
+						if (obj != null && Reflect.hasField(obj, "__class")) {
+							var m = findMethod(Reflect.field(obj, "__class"), methodName);
+							if (m != null) return callMethod(obj, m, [for (a in args) evalExpr(a)]);
+						}
+						// `this`-bound fallback (native Array/String/Map methods,
+						// or a plain field holding a callable) — see callValue's
+						// `recv` doc comment.
+						var fieldVal = obj != null ? Reflect.getProperty(obj, methodName) : null;
+						callValue(fieldVal, evalCallArgs(callee, args), obj);
+					default:
+						callValue(evalExpr(callee), evalCallArgs(callee, args));
+				}
+			case ENew(className, args):
+				instantiate(className, [for (a in args) evalExpr(a)]);
+			case EThis:
+				currentInstance();
+			case ESuper(method, args):
+				evalSuper(method, [for (a in args) evalExpr(a)]);
 			case EIf(cond, eif, eelse):
 				truthy(evalExpr(cond)) ? evalExpr(eif) : (eelse != null ? evalExpr(eelse) : null);
 			case EWhile(cond, body):
@@ -707,7 +879,16 @@ class MuseInterp {
 		return null;
 	}
 
-	public function callValue(f:Dynamic, args:Array<Dynamic>):Dynamic {
+	/**
+	 * `recv` (default null, unchanged behavior for every pre-existing call
+	 * site) is the `this` binding for the plain-native-function case only —
+	 * needed so `arr.push(x)`/other native-Array-or-String-method calls off a
+	 * non-`__class` object actually mutate/read the RIGHT receiver instead of
+	 * running detached (Reflect.getProperty(obj,f) fetches the function VALUE,
+	 * losing which object it came from). Harmless for MuseScript-authored
+	 * closures/builtins, which never reference `this`.
+	 */
+	public function callValue(f:Dynamic, args:Array<Dynamic>, ?recv:Dynamic):Dynamic {
 		if (f == null) throw "Cannot call null";
 		if (Std.isOfType(f, IndicatorInstance)) {
 			var inst:IndicatorInstance = cast f;
@@ -745,7 +926,7 @@ class MuseInterp {
 			return callClosure(fn, args);
 		}
 		if (Reflect.isFunction(f)) {
-			return Reflect.callMethod(null, f, args);
+			return Reflect.callMethod(recv, f, args);
 		}
 		throw 'Not callable: $f';
 	}
@@ -787,15 +968,28 @@ class MuseInterp {
 			var right = evalExpr(b);
 			switch (a) {
 				case EIdent(name):
-					define(name, right);
+					assignName(name, right);
 					return right;
 				case EField(obj, f):
 					var o = evalExpr(obj);
 					if (o == null) throw "assignment target is null";
 					Reflect.setProperty(o, f, right);
 					return right;
+				case EArray(obj, idxExpr):
+					var o = evalExpr(obj);
+					if (o == null) throw "assignment target is null";
+					var idx = evalExpr(idxExpr);
+					// Mirrors the READ side's EArray case (evalExpr, ~line 691):
+					// real Array -> index in place; any other object -> dynamic
+					// field keyed by the index's string form.
+					if (Std.isOfType(o, Array)) {
+						(cast o : Array<Dynamic>)[Std.int(idx)] = right;
+					} else {
+						Reflect.setProperty(o, Std.string(idx), right);
+					}
+					return right;
 				default:
-					throw "assignment target must be an identifier or field";
+					throw "assignment target must be an identifier, field, or index";
 			}
 		}
 
@@ -863,11 +1057,23 @@ class MuseInterp {
 
 	function resolve(name:String):Dynamic {
 		var r = stack.resolve(name);
-		if (r != null) 
+		if (r != null)
 			return r.value;
-		if (globals.exists(name)) 
+		// F2 (hybrid escape thunk only — see bindFramePublic): a boundary-
+		// crossing name reads through the SAME shared memory slot the native
+		// WASM side uses, not a normal interp global.
+		if (frameMap != null && frameMap.exists(name))
+			return frameGetFn(frameMap.get(name));
+		// Optional `this` (Haxe-flavored): a bare identifier not bound by any
+		// frame resolves to the current method receiver's field of that name,
+		// BEFORE falling to globals/params — matching `this.field` semantics
+		// without requiring the `this.` prefix.
+		var inst = currentInstance();
+		if (inst != null && Reflect.hasField(inst, name))
+			return Reflect.field(inst, name);
+		if (globals.exists(name))
 			return globals.get(name);
-		if (harness.params.all().exists(name)) 
+		if (harness.params.all().exists(name))
 			return harness.params.get(name);
 
 		return null;
@@ -878,14 +1084,180 @@ class MuseInterp {
 		if (cur != null) {
 			if (cur.bindings.exists(name)) {
 				cur.bindings.get(name).value = value;
-			} 
+			}
 			else {
 				cur.define(name, value);
 			}
-		} 
+		}
 		else {
 			globals.set(name, value);
 		}
+	}
+
+	/**
+	 * Bare-identifier ASSIGNMENT (`x = expr`, not `var x = expr`) — used by
+	 * `Stmt.Assign` and the hscript `=` binop's `EIdent` target. Unlike
+	 * `define` (always declares/updates a binding in the CURRENT frame, the
+	 * correct behavior for `var`), a plain assignment must check, in order:
+	 * an existing frame-local shadow, then the current method receiver's
+	 * field of that name (optional-`this` WRITE), then fall back to
+	 * declaring in the current frame / globals exactly like `define`.
+	 */
+	function assignName(name:String, value:Dynamic):Void {
+		var cur = stack.current();
+		if (cur != null && cur.bindings.exists(name)) {
+			cur.bindings.get(name).value = value;
+			return;
+		}
+		// F2 (hybrid escape thunk only): write through to the shared frame slot.
+		if (frameMap != null && frameMap.exists(name)) {
+			frameSetFn(frameMap.get(name), value);
+			return;
+		}
+		var inst = currentInstance();
+		if (inst != null && Reflect.hasField(inst, name)) {
+			Reflect.setField(inst, name, value);
+			return;
+		}
+		if (cur != null) {
+			cur.define(name, value);
+		} else {
+			globals.set(name, value);
+		}
+	}
+
+	function currentInstance():Dynamic {
+		return instanceStack.length > 0 ? instanceStack[instanceStack.length - 1] : null;
+	}
+
+	/**
+	 * Allocate an instance, run field initializers PARENT-FIRST across the
+	 * whole `extends` chain (so a child's default for a same-named field
+	 * overrides the parent's, and a field ANY ancestor declares is always
+	 * present by the time a ctor runs), then chain ctors starting from the
+	 * most-derived class (see `runCtorChain`).
+	 */
+	function instantiate(className:String, argVals:Array<Dynamic>):Dynamic {
+		if (!classes.exists(className)) throw 'Unknown class: $className';
+		var inst:Dynamic = {};
+		Reflect.setField(inst, "__class", className);
+		instanceStack.push(inst);
+		try {
+			initFieldsChain(className);
+			runCtorChain(className, argVals);
+		} catch (ex:Dynamic) {
+			instanceStack.pop();
+			throw ex;
+		}
+		instanceStack.pop();
+		return inst;
+	}
+
+	function initFieldsChain(className:String):Void {
+		var cls = classes.get(className);
+		if (cls == null) return;
+		if (cls.parent != null) initFieldsChain(cls.parent);
+		var inst = currentInstance();
+		for (f in cls.fields)
+			Reflect.setField(inst, f.name, f.def != null ? evalExpr(f.def) : null);
+	}
+
+	/**
+	 * Runs `className`'s own ctor (with `this` still the SAME instance already
+	 * on `instanceStack` — no new push) if it has one; otherwise, Haxe-style
+	 * implicit chaining, falls through to the parent's ctor with the SAME
+	 * `argVals` a subclass that omits its own constructor entirely still needs
+	 * to run its ancestor's setup. An explicit `super(...)` inside a ctor body
+	 * (see `evalSuper`) reaches this same function with the PARENT's name and
+	 * whatever args the user actually wrote, taking over from there.
+	 */
+	function runCtorChain(className:String, argVals:Array<Dynamic>):Void {
+		var cls = classes.get(className);
+		if (cls == null) return;
+		if (cls.ctor != null) {
+			var frame = new CallFrame(stack.current(), '$className.new');
+			for (i in 0...cls.ctor.args.length)
+				frame.define(cls.ctor.args[i], i < argVals.length ? argVals[i] : null);
+			stack.push(frame);
+			methodClassStack.push(className);
+			var prevRet = returnFlag, prevVal = returnValue;
+			returnFlag = false;
+			returnValue = null;
+			evalExpr(cls.ctor.body);
+			returnFlag = prevRet;
+			returnValue = prevVal;
+			methodClassStack.pop();
+			stack.pop();
+		} else if (cls.parent != null) {
+			runCtorChain(cls.parent, argVals);
+		}
+	}
+
+	/**
+	 * Method resolution walks the `extends` chain starting at `className` —
+	 * a subclass's own method wins over an inherited one of the same name
+	 * (standard override/virtual-dispatch), found simply by checking the
+	 * subclass's own method list BEFORE recursing to `cls.parent`. `owner` is
+	 * the class the definition actually came from (may differ from
+	 * `className` for an inherited/un-overridden method) — `callMethod` needs
+	 * it so a `super.m()` INSIDE that method resolves relative to ITS class,
+	 * not the runtime instance's most-derived `__class`.
+	 */
+	function findMethod(className:String, methodName:String):Null<{name:String, args:Array<String>, body:Expr, isStatic:Bool, owner:String}> {
+		var cls = classes.get(className);
+		if (cls == null) return null;
+		for (m in cls.methods)
+			if (m.name == methodName)
+				return { name: m.name, args: m.args, body: m.body, isStatic: m.isStatic, owner: className };
+		if (cls.parent != null) return findMethod(cls.parent, methodName);
+		return null;
+	}
+
+	function callMethod(inst:Dynamic, m:{name:String, args:Array<String>, body:Expr, isStatic:Bool, owner:String}, argVals:Array<Dynamic>):Dynamic {
+		var frame = new CallFrame(stack.current(), m.name);
+		for (i in 0...m.args.length)
+			frame.define(m.args[i], i < argVals.length ? argVals[i] : null);
+		stack.push(frame);
+		instanceStack.push(inst);
+		methodClassStack.push(m.owner);
+		var prevRet = returnFlag, prevVal = returnValue;
+		returnFlag = false;
+		returnValue = null;
+		var result = evalExpr(m.body);
+		if (returnFlag) result = returnValue;
+		returnFlag = prevRet;
+		returnValue = prevVal;
+		methodClassStack.pop();
+		instanceStack.pop();
+		stack.pop();
+		return result;
+	}
+
+	/**
+	 * `super(args)` (method == null) chains to the parent's ctor via the SAME
+	 * `runCtorChain` used for implicit chaining — same instance, no new
+	 * `instanceStack` push. `super.method(args)` dispatches starting from the
+	 * PARENT of the LEXICAL class the currently-executing method/ctor is
+	 * defined in (`methodClassStack`'s top), not the runtime instance's
+	 * `__class` — otherwise a 3+ level `super.m()` chain inside an overridden
+	 * method would re-dispatch to itself instead of walking upward.
+	 */
+	function evalSuper(method:Null<String>, argVals:Array<Dynamic>):Dynamic {
+		var inst = currentInstance();
+		if (inst == null) throw "super used outside a method/ctor";
+		var definingClass = methodClassStack.length > 0
+			? methodClassStack[methodClassStack.length - 1]
+			: Reflect.field(inst, "__class");
+		var cls = classes.get(definingClass);
+		if (cls == null || cls.parent == null)
+			throw 'super: $definingClass has no parent class';
+		if (method == null) {
+			runCtorChain(cls.parent, argVals);
+			return null;
+		}
+		var m = findMethod(cls.parent, method);
+		if (m == null) throw 'super.$method: not found in $definingClass\'s parent chain';
+		return callMethod(inst, m, argVals);
 	}
 
 	function truthy(v:Dynamic):Bool {

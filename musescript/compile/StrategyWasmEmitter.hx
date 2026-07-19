@@ -6,6 +6,7 @@ import musescript.ast.Const;
 import musescript.ast.MuseProgram;
 import musescript.ast.Decl;
 import musescript.ast.OrderKind;
+import musescript.ast.ConstructOnce;
 import musescript.builtins.MlBuiltins;
 import musescript.builtins.StatsBuiltins;
 
@@ -33,10 +34,77 @@ class StrategyWasmEmitter {
 	var scratchCursor:Int = 0;
 	var vectorLocals:Map<String, {baseLocal:String, lenLocal:String, maxLen:Null<Int>}> = new Map();
 	var usedIndicators:Map<String, Bool> = new Map();
+	/**
+	 * Hybrid compilation (F1): statements the native emitter can't lower are
+	 * escape regions run by the host's `host_eval` import instead of aborting
+	 * the whole module (StrategyWasmBackend.compile's old all-or-nothing
+	 * fallback). Index in this array == the region id passed to `host_eval`.
+	 */
+	var escapeRegions:Array<Stmt> = [];
+	/**
+	 * F2: names that cross the native/escape boundary (read/written by BOTH a
+	 * native-classified and an escape-classified statement, anywhere across
+	 * prelude/onBar/onPosition) get a shared linear-memory slot instead of
+	 * forcing the producing/consuming statement to escalate — see
+	 * `computeFramedNames` and `StrategyWasmRuntimeWat`'s FRAME region.
+	 */
+	var framedNames:Map<String, Int> = new Map();
+	var nextFrameSlot:Int = 0;
+	/**
+	 * BUG FIX (found while scoping P4): a bare enum variant identifier
+	 * (`Bullish`) has no case of its own in `emitValue`'s `EIdent`, so it fell
+	 * through to the "unknown identifier -> get_param lookup" fallback —
+	 * silently compiling to a HOST PARAM READ (garbage, since no such param
+	 * exists) instead of throwing EmitUnsupported and correctly escaping to
+	 * the interp (P1's enums predate F1; nothing before this ever routed a
+	 * bare-tag construction through emitValue at all, so the gap was never
+	 * exercised until a class-WASM/P4 diagnostic surfaced it: hybrid gave 0
+	 * trades against interp's real signal on the SAME tape). No enum-tag
+	 * native lowering exists yet — that would need a representation the
+	 * interp/JS tiers also understand, not just a WASM-side int constant —
+	 * so the fix here is purely to make the emitter recognize and REFUSE
+	 * (escape) known variant names instead of silently mis-emitting them.
+	 */
+	var enumVariantNames:Map<String, Bool> = new Map();
+
+	/**
+	 * P4 (class-WASM struct lowering — the real version, scoped after the
+	 * cross-bar-persistence fix made clear that lowering `ENew` inside
+	 * on-bar alone wouldn't help the case that matters). ONLY construct-once
+	 * instances (ast/ConstructOnce.hx) are eligible — their memory layout is
+	 * knowable entirely at COMPILE TIME (no runtime allocator needed): each
+	 * gets a FIXED byte offset, exactly like `framedNames`. A class is only
+	 * a candidate when it has no parent (no inheritance in this MVP) and
+	 * every field default / ctor body / method body is independently
+	 * natively emittable in "method mode" (self-relative field access) —
+	 * checked via a dry run (`canLowerClassBody`) that never keeps its
+	 * emission, mirroring the F1/F2 classification discipline. Any class
+	 * that fails stays exactly as safe as before this feature existed:
+	 * fully interp-only via the existing escape-region path.
+	 */
+	var loweredClasses:Map<String, {fieldOffsets:Map<String, Int>, fieldOrder:Array<String>,
+		fieldDefs:Array<Null<Expr>>, ctor:Null<{args:Array<String>, body:Expr}>,
+		methods:Array<{name:String, args:Array<String>, body:Expr, isStatic:Bool}>}> = new Map();
+	/** Construct-once VARIABLE name -> {className, fixed compile-time instance pointer}. */
+	var loweredInstances:Map<String, {className:String, offset:Int}> = new Map();
+	/**
+	 * Non-null while emitting a METHOD or CTOR body: the field-offset table
+	 * for the class being compiled + the `self` param's local name. Null
+	 * while emitting on-bar/on-position (normal mode) — `EIdent`/`Assign`/
+	 * `EVar`/`EBinop("=",...)` all branch on this to route bare identifiers
+	 * to self-relative field load/store instead of locals/framedNames
+	 * (methods have their OWN fully separate local scope — no access to
+	 * on-bar locals, framed names, or series at all in this MVP).
+	 */
+	var methodCtx:Null<{fieldOffsets:Map<String, Int>, selfWat:String}> = null;
+	/** Standalone `(func $Class_method ...)` WAT bodies collected while lowering. */
+	var methodFuncs:Array<String> = [];
+	/** Run-once field-init + ctor WAT, one block per lowered instance, joined into `$construct_once_init`. */
+	var initBlocks:Array<String> = [];
 
 	public function new() {}
 
-	public function emitOnBar(prog:MuseProgram):Null<{wat:String, strings:Array<String>}> {
+	public function emitOnBar(prog:MuseProgram):Null<{wat:String, strings:Array<String>, escapeRegions:Array<Stmt>, framedNames:Map<String, Int>}> {
 		var hooks = collectStrategyHooks(prog);
 		if (hooks.onBar.length == 0 && hooks.onPosition.length == 0) return null;
 		try {
@@ -51,17 +119,33 @@ class StrategyWasmEmitter {
 			scratchCursor = StrategyWasmRuntimeWat.VEC_SCRATCH_BASE;
 			vectorLocals = new Map();
 			usedIndicators = new Map();
+			escapeRegions = [];
+			framedNames = new Map();
+			nextFrameSlot = 0;
+			enumVariantNames = new Map();
+			for (d in prog.decls) switch (d) {
+				case EnumDecl(_, variants):
+					for (v in variants) enumVariantNames.set(v.name, true);
+				default:
+			}
 			// Softmax/sigmoid helpers call host exp; always provide the import.
 			needImport("exp", "(param f64) (result f64)");
 			if (hooks.onPosition.length > 0) needPositionImports();
 
+			// P4: BEFORE framing analysis — computeFramedNames excludes
+			// lowered-instance names from framing eligibility, so it needs
+			// loweredInstances already populated.
+			computeLoweredClasses(prog);
+
+			computeFramedNames(hooks.prelude.concat(hooks.onBar).concat(hooks.onPosition));
+
 			var bodyParts:Array<String> = [];
 			if (hooks.prelude.length > 0)
-				bodyParts.push([for (s in hooks.prelude) emitStmt(s)].join("\n    "));
+				bodyParts.push(emitStmtListWithEscapes(hooks.prelude));
 			if (hooks.onBar.length > 0)
-				bodyParts.push([for (s in hooks.onBar) emitStmt(s)].join("\n    "));
+				bodyParts.push(emitStmtListWithEscapes(hooks.onBar));
 			if (hooks.onPosition.length > 0) {
-				var posBody = [for (s in hooks.onPosition) emitStmt(s)].join("\n      ");
+				var posBody = emitStmtListWithEscapes(hooks.onPosition, "      ");
 				bodyParts.push('call $$get_position\n    f64.const 0\n    f64.ne\n    if\n      '
 					+ posBody + '\n    end');
 			}
@@ -75,6 +159,24 @@ class StrategyWasmEmitter {
 			];
 
 			var helpers = StrategyWasmRuntimeWat.helpers(nextCrossSlot, nextRiseSlot);
+
+			// P4: run-once field-init + ctor for every natively-lowered
+			// construct-once instance, called by the host EXACTLY ONCE before
+			// the bar loop starts (StrategyWasmBackend, mirroring how the
+			// interp/JS tiers already construct these once via
+			// registerStrategyBody / installUserFns's StrategyDecl bridging —
+			// see ast/ConstructOnce.hx). Class methods compile as their own
+			// standalone functions (methodFuncs), called directly (no
+			// host_eval) from method-call sites inside on-bar.
+			var initFunc = initBlocks.length > 0
+				? '
+  (func $$construct_once_init
+    ' + initBlocks.join("\n    ") + '
+  )
+  (export "construct_once_init" (func $$construct_once_init))
+'
+				: "";
+			var methodFuncsWat = methodFuncs.length > 0 ? methodFuncs.join("\n\n") + "\n" : "";
 
 			var strategyFunc = '
   (func $$run_strategy
@@ -128,9 +230,11 @@ class StrategyWasmEmitter {
 				+ importLines.join("\n") + (importLines.length > 0 ? "\n" : "")
 				+ "  (memory (export \"memory\") 1)\n"
 				+ helpers
+				+ methodFuncsWat
+				+ initFunc
 				+ strategyFunc
 				+ ")\n";
-			return { wat: wat, strings: strings.copy() };
+			return { wat: wat, strings: strings.copy(), escapeRegions: escapeRegions.copy(), framedNames: framedNames.copy() };
 		} catch (_:EmitUnsupported) {
 			return null;
 		}
@@ -151,6 +255,12 @@ class StrategyWasmEmitter {
 		for (d in prog.decls) switch (d) {
 			case StrategyDecl(_, body):
 				for (s in body) switch (s) {
+					// Construct-once bindings never enter the per-bar
+					// $run_strategy body at all (native or escape) — the
+					// escape interp (StrategyWasmBackend.makeEnv's
+					// ensureEscapeInterp) instantiates them exactly once
+					// via registerDeclPublic, same as the plain-interp path.
+					case Assign(_, _) if (ConstructOnce.isConstructOnceAssign(s)):
 					case Assign(_, _):
 						prelude.push(s);
 					case OnBar(onBody):
@@ -159,6 +269,7 @@ class StrategyWasmEmitter {
 						onPositionBody = onPositionBody.concat(onBody);
 					case Block(block):
 						for (nested in block) switch (nested) {
+							case Assign(_, _) if (ConstructOnce.isConstructOnceAssign(nested)):
 							case Assign(_, _): prelude.push(nested);
 							case OnBar(onBody): onBarBody = onBarBody.concat(onBody);
 							case OnPosition(onBody): onPositionBody = onPositionBody.concat(onBody);
@@ -212,10 +323,541 @@ class StrategyWasmEmitter {
 		};
 	}
 
+	/**
+	 * F2 pre-pass: classify the COMBINED prelude+onBar+onPosition statement
+	 * list — combined (not per-section, unlike the real emission below)
+	 * because a boundary crossing can span sections (e.g. a name written in
+	 * the prelude and read by an escaped onBar statement), and `locals`/
+	 * `vectorLocals` already accumulate across all 3 sections in the real
+	 * emission (emitOnBar resets them once, not between sections), so this
+	 * pre-pass's combined view matches what the real passes will actually see.
+	 *
+	 * Finds every name touched by BOTH a native-classified and an escape-
+	 * classified statement and assigns each a FRAME_SLOTS-bounded memory slot
+	 * (`StrategyWasmRuntimeWat`'s FRAME region) — see `emitStmtListWithEscapes`
+	 * for how that lets the boundary crossing skip escalation entirely once a
+	 * name is framed. Fully self-contained: snapshots emitter state, classifies
+	 * via the SAME sequential-accumulate discipline `emitStmtListWithEscapes`
+	 * uses (a later statement can depend on an earlier one's REAL registration
+	 * — see that function's doc comment), then restores, so none of this dry
+	 * run's side effects leak into the 3 real per-section calls that follow.
+	 */
+	function computeFramedNames(allStmts:Array<Stmt>):Void {
+		var n = allStmts.length;
+		var reads = [for (s in allStmts) readNames(s)];
+		var writes = [for (s in allStmts) writeNames(s)];
+
+		var localsStart = locals.copy();
+		var localOrderStart = localOrder.copy();
+		var vectorLocalsStart = vectorLocals.copy();
+		var nextTmpStart = nextTmp;
+		var nextCrossSlotStart = nextCrossSlot;
+		var nextRiseSlotStart = nextRiseSlot;
+		var scratchCursorStart = scratchCursor;
+
+		var isEscape = [for (s in allStmts) tryEmitStmt(s) == null];
+
+		locals = localsStart;
+		localOrder = localOrderStart;
+		vectorLocals = vectorLocalsStart;
+		nextTmp = nextTmpStart;
+		nextCrossSlot = nextCrossSlotStart;
+		nextRiseSlot = nextRiseSlotStart;
+		scratchCursor = scratchCursorStart;
+
+		var nativeTouched = new Map<String, Bool>();
+		var escapeTouched = new Map<String, Bool>();
+		for (i in 0...n) {
+			var target = isEscape[i] ? escapeTouched : nativeTouched;
+			for (nm in reads[i]) target.set(nm, true);
+			for (nm in writes[i]) target.set(nm, true);
+		}
+		for (nm in nativeTouched.keys()) {
+			// Lowered-instance names (P4) never correspond to a framedNames f64
+			// slot at all — they're only ever referenced via the specific
+			// `instance.method(...)` call-site pattern, which bypasses generic
+			// EIdent evaluation entirely (see emitCall). Excluding them here
+			// just avoids wasting a slot nothing would read/write; nothing
+			// depends on the exclusion for correctness, but it's free and clean.
+			if (escapeTouched.exists(nm) && !framedNames.exists(nm) && !loweredInstances.exists(nm)) {
+				if (nextFrameSlot < StrategyWasmRuntimeWat.FRAME_SLOTS) {
+					framedNames.set(nm, StrategyWasmRuntimeWat.FRAME_BASE + nextFrameSlot * 8);
+					nextFrameSlot++;
+				}
+				// else: slot budget exhausted — this name falls back to F1's
+				// escalation fixpoint in emitStmtListWithEscapes (still safe,
+				// just not framed).
+			}
+		}
+	}
+
+	/**
+	 * P4: find every construct-once instance (ast/ConstructOnce.hx) in the
+	 * strategy body and try to lower it — no runtime allocator needed, each
+	 * gets a FIXED compile-time offset into StrategyWasmRuntimeWat's HEAP
+	 * region (the set of construct-once instances is fully known statically).
+	 * A class is only eligible when: no parent (no inheritance in this MVP),
+	 * every method + the ctor independently compiles in "method mode" (self-
+	 * relative field access via `methodCtx`), and — for THIS SPECIFIC
+	 * instance — every ctor-call argument is a constant literal (ctor args
+	 * come from the `new X(...)` call site, which for a construct-once
+	 * binding runs before any bar is bound, so there's no meaningful runtime
+	 * value to evaluate them against; non-constant args just aren't
+	 * supported here, not unsafe — the instance stays interp-only). Any
+	 * class/instance that fails ANY of this is untouched — exactly as
+	 * correct and safe as before this feature existed.
+	 */
+	function computeLoweredClasses(prog:MuseProgram):Void {
+		loweredClasses = new Map();
+		loweredInstances = new Map();
+		methodFuncs = [];
+		initBlocks = [];
+
+		var classDecls = new Map<String, {parent:Null<String>, fields:Array<{name:String, def:Null<Expr>}>,
+			methods:Array<{name:String, args:Array<String>, body:Expr, isStatic:Bool}>,
+			ctor:Null<{args:Array<String>, body:Expr}>}>();
+		for (d in prog.decls) switch (d) {
+			case ClassDecl(name, parent, fields, methods, ctor):
+				classDecls.set(name, {parent: parent, fields: fields, methods: methods, ctor: ctor});
+			default:
+		}
+
+		for (className => cls in classDecls) {
+			if (cls.parent != null) continue;
+			if (cls.fields.length == 0) continue;
+			var methodOk = true;
+			for (m in cls.methods) if (m.isStatic) methodOk = false;
+			if (!methodOk) continue;
+
+			var fieldOrder = [for (f in cls.fields) f.name];
+			var fieldOffsets = new Map<String, Int>();
+			for (i in 0...fieldOrder.length) fieldOffsets.set(fieldOrder[i], i * 8);
+
+			var compiled:Array<String> = [];
+			var ok = true;
+			if (cls.ctor != null) {
+				var w = tryCompileMethod(className, "new", cls.ctor.args, cls.ctor.body, fieldOffsets);
+				if (w == null) ok = false; else compiled.push(w);
+			}
+			if (ok) for (m in cls.methods) {
+				var w = tryCompileMethod(className, m.name, m.args, m.body, fieldOffsets);
+				if (w == null) { ok = false; break; }
+				compiled.push(w);
+			}
+			if (!ok) continue;
+
+			for (w in compiled) methodFuncs.push(w);
+			loweredClasses.set(className, {
+				fieldOffsets: fieldOffsets, fieldOrder: fieldOrder,
+				fieldDefs: [for (f in cls.fields) f.def], ctor: cls.ctor, methods: cls.methods
+			});
+		}
+
+		// Find construct-once instances of NOW-LOWERABLE classes and assign
+		// each its fixed heap offset + generate its run-once init block.
+		heapBytesUsed = 0;
+		for (d in prog.decls) switch (d) {
+			case StrategyDecl(_, body):
+				lowerConstructOnceInstances(body, loweredClasses);
+			default:
+		}
+	}
+
+	/** Running allocator for the P4 fixed-offset instance heap — advances only
+	 * during `computeLoweredClasses`, never during per-bar execution. */
+	var heapBytesUsed:Int = 0;
+
+	function lowerConstructOnceInstances(body:Array<Stmt>,
+			classes:Map<String, {fieldOffsets:Map<String, Int>, fieldOrder:Array<String>, fieldDefs:Array<Null<Expr>>,
+				ctor:Null<{args:Array<String>, body:Expr}>, methods:Array<{name:String, args:Array<String>, body:Expr, isStatic:Bool}>}>):Void {
+		for (s in body) switch (s) {
+			case Assign(varName, e) if (ConstructOnce.isConstructOnceAssign(s)):
+				var call = switch (e) {
+					case ENew(cn, args): {cn: cn, args: args};
+					case EParent(ENew(cn, args)): {cn: cn, args: args};
+					default: null;
+				};
+				if (call == null) continue;
+				var cls = classes.get(call.cn);
+				if (cls == null) continue; // class itself wasn't lowerable
+				var argVals:Array<Float> = [];
+				var argsOk = true;
+				for (a in call.args) {
+					var v = constFloat(a);
+					if (v == null) { argsOk = false; break; }
+					argVals.push(v);
+				}
+				if (!argsOk) continue;
+				var instBytes = cls.fieldOrder.length * 8;
+				if (heapBytesUsed + instBytes > StrategyWasmRuntimeWat.HEAP_BYTES) continue;
+				var offset = StrategyWasmRuntimeWat.HEAP_BASE + heapBytesUsed;
+				var initWat = tryCompileInstanceInit(call.cn, cls, offset, call.args, argVals);
+				if (initWat == null) continue;
+				heapBytesUsed += instBytes;
+				initBlocks.push(initWat);
+				loweredInstances.set(varName, {className: call.cn, offset: offset});
+			case Block(inner):
+				lowerConstructOnceInstances(inner, classes);
+			default:
+		}
+	}
+
+	function findLoweredMethod(cls:{fieldOffsets:Map<String, Int>, fieldOrder:Array<String>, fieldDefs:Array<Null<Expr>>,
+			ctor:Null<{args:Array<String>, body:Expr}>, methods:Array<{name:String, args:Array<String>, body:Expr, isStatic:Bool}>},
+			name:String):Null<{name:String, args:Array<String>, body:Expr, isStatic:Bool}> {
+		for (m in cls.methods) if (m.name == name) return m;
+		return null;
+	}
+
+	/** A constant-literal expr's Float value, or null if it isn't one (P4 ctor-arg restriction). */
+	function constFloat(e:Expr):Null<Float> {
+		return switch (e) {
+			case EConst(CInt(i)): i;
+			case EConst(CFloat(f)): f;
+			case EUnop("-", true, inner):
+				var v = constFloat(inner);
+				v != null ? -v : null;
+			case EParent(inner): constFloat(inner);
+			default: null;
+		};
+	}
+
+	/**
+	 * Dry-compiles one method/ctor body as a standalone `(func $Class_method
+	 * (param $self i32) (param $arg f64)... (result f64) ...)`, using a FRESH
+	 * isolated local scope (methods never share on-bar's `locals`) and
+	 * `methodCtx` so bare identifiers matching a field route to self-relative
+	 * `f64.load`/`f64.store` instead of locals/framedNames/series (methods
+	 * have NO access to on-bar state in this MVP — only their own args/locals
+	 * and the class's own fields). Returns null (rather than throwing) on any
+	 * unsupported construct, snapshotting/restoring ALL emitter-wide counters
+	 * around the attempt (same discipline as `tryEmitStmt`) so a rejected
+	 * method never leaks partial state into the rest of compilation.
+	 */
+	function tryCompileMethod(className:String, methodName:String, args:Array<String>, body:Expr, fieldOffsets:Map<String, Int>):Null<String> {
+		var savedLocals = locals, savedOrder = localOrder, savedVec = vectorLocals;
+		var savedTmp = nextTmp, savedCross = nextCrossSlot, savedRise = nextRiseSlot, savedScratch = scratchCursor;
+		var savedImports = imports.copy(), savedStrings = strings.copy();
+		var savedCtx = methodCtx;
+
+		locals = new Map();
+		localOrder = [];
+		vectorLocals = new Map();
+		nextTmp = 0;
+		for (a in args) locals.set(a, "f64"); // known as a param — NOT added to localOrder (params are declared separately, not `(local)`s)
+		methodCtx = {fieldOffsets: fieldOffsets, selfWat: "local.get $self"};
+
+		var result:Null<String> = null;
+		try {
+			var bodyWat = emitValue(body); // body is always EBlock (parser always wraps method/ctor bodies)
+			var declaredLocals = [for (n in localOrder) "(local $" + n + " " + locals.get(n) + ")"].join("\n    ");
+			var paramDecls = [for (a in args) "(param $" + a + " f64)"].join(" ");
+			result = "(func $" + className + "_" + methodName + " (param $self i32)"
+				+ (paramDecls.length > 0 ? " " + paramDecls : "") + " (result f64)\n    "
+				+ (declaredLocals.length > 0 ? declaredLocals + "\n    " : "")
+				+ bodyWat + "\n  )";
+		} catch (_:EmitUnsupported) {
+			result = null;
+		}
+
+		locals = savedLocals;
+		localOrder = savedOrder;
+		vectorLocals = savedVec;
+		nextTmp = savedTmp;
+		nextCrossSlot = savedCross;
+		nextRiseSlot = savedRise;
+		scratchCursor = savedScratch;
+		imports = savedImports;
+		strings = savedStrings;
+		methodCtx = savedCtx;
+		return result;
+	}
+
+	/**
+	 * Dry-compiles the run-once field-init + ctor sequence for ONE instance
+	 * at a FIXED heap `offset` — field defaults write in declared order
+	 * (mirrors MuseInterp.initFieldsChain, minus the parent walk since P4
+	 * excludes inheritance), then the ctor body runs with `self` baked in as
+	 * a literal `i32.const offset` (not a param — there is exactly one
+	 * instance at this offset, known at compile time) and its args bound as
+	 * plain locals initialized from the already-validated constant `argVals`.
+	 */
+	function tryCompileInstanceInit(className:String,
+			cls:{fieldOffsets:Map<String, Int>, fieldOrder:Array<String>, fieldDefs:Array<Null<Expr>>,
+				ctor:Null<{args:Array<String>, body:Expr}>, methods:Array<{name:String, args:Array<String>, body:Expr, isStatic:Bool}>},
+			offset:Int, ctorArgExprs:Array<Expr>, ctorArgVals:Array<Float>):Null<String> {
+		var savedLocals = locals, savedOrder = localOrder, savedVec = vectorLocals;
+		var savedTmp = nextTmp, savedCross = nextCrossSlot, savedRise = nextRiseSlot, savedScratch = scratchCursor;
+		var savedImports = imports.copy(), savedStrings = strings.copy();
+		var savedCtx = methodCtx;
+
+		locals = new Map();
+		localOrder = [];
+		vectorLocals = new Map();
+		nextTmp = 0;
+		var selfWat = "i32.const " + offset;
+		methodCtx = {fieldOffsets: cls.fieldOffsets, selfWat: selfWat};
+
+		var result:Null<String> = null;
+		try {
+			var parts:Array<String> = [];
+			for (i in 0...cls.fieldOrder.length) {
+				var fname = cls.fieldOrder[i];
+				var off = cls.fieldOffsets.get(fname);
+				var def = cls.fieldDefs[i];
+				var valueWat = def != null ? coerceF64(def) : "f64.const 0";
+				parts.push(selfWat + "\n    i32.const " + off + "\n    i32.add\n    " + valueWat + "\n    f64.store");
+			}
+			if (cls.ctor != null) {
+				for (i in 0...cls.ctor.args.length) {
+					var an = cls.ctor.args[i];
+					ensureLocal(an);
+					parts.push("f64.const " + ctorArgVals[i] + "\n    local.set $" + an);
+				}
+				parts.push(emitValue(cls.ctor.body) + "\n    drop");
+			}
+			var declaredLocals = [for (n in localOrder) "(local $" + n + " " + locals.get(n) + ")"].join("\n    ");
+			result = (declaredLocals.length > 0 ? declaredLocals + "\n    " : "") + parts.join("\n    ");
+		} catch (_:EmitUnsupported) {
+			result = null;
+		}
+
+		locals = savedLocals;
+		localOrder = savedOrder;
+		vectorLocals = savedVec;
+		nextTmp = savedTmp;
+		nextCrossSlot = savedCross;
+		nextRiseSlot = savedRise;
+		scratchCursor = savedScratch;
+		imports = savedImports;
+		strings = savedStrings;
+		methodCtx = savedCtx;
+		return result;
+	}
+
+	/**
+	 * F1 hybrid compilation: emit a statement LIST with per-statement escape
+	 * regions instead of the old all-or-nothing `EmitUnsupported` abort.
+	 *
+	 * `emitStmt`'s `ensureLocal`-declared locals are plain WASM `(local)`s
+	 * (reset to 0 every call to `$run_strategy` — one call == one bar, no
+	 * cross-bar persistence), so all data-flow hazards live WITHIN one
+	 * statement list. There are TWO directions, both requiring escalation to
+	 * a full fixpoint (a single top-to-bottom pass only catches the first):
+	 *
+	 *  1. A statement READS a name only an escape region WRITES — native
+	 *     code has no way to see that value UNLESS the name is FRAMED (F2),
+	 *     so an un-framed one must escape too.
+	 *  2. A statement WRITES a name an escape region READS — the escape's
+	 *     interp thunk can only see values that reached it via the SAME
+	 *     shared harness/interp (i.e., were themselves set by a PRIOR escape
+	 *     in this bar) OR the F2 shared frame; a value that only ever existed
+	 *     as a native WASM local (and isn't framed) is invisible to it. So an
+	 *     un-framed writer must escape too, so the value becomes visible
+	 *     through the shared interp's globals instead.
+	 *
+	 * Escaping is always the safe direction to move (never the reverse) —
+	 * same "over-X is always safe" principle PreludeVars.hx documents for
+	 * its own hoist-eligibility analysis, just pointed the other way.
+	 */
+	function emitStmtListWithEscapes(stmts:Array<Stmt>, indent:String = "    "):String {
+		var n = stmts.length;
+		var reads = [for (s in stmts) readNames(s)];
+		var writes = [for (s in stmts) writeNames(s)];
+
+		// Snapshot emitter state before classification so the real pass below
+		// can replay from the same starting point.
+		var localsStart = locals.copy();
+		var localOrderStart = localOrder.copy();
+		var vectorLocalsStart = vectorLocals.copy();
+		var nextTmpStart = nextTmp;
+		var nextCrossSlotStart = nextCrossSlot;
+		var nextRiseSlotStart = nextRiseSlot;
+		var scratchCursorStart = scratchCursor;
+
+		// Seed classification SEQUENTIALLY, carrying real emitter state
+		// forward between statements — NOT dry-running each statement in
+		// isolation and rolling back afterward. A later statement (e.g.
+		// `zs = stat_zscore(xs)`) can depend on registrations (`xs` becoming
+		// a vectorLocal) that only a PRIOR native statement's real emission
+		// makes; classifying each statement against a reset/rolled-back
+		// state falsely marks dependent native chains as escapes.
+		// `tryEmitStmt` rolls back only on ITS OWN failure, so state from
+		// preceding successful statements stays intact for the next call.
+		var isEscape = [for (s in stmts) tryEmitStmt(s) == null];
+
+		var changed = true;
+		while (changed) {
+			changed = false;
+			var escapedWrites = new Map<String, Bool>();
+			var escapedReads = new Map<String, Bool>();
+			for (i in 0...n) if (isEscape[i]) {
+				for (nm in writes[i]) escapedWrites.set(nm, true);
+				for (nm in reads[i]) escapedReads.set(nm, true);
+			}
+			for (i in 0...n) {
+				if (isEscape[i]) continue;
+				var mustEscape = false;
+				// F2: a FRAMED name's boundary is already bridged via shared
+				// linear memory (both sides read/write the same slot), so it
+				// no longer forces escalation — only an un-framed crossing
+				// (e.g. the FRAME_SLOTS budget was exhausted) still does.
+				for (nm in reads[i]) if (escapedWrites.exists(nm) && !framedNames.exists(nm)) mustEscape = true;
+				for (nm in writes[i]) if (escapedReads.exists(nm) && !framedNames.exists(nm)) mustEscape = true;
+				if (mustEscape) { isEscape[i] = true; changed = true; }
+			}
+		}
+
+		// Replay for real from the pre-classification snapshot. Any statement
+		// ending up escaped never needs its classification-time emission
+		// kept (the fixpoint guarantees every remaining-native statement's
+		// reads only depend on names written by OTHER remaining-native
+		// statements before it), so resetting here and re-emitting only the
+		// still-native statements in order reproduces exactly the state a
+		// from-scratch native-only pass would have.
+		locals = localsStart;
+		localOrder = localOrderStart;
+		vectorLocals = vectorLocalsStart;
+		nextTmp = nextTmpStart;
+		nextCrossSlot = nextCrossSlotStart;
+		nextRiseSlot = nextRiseSlotStart;
+		scratchCursor = scratchCursorStart;
+
+		var parts:Array<String> = [];
+		for (i in 0...n) {
+			if (isEscape[i]) {
+				var regionId = escapeRegions.length;
+				escapeRegions.push(stmts[i]);
+				needImport("host_eval", "(param i32)");
+				parts.push("i32.const " + regionId + "\n" + indent + "call $host_eval");
+			} else {
+				// Guaranteed to succeed: the sequential classification pass
+				// already proved it against equivalent preceding state, and
+				// no already-native statement is ever escalated BACK to escape.
+				var wat = tryEmitStmt(stmts[i]);
+				parts.push(wat != null ? wat : "");
+			}
+		}
+		return parts.join("\n" + indent);
+	}
+
+	/** Attempt `emitStmt`, rolling back any partially-registered local/vector/counter state on failure. */
+	function tryEmitStmt(s:Stmt):Null<String> {
+		var localsSnap = locals.copy();
+		var localOrderSnap = localOrder.copy();
+		var vectorLocalsSnap = vectorLocals.copy();
+		var nextTmpSnap = nextTmp;
+		var nextCrossSlotSnap = nextCrossSlot;
+		var nextRiseSlotSnap = nextRiseSlot;
+		var scratchCursorSnap = scratchCursor;
+		try {
+			return emitStmt(s);
+		} catch (_:EmitUnsupported) {
+			locals = localsSnap;
+			localOrder = localOrderSnap;
+			vectorLocals = vectorLocalsSnap;
+			nextTmp = nextTmpSnap;
+			nextCrossSlot = nextCrossSlotSnap;
+			nextRiseSlot = nextRiseSlotSnap;
+			scratchCursor = scratchCursorSnap;
+			return null;
+		}
+	}
+
+	/** Names this statement READS (not the target of its own Assign, if any). Over-inclusive is safe. */
+	function readNames(s:Stmt):Array<String> {
+		var out:Array<String> = [];
+		function e(x:Null<Expr>):Void if (x != null) collectIdents(x, out);
+		switch (s) {
+			case ExprStmt(x): e(x);
+			case Assign(_, x): e(x);
+			case Order(_, args): for (a in args) e(a);
+			case Return(x): e(x);
+			case When(cond, body):
+				e(cond);
+				for (b in body) for (n in readNames(b)) out.push(n);
+			case Block(ss):
+				for (b in ss) for (n in readNames(b)) out.push(n);
+			case OnBar(_) | OnPosition(_) | OnTick(_) | OnEvent(_, _) | MatchFor(_, _, _)
+				| ForIn(_, _, _) | Yield(_) | YieldStar(_) | Use(_, _):
+				// Already unconditionally unsupported (emitStmt throws) — no
+				// need to resolve their reads for taint purposes.
+		}
+		return out;
+	}
+
+	/** Names this statement (or one nested inside it) ASSIGNS. */
+	function writeNames(s:Stmt):Array<String> {
+		var out:Array<String> = [];
+		switch (s) {
+			case Assign(n, _): out.push(n);
+			case When(_, body): for (b in body) for (n in writeNames(b)) out.push(n);
+			case Block(ss): for (b in ss) for (n in writeNames(b)) out.push(n);
+			default:
+		}
+		return out;
+	}
+
+	/** Best-effort free-identifier collector over an Expr subtree (read positions only). */
+	function collectIdents(x:Expr, out:Array<String>):Void {
+		switch (x) {
+			case EIdent(n): out.push(n);
+			case EBarField(_) | EConst(_):
+			case EVar(_, init): if (init != null) collectIdents(init, out);
+			case EBlock(es): for (e in es) collectIdents(e, out);
+			case EField(o, _): collectIdents(o, out);
+			case EBinop(_, a, b): collectIdents(a, out); collectIdents(b, out);
+			case EUnop(_, _, e): collectIdents(e, out);
+			case ECall(callee, args): collectIdents(callee, out); for (a in args) collectIdents(a, out);
+			case EIf(c, a, b): collectIdents(c, out); collectIdents(a, out); if (b != null) collectIdents(b, out);
+			case EWhile(c, b): collectIdents(c, out); collectIdents(b, out);
+			case EFor(_, it, b): collectIdents(it, out); collectIdents(b, out);
+			case EFunction(_, body, _, _): collectIdents(body, out);
+			case EReturn(e): if (e != null) collectIdents(e, out);
+			case EArray(o, i): collectIdents(o, out); collectIdents(i, out);
+			case EArrayDecl(vs): for (v in vs) collectIdents(v, out);
+			case EObject(fs): for (f in fs) collectIdents(f.e, out);
+			case ETernary(c, a, b): collectIdents(c, out); collectIdents(a, out); collectIdents(b, out);
+			case EParent(e): collectIdents(e, out);
+			case EMeta(_, args, e): for (a in args) collectIdents(a, out); collectIdents(e, out);
+			case ELookback(s, n): collectIdents(s, out); collectIdents(n, out);
+			case EMatch(scrut, arms):
+				collectIdents(scrut, out);
+				for (arm in arms) {
+					if (arm.guard != null) collectIdents(arm.guard, out);
+					collectIdents(arm.body, out);
+				}
+			case EYield(e) | EYieldStar(e): collectIdents(e, out);
+			case ENew(_, args): for (a in args) collectIdents(a, out);
+			case EThis:
+			case ESuper(_, args): for (a in args) collectIdents(a, out);
+		}
+	}
+
 	function emitStmt(s:Stmt):String {
 		return switch (s) {
 			case ExprStmt(e):
 				emitValue(e) + "\n    drop";
+			// P4 (checked FIRST — methods have their own isolated scope and
+			// must never fall through to on-bar's framedNames/vector logic,
+			// even if a method-local name happens to collide with an on-bar
+			// framed name string): a bare `field = ...` inside a method body
+			// (optional-this write, no `!locals.exists` shadow) is a
+			// self-relative field store; anything else in method mode is an
+			// ordinary method-local var.
+			case Assign(name, e) if (methodCtx != null && !locals.exists(name) && methodCtx.fieldOffsets.exists(name)):
+				methodCtx.selfWat + "\n    i32.const " + methodCtx.fieldOffsets.get(name)
+					+ "\n    i32.add\n    " + coerceF64(e) + "\n    f64.store";
+			case Assign(name, e) if (methodCtx != null):
+				ensureLocal(name);
+				coerceF64(e) + "\n    local.set $" + name;
+			case Assign(name, e) if (framedNames.exists(name)):
+				// F2: a boundary-crossing name stores to its shared frame slot
+				// instead of a WASM local — the escape side's interp thunk
+				// reads/writes the SAME memory offset (see MuseInterp's frame
+				// binding), so this crossing never needs the whole statement
+				// escalated to interp.
+				"i32.const " + framedNames.get(name) + "\n    " + coerceF64(e) + "\n    f64.store";
 			case Assign(name, e):
 				var vec = tryAssignVector(name, e);
 				if (vec != null) return vec;
@@ -256,7 +898,38 @@ class StrategyWasmEmitter {
 					case CString(_): throw new EmitUnsupported();
 				}
 			case EIdent(n):
+				// P4 (checked FIRST, same reasoning as the Assign case above):
+				// a method's own local/param wins over its class's fields
+				// (shadowing); a bare identifier matching a field name is a
+				// self-relative read. Methods have NO other name source in
+				// this MVP — no framedNames, no series, no get_param.
+				if (methodCtx != null) {
+					if (locals.exists(n)) return "local.get $" + n;
+					if (methodCtx.fieldOffsets.exists(n))
+						return methodCtx.selfWat + "\n    i32.const " + methodCtx.fieldOffsets.get(n) + "\n    i32.add\n    f64.load";
+					throw new EmitUnsupported();
+				}
+				if (framedNames.exists(n)) return "i32.const " + framedNames.get(n) + "\n    f64.load";
 				if (vectorLocals.exists(n)) throw new EmitUnsupported();
+				// A nullary enum variant construction — not a local/series/param
+				// read. No native representation exists (see field doc comment);
+				// throwing here is what lets F1/F2 correctly escape/frame it
+				// instead of silently misreading it as a get_param lookup.
+				//
+				// P4 exploration note: a bare `f64.const <tagId>` encoding was
+				// tried and DELIBERATELY REVERTED — it's only safe for a value
+				// that stays native end-to-end. The moment such a name gets
+				// FRAMED (F2, e.g. because a LATER statement needs it for an
+				// unrelated escape) or aliased into another variable that
+				// itself escapes, the interp thunk reads a bare float where it
+				// expects the canonical `{__tag,args}` record — silent
+				// corruption, not a crash. Closing that fully needs real
+				// taint tracking through arbitrary aliasing (`t = s` where `s`
+				// was tag-typed), which native EMatch lowering ALONE doesn't
+				// solve either. Left for a future pass that builds proper
+				// enum-value taint tracking alongside native match dispatch,
+				// not attempted piecemeal.
+				if (enumVariantNames.exists(n)) throw new EmitUnsupported();
 				if (locals.exists(n)) {
 					"local.get $" + n;
 				} else {
@@ -272,6 +945,19 @@ class StrategyWasmEmitter {
 				var sid = seriesSid(n);
 				if (sid == null) throw new EmitUnsupported();
 				"global.get $" + "cur_" + seriesCurName(sid);
+			case EVar(n, init) if (methodCtx != null && !locals.exists(n) && methodCtx.fieldOffsets.exists(n)):
+				var off = methodCtx.fieldOffsets.get(n);
+				var valueWat = init != null ? coerceF64(init) : "f64.const 0";
+				methodCtx.selfWat + "\n    i32.const " + off + "\n    i32.add\n    " + valueWat
+					+ "\n    f64.store\n    " + methodCtx.selfWat + "\n    i32.const " + off + "\n    i32.add\n    f64.load";
+			case EVar(n, init) if (methodCtx != null):
+				ensureLocal(n);
+				var valueWat = init != null ? coerceF64(init) : "f64.const 0";
+				valueWat + "\n    local.set $" + n + "\n    local.get $" + n;
+			case EVar(n, init) if (framedNames.exists(n)):
+				var off = framedNames.get(n);
+				var valueWat = init != null ? coerceF64(init) : "f64.const 0";
+				"i32.const " + off + "\n    " + valueWat + "\n    f64.store\n    i32.const " + off + "\n    f64.load";
 			case EVar(n, init):
 				if (init != null) {
 					var vec = tryAssignVector(n, init);
@@ -281,6 +967,16 @@ class StrategyWasmEmitter {
 				ensureLocal(n);
 				if (init == null) return "f64.const 0\n    local.set $" + n + "\n    local.get $" + n;
 				coerceF64(init) + "\n    local.set $" + n + "\n    local.get $" + n;
+			case EBinop("=", EIdent(n), v) if (methodCtx != null && !locals.exists(n) && methodCtx.fieldOffsets.exists(n)):
+				var off = methodCtx.fieldOffsets.get(n);
+				methodCtx.selfWat + "\n    i32.const " + off + "\n    i32.add\n    " + coerceF64(v)
+					+ "\n    f64.store\n    " + methodCtx.selfWat + "\n    i32.const " + off + "\n    i32.add\n    f64.load";
+			case EBinop("=", EIdent(n), v) if (methodCtx != null):
+				ensureLocal(n);
+				coerceF64(v) + "\n    local.set $" + n + "\n    local.get $" + n;
+			case EBinop("=", EIdent(n), v) if (framedNames.exists(n)):
+				var off = framedNames.get(n);
+				"i32.const " + off + "\n    " + coerceF64(v) + "\n    f64.store\n    i32.const " + off + "\n    f64.load";
 			case EBinop("=", EIdent(n), v):
 				var vec = tryAssignVector(n, v);
 				if (vec != null) return vec + "\n    f64.const 0";
@@ -304,6 +1000,20 @@ class StrategyWasmEmitter {
 				"block $" + br + "\n      loop $" + ct + "\n        " + asI32Cond(c)
 					+ "\n        i32.eqz\n        br_if $" + br + "\n        " + emitValue(body)
 					+ "\n        drop\n        br $" + ct + "\n      end\n    end\n    f64.const 0";
+			case ECall(EField(EIdent(instanceName), methodName), args) if (loweredInstances.exists(instanceName)):
+				// P4: a method call on a natively-lowered construct-once
+				// instance — `self` is the instance's FIXED compile-time heap
+				// offset (a literal, not loaded from anywhere: there's exactly
+				// one instance at that address, known at compile time), args
+				// evaluated normally, dispatched via a direct `call` to the
+				// method's own standalone function (never a `host_eval`).
+				var inst = loweredInstances.get(instanceName);
+				var cls = loweredClasses.get(inst.className);
+				var m = cls != null ? findLoweredMethod(cls, methodName) : null;
+				if (cls == null || m == null) throw new EmitUnsupported();
+				"i32.const " + inst.offset + "\n    "
+					+ [for (a in args) coerceF64(a)].join("\n    ")
+					+ (args.length > 0 ? "\n    " : "") + "call $" + inst.className + "_" + methodName;
 			case ECall(callee, args):
 				emitCall(callee, args);
 			case EParent(x): emitValue(x);
@@ -312,6 +1022,18 @@ class StrategyWasmEmitter {
 				var parts = [for (i in 0...es.length - 1) emitValue(es[i]) + "\n    drop"];
 				parts.push(emitValue(es[es.length - 1]));
 				parts.join("\n    ");
+			case EReturn(v):
+				// Only valid in method-mode: methods compile as their own
+				// `(func ... (result f64))`, where a real WASM `return`
+				// instruction is well-typed and exits immediately — unlike
+				// on-bar's `$run_strategy` (no result type), where
+				// `emitStmt`'s `Return` case can only drop the value. Code
+				// textually after `return` is WASM-valid unreachable (the
+				// validator accepts anything after an unconditional exit), so
+				// an early `return` followed by more statements in the same
+				// EBlock — e.g. inside a `when` guard — is fine.
+				if (methodCtx == null) throw new EmitUnsupported();
+				(v != null ? emitValue(v) : "f64.const 0") + "\n    return";
 			case EMeta(_, _, x): emitValue(x);
 			case ELookback(series, n):
 				emitLookback(series, n);

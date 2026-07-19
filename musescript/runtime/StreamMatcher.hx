@@ -24,11 +24,15 @@ class StreamMatcher {
 	):Void {
 		IterDriver.each(iter, function(item) {
 			var r = matcher.match(item, arms);
-			if (!r.matched) return;
+			if (!r.matched) 
+				return;
 			if (r.guard != null) {
-				if (onGuard == null) return;
-				if (!onGuard(r.bindings, r.guard)) return;
+				if (onGuard == null) 
+					return;
+				if (!onGuard(r.bindings, r.guard)) 
+					return;
 			}
+			
 			onMatch(r.bindings, r.body);
 		});
 	}

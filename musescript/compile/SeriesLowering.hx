@@ -44,6 +44,8 @@ class SeriesLowering {
 				TemplateDecl(name, params, ret, wrap(r));
 			case StmtTemplateDecl(name, params, body):
 				StmtTemplateDecl(name, params, lowerStmts(body));
+			case EnumDecl(_, _): d;
+			case ClassDecl(_, _, _, _, _): d;
 			case ParamDecl(name, def, opts):
 				if (def == null) d;
 				else {

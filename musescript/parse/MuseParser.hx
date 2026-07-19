@@ -505,6 +505,9 @@ class MuseParser {
 			case EIdent("true"): PatLit(MC.CBool(true));
 			case EIdent("false"): PatLit(MC.CBool(false));
 			case EIdent("null"): PatLit(MC.CNull);
+			// Haxe-flavored: a Capitalized bare identifier is a nullary enum tag;
+			// lowercase binds. (`Ctor(args)` already routes through the ECall arm.)
+			case EIdent(id) if (id.charAt(0) >= "A" && id.charAt(0) <= "Z"): PatTag(id, []);
 			case EIdent(id): PatBind(id);
 			case EConst(CInt(i)): PatLit(MC.CInt(i));
 			case EConst(CFloat(f)): PatLit(MC.CFloat(f));

@@ -7,6 +7,7 @@ class StreamIter implements MuseIter {
 	public var buffer:Array<Dynamic>;
 	public var maxDepth:Int;
 	public var closed:Bool;
+
 	var waiters:Array<Void->Void>;
 
 	public function new(?maxDepth:Int = 1024) {
@@ -23,12 +24,12 @@ class StreamIter implements MuseIter {
 		flushWaiters();
 	}
 
-	public function end():Void {
+	inline public function end():Void {
 		closed = true;
 		flushWaiters();
 	}
 
-	function flushWaiters():Void {
+	inline function flushWaiters():Void {
 		while (waiters.length > 0) waiters.shift()();
 	}
 

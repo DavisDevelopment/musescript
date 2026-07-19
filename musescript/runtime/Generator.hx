@@ -138,7 +138,7 @@ class Generator implements MuseIter {
 	}
 
 	/** Finite values without evalBody — handy for tests and MuseIters.from. */
-	public static inline function fromValues(values:Array<Dynamic>):Generator {
+	public static inline function fromValues(values: Array<Dynamic>):Generator {
 		var g = new Generator();
 		g.queue = values != null ? values.copy() : [];
 		g.started = true;
@@ -148,6 +148,20 @@ class Generator implements MuseIter {
 
 	public static inline function empty():Generator {
 		return fromValues([]);
+	}
+
+	public static inline function from(iter:MuseIter):Generator {
+		var g = new Generator();
+		g.delegated = iter;
+		g.started = true;
+		return g;
+	}
+	
+	public static inline function fromHaxeIter(iter:Iterator<Dynamic>):Generator {
+		var g = new Generator();
+		g.delegated = new HaxeIterWrapper(iter);
+		g.started = true;
+		return g;
 	}
 
 	// INTERP HOOK: true suspend — evalBody should not run the whole body at once.

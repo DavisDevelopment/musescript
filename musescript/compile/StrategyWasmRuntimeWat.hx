@@ -7,7 +7,18 @@ package musescript.compile;
  * Memory layout:
  *   [0, RISE_BASE) — crossover / crossunder slots
  *   [RISE_BASE, VEC_SCRATCH_BASE) — rising / falling history rings
- *   [VEC_SCRATCH_BASE, STATE_BYTES) — ephemeral vector scratch for (ptr,len) lowers
+ *   [VEC_SCRATCH_BASE, FRAME_BASE) — ephemeral vector scratch for (ptr,len) lowers
+ *   [FRAME_BASE, HEAP_BASE) — F2 shared variable frame (one f64 slot per
+ *     boundary-crossing local — see StrategyWasmEmitter's `framedNames`);
+ *     both native WASM code and the host_eval interp thunk read/write here
+ *     directly, so a name crossing the native/interp boundary never needs
+ *     the whole producing/consuming statement escalated to interp (F1)
+ *   [HEAP_BASE, STATE_BYTES) — P4 class-instance struct storage: ONLY
+ *     construct-once instances (ast/ConstructOnce.hx) that got natively
+ *     lowered live here — one f64 per declared field, contiguous, at a
+ *     FIXED compile-time offset (no runtime allocator: the set of
+ *     construct-once instances is fully known at compile time, so this is
+ *     static offset assignment exactly like FRAME_BASE, not a bump heap)
  *   [STATE_BYTES, …) — streaming OHLCV series (7 contiguous f64 arrays) when reset() is used
  *
  * Series ids: 0=open 1=high 2=low 3=close 4=volume 5=time 6=index
@@ -24,7 +35,14 @@ class StrategyWasmRuntimeWat {
 	public static inline var VEC_SCRATCH_BASE = RISE_BASE + RISE_SLOTS * RISE_STRIDE;
 	/** Scratch arena for spilled array / window operands (512 f64s). */
 	public static inline var VEC_SCRATCH_BYTES = 4096;
-	public static inline var STATE_BYTES = VEC_SCRATCH_BASE + VEC_SCRATCH_BYTES;
+	/** F2 variable frame: start + slot count/size. */
+	public static inline var FRAME_BASE = VEC_SCRATCH_BASE + VEC_SCRATCH_BYTES;
+	public static inline var FRAME_SLOTS = 64;
+	public static inline var FRAME_BYTES = FRAME_SLOTS * 8;
+	/** P4 class-instance heap: fixed-offset f64 field storage (see class doc above). */
+	public static inline var HEAP_BASE = FRAME_BASE + FRAME_BYTES;
+	public static inline var HEAP_BYTES = 4096;
+	public static inline var STATE_BYTES = HEAP_BASE + HEAP_BYTES;
 
 	/** Globals + core helpers + all internalized indicators / crosses. */
 	public static function helpers(crossSlots:Int, riseSlots:Int):String {
@@ -139,11 +157,17 @@ class StrategyWasmRuntimeWat {
 		parts.push('
   (func $$init_state
     (local $$slot i32) (local $$addr i32) (local $$j i32)
-    ;; zero entire state region
+    ;; Zero the cross/rise/vec-scratch/F2-frame region -- STOPS at HEAP_BASE,
+    ;; deliberately NOT sweeping through STATE_BYTES: [HEAP_BASE, STATE_BYTES)
+    ;; is P4 construct-once instance heap, whose fields are fully
+    ;; (re-)initialized by their own run-once construct_once_init -- that
+    ;; call already happens once per run (right after instantiation, before
+    ;; this function is called via reset / configure_tape), so sweeping over
+    ;; it here would just wipe out work already done, not do anything useful.
     (local.set $$j (i32.const 0))
     (block $$zdone
       (loop $$zloop
-        (br_if $$zdone (i32.ge_u (local.get $$j) (i32.const __STATE_BYTES__)))
+        (br_if $$zdone (i32.ge_u (local.get $$j) (i32.const __HEAP_BASE__)))
         (i32.store8 (local.get $$j) (i32.const 0))
         (local.set $$j (i32.add (local.get $$j) (i32.const 1)))
         (br $$zloop)))
@@ -961,6 +985,7 @@ class StrategyWasmRuntimeWat {
 ');
 		return parts.join("")
 			.split("__STATE_BYTES__").join(Std.string(STATE_BYTES))
+			.split("__HEAP_BASE__").join(Std.string(HEAP_BASE))
 			.split("__CS__").join(Std.string(cs))
 			.split("__RISE_BASE__").join(Std.string(RISE_BASE))
 			.split("__RISE_STRIDE__").join(Std.string(RISE_STRIDE))

@@ -84,6 +84,9 @@ class SeriesLiveness {
 					}
 				case EYield(x): expr(x);
 				case EYieldStar(x): expr(x);
+				case ENew(_, args): for (a in args) expr(a);
+				case EThis:
+				case ESuper(_, args): for (a in args) expr(a);
 			}
 		}
 
@@ -123,8 +126,10 @@ class SeriesLiveness {
 				case ParamDecl(_, def, _): expr(def);
 				case FnDecl(_, _, body, _): expr(body);
 				case MacroDecl(_, body): stmts(body);
-				case ModuleDecl(_, _, _) | TemplateDecl(_, _, _, _) | StmtTemplateDecl(_, _, _):
+				case EnumDecl(_, _) | ModuleDecl(_, _, _) | TemplateDecl(_, _, _, _) | StmtTemplateDecl(_, _, _):
 					bail = true; // should be expanded away before backends
+				case ClassDecl(_, _, _, _, _):
+					bail = true; // method/ctor bodies are interp-only, not scanned here
 			}
 		}
 		if (!bail) stmts(prog.stmts);

@@ -83,6 +83,15 @@ class TestMain {
 		runner.addCase(new TestInstrumentation());
 		runner.addCase(new TestPlanner());
 		runner.addCase(new TestChecker());
+		runner.addCase(new TestLangEnums());
+		runner.addCase(new TestLangClasses());
+		runner.addCase(new TestLangInheritance());
+		runner.addCase(new TestVariableFrame());
+		runner.addCase(new TestCapstoneIndicators());
+		runner.addCase(new TestArrayBuffer());
+		runner.addCase(new TestConstructOnce());
+		runner.addCase(new TestClassStructLowering());
+		runner.addCase(new TestHybridWasm());
 		runner.addCase(new TestCompiler());
 		runner.addCase(new TestGenerator());
 		runner.addCase(new TestGeneratorLower());
@@ -1418,15 +1427,33 @@ class TestMlBuiltins extends Test {
 		#end
 	}
 
-	public function testStrategyWasmDynamicVectorsStillFallback() {
-		var prog = new MuseParser().parse('strategy MlMatrixStillFallback {
+	/**
+	 * F1 (hybrid WASM/interp): dynamic ml_matrix ops aren't natively lowerable,
+	 * so this whole body escapes to `host_eval` instead of the module aborting
+	 * to null — still compiles, still behaves correctly end to end.
+	 */
+	public function testStrategyWasmDynamicVectorsEscapeToHostEval() {
+		var source = 'strategy MlMatrixStillFallback {
 			onBar {
 				m = ml_matrix(2, 2, [1, 0, 0, 1])
 				score = ml_matrix_get(m, 0, 0)
 				when score > 0: long()
 			}
-		}');
-		Assert.isNull(musescript.compile.StrategyWasmBackend.emitWat(prog));
+		}';
+		var wat = musescript.compile.StrategyWasmBackend.emitWat(new MuseParser().parse(source));
+		Assert.notNull(wat);
+		Assert.isTrue(wat.indexOf("host_eval") >= 0);
+		#if (js || python)
+		if (musescript.compile.StrategyWasmBackend.hostReady()) {
+			var feed = BarFeed.synthetic(60, 4);
+			var interpResult = new MuseInterp(new HarnessContext()).runBacktest(new MuseParser().parse(source), feed);
+			var hybridHarness = new HarnessContext();
+			Reflect.setField(hybridHarness, "feed", feed);
+			var hybridResult = musescript.compile.StrategyWasmBackend.compile(new MuseParser().parse(source))(hybridHarness);
+			Assert.equals(interpResult.trades, hybridResult.trades);
+			Assert.floatEquals(interpResult.finalEquity, hybridResult.finalEquity);
+		}
+		#end
 	}
 
 	public function testStrategyWasmWindowStatComposition() {
@@ -1777,8 +1804,13 @@ class TestCompiler extends Test {
 		#end
 	}
 
-	public function testCompileWasmRejectsRuntimeVectorsAndStrings() {
-		// Matrices still have no Strategy-WASM ABI; assigned windows/softmax are supported.
+	/**
+	 * F1 (hybrid WASM/interp): matrices and string ops still have no native
+	 * Strategy-WASM lowering, but that no longer means the WHOLE module
+	 * aborts to null — the offending statement(s) escape to `host_eval`
+	 * while the module still compiles.
+	 */
+	public function testCompileWasmEscapesRuntimeVectorsAndStrings() {
 		var vectors = new MuseParser().parse('{
 			@strategy("vector")
 			@on(bar) {
@@ -1786,7 +1818,9 @@ class TestCompiler extends Test {
 				if (ml_matrix_get(m, 0, 0) > 0) long();
 			}
 		}');
-		Assert.isNull(musescript.compile.StrategyWasmBackend.emitWat(vectors));
+		var vectorsWat = musescript.compile.StrategyWasmBackend.emitWat(vectors);
+		Assert.notNull(vectorsWat);
+		Assert.isTrue(vectorsWat.indexOf("host_eval") >= 0);
 
 		var strings = new MuseParser().parse('{
 			@strategy("strings")
@@ -1794,7 +1828,9 @@ class TestCompiler extends Test {
 				if (str_contains("muse", "use")) long();
 			}
 		}');
-		Assert.isNull(musescript.compile.StrategyWasmBackend.emitWat(strings));
+		var stringsWat = musescript.compile.StrategyWasmBackend.emitWat(strings);
+		Assert.notNull(stringsWat);
+		Assert.isTrue(stringsWat.indexOf("host_eval") >= 0);
 	}
 
 	public function testCompileWasmVwapClamp() {
@@ -1919,6 +1955,9 @@ class TestCompiler extends Test {
 		Assert.isTrue(wat.indexOf('(import "env" "lookback"') < 0);
 		Assert.isTrue(wat.indexOf('(memory (export "memory")') >= 0);
 
+		// F1 (hybrid WASM/interp): lookback of a CALL expr (vs. a bare series)
+		// still has no native lowering, but escapes to `host_eval` rather than
+		// aborting the whole module to null.
 		var callLb = new MuseParser().parse('{
 			@strategy("lb_call")
 			@on(bar) {
@@ -1926,7 +1965,9 @@ class TestCompiler extends Test {
 				if (p > close) long();
 			}
 		}');
-		Assert.isNull(musescript.compile.StrategyWasmBackend.emitWat(callLb));
+		var callLbWat = musescript.compile.StrategyWasmBackend.emitWat(callLb);
+		Assert.notNull(callLbWat);
+		Assert.isTrue(callLbWat.indexOf("host_eval") >= 0);
 	}
 
 	/** Streaming vs preloaded modes must agree. */

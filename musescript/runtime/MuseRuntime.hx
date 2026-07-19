@@ -41,6 +41,9 @@ import musescript.builtins.TradeBuiltins;
  */
 @:expose("MuseRuntime")
 class MuseRuntime {
+
+	//TODO: document this, literally line-by-line, so I can always follow along c:
+
 	/** No-op entry point; this module exists to `@:expose` its static API to JS. */
 	static function main() {}
 

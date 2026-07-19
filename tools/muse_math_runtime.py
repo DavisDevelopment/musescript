@@ -1,6 +1,7 @@
 """Host helpers for MuseScript math backends (numba / pure python / wasmtime)."""
 from __future__ import annotations
 import math
+import struct
 from typing import Any, Callable, Optional, Sequence
 
 
@@ -266,6 +267,17 @@ def load_strategy_module(wat: str, host: Any) -> dict[str, Any]:
             return
         fn(store, int(base), int(count))
 
+    def construct_once_init() -> None:
+        """P4: run-once field-init + ctor for natively-lowered construct-once
+        class instances (StrategyWasmEmitter). Absent when the program
+        declares none — a no-op then, same optional-export pattern as
+        configure_features."""
+        try:
+            fn = _fn("construct_once_init")
+        except (KeyError, TypeError):
+            return
+        fn(store)
+
     def pack_and_configure(
         bars: Sequence[Any],
         feature_tapes: Optional[Sequence[Sequence[float]]] = None,
@@ -327,6 +339,15 @@ def load_strategy_module(wat: str, host: Any) -> dict[str, Any]:
                 memory.write(store, row.tobytes(order="C"), feature_base + fid * n * 8)
         configure_features(feature_base if feature_count else 0, feature_count)
 
+    def frame_get(offset: int) -> float:
+        """F2: read one f64 from the shared variable frame (see StrategyWasmRuntimeWat's
+        FRAME region) — the Python-host counterpart of the JS Float64Array-view accessor."""
+        data = memory.read(store, int(offset), int(offset) + 8)
+        return struct.unpack("<d", bytes(data))[0]
+
+    def frame_set(offset: int, value: float) -> None:
+        memory.write(store, struct.pack("<d", float(value)), int(offset))
+
     # Plain object (not a dict) so Haxe Reflect.field / getattr works on the Python host.
     class _StrategyModule:
         pass
@@ -341,6 +362,9 @@ def load_strategy_module(wat: str, host: Any) -> dict[str, Any]:
     mod.pack_and_configure = pack_and_configure
     mod.store = store
     mod.memory = memory
+    mod.frame_get = frame_get
+    mod.frame_set = frame_set
+    mod.construct_once_init = construct_once_init
     return mod
 
 

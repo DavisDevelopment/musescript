@@ -63,7 +63,8 @@ class MathOnly {
 				true;
 			case EField(EIdent("Math"), _): true;
 			case ELookback(_, _) | EBarField(_) | EMatch(_, _) | EYield(_) | EYieldStar(_)
-				| EObject(_) | EMeta(_, _, _) | EFunction(_, _, _, _) | EField(_, _):
+				| EObject(_) | EMeta(_, _, _) | EFunction(_, _, _, _) | EField(_, _)
+				| ENew(_, _) | EThis | ESuper(_, _):
 				false;
 		};
 	}

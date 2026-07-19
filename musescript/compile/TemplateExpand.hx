@@ -12,9 +12,12 @@ import musescript.ast.Expr;
  * Expr templates (`template f(...) -> T { expr }`) expand inside expressions.
  * Stmt templates (`template f(...) { onBar/onPosition/... }`) expand when invoked
  * as a bare statement: `TrailingStop(0.05)`.
+ * 
+ * 
+ * [TODO]: implement limited-depth recursion for templates that call themselves (or each other) in a terminating way
  */
 class TemplateExpand {
-	public static var MAX_DEPTH:Int = 32;
+	public static var MAX_DEPTH:Int = 64;
 
 	public static function expand(prog:MuseProgram):MuseProgram {
 		var exprTemplates = new Map<String, Decl>();

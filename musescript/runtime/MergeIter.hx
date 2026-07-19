@@ -11,7 +11,7 @@ class MergeIter implements MuseIter {
 		this.onB = false;
 	}
 
-	public function next():IterResult<Dynamic> {
+	public inline function next():IterResult<Dynamic> {
 		if (!onB) {
 			switch (a.next()) {
 				case Done:
@@ -25,7 +25,7 @@ class MergeIter implements MuseIter {
 		return b.next();
 	}
 
-	function nextFromA(r:Void->IterResult<Dynamic>):IterResult<Dynamic> {
+	inline function nextFromA(r:Void->IterResult<Dynamic>):IterResult<Dynamic> {
 		switch (r()) {
 			case Done:
 				onB = true;

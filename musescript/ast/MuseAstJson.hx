@@ -93,6 +93,12 @@ class MuseAstJson {
 				{ kind: "yieldStar", e: exprToJson(inner, checker) };
 			case EBarField(name):
 				{ kind: "barfield", name: name };
+			case ENew(className, args):
+				{ kind: "new", className: className, args: [for (a in args) exprToJson(a, checker)] };
+			case EThis:
+				{ kind: "this" };
+			case ESuper(method, args):
+				{ kind: "super", method: method, args: [for (a in args) exprToJson(a, checker)] };
 		};
 	}
 
@@ -164,6 +170,13 @@ class MuseAstJson {
 			case StmtTemplateDecl(name, params, body): { kind: "stmtTemplateDecl", name: name,
 				params: [for (p in params) { name: p.name, ty: p.ty }],
 				body: [for (b in body) stmtToJson(b, checker)] };
+			case EnumDecl(name, variants): { kind: "enumDecl", name: name,
+				variants: [for (v in variants) { name: v.name, args: v.args }] };
+			case ClassDecl(name, parent, fields, methods, ctor):
+				{ kind: "classDecl", name: name, parent: parent,
+				  fields: [for (f in fields) { name: f.name, def: f.def != null ? exprToJson(f.def, checker) : null }],
+				  methods: [for (m in methods) { name: m.name, args: m.args, body: exprToJson(m.body, checker), isStatic: m.isStatic }],
+				  ctor: ctor != null ? { args: ctor.args, body: exprToJson(ctor.body, checker) } : null };
 		};
 	}
 

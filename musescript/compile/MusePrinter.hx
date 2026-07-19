@@ -52,6 +52,26 @@ class MusePrinter {
 			case StmtTemplateDecl(name, params, body):
 				var ps = [for (p in params) p.name + ": " + p.ty].join(", ");
 				'template $name($ps) {\n' + indent([for (s in body) printStmt(s)].join("\n")) + "\n}";
+			case EnumDecl(name, variants):
+				var vs = [for (v in variants) {
+					v.args.length == 0 ? v.name + ";" : v.name + "(" + v.args.join(", ") + ");";
+				}];
+				'enum $name {\n' + indent(vs.join("\n")) + "\n}";
+			case ClassDecl(name, parent, fields, methods, ctor):
+				// Body shape (`{ e1; e2; ... }`) mirrors FnDecl's printing —
+				// reuses printExpr's EBlock case, which `parseStmtListUntil`
+				// already round-trips for function bodies.
+				var ext = parent != null ? ' extends $parent' : "";
+				var parts:Array<String> = [];
+				for (f in fields)
+					parts.push(f.def != null ? '${f.name} = ${printExpr(f.def)};' : '${f.name};');
+				if (ctor != null)
+					parts.push('new(${ctor.args.join(", ")}) ${printExpr(ctor.body)}');
+				for (m in methods) {
+					var st = m.isStatic ? "static " : "";
+					parts.push('${st}function ${m.name}(${m.args.join(", ")}) ${printExpr(m.body)}');
+				}
+				'class $name$ext {\n' + indent(parts.join("\n")) + "\n}";
 		};
 	}
 
@@ -113,15 +133,27 @@ class MusePrinter {
 			case EParent(x): '(${printExpr(x)})';
 			case EMeta(n, args, x): '@$n(${[for (a in args) printExpr(a)].join(", ")}) ${printExpr(x)}';
 			case ELookback(s, n): '${printExpr(s)}[${printExpr(n)}]';
-			case EMatch(scrut, arms): 'match ${printExpr(scrut)} {\n' + indent([for (a in arms) printArm(a)].join("\n")) + "\n}";
+			case EMatch(scrut, arms):
+				// Bracket-list form: the ONLY shape both StrategyParser
+				// (`match(scrut) [...]`, the modern surface, PORTING/genome-expansion
+				// target) and the legacy `@match(scrut) [...]` meta actually parse —
+				// a prior `match scrut { case pat => body }` form here parsed as
+				// NEITHER, silently breaking print→reparse round-trips (the exact
+				// mechanism MuseGene's Expand.hx depends on for genome text).
+				'match(${printExpr(scrut)}) [\n' + indent([for (a in arms) printArm(a)].join(",\n")) + "\n]";
 			case EYield(x): 'yield ${printExpr(x)}';
 			case EYieldStar(x): 'yield* ${printExpr(x)}';
+			case ENew(cn, args): 'new $cn(${[for (a in args) printExpr(a)].join(", ")})';
+			case EThis: "this";
+			case ESuper(method, args):
+				var call = '(${[for (a in args) printExpr(a)].join(", ")})';
+				method != null ? 'super.$method$call' : 'super$call';
 		};
 	}
 
 	function printArm(a:MatchArm):String {
 		var g = a.guard != null ? ' if ${printExpr(a.guard)}' : "";
-		return 'case ${printPattern(a.pattern)}$g => ${printExpr(a.body)}';
+		return '${printPattern(a.pattern)}$g => ${printExpr(a.body)}';
 	}
 
 	function printPattern(p:Pattern):String {
@@ -138,6 +170,10 @@ class MusePrinter {
 			case PatOr(a, b): '${printPattern(a)} | ${printPattern(b)}';
 			case PatGuard(p, g): '${printPattern(p)} if ${printExpr(cast g)}';
 			case PatAs(p, n): '${printPattern(p)} as $n';
+			// Nullary tag prints bare (`Bullish`, matching how it's CONSTRUCTED
+			// elsewhere), not `Bullish()` — both parse identically, but bare is
+			// the canonical form the capitalization rule expects on read-back.
+			case PatTag(t, args) if (args.length == 0): t;
 			case PatTag(t, args): '$t(${[for (a in args) printPattern(a)].join(", ")})';
 		};
 	}

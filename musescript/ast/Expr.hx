@@ -34,4 +34,18 @@ enum Expr {
 	EYield(e:Expr);
 	EYieldStar(e:Expr);
 	EBarField(name:String);
+
+	/** `new ClassName(args)` — instantiate a `ClassDecl`. */
+	ENew(className:String, args:Array<Expr>);
+
+	/** `this` inside a method/ctor body — the receiving instance. Optional
+	 * elsewhere: bare field reads/writes resolve like `this.field` without it. */
+	EThis;
+
+	/** P3: `super(args)` (method:null — chains to the parent ctor) or
+	 * `super.method(args)` (method set — calls the parent's version, bypassing
+	 * the child's own override). Resolved relative to the LEXICAL class the
+	 * currently-executing method/ctor is defined in, not the runtime instance's
+	 * most-derived `__class`. */
+	ESuper(method:Null<String>, args:Array<Expr>);
 }

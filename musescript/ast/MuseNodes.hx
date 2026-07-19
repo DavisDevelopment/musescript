@@ -99,6 +99,15 @@ class MuseNodes {
 	public static inline function barField(name:String):Expr
 		return AstSpans.autoStamp(EBarField(name));
 
+	public static inline function enew(className:String, args:Array<Expr>):Expr
+		return AstSpans.autoStamp(ENew(className, args));
+
+	public static inline function ethis():Expr
+		return AstSpans.autoStamp(EThis);
+
+	public static inline function esuper(method:Null<String>, args:Array<Expr>):Expr
+		return AstSpans.autoStamp(ESuper(method, args));
+
 	// --- Convenience ---
 
 	public static inline function nullExpr():Expr

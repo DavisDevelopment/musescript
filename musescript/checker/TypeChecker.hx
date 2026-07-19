@@ -264,6 +264,32 @@ class TypeChecker {
 					env.set(name, TFun(argTys, retTy));
 			case MacroDecl(_, body):
 				for (s in body) checkStmt(s);
+			case EnumDecl(_, variants):
+				// Bind each variant so references type-check: nullary → an enum value,
+				// n-ary → a constructor function. (Payload types are untyped in P1.)
+				for (v in variants) {
+					if (v.args.length == 0) env.set(v.name, TUnknown);
+					else env.set(v.name, TFun([for (_ in v.args) TUnknown], TUnknown));
+				}
+			case ClassDecl(name, _, fields, methods, ctor):
+				// P2: field/method/ctor bodies check in their OWN scope (fields +
+				// ctor args visible, `this`-optional resolution isn't modeled by
+				// this lattice — just diagnose nested expressions), not the
+				// enclosing env, and don't leak locals back out afterward.
+				var saved = env.copy();
+				for (f in fields) env.set(f.name, f.def != null ? infer(f.def) : TUnknown);
+				if (ctor != null) {
+					for (a in ctor.args) env.set(a, TUnknown);
+					infer(ctor.body);
+				}
+				for (m in methods) {
+					var msaved = env.copy();
+					for (a in m.args) env.set(a, TUnknown);
+					infer(m.body);
+					env = msaved;
+				}
+				env = saved;
+				env.set(name, TUnknown);
 		}
 	}
 
@@ -463,6 +489,16 @@ class TypeChecker {
 			case EYieldStar(v):
 				// Flattened yield: element of the iterable when known.
 				elementTypeOf(infer(v));
+			case ENew(_, args):
+				// P2: instance types aren't modeled in this lattice yet — still
+				// infer args so nested expressions get diagnosed.
+				for (a in args) infer(a);
+				TUnknown;
+			case EThis:
+				TUnknown;
+			case ESuper(_, args):
+				for (a in args) infer(a);
+				TUnknown;
 		};
 		lastType = t;
 		return t;

@@ -161,7 +161,8 @@ class PyEmitter {
 			case EReturn(v):
 				v != null ? emitExpr(v) : "None";
 			case EWhile(_, _) | EFor(_, _, _) | ELookback(_, _) | EBarField(_) | EMatch(_, _)
-				| EYield(_) | EYieldStar(_) | EObject(_) | EMeta(_, _, _) | EFunction(_, _, _, _) | EField(_, _):
+				| EYield(_) | EYieldStar(_) | EObject(_) | EMeta(_, _, _) | EFunction(_, _, _, _) | EField(_, _)
+				| ENew(_, _) | EThis | ESuper(_, _):
 				throw "PyEmitter: unsupported expression in math-only emit";
 		};
 	}

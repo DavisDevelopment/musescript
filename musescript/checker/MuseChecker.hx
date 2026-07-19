@@ -27,6 +27,9 @@ class MuseChecker {
 	var typed:Bool;
 	var typeChecker:TypeChecker;
 	var spans:Null<AstSpans>;
+	/** enum name → its variant names, and each variant → its owning enum, for match exhaustiveness. */
+	var enumVariants:Map<String, Array<String>>;
+	var variantToEnum:Map<String, String>;
 
 	public function new(?opts:{?typed:Bool, ?strict:Bool}) {
 		diags = [];
@@ -37,6 +40,8 @@ class MuseChecker {
 		typed = opts == null || opts.typed != false;
 		typeChecker = new TypeChecker({ strict: opts != null && opts.strict == true });
 		spans = null;
+		enumVariants = new Map();
+		variantToEnum = new Map();
 	}
 
 	/** Back-compat: string diagnostics. */
@@ -47,6 +52,25 @@ class MuseChecker {
 	public function checkEx(prog:MuseProgram):Array<Diagnostic> {
 		diags = [];
 		spans = prog.spans;
+		// Pre-register enums so match exhaustiveness works regardless of decl order.
+		for (d in prog.decls) switch (d) {
+			case EnumDecl(name, variants):
+				var names = [for (v in variants) v.name];
+				enumVariants.set(name, names);
+				for (vn in names) variantToEnum.set(vn, name);
+			default:
+		}
+		// Pre-register class names so `extends` can be diagnosed regardless of decl order.
+		var classNames = new Map<String, Bool>();
+		for (d in prog.decls) switch (d) {
+			case ClassDecl(name, _, _, _, _): classNames.set(name, true);
+			default:
+		}
+		for (d in prog.decls) switch (d) {
+			case ClassDecl(name, parent, _, _, _) if (parent != null && !classNames.exists(parent)):
+				warn('class $name extends unknown class $parent');
+			default:
+		}
 		for (d in prog.decls) checkDecl(d);
 		for (s in prog.stmts) checkStmt(s);
 		checkCompileCoverage(prog);
@@ -129,6 +153,12 @@ class MuseChecker {
 				checkExpr(body);
 			case ParamDecl(_, def, _):
 				if (def != null) checkExpr(def);
+			case EnumDecl(_, _):
+				// Registered in checkEx pre-pass; nothing to check in the decl itself.
+			case ClassDecl(_, _, fields, methods, ctor):
+				for (f in fields) if (f.def != null) checkExpr(f.def);
+				if (ctor != null) checkExpr(ctor.body);
+				for (m in methods) checkExpr(m.body);
 		}
 	}
 
@@ -234,12 +264,19 @@ class MuseChecker {
 				checkYieldSite(value);
 			case EYieldStar(value):
 				checkYieldStarSite(value);
+			case ENew(_, args):
+				for (a in args) checkExpr(a);
+			case EThis:
+			case ESuper(_, args):
+				for (a in args) checkExpr(a);
 		}
 	}
 
 	function checkMatchArms(arms:Array<MatchArm>):Void {
 		var hasWild = false;
 		var wildIndex = -1;
+		var tags:Array<String> = [];
+		var allTagged = arms.length > 0;
 		for (i in 0...arms.length) {
 			var a = arms[i];
 			checkPattern(a.pattern);
@@ -250,8 +287,29 @@ class MuseChecker {
 				hasWild = true;
 				if (wildIndex < 0) wildIndex = i;
 			}
+			switch (a.pattern) {
+				case PatTag(tag, _) if (a.guard == null): tags.push(tag);
+				default: allTagged = false;
+			}
 		}
-		if (!hasWild) warn("match may be non-exhaustive (no wildcard arm)");
+		if (!hasWild) {
+			// Enum-aware: covering every variant of one enum is exhaustive without a wildcard.
+			var owningEnum = allTagged && tags.length > 0 ? variantToEnum.get(tags[0]) : null;
+			var coversEnum = owningEnum != null
+				&& [for (t in tags) variantToEnum.get(t)].filter(e -> e != owningEnum).length == 0
+				&& enumVariants.get(owningEnum).filter(v -> tags.indexOf(v) < 0).length == 0;
+			if (coversEnum) {
+				// exhaustive over `owningEnum` — no warning
+			} else if (owningEnum != null) {
+				var missing = enumVariants.get(owningEnum).filter(v -> tags.indexOf(v) < 0);
+				if (missing.length > 0)
+					warn('match on enum $owningEnum is missing variants: ${missing.join(", ")}');
+				else
+					warn("match may be non-exhaustive (no wildcard arm)");
+			} else {
+				warn("match may be non-exhaustive (no wildcard arm)");
+			}
+		}
 		if (wildIndex >= 0 && wildIndex < arms.length - 1)
 			warn("match arms after wildcard are unreachable");
 	}

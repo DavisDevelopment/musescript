@@ -9,6 +9,7 @@ import musescript.ast.OrderKind;
 import musescript.ast.FnKind;
 import musescript.ast.Pattern;
 import musescript.ast.MatchArm;
+import musescript.ast.ConstructOnce;
 import musescript.types.BuiltinSigs;
 
 /**
@@ -183,11 +184,19 @@ class JsEmitter {
 		for (d in prog.decls) switch (d) {
 			case StrategyDecl(_, body):
 				for (s in body) switch (s) {
+					// Construct-once bindings (`c = new Counter()`) are
+					// instantiated exactly once via the seed interp
+					// (JsBackend.installUserFns bridges the resulting
+					// instance into `api`) — NOT re-emitted into the
+					// per-bar on-bar body, or the class would silently
+					// reconstruct (and reset) itself every bar.
+					case Assign(_, _) if (ConstructOnce.isConstructOnceAssign(s)):
 					case Assign(_, _): prelude.push(s);
 					case OnBar(onBody): onBarBody = onBarBody.concat(onBody);
 					case OnPosition(onBody): onPositionBody = onPositionBody.concat(onBody);
 					case Block(block):
 						for (nested in block) switch (nested) {
+							case Assign(_, _) if (ConstructOnce.isConstructOnceAssign(nested)):
 							case Assign(_, _): prelude.push(nested);
 							case OnBar(onBody): onBarBody = onBarBody.concat(onBody);
 							case OnPosition(onBody): onPositionBody = onPositionBody.concat(onBody);
@@ -391,6 +400,15 @@ class JsEmitter {
 				args.length <= 4
 					? 'api.invoke${args.length}("${safe(name)}"${emitted.length > 0 ? ", " + emitted.join(",") : ""})'
 					: 'api.invoke("${safe(name)}", [${emitted.join(",")}])';
+			case ECall(EField(objExpr, methodName), args):
+				// Class method dispatch (P2): construction AND method bodies stay
+				// interp-only (see JsBackend.installUserFns' `__method_call`
+				// bridge) — this only emits the SURROUNDING JS call site, routed
+				// through the same shared interp that also handles the plain
+				// "field holds a callable" fallback, so both cases stay correct
+				// without needing to know here which one `objExpr` will be.
+				var emitted = [for (a in args) emitExpr(a)];
+				'api.invoke("__method_call", [${emitExpr(objExpr)}, "${safe(methodName)}"${emitted.length > 0 ? ", " + emitted.join(",") : ""}])';
 			case ECall(callee, args):
 				'api.apply(${emitExpr(callee)}, [${[for (a in args) emitExpr(a)].join(",")}])';
 			case EIf(c, a, b):
@@ -439,6 +457,17 @@ class JsEmitter {
 			case EMatch(scrutinee, arms):
 				emitMatch(scrutinee, arms);
 			case EYield(_) | EYieldStar(_):
+				throw new EmitUnsupported();
+			case ENew(className, args):
+				// Construction is interp-only (JsBackend.installUserFns bridges
+				// `new_<Class>` to the shared interp's `instantiate`) — same
+				// reasoning as method dispatch above.
+				var emitted = [for (a in args) emitExpr(a)];
+				'api.invoke("new_${safe(className)}", [${emitted.join(",")}])';
+			case EThis | ESuper(_, _):
+				// Only valid inside a method/ctor body, which is never JS-emitted
+				// (methods run purely in the interp) — reaching here means one
+				// leaked into on-bar/on-tick codegen, a genuine unsupported case.
 				throw new EmitUnsupported();
 		};
 	}
@@ -525,13 +554,13 @@ class JsEmitter {
 				+ '||(${scrutVar}!=null&&${scrutVar}.kind==="${t}"))';
 		}
 		var parts = ['(${scrutVar}!=null&&(${scrutVar}.__tag==="${t}"||${scrutVar}.kind==="${t}"))'];
-		if (args.length == 1) {
-			parts.push(emitPattern(args[0], scrutVar, binds));
-			return "(" + parts.join("&&") + ")";
-		}
+		// Enum payload lives in `.args` (canonical `{__tag,args:[...]}`, matching
+		// the interp reference PatternMatcher). Fall back to the whole object for
+		// single-arg legacy `kind`-values that carry no `.args` array.
 		for (i in 0...args.length) {
 			var iv = fresh("g");
-			binds.push('var ${iv}=(Array.isArray(${scrutVar}.args)?${scrutVar}.args[${i}]:null);');
+			var fallback = args.length == 1 ? scrutVar : "null";
+			binds.push('var ${iv}=(${scrutVar}!=null&&Array.isArray(${scrutVar}.args)?${scrutVar}.args[${i}]:${fallback});');
 			parts.push(emitPattern(args[i], iv, binds));
 		}
 		return "(" + parts.join("&&") + ")";

@@ -86,6 +86,9 @@ class CallsiteIds {
 				case EMatch(scrutinee, arms): EMatch(mapExpr(scrutinee), [for (a in arms) mapArm(a)]);
 				case EYield(x): EYield(mapExpr(x));
 				case EYieldStar(x): EYieldStar(mapExpr(x));
+				case ENew(cn, args): ENew(cn, [for (a in args) mapExpr(a)]);
+				case EThis: EThis;
+				case ESuper(m, args): ESuper(m, [for (a in args) mapExpr(a)]);
 			};
 		}
 
@@ -136,6 +139,8 @@ class CallsiteIds {
 			case ModuleDecl(n, params, body): ModuleDecl(n, params, body);
 			case TemplateDecl(n, params, retTy, body): TemplateDecl(n, params, retTy, body);
 			case StmtTemplateDecl(n, params, body): StmtTemplateDecl(n, params, body);
+			case EnumDecl(_, _): d;
+			case ClassDecl(_, _, _, _, _): d;
 		}];
 
 		return { decls: decls, stmts: mapStmts(prog.stmts), spans: prog.spans };
@@ -200,6 +205,9 @@ class CallsiteIds {
 					}
 				case EYield(x): expr(x);
 				case EYieldStar(x): expr(x);
+				case ENew(_, args): for (a in args) expr(a);
+				case EThis:
+				case ESuper(_, args): for (a in args) expr(a);
 			}
 		}
 
@@ -250,7 +258,9 @@ class CallsiteIds {
 					expr(def);
 				case FnDecl(_, _, _, _) | IndicatorDecl(_, _, _) | MacroDecl(_, _):
 					bail = true;
-				case ModuleDecl(_, _, _) | TemplateDecl(_, _, _, _) | StmtTemplateDecl(_, _, _):
+				case EnumDecl(_, _) | ModuleDecl(_, _, _) | TemplateDecl(_, _, _, _) | StmtTemplateDecl(_, _, _):
+					bail = true;
+				case ClassDecl(_, _, _, _, _):
 					bail = true;
 			}
 		}
@@ -321,6 +331,9 @@ class CallsiteIds {
 					}
 				case EYield(x): expr(x);
 				case EYieldStar(x): expr(x);
+				case ENew(_, args): for (a in args) expr(a);
+				case EThis:
+				case ESuper(_, args): for (a in args) expr(a);
 			}
 		}
 		function stmts(ss:Array<Stmt>):Void {
@@ -365,6 +378,8 @@ class CallsiteIds {
 				case ModuleDecl(_, _, body): stmts(body);
 				case TemplateDecl(_, _, _, body): expr(body);
 				case StmtTemplateDecl(_, _, body): stmts(body);
+				case EnumDecl(_, _):
+				case ClassDecl(_, _, _, _, _):
 			}
 		}
 		if (!found) stmts(prog.stmts);

@@ -48,14 +48,14 @@ class StrategyWasmBackend {
 				return runInterp(prog, ctx);
 			};
 		}
-		return compileJs(prog, mod, emitted.strings);
+		return compileJs(prog, mod, emitted.strings, emitted.escapeRegions, emitted.framedNames);
 		#elseif python
 		if (!wasmtimeReady()) {
 			return function(ctx:Dynamic):Dynamic {
 				return runInterp(prog, ctx);
 			};
 		}
-		return compilePython(prog, emitted.wat, emitted.strings);
+		return compilePython(prog, emitted.wat, emitted.strings, emitted.escapeRegions, emitted.framedNames);
 		#else
 		return function(ctx:Dynamic):Dynamic {
 			return runInterp(prog, ctx);
@@ -68,8 +68,8 @@ class StrategyWasmBackend {
 		return e != null ? e.wat : null;
 	}
 
-	/** WAT + string table for `prog` (null if the on_bar subset can't emit). */
-	public static function emitOnBar(prog:MuseProgram):Null<{wat:String, strings:Array<String>}> {
+	/** WAT + string table + escape regions + F2 frame map for `prog` (null if the on_bar subset can't emit). */
+	public static function emitOnBar(prog:MuseProgram):Null<{wat:String, strings:Array<String>, escapeRegions:Array<musescript.ast.Stmt>, framedNames:Map<String, Int>}> {
 		return new StrategyWasmEmitter().emitOnBar(prog);
 	}
 
@@ -81,9 +81,9 @@ class StrategyWasmBackend {
 	 * / ArrayBuffer of the assembled module. Returns a BarStrategyFn; `ctx` must
 	 * carry a `feed`. Execution is genuine native WebAssembly.
 	 */
-	public static function compileFromBytes(prog:MuseProgram, wasmBytes:Dynamic, strings:Array<String>):BarStrategyFn {
+	public static function compileFromBytes(prog:MuseProgram, wasmBytes:Dynamic, strings:Array<String>, ?escapeRegions:Array<musescript.ast.Stmt>, ?framedNames:Map<String, Int>):BarStrategyFn {
 		var mod:Dynamic = js.Syntax.code("new WebAssembly.Module({0})", wasmBytes);
-		return compileJs(prog, mod, strings);
+		return compileJs(prog, mod, strings, escapeRegions != null ? escapeRegions : [], framedNames != null ? framedNames : new Map());
 	}
 	#end
 
@@ -106,13 +106,42 @@ class StrategyWasmBackend {
 		}
 	}
 
-	/** Side-effect HostABI only — charts + orders + params. */
-	static function makeEnv(harness:HarnessContext, barRef:Array<Bar>, strings:Array<String>):Dynamic {
+	/**
+	 * Side-effect HostABI — charts + orders + params, plus (F1) `host_eval` for
+	 * statements the native emitter escaped instead of aborting the whole
+	 * module. `escapeRegions[i]` is run against a single seed `MuseInterp`
+	 * (created once, `prog.decls` registered, reused across every bar/call —
+	 * NOT a fresh interp per escape, which would drop indicator/local state)
+	 * sharing `harness` with the native side.
+	 *
+	 * F2: `frameMap`/`frameGet`/`frameSet` wire the seed interp's variable
+	 * resolution to the SAME linear-memory slots the native WAT reads/writes
+	 * for boundary-crossing names (`StrategyWasmEmitter.framedNames`) — the
+	 * accessor closures are host-specific (JS Float64Array view vs Python
+	 * wasmtime memory.read/write) so they're built in `compileJs`/
+	 * `compilePython`, not here (this function must stay host-agnostic, it's
+	 * shared by both — see either call site for the platform-specific half).
+	 */
+	static function makeEnv(prog:MuseProgram, harness:HarnessContext, barRef:Array<Bar>, strings:Array<String>,
+			escapeRegions:Array<musescript.ast.Stmt>, frameMap:Map<String, Int>, frameGet:Int->Float, frameSet:Int->Float->Void):Dynamic {
 		function str(i:Int):String {
 			return i >= 0 && i < strings.length ? strings[i] : "close";
 		}
 		function bar():Bar return barRef[0];
+		var escapeInterp:Null<MuseInterp> = null;
+		function ensureEscapeInterp():MuseInterp {
+			if (escapeInterp == null) {
+				escapeInterp = new MuseInterp(harness);
+				for (d in prog.decls) escapeInterp.registerDeclPublic(d);
+				if (frameMap.keys().hasNext()) escapeInterp.bindFramePublic(frameMap, frameGet, frameSet);
+			}
+			return escapeInterp;
+		}
 		return {
+			host_eval: function(regionId:Int) {
+				if (regionId < 0 || regionId >= escapeRegions.length) return;
+				ensureEscapeInterp().runEscapeStmt(bar(), escapeRegions[regionId]);
+			},
 			get_param: function(id:Int) {
 				var n = str(id);
 				return harness.params.all().exists(n) ? harness.params.get(n) : 0.0;
@@ -184,7 +213,7 @@ class StrategyWasmBackend {
 		}
 	}
 
-	static function compileJs(prog:MuseProgram, mod:Dynamic, strings:Array<String>):BarStrategyFn {
+	static function compileJs(prog:MuseProgram, mod:Dynamic, strings:Array<String>, escapeRegions:Array<musescript.ast.Stmt>, framedNames:Map<String, Int>):BarStrategyFn {
 		return function(ctx:Dynamic):Dynamic {
 			var harness:HarnessContext =
 				Std.isOfType(ctx, HarnessContext) ? cast ctx : new HarnessContext();
@@ -194,9 +223,30 @@ class StrategyWasmBackend {
 			seedParams(prog, harness);
 
 			var barRef:Array<Bar> = [null];
-			var env = makeEnv(harness, barRef, strings);
+			// F2: memRef is populated right after instantiation below — these
+			// closures re-derive `.buffer` on every access (not cached), since
+			// `memory.grow` detaches the old ArrayBuffer and JS gives back a
+			// NEW one; `memory` itself (the WebAssembly.Memory object) stays
+			// the same reference for the whole run.
+			var memRef:Array<Dynamic> = [null];
+			function frameGet(off:Int):Float {
+				return js.Syntax.code("new Float64Array({0}.buffer, {1}, 1)[0]", memRef[0], off);
+			}
+			function frameSet(off:Int, v:Float):Void {
+				js.Syntax.code("new Float64Array({0}.buffer, {1}, 1)[0] = {2}", memRef[0], off, v);
+			}
+			var env = makeEnv(prog, harness, barRef, strings, escapeRegions, framedNames, frameGet, frameSet);
 			var inst:Dynamic = js.Syntax.code("new WebAssembly.Instance({0}, {1})", mod, { env: env });
 			var exports:Dynamic = inst.exports;
+			memRef[0] = Reflect.field(exports, "memory");
+			// P4: run-once field-init + ctor for any natively-lowered
+			// construct-once class instances (StrategyWasmEmitter's
+			// `construct_once_init` export) — called EXACTLY ONCE, before any
+			// bar, mirroring how the interp/JS tiers already construct these
+			// once (ast/ConstructOnce.hx). Absent when the program declares
+			// no lowerable construct-once instances.
+			var initFn:Dynamic = Reflect.field(exports, "construct_once_init");
+			if (initFn != null) Reflect.callMethod(null, initFn, []);
 			var n = feed.length();
 			if (n <= 0) n = 1;
 
@@ -307,7 +357,7 @@ class StrategyWasmBackend {
 		return wasmtimeOk;
 	}
 
-	static function compilePython(prog:MuseProgram, wat:String, strings:Array<String>):BarStrategyFn {
+	static function compilePython(prog:MuseProgram, wat:String, strings:Array<String>, escapeRegions:Array<musescript.ast.Stmt>, framedNames:Map<String, Int>):BarStrategyFn {
 		return function(ctx:Dynamic):Dynamic {
 			var harness:HarnessContext =
 				Std.isOfType(ctx, HarnessContext) ? cast ctx : new HarnessContext();
@@ -320,9 +370,24 @@ class StrategyWasmBackend {
 				NumbaBackend.ensurePathPublic();
 				python.Syntax.code("import muse_math_runtime as _mmr");
 				var barRef:Array<Bar> = [null];
-				var env = makeEnv(harness, barRef, strings);
+				// F2: `modRef` mirrors JS's `memRef` — `mod.frame_get`/`frame_set`
+				// (muse_math_runtime.load_strategy_module) only exist once the
+				// loader call below returns, but `env` (passed INTO that call)
+				// needs the closures upfront; both close over `modRef` and are
+				// only ever actually invoked (via host_eval) after it's set.
+				var modRef:Array<Dynamic> = [null];
+				function frameGet(off:Int):Float {
+					return Reflect.callMethod(null, Reflect.field(modRef[0], "frame_get"), [off]);
+				}
+				function frameSet(off:Int, v:Float):Void {
+					Reflect.callMethod(null, Reflect.field(modRef[0], "frame_set"), [off, v]);
+				}
+				var env = makeEnv(prog, harness, barRef, strings, escapeRegions, framedNames, frameGet, frameSet);
 				var loader:Dynamic = python.Syntax.code("_mmr.load_strategy_module");
 				var mod:Dynamic = Reflect.callMethod(null, loader, [wat, env]);
+				modRef[0] = mod;
+				// P4: same run-once init call as the JS path (see its comment).
+				Reflect.callMethod(null, Reflect.field(mod, "construct_once_init"), []);
 				var n = feed.length();
 				if (n <= 0) n = 1;
 				if (preferPreloaded) {

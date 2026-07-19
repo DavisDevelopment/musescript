@@ -24,9 +24,9 @@ import musescript.ast.MuseNodes.*;
  * Iterator state lives on the returned object (not harness params), so resume
  * works on JS and Python hosts alike.
  *
- * Unsupported (left unchanged):
+ *[TODO] Unsupported (left unchanged):
  * - multiple loops, complex if bodies, yields after non-for stmts mid-body
- * - generators with no recognized yield layout
+ * - generators with no recognized yield layout (except maybe this one? I'm not sure why one would want to do that)
  * - on-bar `yield` (stmt) — not lowered here
  *
  * σπέρμα σπέρματος· yield* εἰς for-in θερίζει.
@@ -35,14 +35,16 @@ import musescript.ast.MuseNodes.*;
 class GeneratorLower {
 	static var ysFresh:Int = 0;
 
-	public static function lower(prog:MuseProgram):MuseProgram {
+	public static function lower(prog: MuseProgram):MuseProgram {
 		ysFresh = 0;
 		var changed = false;
 		var decls = [for (d in prog.decls) {
 			var nd = lowerDecl(d);
-			if (!declEq(d, nd)) changed = true;
+			if (!declEq(d, nd)) 
+				changed = true;
 			nd;
 		}];
+
 		var stmts = prog.stmts;
 		if (stmtsContainYieldStar(stmts)) {
 			changed = true;
@@ -51,7 +53,7 @@ class GeneratorLower {
 		return changed ? { decls: decls, stmts: stmts, spans: prog.spans } : prog;
 	}
 
-	static function lowerDecl(d:Decl):Decl {
+	static function lowerDecl(d: Decl):Decl {
 		return switch (d) {
 			case FnDecl(name, args, body, kind)
 				if (kind == Generator || containsYield(body)):
@@ -65,6 +67,7 @@ class GeneratorLower {
 	}
 
 	static function lowerGeneratorBody(body:Expr):Expr {
+		//[TODO]: Can we get an explanation as to what the fuck I'm even looking at here? XD
 		var expanded = expandYieldStars(body);
 		expanded = expandLiteralForYields(expanded);
 		return switch (tryLowerWhileYield(expanded)) {
@@ -91,32 +94,44 @@ class GeneratorLower {
 
 	/** Rewrite `yield* e` → `for (v in e) yield v` before shape detection.
 	 * εἰς τὸν λαβύρινθον φέρων μῖτον ἐκ τοῦ ἀπείρου. */
-	static function expandYieldStars(e:Expr):Expr {
-		if (e == null || !containsYieldStar(e)) return e;
-		return mapExpandYieldStar(e);
+	inline static function expandYieldStars(e:Expr):Expr {
+		if (e == null || !containsYieldStar(e)) 
+			return e;
+		else
+			return mapExpandYieldStar(e);
 	}
 
 	/** Expand `for (v in [a,b,…]) yield v` into sequential `yield a; yield b; …`.
 	 * Lets seq (and literal for-then-yield) paths catch compounds after yield*.
 	 * ἵνα ὁ for τὰ ἑαυτοῦ εἰς τάξιν yield ἐκχέῃ. */
 	static function expandLiteralForYields(e:Expr):Expr {
-		if (e == null) return e;
+		if (e == null) 
+			return e;
+
 		switch (matchSimpleLiteralForYield(e)) {
 			case null:
-			case yields: return block(yields);
+			case yields: 
+				return block(yields);
 		}
+
 		var es = leadingBlock(e);
-		if (es == null) return e;
+		if (es == null) 
+			return e;
+
 		var out:Array<Expr> = [];
 		var changed = false;
 		for (stmt in es) {
 			switch (matchSimpleLiteralForYield(stmt)) {
-				case null: out.push(stmt);
+				case null: 
+					out.push(stmt);
+				
 				case yields:
 					changed = true;
-					for (y in yields) out.push(y);
+					for (y in yields)
+						out.push(y);
 			}
 		}
+
 		return changed ? block(out) : e;
 	}
 
@@ -135,7 +150,9 @@ class GeneratorLower {
 	}
 
 	static function mapExpandYieldStar(e:Expr):Expr {
-		if (e == null) return e;
+		if (e == null) 
+			return e;
+
 		return switch (e) {
 			case EYieldStar(inner):
 				var v = freshYs();
@@ -652,6 +669,7 @@ class GeneratorLower {
 				branch(idx + 1)
 			);
 		}
+		
 		return ewhile(boolExpr(true), branch(0));
 	}
 

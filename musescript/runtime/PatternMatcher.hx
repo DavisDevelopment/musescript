@@ -102,32 +102,61 @@ class PatternMatcher {
 		bindings:Map<String, Dynamic>,
 		?patGuards:Array<Dynamic>
 	):Bool {
+		// are we matching a string-literal?
 		if (Std.isOfType(value, String)) {
+			// did we match the tag, and are there no args? (string literals can't have args)
 			return value == tag && args.length == 0;
 		}
+
+		// are we matching a tagged record?
 		if (value != null && Reflect.hasField(value, "__tag")) {
-			if (Reflect.field(value, "__tag") != tag) return false;
+			// abort on tag-mismatch or arg-count mismatch
+			if (Reflect.field(value, "__tag") != tag) 
+				return false;
+
+			// grab them arguments
 			var a:Array<Dynamic> = Reflect.field(value, "args");
-			if (a == null) a = [];
-			if (a.length != args.length) return false;
+			if (a == null) 
+				a = new Array<Dynamic>();
+
+			// abort on arg-count mismatch
+			if (a.length != args.length) 
+				return false;
+
+			// match each argument
 			for (i in 0...args.length) {
-				if (!tryPattern(args[i], a[i], bindings, patGuards)) return false;
+				if (!tryPattern(args[i], a[i], bindings, patGuards)) {
+					return false;
+				}
 			}
+
 			return true;
 		}
+
+		// 
 		if (value != null && Reflect.hasField(value, "kind")) {
-			if (Std.string(Reflect.field(value, "kind")) != tag) return false;
-			if (args.length == 0) return true;
+			if (Std.string(Reflect.field(value, "kind")) != tag) 
+				return false;
+			if (args.length == 0) 
+				return true;
+
 			if (args.length == 1) {
 				return tryPattern(args[0], value, bindings, patGuards);
 			}
+
 			var fields = Reflect.fields(value).filter(f -> f != "kind" && f != "__tag");
-			if (fields.length < args.length) return false;
+			if (fields.length < args.length) 
+				return false;
+
 			for (i in 0...args.length) {
-				if (!tryPattern(args[i], Reflect.field(value, fields[i]), bindings, patGuards)) return false;
+				if (!tryPattern(args[i], Reflect.field(value, fields[i]), bindings, patGuards)) {
+					return false;
+				}
 			}
+
 			return true;
 		}
+
 		return false;
 	}
 
