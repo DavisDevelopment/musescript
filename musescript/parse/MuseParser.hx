@@ -366,6 +366,12 @@ class MuseParser {
 				MuseNodes.block([for (x in a) lowerExpr(x)]);
 			case EField(e, f):
 				MuseNodes.field(lowerExpr(e), f);
+			case EBinop("...", a, b):
+				// Range literal: `a...b` desugars to the cross-tier `range(a, b)`
+				// builtin, so it works both as `for (i in 1...n)` and as a
+				// first-class iterable value (`[for x in 0...5]`, `sum(1...4)`).
+				// Without this the interp rejected `...` as an unknown operator.
+				MuseNodes.call(MuseNodes.ident("range"), [lowerExpr(a), lowerExpr(b)]);
 			case EBinop(op, a, b):
 				MuseNodes.binop(op, lowerExpr(a), lowerExpr(b));
 			case EUnop(op, prefix, e):
@@ -633,6 +639,10 @@ class MuseParser {
 			if (x == null || found) return;
 			switch (Tools.expr(x)) {
 				case EMeta("yield" | ":yield" | "yieldStar" | "yieldstar" | ":yieldStar", _, _): found = true;
+				// A nested function owns its own yields — `yield` binds to the
+				// nearest enclosing function, so don't descend into it. Otherwise
+				// a normal factory returning a generator lambda gets misclassified.
+				case EFunction(_, _, _, _):
 				default: Tools.iter(x, walk);
 			}
 		}

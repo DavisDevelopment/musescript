@@ -1187,18 +1187,16 @@ class StrategyWasmEmitter {
 			case "vwap":
 				usedIndicators.set(name, true);
 				"call $vwap";
-			case "feature" | "model_score":
+			// Generic externally-fed feature-tape slot lookup: `feature("any:key")` reserves
+			// (or reuses) a dense slot for an arbitrary string key and reads whatever value the
+			// host supplied for that slot this bar (see featureSlot() below). This is the ONLY
+			// feature-tape builtin core recognizes by name; any specific naming convention (e.g.
+			// "tree:<id>:value", "graph:<id>:<metric>") is a caller-side concern — an out-of-tree
+			// codegen can construct whatever key string it wants and call feature(key) directly,
+			// without core needing to know its vocabulary.
+			case "feature":
 				if (args.length < 1) throw new EmitUnsupported();
 				"i32.const " + featureSlot(stringKey(args[0])) + "\n    call $feature_at";
-			case "tree_value":
-				if (args.length < 1) throw new EmitUnsupported();
-				"i32.const " + featureSlot("tree:" + stringKey(args[0]) + ":value") + "\n    call $feature_at";
-			case "tree_bit":
-				if (args.length < 2) throw new EmitUnsupported();
-				"i32.const " + featureSlot("tree:" + stringKey(args[0]) + ":" + constIntKey(args[1])) + "\n    call $feature_at";
-			case "graph_metric":
-				if (args.length < 2) throw new EmitUnsupported();
-				"i32.const " + featureSlot("graph:" + stringKey(args[0]) + ":" + stringKey(args[1])) + "\n    call $feature_at";
 			case "hl2":
 				"global.get $" + "cur_high\n    global.get $" + "cur_low\n    f64.add\n    f64.const 2\n    f64.div";
 			case "hlc3":
@@ -1347,11 +1345,16 @@ class StrategyWasmEmitter {
 		};
 	}
 
+	/** Generic sidecar-string-table marker prefix for feature-tape keys; any package walking
+	 * `emitted.strings` to recover the feature-slot list looks for this exact prefix (see e.g.
+	 * the out-of-tree Kestrel WASM-artifact reader, which mirrors this constant on its side). */
+	public static inline var FEATURE_SLOT_PREFIX = "feature-slot:";
+
 	function featureSlot(key:String):Int {
 		var i = featureKeys.indexOf(key);
 		if (i >= 0) return i;
 		featureKeys.push(key);
-		strId("kestrel:" + key); // sidecar metadata only; not the dense feature id
+		strId(FEATURE_SLOT_PREFIX + key); // sidecar metadata only; not the dense feature id
 		return featureKeys.length - 1;
 	}
 

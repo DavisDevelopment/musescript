@@ -135,6 +135,29 @@ class StrategyParser {
 	function parseStrategy():Decl {
 		expectIdent("strategy");
 		var name = expectIdentValue();
+		// `strategy Name(p0 = 1.0, p1: Float = 2.0) { ... }` — normal function-argument notation
+		// as sugar for the equivalent `param p0 = 1.0; param p1: Float = 2.0;` statements inside
+		// the body (see parseParamDecl); mirrors parseModule's identical `(name [: ty] [= def],
+		// ...)` signature syntax just below. Only the plain name/type/default trio is supported
+		// here, not the `{ min: .. max: .. }` extended-options block (that reads awkwardly
+		// crammed into a comma-separated argument list) — use the body-statement `param` form
+		// for those. Both forms are fully interchangeable and freely mixable in the same
+		// strategy; this just desugars to identical `ParamDecl`s pushed onto the same `hoisted`
+		// list the body-statement form already uses, so every downstream consumer (checker,
+		// interp, both backends) needs no changes at all.
+		if (match("(")) {
+			if (!check(")")) {
+				do {
+					var pn = expectIdentValue();
+					var pty:Null<String> = null;
+					if (match(":")) pty = expectIdentValue();
+					var pdef:Null<Expr> = null;
+					if (match("=")) pdef = parseExpr();
+					hoisted.push(ParamDecl(pn, pdef, { ty: pty }));
+				} while (match(","));
+			}
+			expect(")");
+		}
 		expect("{");
 		var body:Array<Stmt> = [];
 		skipWs();
@@ -275,15 +298,38 @@ class StrategyParser {
 		};
 	}
 
+	/**
+	 * `indicator name(args) = expr` (single-expression value form, unchanged) OR
+	 * `indicator function name(args) { ...stmts...; return v; }` (statement-block form,
+	 * matching parseFnDecl's own `function name(args) { ... }` body-parsing exactly — the
+	 * block form supports `state.foo`/`bar_index`/`close[i]` lookback across bars, the same
+	 * capability the LEGACY `@indicator("name") function(args) {...}` annotation syntax
+	 * already has via MuseParser.readIndicator; both produce the identical `IndicatorDecl`
+	 * AST, so nothing downstream needs to know which spelling was used).
+	 */
 	function parseIndicatorDecl():Decl {
 		expectIdent("indicator");
-		var d = parseValueDeclAfterKeyword();
+		var d = matchIdent("function") ? parseIndicatorFunctionBody() : parseValueDeclAfterKeyword();
 		switch (d) {
 			case IndicatorDecl(name, _, body):
 				if (isSeriesExpr(body)) knownSeries.set(name, true);
 			default:
 		}
 		return d;
+	}
+
+	function parseIndicatorFunctionBody():Decl {
+		var name = expectIdentValue();
+		expect("(");
+		var args:Array<String> = [];
+		if (!check(")")) {
+			do args.push(expectIdentValue()) while (match(","));
+		}
+		expect(")");
+		expect("{");
+		var body = MuseNodes.block([for (s in parseStmtListUntil("}")) stmtAsExpr(s)]);
+		expect("}");
+		return IndicatorDecl(name, args, body);
 	}
 
 	function parseFeatureDecl():Decl {
@@ -394,6 +440,72 @@ class StrategyParser {
 		return FnDecl(name, args, bodyExpr, Normal);
 	}
 
+	/** `(cond) { block } [else if (cond) { block }]* [else { block }]?` -- the leading `if`
+	 * keyword has already been consumed by the caller (both parsePrimary's expression-position
+	 * case and parseStmt's statement-position case below share this). Recurses on `else if`
+	 * for the chain, matching the standard else-if mental model. */
+	function parseIfExpr():Expr {
+		expect("(");
+		var cond = parseExpr();
+		expect(")");
+		var thenBranch = parseBraceBlock();
+		var elseBranch:Null<Expr> = null;
+		if (matchIdent("else")) {
+			elseBranch = matchIdent("if") ? parseIfExpr() : parseBraceBlock();
+		}
+		return MuseNodes.eif(cond, thenBranch, elseBranch);
+	}
+
+	/** `{ stmt; stmt; ... }` as a single block expression -- same construction parsePrimary's
+	 * own `{`-disambiguation (object literal vs. block) already uses for its block case. */
+	function parseBraceBlock():Expr {
+		expect("{");
+		var es = [for (s in parseStmtListUntil("}")) stmtAsExpr(s)];
+		expect("}");
+		return MuseNodes.block(es);
+	}
+
+	/** Optional `()` / `(bar)` right after `onBar`/`on` -- consumed and ignored either way
+	 * (both spellings have meant "the on-bar hook" since before this parenthesized form
+	 * existed; the parens are purely a syntax preference, not a real argument list). */
+	function parseOnBarParens():Void {
+		if (match("(")) {
+			if (!check(")")) expectIdentValue();
+			expect(")");
+		}
+	}
+
+	/** Optional `when (cond)` guard clause immediately after `onBar()`/`on(bar)`, BEFORE the
+	 * `{`. Reuses the `when` keyword in a new position (not the general-conditional statement
+	 * position `when cond: {...}` already has) -- see the else-if-chain doc comment above. */
+	function parseOnBarGuard():Null<Expr> {
+		if (!matchIdent("when")) return null;
+		expect("(");
+		var cond = parseExpr();
+		expect(")");
+		return cond;
+	}
+
+	/** Folds a run of `(guard, body)` onBar branches into ONE nested if/else-if/else Stmt --
+	 * a trailing branch with `guard == null` becomes the base `else` value; every guarded
+	 * branch before it becomes another `else if` link, evaluated in declaration order so the
+	 * FIRST true guard wins (not "every true guard runs"). */
+	function buildOnBarGuardChain(branches:Array<{guard:Null<Expr>, body:Array<Stmt>}>):Stmt {
+		var idx = branches.length - 1;
+		var expr:Null<Expr> = null;
+		if (branches[idx].guard == null) {
+			expr = MuseNodes.block([for (s in branches[idx].body) stmtAsExpr(s)]);
+			idx--;
+		}
+		while (idx >= 0) {
+			var b = branches[idx];
+			var thenExpr = MuseNodes.block([for (s in b.body) stmtAsExpr(s)]);
+			expr = MuseNodes.eif(b.guard, thenExpr, expr);
+			idx--;
+		}
+		return ExprStmt(expr);
+	}
+
 	function parseStmtListUntil(end:Null<String>):Array<Stmt> {
 		var out:Array<Stmt> = [];
 		skipWs();
@@ -410,10 +522,35 @@ class StrategyParser {
 		var stmtStart = i;
 		if (matchIdent("onBar") || matchIdent("on")) {
 			if (peekIdent() == "bar") expectIdentValue();
+			parseOnBarParens();
+			var guard = parseOnBarGuard();
 			expect("{");
 			var body = parseStmtListUntil("}");
 			expect("}");
-			return stampStmt(stmtStart, OnBar(body));
+			if (guard == null) {
+				// No guard on THIS block -- an unguarded onBar can only ever be a trailing
+				// fallback, never the start of a chain, so it stays an ordinary, independently
+				// concatenated OnBar (today's behavior, byte-for-byte, for files that never use
+				// `when` guards at all).
+				return stampStmt(stmtStart, OnBar(body));
+			}
+			// A guarded onBar() opens an else-if CHAIN: keep consuming immediately-following
+			// onBar(...) blocks (guarded -> another else-if link; one trailing unguarded ->
+			// the else fallback, which ends the chain) and fold them into ONE OnBar wrapping a
+			// single nested if/else-if/else expression (see parseIfExpr's doc comment for why
+			// that's semantically "first matching guard wins", not "every true guard runs").
+			var branches:Array<{guard:Null<Expr>, body:Array<Stmt>}> = [{guard: guard, body: body}];
+			while (matchIdent("onBar") || matchIdent("on")) {
+				if (peekIdent() == "bar") expectIdentValue();
+				parseOnBarParens();
+				var g = parseOnBarGuard();
+				expect("{");
+				var b = parseStmtListUntil("}");
+				expect("}");
+				branches.push({guard: g, body: b});
+				if (g == null) break;
+			}
+			return stampStmt(stmtStart, OnBar([buildOnBarGuardChain(branches)]));
 		}
 		if (matchIdent("onPosition")) {
 			expect("{");
@@ -454,6 +591,12 @@ class StrategyParser {
 				body = [parseStmt()];
 			}
 			return stampStmt(stmtStart, When(cond, body));
+		}
+		// General `if (cond) { ... } [else if ...]* [else { ... }]?` at statement position --
+		// see parseIfExpr's doc comment. `when` (above) stays the no-else spelling; `if` is the
+		// general, else-capable one.
+		if (matchIdent("if")) {
+			return stampStmt(stmtStart, ExprStmt(parseIfExpr()));
 		}
 		if (matchIdent("for")) {
 			expect("(");
@@ -706,13 +849,12 @@ class StrategyParser {
 			return stampExpr(start, MuseNodes.block(es));
 		}
 		var id = expectIdentValue();
-		// `if (...) { ... }` is not a statement/expression in this grammar (only
-		// `EIf` is EMITTED-side supported, via the legacy decorator parser's own
-		// expression path) — falling through to a bare-identifier read here would
-		// silently misparse `if` as a call to an unknown builtin named "if"
-		// (cryptic "unknown builtin if" / "Cannot call null" at RUN time, far from
-		// this parse site). Fail loudly, at parse time, with the actual fix.
-		if (id == "if") throw err('"if" is not valid here — this syntax uses `when cond: { ... }` for conditionals (e.g. `when close > sma(close, 20): { long() }`)');
+		// General `if (cond) { ... } [else if (cond) { ... }]* [else { ... }]?`, building a
+		// nested EIf chain -- the SAME node `when cond: { ... }` already desugars to (minus
+		// `else`), so every backend (interp/JS/checker) already handles this correctly with
+		// zero downstream changes. `when` is kept working (large existing corpus, and it's
+		// reused as the onBar() guard-clause keyword below) -- `if` is just no longer rejected.
+		if (id == "if") return stampExpr(start, parseIfExpr());
 		if (id == "true") return stampExpr(start, MuseNodes.boolExpr(true));
 		if (id == "false") return stampExpr(start, MuseNodes.boolExpr(false));
 		if (id == "null") return stampExpr(start, MuseNodes.nullExpr());

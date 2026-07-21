@@ -93,16 +93,17 @@ class MuseScript {
 		return musescript.types.BuiltinSigs.toPaletteJson();
 	}
 
-	/** Export Kestrel-specific feature/model/graph palette JSON. */
-	public static function kestrelPalette():Dynamic {
-		return musescript.kestrel.KestrelPalette.toJson();
+	/** Palette JSON from every registered out-of-tree extension (e.g. Kestrel, when present),
+	 * one entry per package in registration order. Core names no specific package here. */
+	public static function extensionPalettes():Array<Dynamic> {
+		return musescript.interp.MuseExtensions.collectPalettes();
 	}
 
-	/** Combined palette for editors that want the full MuseScript + Kestrel surface. */
+	/** Combined palette for editors that want the full MuseScript + extensions surface. */
 	public static function fullPalette():Dynamic {
 		return {
 			builtins: palette(),
-			kestrel: kestrelPalette()
+			extensions: extensionPalettes()
 		};
 	}
 

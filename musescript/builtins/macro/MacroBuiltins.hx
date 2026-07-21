@@ -95,15 +95,25 @@ class MacroBuiltins {
 		if (candidates == null || fn == null) return null;
 		var best:Dynamic = null;
 		var bestScore = Math.NEGATIVE_INFINITY;
+		// Restructured from a `continue`-per-skip loop + inline ternaries: on the JVM target,
+		// Haxe 5.0.0-preview.1's codegen emits invalid bytecode (VerifyError: inconsistent
+		// stackmap frames) whenever a ternary here has one branch reading a boxed Dynamic
+		// field (`Reflect.field(r, "score")`, an Object) and the other a raw numeric literal
+		// -- the two branches get merged with mismatched JVM stack types even though Haxe's
+		// own type system treats both as uniformly Dynamic/Float. Fixed by assigning through
+		// plain if/else statements instead of a ternary expression (no behavior change on
+		// any target -- confirmed via the interp/JS test suite + this JVM probe).
 		for (c in candidates) {
 			var r = fn(c);
-			if (r == null) continue;
-			var raw:Dynamic = Reflect.hasField(r, "score") ? Reflect.field(r, "score") : 0;
-			var score:Float = Std.isOfType(raw, Float) || Std.isOfType(raw, Int) ? (raw : Float) : 0;
-			if (Math.isNaN(score)) continue;
-			if (score > bestScore) {
-				bestScore = score;
-				best = r;
+			if (r != null) {
+				var raw:Dynamic = 0.0;
+				if (Reflect.hasField(r, "score")) raw = Reflect.field(r, "score");
+				var score:Float = 0.0;
+				if (Std.isOfType(raw, Float) || Std.isOfType(raw, Int)) score = (raw : Float);
+				if (!Math.isNaN(score) && score > bestScore) {
+					bestScore = score;
+					best = r;
+				}
 			}
 		}
 		if (best != null && Reflect.isObject(best))

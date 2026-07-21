@@ -1,0 +1,156 @@
+=== MuseScript CORPUS-SEEDED evolution on GraalWasm ===
+jvm:  OpenJDK 64-Bit Server VM 25.0.3+9-jvmci-25.1-b19
+tape: 6909 bars total -> IS 5161 / embargo 21 / OOS 1727
+tournament corpus: 560 files, 152 translated to genomes, 408 skipped (outside the closed GP grammar -- onPosition exits, multi-output field access, etc.)
+indicator seeds: 124 compatible indicators x 3 windows = 372 genomes
+seeded generation 0: 524 real genomes (152 corpus-derived + 372 indicator-derived)
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by com.oracle.truffle.polyglot.JDKSupport in an unnamed module (file:/C:/Users/epiki/.m2/repository/org/graalvm/truffle/truffle-api/25.1.3/truffle-api-25.1.3.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+assembled 172
+gen  0 | popSize=524 new=172 unsupported=336 valid=174 | best=0.6405 mean=-9.0E-4 champion="A04S03_RsiTrendPullbackR8" | 54194ms
+assembled 64
+gen  1 | popSize=128 new=64 unsupported=46 valid=81 | best=0.987 mean=0.1214 champion="MacdDonTime34" | 33715ms
+assembled 97
+gen  2 | popSize=128 new=97 unsupported=15 valid=107 | best=0.987 mean=0.2471 champion="MacdDonTime34" | 59301ms
+assembled 88
+gen  3 | popSize=128 new=88 unsupported=23 valid=116 | best=0.987 mean=0.4374 champion="MacdDonTime34" | 64476ms
+assembled 57
+gen  4 | popSize=128 new=57 unsupported=52 valid=116 | best=0.987 mean=0.6692 champion="MacdDonTime34" | 37433ms
+assembled 24
+gen  5 | popSize=128 new=24 unsupported=84 valid=111 | best=0.987 mean=0.8416 champion="MacdDonTime34" | 11749ms
+assembled 19
+gen  6 | popSize=128 new=19 unsupported=89 valid=115 | best=0.987 mean=0.8978 champion="MacdDonTime34" | 5298ms
+assembled 15
+gen  7 | popSize=128 new=15 unsupported=90 valid=109 | best=0.987 mean=0.9346 champion="MacdDonTime34" | 4240ms
+assembled 15
+gen  8 | popSize=128 new=15 unsupported=95 valid=118 | best=0.988 mean=0.8874 champion="MacdDonTime34" | 3364ms
+assembled 19
+gen  9 | popSize=128 new=19 unsupported=93 valid=112 | best=0.988 mean=0.8733 champion="MacdDonTime34" | 4210ms
+assembled 13
+gen 10 | popSize=128 new=13 unsupported=98 valid=122 | best=0.989 mean=0.8994 champion="MacdDonTime34" | 4292ms
+assembled 11
+gen 11 | popSize=128 new=11 unsupported=101 valid=119 | best=0.989 mean=0.9154 champion="MacdDonTime34" | 2325ms
+assembled 12
+gen 12 | popSize=128 new=12 unsupported=99 valid=117 | best=0.989 mean=0.8953 champion="MacdDonTime34" | 2790ms
+assembled 14
+gen 13 | popSize=128 new=14 unsupported=100 valid=120 | best=0.99 mean=0.8867 champion="MacdDonTime34" | 3487ms
+assembled 15
+gen 14 | popSize=128 new=15 unsupported=98 valid=118 | best=0.99 mean=0.8655 champion="MacdDonTime34" | 3435ms
+assembled 10
+gen 15 | popSize=128 new=10 unsupported=96 valid=120 | best=0.99 mean=0.9049 champion="MacdDonTime34" | 2443ms
+assembled 11
+gen 16 | popSize=128 new=11 unsupported=94 valid=121 | best=0.991 mean=0.8869 champion="MacdDonTime34" | 4642ms
+assembled 13
+gen 17 | popSize=128 new=13 unsupported=89 valid=117 | best=0.991 mean=0.8644 champion="MacdDonTime34" | 4137ms
+assembled 21
+gen 18 | popSize=128 new=21 unsupported=83 valid=119 | best=0.991 mean=0.8114 champion="MacdDonTime34" | 5390ms
+assembled 19
+gen 19 | popSize=128 new=19 unsupported=88 valid=118 | best=0.991 mean=0.8229 champion="MacdDonTime34" | 4347ms
+assembled 15
+gen 20 | popSize=128 new=15 unsupported=86 valid=112 | best=0.991 mean=0.9036 champion="MacdDonTime34" | 2953ms
+assembled 15
+gen 21 | popSize=128 new=15 unsupported=91 valid=110 | best=0.991 mean=0.8609 champion="MacdDonTime34" | 4487ms
+assembled 9
+gen 22 | popSize=128 new=9 unsupported=94 valid=108 | best=0.991 mean=0.9158 champion="MacdDonTime34" | 2259ms
+assembled 12
+gen 23 | popSize=128 new=12 unsupported=97 valid=109 | best=0.991 mean=0.9014 champion="MacdDonTime34" | 2263ms
+assembled 7
+gen 24 | popSize=128 new=7 unsupported=99 valid=107 | best=0.991 mean=0.9427 champion="MacdDonTime34" | 2135ms
+assembled 8
+gen 25 | popSize=128 new=8 unsupported=96 valid=101 | best=0.991 mean=0.9397 champion="MacdDonTime34" | 2342ms
+assembled 4
+gen 26 | popSize=128 new=4 unsupported=110 valid=104 | best=0.991 mean=0.9557 champion="MacdDonTime34" | 1801ms
+assembled 13
+gen 27 | popSize=128 new=13 unsupported=95 valid=114 | best=0.991 mean=0.8918 champion="MacdDonTime34" | 2891ms
+assembled 9
+gen 28 | popSize=128 new=9 unsupported=102 valid=101 | best=0.991 mean=0.9036 champion="MacdDonTime34" | 2066ms
+assembled 6
+gen 29 | popSize=128 new=6 unsupported=102 valid=112 | best=0.991 mean=0.9386 champion="MacdDonTime34" | 1585ms
+assembled 5
+gen 30 | popSize=128 new=5 unsupported=107 valid=99 | best=0.991 mean=0.9474 champion="MacdDonTime34" | 1739ms
+assembled 6
+gen 31 | popSize=128 new=6 unsupported=100 valid=105 | best=0.991 mean=0.9436 champion="MacdDonTime34" | 1706ms
+assembled 6
+gen 32 | popSize=128 new=6 unsupported=97 valid=112 | best=0.991 mean=0.9438 champion="MacdDonTime34" | 2202ms
+gen 33 | popSize=128 new=0 unsupported=103 valid=111 | best=0.991 mean=0.9909 champion="MacdDonTime34" | 214ms
+assembled 1
+gen 34 | popSize=128 new=1 unsupported=97 valid=112 | best=0.991 mean=0.9908 champion="MacdDonTime34" | 829ms
+assembled 5
+gen 35 | popSize=128 new=5 unsupported=98 valid=108 | best=0.991 mean=0.9517 champion="MacdDonTime34" | 1762ms
+assembled 2
+gen 36 | popSize=128 new=2 unsupported=103 valid=112 | best=0.991 mean=0.9766 champion="MacdDonTime34" | 906ms
+assembled 1
+gen 37 | popSize=128 new=1 unsupported=99 valid=117 | best=0.991 mean=0.9836 champion="MacdDonTime34" | 1237ms
+assembled 3
+gen 38 | popSize=128 new=3 unsupported=94 valid=111 | best=0.991 mean=0.9639 champion="MacdDonTime34" | 997ms
+assembled 5
+gen 39 | popSize=128 new=5 unsupported=95 valid=113 | best=0.991 mean=0.9413 champion="MacdDonTime34" | 1131ms
+assembled 1
+gen 40 | popSize=128 new=1 unsupported=98 valid=106 | best=0.991 mean=0.9885 champion="MacdDonTime34" | 858ms
+assembled 3
+gen 41 | popSize=128 new=3 unsupported=88 valid=107 | best=0.991 mean=0.9577 champion="MacdDonTime34" | 1314ms
+assembled 2
+gen 42 | popSize=128 new=2 unsupported=92 valid=112 | best=0.991 mean=0.9735 champion="MacdDonTime34" | 1216ms
+gen 43 | popSize=128 new=0 unsupported=85 valid=111 | best=0.991 mean=0.9908 champion="MacdDonTime34" | 207ms
+assembled 5
+gen 44 | popSize=128 new=5 unsupported=98 valid=108 | best=0.991 mean=0.9482 champion="MacdDonTime34" | 1679ms
+assembled 5
+gen 45 | popSize=128 new=5 unsupported=95 valid=110 | best=0.991 mean=0.9574 champion="MacdDonTime34" | 1777ms
+assembled 3
+gen 46 | popSize=128 new=3 unsupported=103 valid=107 | best=0.991 mean=0.9741 champion="MacdDonTime34" | 1534ms
+assembled 3
+gen 47 | popSize=128 new=3 unsupported=101 valid=113 | best=0.991 mean=0.9735 champion="MacdDonTime34" | 1024ms
+assembled 1
+gen 48 | popSize=128 new=1 unsupported=93 valid=112 | best=0.991 mean=0.9846 champion="MacdDonTime34" | 809ms
+assembled 3
+gen 49 | popSize=128 new=3 unsupported=101 valid=108 | best=0.991 mean=0.9591 champion="MacdDonTime34" | 1524ms
+assembled 2
+gen 50 | popSize=128 new=2 unsupported=96 valid=115 | best=0.991 mean=0.9745 champion="MacdDonTime34" | 937ms
+assembled 2
+gen 51 | popSize=128 new=2 unsupported=99 valid=113 | best=0.991 mean=0.9717 champion="MacdDonTime34" | 1361ms
+assembled 2
+gen 52 | popSize=128 new=2 unsupported=100 valid=115 | best=0.991 mean=0.9728 champion="MacdDonTime34" | 1344ms
+assembled 3
+gen 53 | popSize=128 new=3 unsupported=100 valid=108 | best=0.991 mean=0.9673 champion="MacdDonTime34" | 972ms
+assembled 2
+gen 54 | popSize=128 new=2 unsupported=103 valid=109 | best=0.991 mean=0.9706 champion="MacdDonTime34" | 939ms
+assembled 3
+gen 55 | popSize=128 new=3 unsupported=107 valid=116 | best=0.991 mean=0.9611 champion="MacdDonTime34" | 1283ms
+assembled 3
+gen 56 | popSize=128 new=3 unsupported=109 valid=108 | best=0.991 mean=0.9625 champion="MacdDonTime34" | 958ms
+assembled 3
+gen 57 | popSize=128 new=3 unsupported=96 valid=111 | best=0.991 mean=0.9585 champion="MacdDonTime34" | 1042ms
+assembled 6
+gen 58 | popSize=128 new=6 unsupported=90 valid=109 | best=0.991 mean=0.9332 champion="MacdDonTime34" | 1213ms
+assembled 6
+gen 59 | popSize=128 new=6 unsupported=104 valid=107 | best=0.991 mean=0.9468 champion="MacdDonTime34" | 1333ms
+
+=== CHAMPION (fitness=0.991, lineage=026d5705b38438bc <- b98f034b614e80d8) ===
+backend=js(fallback) trades=31 equity=100310 sharpe=0.991 nodeCount=9
+{
+  @strategy("MacdDonTime34")
+  @on(bar) {
+    if (falling(mom("high", 3), 8)) long(1);
+    if (falling(roc("volume", 89), 8)) short(1);
+    if ((falling(rsi("volume", 55), 55)) || (falling(ehma("close", 8), 5))) flat();
+  }
+}
+total wall: 376.3s  modules compiled: 899
+
+=== OOS RE-SCORE (top 10 by IS fitness, held-out 1727-bar tail) ===
+   1. IS=0.991  OOS=0.991 (trades=31)  [HELD]  MacdDonTime34
+   2. IS=0.991  OOS=0.991 (trades=31)  [HELD]  MacdDonTime34
+   3. IS=0.991  OOS=0.991 (trades=31)  [HELD]  MacdDonTime34
+   4. IS=0.991  OOS=0.991 (trades=31)  [HELD]  MacdDonTime34
+   5. IS=0.991  OOS=0.991 (trades=31)  [HELD]  MacdDonTime34
+   6. IS=0.991  OOS=0.991 (trades=31)  [HELD]  MacdDonTime34
+   7. IS=0.991  OOS=0.991 (trades=31)  [HELD]  S01_GoldenVault
+   8. IS=0.991  OOS=0.991 (trades=31)  [HELD]  MacdDonTime34
+   9. IS=0.991  OOS=0.991 (trades=31)  [HELD]  S01_GoldenVault
+  10. IS=0.991  OOS=0.991 (trades=31)  [HELD]  S01_GoldenVault
+OOS summary: 10/10 of the top IS performers held a positive Sharpe out of sample.
+
+CORPUS_EVO_OK

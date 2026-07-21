@@ -18,6 +18,15 @@ class BuiltinSigs {
 		return table;
 	}
 
+	/** Out-of-tree packages (e.g. Kestrel) register their own typed signatures here, so the
+	 * checker/palette recognize names core has no builtin implementation for, without core
+	 * naming that package anywhere. Call after ensure() has had a chance to run once (any call
+	 * to get/all/toPaletteJson triggers that), or just call register() itself — it self-ensures. */
+	public static function register(name:String, sig:BuiltinSig):Void {
+		ensure();
+		table.set(name, sig);
+	}
+
 	/** True when the named builtin expects a Series value at the given argument index. */
 	public static function wantsSeries(name:String, argIndex:Int):Bool {
 		var sig = get(name);
@@ -306,18 +315,11 @@ class BuiltinSigs {
 		fun("promote", [TUnknown], TPlan, 1);
 		fun("ensemble", [TUnknown, TScalar], TModel, 0);
 		fun("DecisionTreeEnsemble", [TUnknown, TScalar], TModel, 0);
+		// Generic externally-fed feature-tape slot: `feature("any:key")`, TFeature. Any more
+		// specific vocabulary built on top of this (typed model/tree/graph-derived feature
+		// combinators) is an out-of-tree concern registered via BuiltinSigs.register() — see
+		// e.g. the Kestrel package, which is exactly such a consumer, not part of core.
 		fun("feature", [TString], TFeature);
-		fun("feature_zscore", [TFeature, TWindow], TFeature);
-		fun("xscore", [TFeature], TFeature);
-		fun("gscore", [TFeature], TFeature);
-		fun("model_score", [TString], TFeature);
-		fun("mlp", [TFeature], TModel, 1);
-		fun("gbdt", [TFeature], TModel, 1);
-		fun("tree", [TFeature], TTree, 1);
-		fun("tree_value", [TString], TFeature);
-		fun("tree_bit", [TString, TWindow], TFeature);
-		fun("graph_query", [TString], TGraphQuery);
-		fun("graph_metric", [TString, TString], TFeature);
 		// Graph is an opaque JSON-safe object at runtime; result containers are typed
 		// enough for checker/editor legality without exposing structural fields yet.
 		fun("graph_neighbors", [TGraph, TString, TString, TScalar], TStringArray, 2);
@@ -333,29 +335,8 @@ class BuiltinSigs {
 			{name: "distance", ty: TScalar}
 		]), 3);
 		fun("graph_pagerank", [TGraph, TScalar, TScalar, TScalar], TGraphRanks, 1);
-		// Probability-cloud query surface (musescript/kestrel/ProbCloudRuntime.hx)
-		// — a portable, pure-Haxe port of the Python ProbabilityCloud query API,
-		// so it behaves identically on JS (web/mobile) and Python (backtest)
-		// targets. FITTING a cloud is a separate, offline, Python-only concern
-		// (tools/kestrel_bridge.py); `probcloud_from_json` just parses its
-		// already-fitted JSON output — never touches Python at query time.
-		fun("probcloud_from_json", [TString], TProbCloud, 1);
-		fun("probcloud_median", [TProbCloud, TString, TScalar], TScalar, 2);
-		fun("probcloud_quantile", [TProbCloud, TString, TScalar, TScalar], TScalar, 3);
-		fun("probcloud_interval_low", [TProbCloud, TString, TScalar, TScalar], TScalar, 2);
-		fun("probcloud_interval_high", [TProbCloud, TString, TScalar, TScalar], TScalar, 2);
-		fun("probcloud_iqr", [TProbCloud, TString, TScalar], TScalar, 2);
-		fun("probcloud_width", [TProbCloud, TString, TScalar, TScalar], TScalar, 2);
-		fun("probcloud_conviction", [TProbCloud, TString, TScalar], TScalar, 2);
-		fun("probcloud_skew", [TProbCloud, TString, TScalar], TScalar, 2);
-		fun("probcloud_expected_value", [TProbCloud, TString, TScalar], TScalar, 2);
-		fun("probcloud_cdf", [TProbCloud, TString, TScalar, TScalar], TScalar, 3);
-		fun("probcloud_prob_below", [TProbCloud, TString, TScalar, TScalar], TScalar, 3);
-		fun("probcloud_prob_above", [TProbCloud, TString, TScalar, TScalar], TScalar, 3);
-		fun("probcloud_prob_between", [TProbCloud, TString, TScalar, TScalar, TScalar], TScalar, 4);
-		fun("probcloud_prob_up", [TProbCloud, TString, TScalar], TScalar, 2);
-		fun("probcloud_is_calibrated", [TProbCloud], TBool, 1);
-		fun("probcloud_trust_note", [TProbCloud], TString, 1);
+		// Probability-cloud query surface (probcloud_*) is Kestrel's, registered externally via
+		// BuiltinSigs.register() when that package is present — not part of core.
 		// Opaque Dict / Set bookkeeping (string keys / string identity).
 		fun("dict_new", [], TDict);
 		// Keys are coerced with Std.string at runtime — accept any key type.
@@ -379,15 +360,22 @@ class BuiltinSigs {
 		fun("set_jaccard", [TSet, TSet], TScalar);
 	}
 
+	static var extraPaletteOnly:Map<String, Bool> = new Map();
+
+	/** Out-of-tree packages mark their own palette-only names here instead of core hardcoding
+	 * them (see register() above for the matching typed-signature counterpart). */
+	public static function markPaletteOnly(name:String):Void {
+		extraPaletteOnly.set(name, true);
+	}
+
 	/**
 	 * Palette / planner-only names that are intentionally not TradeBuiltins
 	 * installables (feature/model stubs, or MacroBuiltins-only markers).
 	 */
 	public static function isPaletteOnly(name:String):Bool {
+		if (extraPaletteOnly.exists(name)) return true;
 		return switch (name) {
-			case "feature" | "feature_zscore" | "xscore" | "gscore" | "model_score"
-				| "mlp" | "gbdt" | "tree" | "tree_value" | "tree_bit"
-				| "graph_query" | "graph_metric":
+			case "feature":
 				true;
 			default:
 				false;

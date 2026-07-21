@@ -337,13 +337,15 @@ class TestIndicatorPorts extends Test {
 				new MuseInterp(harness).runBacktest(
 					new MuseParser().parse(source), new BarFeed(bars.copy()));
 			} catch (e:Dynamic) {
-				// A constructor-time argument-validation throw (e.g. "period must be > lag")
-				// proves the indicator IS wired and dispatching correctly — it's just that
-				// this generic multi-arg default combo doesn't satisfy that indicator's own
-				// semantic constraint. That's not a mis-wiring, so it isn't a failure here;
-				// only non-validation errors (unknown builtin, null deref, etc.) fail.
+				// A constructor-time argument-validation throw (e.g. "period must be > lag",
+				// GARCH's "requires alpha + beta < 1" — both phrasings transcribed verbatim
+				// from the Rust panics) proves the indicator IS wired and dispatching
+				// correctly — it's just that this generic multi-arg default combo doesn't
+				// satisfy that indicator's own semantic constraint. That's not a mis-wiring,
+				// so it isn't a failure here; only non-validation errors (unknown builtin,
+				// null deref, etc.) fail.
 				var msg = Std.string(e);
-				if (msg.indexOf("must be") == -1) {
+				if (msg.indexOf("must be") == -1 && msg.indexOf("requires") == -1) {
 					Assert.fail('registered indicator "$name" threw when called as `$call`: $e');
 				}
 			}

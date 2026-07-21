@@ -1,3 +1,5 @@
 extraParams.hxml
+-cp ../musescript-kestrel
+-D kestrel
 -main musescript.kestrel.KestrelProof
 --interp

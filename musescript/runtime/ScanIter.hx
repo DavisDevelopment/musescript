@@ -14,20 +14,18 @@ class ScanIter implements MuseIter {
 	}
 
 	public function next():IterResult<Dynamic> {
-		return switch (src.next()) {
+		return step(src.next());
+	}
+
+	/** Fold at whatever await-depth the value surfaces; recurse through nested
+	 * Awaits so the accumulator is never bypassed. */
+	function step(r:IterResult<Dynamic>):IterResult<Dynamic> {
+		return switch (r) {
 			case Done: Done;
 			case Value(v):
 				acc = f(acc, v);
 				Value(acc);
-			case Await(r): Await(function() {
-				return switch (r()) {
-					case Done: Done;
-					case Value(v):
-						acc = f(acc, v);
-						Value(acc);
-					case Await(r2): Await(r2);
-				};
-			});
+			case Await(cont): Await(function() return step(cont()));
 		};
 	}
 }

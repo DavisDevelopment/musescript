@@ -16,6 +16,9 @@ import musescript.runtime.IndicatorInstance;
 import musescript.runtime.PatternMatcher;
 import musescript.runtime.MuseIters;
 import musescript.runtime.IterDriver;
+import musescript.runtime.MuseIter;
+import musescript.runtime.MappedIter;
+import musescript.runtime.IterResult;
 import musescript.runtime.Generator;
 import musescript.ast.MuseProgram;
 import musescript.ast.Decl;
@@ -62,6 +65,12 @@ class TestMain {
 		runner.addCase(new TestBuiltinDocs());
 		runner.addCase(new TestWalkForwardPipeline());
 		runner.addCase(new TestIndicatorPorts());
+		runner.addCase(new TestTaToolbelt());
+		runner.addCase(new TestIndicatorCallsiteState());
+		runner.addCase(new TestNativeIndicatorParity());
+		runner.addCase(new TestRegistryPalette());
+		runner.addCase(new TestStrategyParserGrammarExtensions());
+		runner.addCase(new TestFourierBuiltins());
 		// Delegated indicator-port batches self-register from musescript/tests/ports/
 		// (PortTestsMacro) — no per-batch edit here, so parallel porting never
 		// conflicts on this file. See musescript/indicators/PORTING.md.
@@ -77,6 +86,14 @@ class TestMain {
 		runner.addCase(new TestMlBuiltins());
 		runner.addCase(new TestPositionHooks());
 		runner.addCase(new TestGraphBuiltins());
+		// Murmuration is proprietary (private classpath addition, like Kestrel — see
+		// GeneRunner.hx's #if kestrel guard) — these two test classes live in
+		// musescript/tests/TestMurmuration*.hx, which are gitignored and absent from a public
+		// clone, so the public build must not reference them unconditionally.
+		#if kestrel
+		runner.addCase(new TestMurmuration());
+		runner.addCase(new TestMurmurationConservation());
+		#end
 		runner.addCase(new TestDictSetBuiltins());
 		runner.addCase(new TestPortfolioPanel());
 		runner.addCase(new TestBagPortfolio());
@@ -86,12 +103,14 @@ class TestMain {
 		runner.addCase(new TestLangEnums());
 		runner.addCase(new TestLangClasses());
 		runner.addCase(new TestLangInheritance());
+		runner.addCase(new TestConstFold());
+		runner.addCase(new TestCommonSubexprElim());
 		runner.addCase(new TestVariableFrame());
 		runner.addCase(new TestCapstoneIndicators());
 		runner.addCase(new TestArrayBuffer());
 		runner.addCase(new TestConstructOnce());
 		runner.addCase(new TestClassStructLowering());
-		runner.addCase(new TestProbCloud());
+		// TestProbCloud moved to musescript-kestrel/musescript/tests/ (Kestrel package, not core).
 		runner.addCase(new TestHybridWasm());
 		runner.addCase(new TestCompiler());
 		runner.addCase(new TestGenerator());
@@ -440,6 +459,133 @@ class TestIter extends Test {
 		Assert.equals(0, Reflect.field(en[0], "i"));
 		Assert.equals("a", Reflect.field(en[0], "v"));
 		Assert.equals(1, Reflect.field(en[1], "i"));
+	}
+
+	// Fully drive a (possibly async) MuseIter to completion, resolving every
+	// Await — the shape a real async driver would use, and the shape sync
+	// IterDriver.each deliberately can't (it stops on a would-block Await).
+	static function drainAsync(it:MuseIter):Array<Dynamic> {
+		var out:Array<Dynamic> = [];
+		var r = it.next();
+		var guard = 0;
+		while (guard++ < 100000) {
+			switch (r) {
+				case Done: break;
+				case Value(v): out.push(v); r = it.next();
+				case Await(cont): r = cont();
+			}
+		}
+		return out;
+	}
+
+	// Regression: lazy combinators must apply their transform/predicate/counter
+	// to a value that only surfaces after MORE THAN ONE await pump — the shape an
+	// empty-then-filled StreamIter produces. The old single-source combinators
+	// passed a nested Await through raw, letting deep values escape their logic.
+	public function testMapAppliesThroughNestedAwait() {
+		var src:MuseIter = new DelayedValueIter([10, 20], 2); // each value after 2 pumps
+		var out = drainAsync(new MappedIter(src, function(v) return (v : Int) + 1));
+		Assert.equals(2, out.length);
+		Assert.equals(11, out[0]); // f applied to a 2-pump-deep value
+		Assert.equals(21, out[1]);
+	}
+
+	public function testCombinatorsThroughNestedAwait() {
+		// filter keeps evens even when they arrive 2 pumps deep
+		var filtered = drainAsync(IterDriver.filter(
+			new DelayedValueIter([1, 2, 3, 4], 2), function(v) return (v : Int) % 2 == 0));
+		Assert.equals(2, filtered.length);
+		Assert.equals(2, filtered[0]);
+		Assert.equals(4, filtered[1]);
+
+		// take(2) must not over-yield when values come via Await
+		var taken = drainAsync(IterDriver.take(new DelayedValueIter([1, 2, 3, 4], 2), 2));
+		Assert.equals(2, taken.length);
+		Assert.equals(1, taken[0]);
+		Assert.equals(2, taken[1]);
+
+		// drop consumes its quota through Await
+		var dropped = drainAsync(IterDriver.drop(new DelayedValueIter([1, 2, 3, 4], 2), 2));
+		Assert.equals(2, dropped.length);
+		Assert.equals(3, dropped[0]);
+
+		// takeWhile gates on a deep value
+		var whileLt3 = drainAsync(IterDriver.takeWhile(
+			new DelayedValueIter([1, 2, 3, 4], 2), function(v) return (v : Int) < 3));
+		Assert.equals(2, whileLt3.length);
+		Assert.equals(2, whileLt3[1]);
+
+		// scan folds through Await
+		var scanned = drainAsync(IterDriver.scan(
+			new DelayedValueIter([1, 2, 3], 2), 0, function(a, b) return (a : Int) + (b : Int)));
+		Assert.equals(3, scanned.length);
+		Assert.equals(1, scanned[0]);
+		Assert.equals(3, scanned[1]);
+		Assert.equals(6, scanned[2]);
+
+		// enumerate attaches indices to deep values
+		var en = drainAsync(IterDriver.enumerate(new DelayedValueIter(["a", "b"], 2)));
+		Assert.equals(2, en.length);
+		Assert.equals(0, Reflect.field(en[0], "i"));
+		Assert.equals("a", Reflect.field(en[0], "v"));
+		Assert.equals(1, Reflect.field(en[1], "i"));
+
+		// flatMap flattens through Await
+		var flat = drainAsync(IterDriver.flatMap(
+			new DelayedValueIter([1, 2], 2), function(v) return [v, (v : Int) * 10]));
+		Assert.equals(4, flat.length);
+		Assert.equals(1, flat[0]);
+		Assert.equals(10, flat[1]);
+		Assert.equals(2, flat[2]);
+		Assert.equals(20, flat[3]);
+	}
+
+	// Regression: a generator delegating (yield*) into an async iterator must
+	// resume its OWN body after the delegate is exhausted. The old raw
+	// `Await(r)` passthrough stranded the post-yield* values.
+	public function testGeneratorDelegatesThroughAsyncAwait() {
+		var g = new Generator();
+		g.started = true;
+		g.queue = []; // body drained lazily below
+		// After the delegated async iter finishes, this queued value must appear.
+		var tail = [99];
+		g.evalBody = function(gen:Generator):Dynamic {
+			for (v in tail) gen.pushYield(v);
+			return null;
+		};
+		// Delegate ends its stream with Done delivered THROUGH an Await — the
+		// exact shape that strands the post-yield* body under a raw passthrough.
+		g.delegateTo(new TailAwaitDoneIter([1, 2]));
+
+		var out = drainAsync(g);
+		Assert.equals(3, out.length);
+		Assert.equals(1, out[0]);  // delegated value (2-pump-deep) survives
+		Assert.equals(2, out[1]);
+		Assert.equals(99, out[2]); // OWN body resumes after delegation completes
+	}
+
+	// `a...b` range literal desugars to the range() builtin — works as a value
+	// and as a for-in source. Previously `...` reached the interp as an unknown
+	// binary operator and threw.
+	public function testRangeLiteralDesugarsToRange() {
+		var interp = new MuseInterp(new HarnessContext());
+		var lit = MuseIters.toArray(cast interp.evalExpr(new MuseParser().parseExpr('1...4')));
+		Assert.equals(3, lit.length);
+		Assert.equals(1, lit[0]);
+		Assert.equals(3, lit[2]);
+
+		// identical to the explicit range() builtin
+		var viaFn = MuseIters.toArray(cast interp.evalExpr(new MuseParser().parseExpr('range(1, 4)')));
+		Assert.equals(lit.length, viaFn.length);
+
+		// usable directly as a for-in source inside a strategy: 0+1+2+3+4 = 10
+		var prog = new MuseParser().parse(
+			'@strategy("r") @on(bar) { var s = 0; for (i in 0...5) { s = s + i; } plot(s, "rangeSum"); }');
+		var harness = new HarnessContext();
+		new MuseInterp(harness).runBacktest(prog, BarFeed.synthetic(3, 1));
+		var saw = false;
+		for (c in harness.chart.commands) if (c.label == "rangeSum") { Assert.floatEquals(10.0, c.series); saw = true; }
+		Assert.isTrue(saw);
 	}
 
 	public function testAnyAllFindSumCount() {
@@ -827,6 +973,42 @@ class TestAuxData extends Test {
 		Assert.equals(r2.trades, r1.trades);
 		Assert.floatEquals(r2.finalEquity, r1.finalEquity);
 		Assert.equals(1, r1.trades);
+	}
+
+	// Regression: `expr().field = value` used in EXPRESSION position (not as a
+	// bare statement) must evaluate `expr()` exactly once on the JS tier, same
+	// as the interp. JsEmitter's EBinop("=", EField(obj,f), v) case re-emitted
+	// `obj` a second time to read back the post-assignment value — but JS
+	// assignment expressions already evaluate to the RHS, so the second read
+	// was both redundant and, for a side-effecting `obj` (e.g. a factory call),
+	// a real double-call bug.
+	public function testFieldAssignExprPositionEvaluatesObjectOnce() {
+		// `plot()` writes straight to the shared harness chart (not a captured
+		// local), so counting "call" commands sidesteps interp closure-scoping
+		// semantics entirely and isolates exactly the double-eval in question.
+		var source = '
+			@strategy("dbleval")
+			@on(bar) {
+				function mkObj() { plot(1, "call"); return { f: 0 }; }
+				var y = (mkObj().f = 5);
+			}
+		';
+		var interpHarness = new HarnessContext();
+		new MuseInterp(interpHarness).runBacktest(new MuseParser().parse(source), BarFeed.synthetic(1, 1));
+		var interpCalls = 0;
+		for (c in interpHarness.chart.commands) if (c.label == "call") interpCalls++;
+		Assert.equals(1, interpCalls); // interp already calls mkObj() exactly once
+
+		#if js
+		var jsHarness = new HarnessContext();
+		Reflect.setField(jsHarness, "feed", BarFeed.synthetic(1, 1));
+		var ex = MuseCompiler.compileEx(new MuseParser().parse(source), { target: "js", strict: true });
+		Assert.equals("js", ex.backend);
+		ex.fn(jsHarness);
+		var jsCalls = 0;
+		for (c in jsHarness.chart.commands) if (c.label == "call") jsCalls++;
+		Assert.equals(1, jsCalls); // must match interp — mkObj() called once, not twice
+		#end
 	}
 
 	public function testBareAuxIdentifierJsParity() {
@@ -1672,6 +1854,33 @@ class TestChecker extends Test {
 		Assert.isFalse(hasWarning(errs, "generator function has no yield"));
 	}
 
+	// A NORMAL function that merely returns a yielding lambda must NOT itself be
+	// classified as a generator — `yield` binds to the nearest enclosing
+	// function. containsYield used to descend into nested function bodies.
+	public function testGeneratorFactoryNotMisclassified() {
+		var outer = new MuseParser().parseExpr('function() { return function() { @yield 1; }; }');
+		switch (outer) {
+			case EFunction(_, body, kind, _):
+				Assert.equals(Normal, kind); // outer is a factory, not a generator
+				// the inner lambda IS a generator
+				var innerKind = findInnerFnKind(body);
+				Assert.equals(Generator, innerKind);
+			default:
+				Assert.fail("expected EFunction");
+		}
+	}
+
+	static function findInnerFnKind(e:Expr):Null<FnKind> {
+		return switch (e) {
+			case EFunction(_, _, k, _): k;
+			case EBlock(es):
+				for (x in es) { var k = findInnerFnKind(x); if (k != null) return k; }
+				null;
+			case EReturn(v): v != null ? findInnerFnKind(v) : null;
+			default: null;
+		};
+	}
+
 	public function testYieldOutsideGenerator() {
 		var prog:MuseProgram = {
 			decls: [],
@@ -1760,50 +1969,10 @@ class TestCompiler extends Test {
 		#end
 	}
 
-	public function testCompileWasmKestrelDenseFeaturePrelude() {
-		var prog = new MuseParser().parse('
-			strategy kestrel_dense {
-				indicator ordinary = externalParam;
-				feature graphSignal = graph_metric("supply", "degree");
-				onBar {
-					when treeSignal > ordinary: long();
-				}
-				feature treeSignal = tree_value("logic");
-				onBar {
-					when graphSignal < -1: flat();
-				}
-			}
-		');
-		var emitted = new musescript.compile.StrategyWasmEmitter().emitOnBar(prog);
-		Assert.notNull(emitted);
-		Assert.isTrue(emitted.strings.indexOf("externalParam") >= 0);
-		var slots = musescript.kestrel.KestrelWasmArtifact.featureSlots(emitted.strings);
-		Assert.equals(2, slots.length);
-		Assert.equals(0, slots[0].id);
-		Assert.equals("graph:supply:degree", slots[0].key);
-		Assert.equals(1, slots[1].id);
-		Assert.equals("tree:logic:value", slots[1].key);
-		// Both assignments execute once per bar even though one is declared after
-		// onBar and the strategy has two onBar blocks.
-		Assert.equals(2, emitted.wat.split("call $feature_at").length - 1);
-		Assert.isTrue(emitted.wat.indexOf("i32.const 0\n    call $feature_at") >= 0);
-		Assert.isTrue(emitted.wat.indexOf("i32.const 1\n    call $feature_at") >= 0);
-		#if (js || python)
-		if (musescript.compile.StrategyWasmBackend.hostReady()) {
-			var feed = BarFeed.synthetic(3, 7);
-			var ctx:Dynamic = {
-				feed: feed,
-				kestrelFeatureTapes: [
-					[-2.0, -2.0, -2.0], // graphSignal => flat
-					[1.0, 1.0, 1.0]    // treeSignal => long
-				]
-			};
-			var fn = musescript.compile.StrategyWasmBackend.compile(prog);
-			var r = fn(ctx);
-			Assert.equals(6, r.trades);
-		}
-		#end
-	}
+	// testCompileWasmKestrelDenseFeaturePrelude moved to musescript-kestrel/musescript/tests/
+	// TestKestrelWasmFeatureSlots.hx (Kestrel package, not core) and rewritten to use the
+	// generic feature("key") builtin directly, since graph_metric(...)/tree_value(...) never
+	// resolved to anything callable (core or Kestrel) — only feature(...) is a real builtin.
 
 	/**
 	 * F1 (hybrid WASM/interp): matrices and string ops still have no native
@@ -2909,6 +3078,29 @@ class TestMathCompile extends Test {
 		Assert.isTrue(js.indexOf("function polySum") >= 0);
 		Assert.isTrue(py.indexOf("def polySum") >= 0);
 		Assert.isTrue(wat.indexOf("(module") >= 0);
+	}
+
+	// Regression: `x = expr` used in EXPRESSION position must emit `expr`'s
+	// source exactly once in the generated Python — not twice (once to store,
+	// once to "read back" as the expression's value). Spot-checked via source
+	// text since Python execution is host-gated (#elseif python); the emitted
+	// string is available on every target this suite runs on.
+	public function testPyEmitAssignExprEvaluatesRhsOnce() {
+		var body = EBlock([
+			EVar("y", EBinop("=", EIdent("x"), ECall(EIdent("sqrt"), [EIdent("x")])))
+		]);
+		var prog:MuseProgram = {
+			decls: [FnDecl("f", ["x"], body, Normal)],
+			stmts: []
+		};
+		var out = musescript.compile.MathCompiler.emit(prog, "f", { target: "python" });
+		Assert.notNull(out);
+		// "sqrt(" should appear exactly once — the old shape duplicated the
+		// whole RHS text via `X or ${emitExpr(b)}`.
+		var count = 0;
+		var idx = 0;
+		while ((idx = out.indexOf("sqrt(", idx)) >= 0) { count++; idx++; }
+		Assert.equals(1, count);
 	}
 
 	public function testHostCompile() {
@@ -4293,5 +4485,45 @@ strategy S {
 	public function testPaletteExport() {
 		var p:Dynamic = MuseScript.palette();
 		Assert.equals("musegene.palette/1", Reflect.field(p, "schema"));
+	}
+}
+
+/** Test iterator: each value surfaces only after `delay` Await pumps, mimicking
+ * a StreamIter whose buffer is empty at poll time and filled on a later pump. */
+private class DelayedValueIter implements MuseIter {
+	var values:Array<Dynamic>;
+	var pending:Int;
+	var delay:Int;
+
+	public function new(values:Array<Dynamic>, delay:Int) {
+		this.values = values.copy();
+		this.delay = delay;
+		this.pending = delay;
+	}
+
+	public function next():IterResult<Dynamic> {
+		if (values.length == 0) return Done;
+		if (pending > 0) {
+			pending--;
+			var self = this;
+			return Await(function() return self.next());
+		}
+		pending = delay;
+		return Value(values.shift());
+	}
+}
+
+/** Emits `values` synchronously, then signals completion via `Await(() -> Done)`
+ * — i.e. the terminal Done surfaces THROUGH an await continuation rather than a
+ * fresh next() call. This is what strands a delegating generator's post-yield*
+ * body if the delegated Await is passed through raw. */
+private class TailAwaitDoneIter implements MuseIter {
+	var values:Array<Dynamic>;
+	public function new(values:Array<Dynamic>) {
+		this.values = values.copy();
+	}
+	public function next():IterResult<Dynamic> {
+		if (values.length > 0) return Value(values.shift());
+		return Await(function() return Done);
 	}
 }

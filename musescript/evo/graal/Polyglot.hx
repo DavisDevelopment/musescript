@@ -58,6 +58,7 @@ extern class Value {
 	function asInt():Int;
 	function isNull():Bool;
 	function writeBufferDouble(order:ByteOrder, byteOffset:haxe.Int64, value:Float):Void;
+	function readBufferDouble(order:ByteOrder, byteOffset:haxe.Int64):Float;
 }
 
 @:native("java.nio.ByteOrder")

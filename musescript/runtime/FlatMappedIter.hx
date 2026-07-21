@@ -24,17 +24,7 @@ class FlatMappedIter implements MuseIter {
 					case Value(v):
 						return Value(v);
 					case Await(r):
-						return Await(function() {
-							return switch (r()) {
-								case Done:
-									inner = null;
-									this.next();
-								case Value(v):
-									Value(v);
-								case Await(r2):
-									Await(r2);
-							};
-						});
+						return Await(function() return stepInner(r()));
 				}
 				continue;
 			}
@@ -44,18 +34,36 @@ class FlatMappedIter implements MuseIter {
 				case Value(v):
 					inner = MuseIters.from(f(v));
 				case Await(r):
-					return Await(function() {
-						return switch (r()) {
-							case Done:
-								Done;
-							case Value(v):
-								inner = MuseIters.from(f(v));
-								this.next();
-							case Await(r2):
-								Await(r2);
-						};
-					});
+					return Await(function() return stepOuter(r()));
 			}
 		}
+	}
+
+	/** Resolve an inner-iterable Await: exhausted inner restarts the search,
+	 * a value passes through, a nested Await recurses (not passed through raw). */
+	function stepInner(r:IterResult<Dynamic>):IterResult<Dynamic> {
+		return switch (r) {
+			case Done:
+				inner = null;
+				next();
+			case Value(v):
+				Value(v);
+			case Await(cont):
+				Await(function() return stepInner(cont()));
+		};
+	}
+
+	/** Resolve a source Await: a value opens its inner iterable then restarts,
+	 * a nested Await recurses. */
+	function stepOuter(r:IterResult<Dynamic>):IterResult<Dynamic> {
+		return switch (r) {
+			case Done:
+				Done;
+			case Value(v):
+				inner = MuseIters.from(f(v));
+				next();
+			case Await(cont):
+				Await(function() return stepOuter(cont()));
+		};
 	}
 }

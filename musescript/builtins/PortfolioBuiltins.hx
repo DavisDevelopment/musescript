@@ -99,10 +99,15 @@ class PortfolioBuiltins {
 		});
 	}
 
-	static function lookback(harness:HarnessContext, field:String, sym:String, n:Int):Float {
-		if (n == null || n < 0) n = 0;
+	static function lookback(harness:HarnessContext, field:String, sym:String, n:Null<Int>):Float {
+		// `n` is declared Null<Int> (not plain Int) specifically because these builtins are
+		// invoked through dynamic/reflective dispatch (vars.set(...) closures called by the
+		// interpreter) where a caller can genuinely supply undefined/null at runtime despite
+		// the ?n:Int = 0 default on install()'s wrapper closures -- that default only fires for
+		// a real static-arity Haxe call, not a dynamic one short on arguments.
+		var nn:Int = (n == null || n < 0) ? 0 : n;
 		var key = seriesKey(field, sym);
-		return harness.seriesLookback(key, n);
+		return harness.seriesLookback(key, nn);
 	}
 
 	/**

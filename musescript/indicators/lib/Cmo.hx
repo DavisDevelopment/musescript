@@ -84,4 +84,45 @@ class Cmo implements MuseIndicator<Float, Float> {
 			}
 		};
 	}
+
+	/**
+	 * Native MuseScript reimplementation, forkable/tunable in-language (see
+	 * TaSourceEntry.nativeSource's doc comment). Same recurrence as `update()`
+	 * above, translated 1:1: a bounded window of gains/losses fed via a running
+	 * sum, first value at `period + 1` bars (one bar to seed `prevPrice`, `period`
+	 * more to fill the window). Verified byte-for-byte equal to the Haxe port
+	 * over a shared synthetic tape by TestNativeIndicatorParity.
+	 */
+	public static function nativeSource():String {
+		return '@indicator("cmo") function(period) {
+	if (state.hasPrev != true) {
+		state.hasPrev = true;
+		state.prevPrice = close;
+		state.gains = [];
+		state.losses = [];
+		state.sumGain = 0.0;
+		state.sumLoss = 0.0;
+		return null;
+	}
+	var change = close - state.prevPrice;
+	state.prevPrice = close;
+	var gain = change > 0.0 ? change : 0.0;
+	var loss = change < 0.0 ? -change : 0.0;
+
+	if (state.gains.length == period) {
+		state.sumGain = state.sumGain - state.gains[0];
+		state.sumLoss = state.sumLoss - state.losses[0];
+		state.gains.shift();
+		state.losses.shift();
+	}
+	state.gains.push(gain);
+	state.losses.push(loss);
+	state.sumGain = state.sumGain + gain;
+	state.sumLoss = state.sumLoss + loss;
+
+	if (state.gains.length < period) return null;
+	var denom = state.sumGain + state.sumLoss;
+	return denom == 0.0 ? 0.0 : 100.0 * (state.sumGain - state.sumLoss) / denom;
+}';
+	}
 }

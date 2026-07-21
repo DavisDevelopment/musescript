@@ -11,9 +11,22 @@ class Rand {
 	}
 
 	public function int(n:Int):Int {
-		state = Std.int((state * 1103515245 + 12345) % 2147483648);
-		if (state < 0) state = -state;
+		state = (imul32(state, 1103515245) + 12345) & 0x7fffffff;
 		return n == 0 ? 0 : state % n;
+	}
+
+	/**
+	 * Portable 32-bit-wrapping multiply, via the `haxe.Int32` abstract's overloaded `*`
+	 * operator (NOT raw `Int` `*`) -- see musescript.harness.BarFeed.imul32 for the full
+	 * writeup. Same LCG, same bug class: on JS, `Int` is a plain Number so raw `*` silently
+	 * loses precision once the product exceeds 2^53, while a real-32-bit-int target (JVM,
+	 * C++, ...) overflows correctly on the exact same source -- two targets given "the same
+	 * seed" would silently diverge. `haxe.Int32`'s `*` forces the same 32-bit-wrapping
+	 * product on every target.
+	 */
+	static inline function imul32(a:Int, b:Int):Int {
+		var r:haxe.Int32 = (a : haxe.Int32) * (b : haxe.Int32);
+		return r;
 	}
 
 	public function float():Float {

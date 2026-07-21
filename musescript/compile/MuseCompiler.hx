@@ -47,6 +47,22 @@ class MuseCompiler {
 		prog = SeriesLowering.lower(prog);
 		prog = GeneratorLower.lower(prog);
 		prog = TailCallPass.transform(prog);
+		// Inline simple (single-expression) static class methods at their call sites — see
+		// StaticInlinePass's doc comment. After TailCallPass (different target), before
+		// CallsiteIds (inlining creates new call sites; stateful-builtin identity is assigned
+		// per POST-inline syntactic site, matching CallsiteIds' own "per helper, not per dynamic
+		// call" semantics for ordinary function calls).
+		prog = StaticInlinePass.transform(prog);
+		// Fold constant sub-expressions and dead branches — see ConstFold's doc comment.
+		// After StaticInlinePass specifically because inlining substitutes literal
+		// default-argument values into call bodies, which routinely turns a `when`/
+		// comparison inside that body into something fold-eligible only AFTER splicing.
+		prog = ConstFold.transform(prog);
+		// Deduplicate a repeated PURE value within the same flat statement list (a duplicate
+		// `when` condition, or an `Assign` recomputing the same thing another local already
+		// holds) — see CommonSubexprElim's doc comment for exactly how narrow "pure" is here
+		// (any call is conservatively impure, so stateful builtins are never touched).
+		prog = CommonSubexprElim.transform(prog);
 		// Static identities for stateful callsites (crossover/rising/...) so
 		// conditional evaluation can't alias state and backends agree. Runs
 		// after template expansion so each instantiation gets its own id.

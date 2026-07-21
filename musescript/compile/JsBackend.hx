@@ -333,6 +333,8 @@ class JsBackend {
 			return null;
 		};
 
+		//[TODO!] I bet this can be written less shitty without losing any performance c:
+
 		// Arity-specialized invoke fast path (see JsEmitter ECall emission).
 		// Hot builtins dispatch through per-arity plain-object tables of fixed-arg
 		// closures — no args array, no lookup frame walk, no string switch. A name
@@ -481,6 +483,9 @@ class JsBackend {
 			sin: Math.sin, cos: Math.cos, tan: Math.tan, log: Math.log, exp: Math.exp,
 			pow: Math.pow, PI: Math.PI, NaN: Math.NaN
 		});
+		// Match MuseInterp `ta` toolbelt global (same object-with-callable-fields
+		// shape as Math, built from the same IndicatorRegistry the flat builtins use).
+		frames[0].set("ta", musescript.builtins.TaToolbelt.build(harness));
 		Reflect.setField(api, "__locals", frames[0]);
 		return api;
 	}
@@ -635,6 +640,15 @@ class JsBackend {
 			var methodName:String = args[1];
 			var rest = args.slice(2);
 			return seed.callInstanceMethodPublic(obj, methodName, rest);
+		}));
+		// Static dispatch (`ClassName.method(...)`) — see JsEmitter's ECall case and
+		// callStaticMethodPublic's doc comment for why this needs its own bridge distinct
+		// from __method_call (there is no JS value to pass for a bare class name).
+		setFn("__static_call", Reflect.makeVarArgs(function(args:Array<Dynamic>):Dynamic {
+			var className:String = args[0];
+			var methodName:String = args[1];
+			var rest = args.slice(2);
+			return seed.callStaticMethodPublic(className, methodName, rest);
 		}));
 		for (d in prog.decls) switch (d) {
 			case FnDecl(name, _, _, _) if (name != null):
@@ -1230,40 +1244,12 @@ class JsBackend {
 				var kept = musescript.builtins.BagBuiltins.bagMask(curM, args[0], null);
 				harness.portfolio.applyBag(kept.weights, harness.panelPrices, biM, true);
 				null;
-			case "probcloud_from_json": musescript.builtins.ProbCloudBuiltins.fromJson(args[0]);
-			case "probcloud_median":
-				musescript.builtins.ProbCloudBuiltins.median(args[0], args[1], args.length > 2 ? args[2] : null);
-			case "probcloud_quantile":
-				musescript.builtins.ProbCloudBuiltins.quantileAt(args[0], args[1], args[2], args.length > 3 ? args[3] : null);
-			case "probcloud_interval_low":
-				musescript.builtins.ProbCloudBuiltins.intervalLow(args[0], args[1],
-					args.length > 2 ? args[2] : null, args.length > 3 ? args[3] : null);
-			case "probcloud_interval_high":
-				musescript.builtins.ProbCloudBuiltins.intervalHigh(args[0], args[1],
-					args.length > 2 ? args[2] : null, args.length > 3 ? args[3] : null);
-			case "probcloud_iqr":
-				musescript.builtins.ProbCloudBuiltins.iqr(args[0], args[1], args.length > 2 ? args[2] : null);
-			case "probcloud_width":
-				musescript.builtins.ProbCloudBuiltins.width(args[0], args[1],
-					args.length > 2 ? args[2] : null, args.length > 3 ? args[3] : null);
-			case "probcloud_conviction":
-				musescript.builtins.ProbCloudBuiltins.conviction(args[0], args[1], args.length > 2 ? args[2] : null);
-			case "probcloud_skew":
-				musescript.builtins.ProbCloudBuiltins.skew(args[0], args[1], args.length > 2 ? args[2] : null);
-			case "probcloud_expected_value":
-				musescript.builtins.ProbCloudBuiltins.expectedValue(args[0], args[1], args.length > 2 ? args[2] : null);
-			case "probcloud_cdf":
-				musescript.builtins.ProbCloudBuiltins.cdf(args[0], args[1], args[2], args.length > 3 ? args[3] : null);
-			case "probcloud_prob_below":
-				musescript.builtins.ProbCloudBuiltins.probBelow(args[0], args[1], args[2], args.length > 3 ? args[3] : null);
-			case "probcloud_prob_above":
-				musescript.builtins.ProbCloudBuiltins.probAbove(args[0], args[1], args[2], args.length > 3 ? args[3] : null);
-			case "probcloud_prob_between":
-				musescript.builtins.ProbCloudBuiltins.probBetween(args[0], args[1], args[2], args[3], args.length > 4 ? args[4] : null);
-			case "probcloud_prob_up":
-				musescript.builtins.ProbCloudBuiltins.probUp(args[0], args[1], args.length > 2 ? args[2] : null);
-			case "probcloud_is_calibrated": musescript.builtins.ProbCloudBuiltins.isCalibrated(args[0]);
-			case "probcloud_trust_note": musescript.builtins.ProbCloudBuiltins.trustNote(args[0]);
+			// probcloud_* (Kestrel's query surface) isn't core, so it has no JS fast-path case
+			// here. A strategy that calls it under the "js" compile target will hit the
+			// `default:` unknown-builtin throw below unless the JS backend is separately taught
+			// about it (out of scope here — this file only needs to not import Kestrel by name).
+			// The tree-walking MuseInterp path (which is what MuseExtensions wires builtins into)
+			// is unaffected either way.
 			case "any": IterDriver.any(MuseIters.from(args[0]), Callables.asHostPred(args[1], harness));
 			case "all": IterDriver.all(MuseIters.from(args[0]), Callables.asHostPred(args[1], harness));
 			case "find": IterDriver.find(MuseIters.from(args[0]), Callables.asHost1(args[1], harness));

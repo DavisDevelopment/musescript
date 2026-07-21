@@ -1,9 +1,5 @@
 package musescript.builtins;
 
-import musescript.kestrel.GraphQuerySpec;
-import musescript.kestrel.GraphQuerySpec.GraphMetricOp;
-import musescript.kestrel.GraphQuerySpec.GraphSeed;
-
 /**
  * Dependency-free, in-memory graph operations for JSON-safe MuseScript values.
  *
@@ -198,46 +194,6 @@ class GraphBuiltins {
 		return [for (i in 0...n) {node: graph.nodes[i], score: rank[i]}];
 	}
 
-	/**
-	 * Converts existing Kestrel GraphQuerySpec bounds/seed into runtime options.
-	 * It intentionally performs no external KG lookup or live query execution.
-	 */
-	public static function querySpecOptions(spec:GraphQuerySpec):GraphQueryRuntimeOptions {
-		if (spec == null) throw "graph query spec is required";
-		var maxNodes = spec.maxNodes == null ? DEFAULT_TRAVERSAL_NODES
-			: checkedLimit("GraphQuerySpec.maxNodes", spec.maxNodes, MAX_TRAVERSAL_NODES, false);
-		var depth = spec.depth == null ? DEFAULT_MAX_DEPTH
-			: checkedLimit("GraphQuerySpec.depth", spec.depth, MAX_GRAPH_NODES, true);
-		var topK = spec.topK == null ? maxNodes
-			: checkedLimit("GraphQuerySpec.topK", spec.topK, maxNodes, false);
-		var pageRankIterations = DEFAULT_PAGERANK_ITERATIONS;
-		for (metric in spec.metrics) switch (metric.op) {
-			case GPageRankApprox(n):
-				pageRankIterations = checkedLimit(
-					"GraphQuerySpec PageRank iterations",
-					n,
-					MAX_PAGERANK_ITERATIONS,
-					false
-				);
-			default:
-		}
-		return {
-			seedNode: seedNode(spec.seed),
-			relations: spec.relations == null ? [] : spec.relations.copy(),
-			maxDepth: depth,
-			maxNodes: maxNodes,
-			topK: topK,
-			pageRankIterations: pageRankIterations
-		};
-	}
-
-	static function seedNode(seed:GraphSeed):String {
-		return switch (seed) {
-			case GSymbol(value) | GEntity(value) | GFeature(value): value;
-			case GQuestion(value): value;
-		};
-	}
-
 	static function bfsIds(
 		graph:GraphRuntime,
 		startId:Int,
@@ -264,20 +220,13 @@ class GraphBuiltins {
 		return out;
 	}
 
-	static function checkedLimit(name:String, value:Int, hardMax:Int, allowZero:Bool):Int {
+	/** Public so out-of-tree adapters (e.g. Kestrel's graph-query spec bridge) can reuse the
+	 * same bounds-checking rather than duplicating it. */
+	public static function checkedLimit(name:String, value:Int, hardMax:Int, allowZero:Bool):Int {
 		if ((allowZero ? value < 0 : value <= 0) || value > hardMax)
 			throw '$name must be ${allowZero ? "between 0 and" : "between 1 and"} $hardMax';
 		return value;
 	}
-}
-
-typedef GraphQueryRuntimeOptions = {
-	var seedNode:String;
-	var relations:Array<String>;
-	var maxDepth:Int;
-	var maxNodes:Int;
-	var topK:Int;
-	var pageRankIterations:Int;
 }
 
 private typedef GraphArc = {

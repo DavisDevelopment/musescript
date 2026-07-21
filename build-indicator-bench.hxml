@@ -1,0 +1,3 @@
+extraParams.hxml
+-main musescript.examples.IndicatorTapeBench
+--jvm build/jvm/indicator-bench.jar

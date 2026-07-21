@@ -34,22 +34,16 @@ class StreamIter implements MuseIter {
 	}
 
 	public function next():IterResult<Dynamic> {
-		//TODO: it seems like maybe this could be simplified(?)
-		if (buffer.length > 0) 
+		// Drain buffered values synchronously; once empty-and-closed we're done.
+		// Otherwise defer: the resume closure is just next() again, which re-checks
+		// the buffer/closed state whenever the driver next pumps us. (The old
+		// `next_work_chunk` local was a verbatim re-implementation of this method.)
+		if (buffer.length > 0)
 			return Value(buffer.shift());
-		if (closed) 
+		if (closed)
 			return Done;
 
 		var self = this;
-		function next_work_chunk():IterResult<Dynamic> {
-			if (self.buffer.length > 0) 
-				return Value(self.buffer.shift());
-			if (self.closed) 
-				return Done;
-			
-			return Await(function() return self.next());
-		}
-
-		return Await(next_work_chunk);
+		return Await(function() return self.next());
 	}
 }

@@ -12,6 +12,15 @@ import musescript.interp.MuseInterp;
 import musescript.builtins.TradeBuiltins;
 import musescript.ast.ExprJson;
 import musescript.ast.MuseAstJson;
+// Murmuration (proprietary market simulator, private classpath addition like Kestrel — see
+// build-kestrel.hxml / the #if kestrel guard on KestrelBootstrap.register() below): the public
+// build must compile cleanly WITHOUT musescript/murmuration/ present at all, so these imports
+// (and every use of them below) are gated the same way core code gates musescript.kestrel.
+#if kestrel
+import musescript.murmuration.MurmurationConfig;
+import musescript.murmuration.MurmurationSim;
+import musescript.murmuration.MurmurationTape;
+#end
 
 /**
  * GeneRunner — headless fitness bridge for the MuseGene evolvable IR.
@@ -40,6 +49,13 @@ class GeneRunner {
 	}
 
 	static function main() {
+		// Only present in a private build that adds the musescript-kestrel package to the
+		// classpath with -D kestrel (see build-kestrel.hxml); compiles to nothing in the public
+		// build. Registers Kestrel's builtins/palette/typed-sigs via musescript.interp.
+		// MuseExtensions — core never imports musescript.kestrel itself either way.
+		#if kestrel
+		musescript.kestrel.KestrelBootstrap.register();
+		#end
 		// Native front end soak switch (ROADMAP "Native front end" Stage B):
 		// MUSE_NATIVE_PARSER=1 routes legacy-dialect parses through
 		// NativeParser (counted hscript fallback on unsupported constructs).
@@ -51,6 +67,13 @@ class GeneRunner {
 		var target = argVal("--target", "js");
 		var synthN = intArg("--synth", 400);
 		var seed = intArg("--seed", 42);
+		#if kestrel
+		var murmurationConfigPath = argVal("--murmuration-config", "");
+		var murmurationSteps = intArg("--murmuration-synth", 0);
+		#else
+		var murmurationConfigPath = "";
+		var murmurationSteps = 0;
+		#end
 		var checkOnly = argFlag("--check");
 		var extractCond = argFlag("--extract-cond");
 		var astJson = argFlag("--ast-json");
@@ -154,7 +177,7 @@ class GeneRunner {
 
 		// Batch mode: load the tape ONCE, then compile+run each JSONL {id, source}.
 		if (batchPath != "") {
-			var bars = loadBars(tapePath, symbol, synthN, seed);
+			var bars = loadBars(tapePath, symbol, synthN, seed, murmurationConfigPath, murmurationSteps);
 			var lines = readFile(batchPath).split("\r\n").join("\n").split("\r").join("\n").split("\n");
 			for (ln in lines) {
 				var t = StringTools.trim(ln);
@@ -180,7 +203,7 @@ class GeneRunner {
 		}
 
 		var source = sourcePath != "" ? readFile(sourcePath) : readStdin();
-		var bars = checkOnly ? [] : loadBars(tapePath, symbol, synthN, seed);
+		var bars = checkOnly ? [] : loadBars(tapePath, symbol, synthN, seed, murmurationConfigPath, murmurationSteps);
 		try {
 			emit(runOne(source, bars, target, checkOnly, strict, artifactDir, executionMode, instrument));
 		} catch (e:Dynamic) {
@@ -280,7 +303,28 @@ class GeneRunner {
 		return out;
 	}
 
-	static function loadBars(tapePath:String, symbol:String, synthN:Int, seed:Int):Array<Bar> {
+	static function loadBars(tapePath:String, symbol:String, synthN:Int, seed:Int,
+			murmurationConfigPath:String, murmurationSteps:Int):Array<Bar> {
+		// Murmuration takes priority over --tape/--synth when requested: a genome/strategy gets
+		// backtested against a freshly-simulated endogenous-price tape whose aux columns (ret,
+		// mom, value_gap, vol, imb, spread, g, infl, inv_norm, unreal_pnl, capital_norm) are real
+		// bound MuseScript identifiers (musescript.harness.HarnessContext's generic aux-series
+		// mechanism), not a JS-side mock — this is what actually closes the loop for
+		// distillation/derivation machinery pointed at this vocabulary.
+		// #if kestrel-gated (see the import block at the top of this file): murmurationSteps is
+		// hardcoded 0 in the public build (its only assignment site, the CLI flag parse above,
+		// is also gated), so this branch is simply unreachable dead code there, not a runtime
+		// difference — but the compile-time gate is what lets the public build skip needing
+		// musescript/murmuration/ present at all.
+		#if kestrel
+		if (murmurationSteps > 0) {
+			var cfg = MurmurationConfigs.withOverrides(
+				murmurationConfigPath != "" ? haxe.Json.parse(readFile(murmurationConfigPath)) : null);
+			if (murmurationConfigPath == "") cfg.seed = seed; // --seed still applies to the synthetic default
+			var sim = new MurmurationSim(cfg);
+			return MurmurationTape.toBars(sim.run(murmurationSteps));
+		}
+		#end
 		if (tapePath == "") return BarFeed.synthetic(synthN, seed).all();
 		var text = readFile(tapePath);
 		if (symbol != "") text = filterSymbol(text, symbol);

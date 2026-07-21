@@ -51,6 +51,22 @@ class Fitness {
 		}
 	}
 
+	public static inline var NEG_INF = -1.0 / 0.0;
+
+	/** `-inf` on a failed run, a missing sharpe, or too few trades — otherwise the raw sharpe.
+	 * Matches musegene/evolve.py's `fitness()` exactly (same NEG_INF-on-invalid contract, same
+	 * `trades < min_trades` filter to reject degenerate buy-and-hold genomes). Kept SEPARATE
+	 * from the parsimony tiebreak (see EvolutionEngine.step's sort) rather than baking node-count
+	 * into the score itself — a caller-side `sharpe - nodeCount*0.0001`-style fudge (what
+	 * EvoProof.hx did before this existed) silently changes the actual RANKING whenever two
+	 * genomes' fitness values are close but not equal, not just on true ties. */
+	public static function score(r:FitnessResult, minTrades:Int = 1):Float {
+		if (!r.ok) return NEG_INF;
+		if (Math.isNaN(r.sharpe)) return NEG_INF;
+		if (r.trades < minTrades) return NEG_INF;
+		return r.sharpe;
+	}
+
 	static function fieldF(o:Dynamic, n:String):Float {
 		if (o == null) return 0;
 		var v:Dynamic = Reflect.field(o, n);

@@ -1,0 +1,3426 @@
+{
+  "jvm": "OpenJDK 64-Bit Server VM 25.0.3+9-jvmci-25.1-b19",
+  "schema": "musescript.bench/indicator-tape/1",
+  "tapes": [
+    {
+      "path": "corpus/tapes/spy_full.csv",
+      "bars": 8419
+    },
+    {
+      "path": "corpus/tapes/spy_is_1993_2018.csv",
+      "bars": 6528
+    },
+    {
+      "path": "corpus/tapes/spy_oos_2019_2026.csv",
+      "bars": 1891
+    },
+    {
+      "path": "corpus/tapes/spy_oos_2022_2026.csv",
+      "bars": 1134
+    },
+    {
+      "path": "data/real/spy.csv",
+      "bars": 8419
+    },
+    {
+      "path": "data/real/tape.csv",
+      "bars": 137478
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/eval_3m_AAPL.csv",
+      "bars": 62
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/eval_3m_AMD.csv",
+      "bars": 62
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/eval_3m_AMZN.csv",
+      "bars": 62
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/eval_3m_GOOGL.csv",
+      "bars": 62
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/eval_3m_IWM.csv",
+      "bars": 62
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/eval_3m_META.csv",
+      "bars": 62
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/eval_3m_MSFT.csv",
+      "bars": 62
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/eval_3m_NVDA.csv",
+      "bars": 62
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/eval_3m_QQQ.csv",
+      "bars": 62
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/eval_3m_SPY.csv",
+      "bars": 62
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/wf_1_AAPL_2019-01-02_2019-04-01.csv",
+      "bars": 62
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/wf_1_QQQ_2019-01-02_2019-04-01.csv",
+      "bars": 62
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/wf_1_SPY_2019-01-02_2019-04-01.csv",
+      "bars": 62
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/wf_2_AAPL_2022-01-03_2022-04-01.csv",
+      "bars": 63
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/wf_2_QQQ_2022-01-03_2022-04-01.csv",
+      "bars": 63
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/wf_2_SPY_2022-01-03_2022-04-01.csv",
+      "bars": 63
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/wf_3_AAPL_2024-10-01_2024-12-31.csv",
+      "bars": 64
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/wf_3_QQQ_2024-10-01_2024-12-31.csv",
+      "bars": 64
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/wf_3_SPY_2024-10-01_2024-12-31.csv",
+      "bars": 64
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/eval_3m_ADAUSD.csv",
+      "bars": 91
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/eval_3m_AUDUSD.csv",
+      "bars": 65
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/eval_3m_BTCUSD.csv",
+      "bars": 91
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/eval_3m_ETHUSD.csv",
+      "bars": 91
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/eval_3m_EURUSD.csv",
+      "bars": 65
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/eval_3m_GBPUSD.csv",
+      "bars": 65
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/eval_3m_SOLUSD.csv",
+      "bars": 91
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/eval_3m_USDCAD.csv",
+      "bars": 65
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/eval_3m_USDJPY.csv",
+      "bars": 65
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/eval_3m_XRPUSD.csv",
+      "bars": 91
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/wf_1_BTCUSD_2019-01-02_2019-04-01.csv",
+      "bars": 90
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/wf_1_ETHUSD_2019-01-02_2019-04-01.csv",
+      "bars": 90
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/wf_1_EURUSD_2019-01-02_2019-04-01.csv",
+      "bars": 65
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/wf_2_BTCUSD_2022-01-03_2022-04-02.csv",
+      "bars": 90
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/wf_2_ETHUSD_2022-01-03_2022-04-02.csv",
+      "bars": 90
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/wf_2_EURUSD_2022-01-03_2022-04-02.csv",
+      "bars": 65
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/wf_3_BTCUSD_2024-10-01_2024-12-31.csv",
+      "bars": 92
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/wf_3_ETHUSD_2024-10-01_2024-12-31.csv",
+      "bars": 92
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/wf_3_EURUSD_2024-10-01_2024-12-31.csv",
+      "bars": 65
+    }
+  ],
+  "generatedAt": "2026-07-20 23:10:08",
+  "perIndicator": [
+    {
+      "evals": 166575,
+      "coldMs": 562.000036239624,
+      "ms": 472.0001220703125,
+      "name": "fib_confluence",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 546.0000038146973,
+      "ms": 450.9999752044678,
+      "name": "naked_poc",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 276.0000228881836,
+      "ms": 240.00000953674316,
+      "name": "ht_dcphase",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 309.00001525878906,
+      "ms": 238.00015449523926,
+      "name": "ht_trendmode",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 349.99990463256836,
+      "ms": 208.00018310546875,
+      "name": "value_area",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 307.999849319458,
+      "ms": 199.00012016296387,
+      "name": "spearman_correlation",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 399.99985694885254,
+      "ms": 198.99988174438477,
+      "name": "volume_profile",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 368.0000305175781,
+      "ms": 190.00005722045898,
+      "name": "composite_profile",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 247.999906539917,
+      "ms": 187.00003623962402,
+      "name": "fourier_projection",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 193.00007820129395,
+      "ms": 186.99979782104492,
+      "name": "fourier_dominant_period",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 293.99991035461426,
+      "ms": 183.0000877380371,
+      "name": "high_low_volume_nodes",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 269.0000534057617,
+      "ms": 180.00006675720215,
+      "name": "tpo_profile",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 198.99988174438477,
+      "ms": 177.0000457763672,
+      "name": "regime_label",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 195.9998607635498,
+      "ms": 177.0000457763672,
+      "name": "fourier_recompose",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 355.9999465942383,
+      "ms": 174.99995231628418,
+      "name": "cointegration",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 268.00012588500977,
+      "ms": 174.00002479553223,
+      "name": "sar_ext",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 265.0001049041748,
+      "ms": 173.00009727478027,
+      "name": "fourier_decompose",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 203.99999618530273,
+      "ms": 169.9998378753662,
+      "name": "volatility_cone",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 259.0000629425049,
+      "ms": 163.00010681152344,
+      "name": "profile_shape",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 240.99993705749512,
+      "ms": 149.99985694885254,
+      "name": "fama",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 182.00016021728516,
+      "ms": 149.0001678466797,
+      "name": "single_prints",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 185.99987030029297,
+      "ms": 149.0001678466797,
+      "name": "ttm_squeeze",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 180.00030517578125,
+      "ms": 148.00000190734863,
+      "name": "median_absolute_deviation",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 162.99986839294434,
+      "ms": 144.99998092651367,
+      "name": "mama",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 166.0001277923584,
+      "ms": 137.00008392333984,
+      "name": "stc",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 187.99996376037598,
+      "ms": 134.99999046325684,
+      "name": "andrews_pitchfork",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 186.99979782104492,
+      "ms": 131.99996948242188,
+      "name": "bomar_bands",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 179.0001392364502,
+      "ms": 131.00004196166992,
+      "name": "chande_kroll_stop",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 183.0000877380371,
+      "ms": 129.99987602233887,
+      "name": "conditional_value_at_risk",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 177.99997329711914,
+      "ms": 129.99987602233887,
+      "name": "ht_phasor",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 170.0000762939453,
+      "ms": 129.99987602233887,
+      "name": "sine_wave",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 163.00010681152344,
+      "ms": 126.9998550415039,
+      "name": "value_at_risk",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 184.00001525878906,
+      "ms": 122.99990653991699,
+      "name": "rolling_quantile",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 223.9999771118164,
+      "ms": 122.00021743774414,
+      "name": "td_dwave",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 198.99988174438477,
+      "ms": 118.99995803833008,
+      "name": "acceleration_bands",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 192.000150680542,
+      "ms": 118.00003051757812,
+      "name": "shannon_entropy",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 143.00012588500977,
+      "ms": 118.00003051757812,
+      "name": "elder_safezone",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 153.0001163482666,
+      "ms": 118.00003051757812,
+      "name": "adaptive_laguerre_filter",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 167.00005531311035,
+      "ms": 115.00000953674316,
+      "name": "volume_weighted_sr",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 138.99993896484375,
+      "ms": 111.9999885559082,
+      "name": "kst",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 136.99984550476074,
+      "ms": 110.99982261657715,
+      "name": "double_bollinger",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 138.0000114440918,
+      "ms": 109.9998950958252,
+      "name": "three_soldiers_or_crows",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 127.00009346008301,
+      "ms": 109.9998950958252,
+      "name": "rolling_iqr",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 125,
+      "ms": 108.99996757507324,
+      "name": "td_combo",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 126.00016593933105,
+      "ms": 108.00004005432129,
+      "name": "awesome_oscillator_histogram",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 144.00005340576172,
+      "ms": 107.00011253356934,
+      "name": "median_channel",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 175.99987983703613,
+      "ms": 106.99987411499023,
+      "name": "hasbrouck_information_share",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 152.9998779296875,
+      "ms": 106.99987411499023,
+      "name": "treynor_ratio",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 132.99989700317383,
+      "ms": 106.00018501281738,
+      "name": "smi",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 161.00001335144043,
+      "ms": 105.00001907348633,
+      "name": "rolling_covariance",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 126.00016593933105,
+      "ms": 105.00001907348633,
+      "name": "alma",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 122.00021743774414,
+      "ms": 105.00001907348633,
+      "name": "bollinger_bandwidth",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 134.00006294250488,
+      "ms": 105.00001907348633,
+      "name": "tail_ratio",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 124.00007247924805,
+      "ms": 104.99978065490723,
+      "name": "projection_oscillator",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 148.00000190734863,
+      "ms": 104.00009155273438,
+      "name": "alpha",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 152.9998779296875,
+      "ms": 104.00009155273438,
+      "name": "time_of_day_return_profile",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 179.99982833862305,
+      "ms": 104.00009155273438,
+      "name": "ou_half_life",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 179.0001392364502,
+      "ms": 103.99985313415527,
+      "name": "kicking_by_length",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 148.9999294281006,
+      "ms": 103.99985313415527,
+      "name": "ichimoku",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 142.99988746643066,
+      "ms": 103.00016403198242,
+      "name": "intraday_volatility_profile",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 200.00004768371582,
+      "ms": 102.99992561340332,
+      "name": "volume_weighted_macd",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 125.99992752075195,
+      "ms": 102.99992561340332,
+      "name": "median_ma",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 141.00003242492676,
+      "ms": 102.99992561340332,
+      "name": "fisher_rsi",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 134.00006294250488,
+      "ms": 102.99992561340332,
+      "name": "m2_measure",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 117.00010299682617,
+      "ms": 101.99999809265137,
+      "name": "accelerator_oscillator",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 171.00000381469727,
+      "ms": 101.99999809265137,
+      "name": "td_risk_level",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 131.99996948242188,
+      "ms": 101.00007057189941,
+      "name": "hilbert_dominant_cycle",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 121.99997901916504,
+      "ms": 101.00007057189941,
+      "name": "cmf",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 151.99995040893555,
+      "ms": 100.99983215332031,
+      "name": "pearson_correlation",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 161.00001335144043,
+      "ms": 100.00014305114746,
+      "name": "rwi",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 121.99997901916504,
+      "ms": 99.99990463256836,
+      "name": "upside_potential_ratio",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 188.99989128112793,
+      "ms": 99.99990463256836,
+      "name": "adaptive_cycle",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 124.00007247924805,
+      "ms": 98.9999771118164,
+      "name": "empirical_mode_decomposition",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 118.00003051757812,
+      "ms": 98.9999771118164,
+      "name": "modified_ma_stop",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 134.00006294250488,
+      "ms": 98.9999771118164,
+      "name": "choppiness_index",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 124.00007247924805,
+      "ms": 98.9999771118164,
+      "name": "spread_bollinger_bands",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 138.0000114440918,
+      "ms": 98.00004959106445,
+      "name": "kalman_hedge_ratio",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 115.99993705749512,
+      "ms": 98.00004959106445,
+      "name": "td_countdown",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 142.99988746643066,
+      "ms": 98.00004959106445,
+      "name": "lead_lag_cross_correlation",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 115.99993705749512,
+      "ms": 97.99981117248535,
+      "name": "quartile_bands",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 178.9999008178711,
+      "ms": 97.0001220703125,
+      "name": "rolling_correlation",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 141.9999599456787,
+      "ms": 96.9998836517334,
+      "name": "volume_by_time_profile",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 163.00010681152344,
+      "ms": 96.9998836517334,
+      "name": "yang_zhang",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 125.99992752075195,
+      "ms": 96.00019454956055,
+      "name": "percent_b",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 233.99972915649414,
+      "ms": 96.00019454956055,
+      "name": "abandoned_baby",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 153.99980545043945,
+      "ms": 96.00019454956055,
+      "name": "psar",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 110.0001335144043,
+      "ms": 96.00019454956055,
+      "name": "projection_bands",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 151.0000228881836,
+      "ms": 95.99995613098145,
+      "name": "pair_spread_zscore",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 131.99996948242188,
+      "ms": 95.99995613098145,
+      "name": "chandelier_exit",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 125,
+      "ms": 95.99995613098145,
+      "name": "volatility_of_volatility",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 131.99996948242188,
+      "ms": 95.99995613098145,
+      "name": "omega_ratio",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 115.00000953674316,
+      "ms": 95.00002861022949,
+      "name": "linreg_channel",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 108.99996757507324,
+      "ms": 94.00010108947754,
+      "name": "bollinger",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 138.0000114440918,
+      "ms": 94.00010108947754,
+      "name": "kendall_tau",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 164.99996185302734,
+      "ms": 94.00010108947754,
+      "name": "connors_rsi",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 167.00005531311035,
+      "ms": 94.00010108947754,
+      "name": "td_rei",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 115.00000953674316,
+      "ms": 93.99986267089844,
+      "name": "rogers_satchell",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 134.99999046325684,
+      "ms": 93.99986267089844,
+      "name": "derivative_oscillator",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 103.00016403198242,
+      "ms": 93.00017356872559,
+      "name": "atr_ratchet",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 142.0001983642578,
+      "ms": 92.99993515014648,
+      "name": "zero_lag_macd",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 105.99994659423828,
+      "ms": 92.99993515014648,
+      "name": "holt_winters",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 172.00016975402832,
+      "ms": 92.99993515014648,
+      "name": "hurst_channel",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 120.99981307983398,
+      "ms": 92.99993515014648,
+      "name": "starc_bands",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 110.0001335144043,
+      "ms": 92.99993515014648,
+      "name": "jump_indicator",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 114.00008201599121,
+      "ms": 92.00000762939453,
+      "name": "super_trend",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 144.99998092651367,
+      "ms": 92.00000762939453,
+      "name": "pairwise_beta",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 130.00011444091797,
+      "ms": 92.00000762939453,
+      "name": "dynamic_momentum_index",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 128.9999485015869,
+      "ms": 92.00000762939453,
+      "name": "day_of_week_profile",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 106.99987411499023,
+      "ms": 91.00008010864258,
+      "name": "historical_volatility",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 111.00006103515625,
+      "ms": 91.00008010864258,
+      "name": "cybernetic_cycle",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 115.00000953674316,
+      "ms": 91.00008010864258,
+      "name": "hurst_exponent",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 117.00010299682617,
+      "ms": 91.00008010864258,
+      "name": "vertical_horizontal_filter",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 101.00007057189941,
+      "ms": 91.00008010864258,
+      "name": "hma",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 128.9999485015869,
+      "ms": 90.99984169006348,
+      "name": "beta",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 120.00012397766113,
+      "ms": 90.00015258789062,
+      "name": "ultimate_oscillator",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 121.99997901916504,
+      "ms": 90.00015258789062,
+      "name": "standard_error_bands",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 122.00021743774414,
+      "ms": 89.99991416931152,
+      "name": "td_pressure",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 127.00009346008301,
+      "ms": 88.00005912780762,
+      "name": "kase_devstop",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 111.9999885559082,
+      "ms": 87.00013160705566,
+      "name": "gravestone_doji",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 119.00019645690918,
+      "ms": 86.99989318847656,
+      "name": "evening_doji_star",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 124.00007247924805,
+      "ms": 86.99989318847656,
+      "name": "stochastic",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 94.99979019165039,
+      "ms": 86.99989318847656,
+      "name": "awesome_oscillator",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 128.00002098083496,
+      "ms": 86.99989318847656,
+      "name": "coppock",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 101.99999809265137,
+      "ms": 86.99989318847656,
+      "name": "instantaneous_trendline",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 113.99984359741211,
+      "ms": 85.99996566772461,
+      "name": "garman_klass",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 170.0000762939453,
+      "ms": 85.99996566772461,
+      "name": "kicking",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 98.9999771118164,
+      "ms": 85.99996566772461,
+      "name": "atr_trailing_stop",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 148.9999294281006,
+      "ms": 85.99996566772461,
+      "name": "rolling_min_max_scaler",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 124.00007247924805,
+      "ms": 85.99996566772461,
+      "name": "sharpe_ratio",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 121.00005149841309,
+      "ms": 85.99996566772461,
+      "name": "intraday_momentum_index",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 88.99998664855957,
+      "ms": 85.00003814697266,
+      "name": "volty_stop",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 144.99998092651367,
+      "ms": 85.00003814697266,
+      "name": "relative_strength_ab",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 149.0001678466797,
+      "ms": 85.00003814697266,
+      "name": "sortino_ratio",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 115.99993705749512,
+      "ms": 85.00003814697266,
+      "name": "jarque_bera",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 107.99980163574219,
+      "ms": 85.00003814697266,
+      "name": "closing_marubozu",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 95.99995613098145,
+      "ms": 85.00003814697266,
+      "name": "decycler_oscillator",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 101.00007057189941,
+      "ms": 85.00003814697266,
+      "name": "average_drawdown",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 101.99999809265137,
+      "ms": 85.00003814697266,
+      "name": "wave_trend",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 129.99987602233887,
+      "ms": 84.0001106262207,
+      "name": "stoch_rsi",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 112.99991607666016,
+      "ms": 84.0001106262207,
+      "name": "identical_three_crows",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 100.00014305114746,
+      "ms": 84.0001106262207,
+      "name": "beta_neutral_spread",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 97.0001220703125,
+      "ms": 84.0001106262207,
+      "name": "volume_oscillator",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 95.00002861022949,
+      "ms": 84.0001106262207,
+      "name": "detrended_std_dev",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 119.99988555908203,
+      "ms": 84.0001106262207,
+      "name": "kase_permission_stochastic",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 102.99992561340332,
+      "ms": 84.0001106262207,
+      "name": "fisher_transform",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 100.00014305114746,
+      "ms": 83.9998722076416,
+      "name": "ma_envelope",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 171.00000381469727,
+      "ms": 83.9998722076416,
+      "name": "inertia",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 90.99984169006348,
+      "ms": 83.9998722076416,
+      "name": "atr_bands",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 116.99986457824707,
+      "ms": 83.00018310546875,
+      "name": "spread_ar1_coefficient",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 137.00008392333984,
+      "ms": 82.99994468688965,
+      "name": "fractal_chaos_bands",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 110.99982261657715,
+      "ms": 82.99994468688965,
+      "name": "gap_side_by_side_white",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 118.99995803833008,
+      "ms": 82.99994468688965,
+      "name": "long_legged_doji",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 99.99990463256836,
+      "ms": 82.99994468688965,
+      "name": "td_moving_average",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 115.99993705749512,
+      "ms": 82.0000171661377,
+      "name": "murrey_math_lines",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 109.9998950958252,
+      "ms": 82.0000171661377,
+      "name": "belt_hold",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 104.00009155273438,
+      "ms": 82.0000171661377,
+      "name": "vwap_stddev_bands",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 92.00000762939453,
+      "ms": 82.0000171661377,
+      "name": "linreg_intercept",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 127.00009346008301,
+      "ms": 82.0000171661377,
+      "name": "qqe",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 122.00021743774414,
+      "ms": 82.0000171661377,
+      "name": "td_sequential",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 143.00012588500977,
+      "ms": 82.0000171661377,
+      "name": "harami_cross",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 121.99997901916504,
+      "ms": 81.9997787475586,
+      "name": "keltner",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 85.99996566772461,
+      "ms": 81.9997787475586,
+      "name": "laguerre_rsi",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 107.00011253356934,
+      "ms": 81.00008964538574,
+      "name": "correlation_trend_indicator",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 133.00013542175293,
+      "ms": 81.00008964538574,
+      "name": "rolling_percentile_rank",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 110.0001335144043,
+      "ms": 80.99985122680664,
+      "name": "doji_star",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 105.00001907348633,
+      "ms": 80.99985122680664,
+      "name": "twiggs_money_flow",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 106.00018501281738,
+      "ms": 80.99985122680664,
+      "name": "step_trailing_stop",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 87.99982070922852,
+      "ms": 80.99985122680664,
+      "name": "trade_volume_index",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 125,
+      "ms": 80.99985122680664,
+      "name": "inverted_hammer",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 137.00008392333984,
+      "ms": 80.99985122680664,
+      "name": "kama",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 112.99991607666016,
+      "ms": 79.99992370605469,
+      "name": "t3",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 91.00008010864258,
+      "ms": 79.99992370605469,
+      "name": "mass_index",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 126.9998550415039,
+      "ms": 79.99992370605469,
+      "name": "counterattack",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 110.0001335144043,
+      "ms": 79.99992370605469,
+      "name": "realized_volatility",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 80.00016212463379,
+      "ms": 79.99992370605469,
+      "name": "flag_pennant",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 114.00008201599121,
+      "ms": 78.99999618530273,
+      "name": "adaptive_rsi",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 118.99995803833008,
+      "ms": 78.99999618530273,
+      "name": "wave_pm",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 90.00015258789062,
+      "ms": 78.99999618530273,
+      "name": "tsi",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 111.00006103515625,
+      "ms": 78.99999618530273,
+      "name": "ulcer_index",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 117.00010299682617,
+      "ms": 78.99999618530273,
+      "name": "marubozu",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 121.00005149841309,
+      "ms": 78.99999618530273,
+      "name": "dragonfly_doji",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 86.99989318847656,
+      "ms": 78.99999618530273,
+      "name": "std_dev",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 116.00017547607422,
+      "ms": 78.00006866455078,
+      "name": "gain_to_pain_ratio",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 98.9999771118164,
+      "ms": 78.00006866455078,
+      "name": "chaikin_oscillator",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 89.99991416931152,
+      "ms": 78.00006866455078,
+      "name": "adxr",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 115.99993705749512,
+      "ms": 78.00006866455078,
+      "name": "calmar_ratio",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 93.00017356872559,
+      "ms": 78.00006866455078,
+      "name": "ewma_volatility",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 93.99986267089844,
+      "ms": 78.00006866455078,
+      "name": "bandpass_filter",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 145.00021934509277,
+      "ms": 78.00006866455078,
+      "name": "hanging_man",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 101.99999809265137,
+      "ms": 78.00006866455078,
+      "name": "long_line",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 99.99990463256836,
+      "ms": 78.00006866455078,
+      "name": "vidya",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 96.9998836517334,
+      "ms": 78.00006866455078,
+      "name": "session_vwap",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 92.00000762939453,
+      "ms": 78.00006866455078,
+      "name": "in_neck",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 141.9999599456787,
+      "ms": 77.99983024597168,
+      "name": "adx",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 121.99997901916504,
+      "ms": 77.99983024597168,
+      "name": "ehlers_stochastic",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 123.0001449584961,
+      "ms": 77.99983024597168,
+      "name": "spinning_top",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 90.00015258789062,
+      "ms": 77.99983024597168,
+      "name": "percentage_trailing_stop",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 98.9999771118164,
+      "ms": 77.00014114379883,
+      "name": "williams_r",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 105.00001907348633,
+      "ms": 77.00014114379883,
+      "name": "pfe",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 111.9999885559082,
+      "ms": 76.99990272521973,
+      "name": "generalized_dema",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 98.00004959106445,
+      "ms": 76.99990272521973,
+      "name": "linreg_slope",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 105.00001907348633,
+      "ms": 75.99997520446777,
+      "name": "high_wave",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 75.00004768371582,
+      "ms": 75.99997520446777,
+      "name": "aroon_oscillator",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 113.99984359741211,
+      "ms": 75.99997520446777,
+      "name": "morning_doji_star",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 88.99998664855957,
+      "ms": 75.99997520446777,
+      "name": "td_lines",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 100.99983215332031,
+      "ms": 75.99997520446777,
+      "name": "dx",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 105.00001907348633,
+      "ms": 75.99997520446777,
+      "name": "trendflex",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 111.9999885559082,
+      "ms": 75.99997520446777,
+      "name": "reflex",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 124.00007247924805,
+      "ms": 75.99997520446777,
+      "name": "information_ratio",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 111.9999885559082,
+      "ms": 75.99997520446777,
+      "name": "session_range",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 78.00006866455078,
+      "ms": 75.99997520446777,
+      "name": "tsv",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 99.99990463256836,
+      "ms": 75.99997520446777,
+      "name": "kelly_criterion",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 115.99993705749512,
+      "ms": 75.99997520446777,
+      "name": "average_daily_range",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 109.9998950958252,
+      "ms": 75.99997520446777,
+      "name": "gain_loss_ratio",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 104.00009155273438,
+      "ms": 75.00004768371582,
+      "name": "session_high_low",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 95.99995613098145,
+      "ms": 75.00004768371582,
+      "name": "minus_di",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 101.00007057189941,
+      "ms": 75.00004768371582,
+      "name": "pain_index",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 127.00009346008301,
+      "ms": 75.00004768371582,
+      "name": "elder_impulse",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 96.9998836517334,
+      "ms": 75.00004768371582,
+      "name": "mfi",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 96.9998836517334,
+      "ms": 75.00004768371582,
+      "name": "linreg_angle",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 106.99987411499023,
+      "ms": 75.00004768371582,
+      "name": "donchian",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 106.00018501281738,
+      "ms": 75.00004768371582,
+      "name": "tii",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 111.9999885559082,
+      "ms": 75.00004768371582,
+      "name": "opening_marubozu",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 95.99971771240234,
+      "ms": 74.99980926513672,
+      "name": "overnight_intraday_return",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 148.9999294281006,
+      "ms": 74.99980926513672,
+      "name": "hammer",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 95.00002861022949,
+      "ms": 74.00012016296387,
+      "name": "yoyo_exit",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 109.9998950958252,
+      "ms": 74.00012016296387,
+      "name": "k_ratio",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 103.00016403198242,
+      "ms": 74.00012016296387,
+      "name": "macd_histogram",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 102.99992561340332,
+      "ms": 74.00012016296387,
+      "name": "cci",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 108.00004005432129,
+      "ms": 74.00012016296387,
+      "name": "distance_ssd",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 98.9999771118164,
+      "ms": 74.00012016296387,
+      "name": "macd_ext",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 92.99993515014648,
+      "ms": 74.00012016296387,
+      "name": "aroon",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 94.00010108947754,
+      "ms": 74.00012016296387,
+      "name": "vzo",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 101.99999809265137,
+      "ms": 74.00012016296387,
+      "name": "martin_ratio",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 108.00004005432129,
+      "ms": 74.00012016296387,
+      "name": "stochastic_cci",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 82.0000171661377,
+      "ms": 73.99988174438477,
+      "name": "cypher",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 92.99993515014648,
+      "ms": 73.99988174438477,
+      "name": "tsf_oscillator",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 83.9998722076416,
+      "ms": 73.99988174438477,
+      "name": "ppo_histogram",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 142.99988746643066,
+      "ms": 73.99988174438477,
+      "name": "vortex",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 110.0001335144043,
+      "ms": 73.99988174438477,
+      "name": "standard_error",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 98.9999771118164,
+      "ms": 73.99988174438477,
+      "name": "bipower_variation",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 132.00020790100098,
+      "ms": 73.99988174438477,
+      "name": "burke_ratio",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 91.00008010864258,
+      "ms": 73.99988174438477,
+      "name": "fib_extension",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 112.99991607666016,
+      "ms": 73.00019264221191,
+      "name": "turn_of_month",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 109.9998950958252,
+      "ms": 72.99995422363281,
+      "name": "three_outside",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 95.99995613098145,
+      "ms": 72.99995422363281,
+      "name": "fib_retracement",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 93.99986267089844,
+      "ms": 72.99995422363281,
+      "name": "td_setup",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 92.99993515014648,
+      "ms": 72.99995422363281,
+      "name": "universal_oscillator",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 137.00008392333984,
+      "ms": 72.99995422363281,
+      "name": "adaptive_cci",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 127.00009346008301,
+      "ms": 72.99995422363281,
+      "name": "rvi",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 98.9999771118164,
+      "ms": 72.99995422363281,
+      "name": "mid_point",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 93.99986267089844,
+      "ms": 72.99995422363281,
+      "name": "z_score",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 109.9998950958252,
+      "ms": 72.99995422363281,
+      "name": "intraday_intensity",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 83.9998722076416,
+      "ms": 72.00002670288086,
+      "name": "zlema",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 97.0001220703125,
+      "ms": 72.00002670288086,
+      "name": "renko_trailing_stop",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 78.99999618530273,
+      "ms": 72.00002670288086,
+      "name": "zig_zag",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 109.9998950958252,
+      "ms": 72.00002670288086,
+      "name": "gator_oscillator",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 92.00000762939453,
+      "ms": 72.00002670288086,
+      "name": "chaikin_volatility",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 95.99995613098145,
+      "ms": 72.00002670288086,
+      "name": "ease_of_movement",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 80.00016212463379,
+      "ms": 71.99978828430176,
+      "name": "hilo_activator",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 117.00010299682617,
+      "ms": 71.0000991821289,
+      "name": "trend_strength_index",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 91.00008010864258,
+      "ms": 71.0000991821289,
+      "name": "rocr100",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 107.00011253356934,
+      "ms": 71.0000991821289,
+      "name": "equivolume",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 97.0001220703125,
+      "ms": 71.0000991821289,
+      "name": "donchian_stop",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 108.99996757507324,
+      "ms": 70.9998607635498,
+      "name": "rvi_volatility",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 93.99986267089844,
+      "ms": 70.9998607635498,
+      "name": "profit_factor",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 93.99986267089844,
+      "ms": 70.9998607635498,
+      "name": "nrtr",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 102.99992561340332,
+      "ms": 70.9998607635498,
+      "name": "cfo",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 154.9999713897705,
+      "ms": 70.00017166137695,
+      "name": "fib_fan",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 84.0001106262207,
+      "ms": 69.99993324279785,
+      "name": "volatility_ratio",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 86.99989318847656,
+      "ms": 69.99993324279785,
+      "name": "disparity_index",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 95.00002861022949,
+      "ms": 69.99993324279785,
+      "name": "matching_low",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 99.99990463256836,
+      "ms": 69.99993324279785,
+      "name": "coefficient_of_variation",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 93.00017356872559,
+      "ms": 69.99993324279785,
+      "name": "geometric_ma",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 92.99993515014648,
+      "ms": 69.99993324279785,
+      "name": "vwma",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 100.00014305114746,
+      "ms": 69.99993324279785,
+      "name": "cmo",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 108.00004005432129,
+      "ms": 69.99993324279785,
+      "name": "td_demarker",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 94.99979019165039,
+      "ms": 69.99993324279785,
+      "name": "expectancy",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 112.99991607666016,
+      "ms": 69.99993324279785,
+      "name": "rmi",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 101.99999809265137,
+      "ms": 69.99993324279785,
+      "name": "plus_di",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 97.99981117248535,
+      "ms": 69.0000057220459,
+      "name": "sterling_ratio",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 98.9999771118164,
+      "ms": 69.0000057220459,
+      "name": "center_of_gravity",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 91.00008010864258,
+      "ms": 69.0000057220459,
+      "name": "inverse_fisher_transform",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 80.99985122680664,
+      "ms": 69.0000057220459,
+      "name": "evwma",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 114.00008201599121,
+      "ms": 68.00007820129395,
+      "name": "trend_label",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 95.00002861022949,
+      "ms": 68.00007820129395,
+      "name": "short_line",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 95.00002861022949,
+      "ms": 68.00007820129395,
+      "name": "dpo",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 88.99998664855957,
+      "ms": 68.00007820129395,
+      "name": "trima",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 79.99992370605469,
+      "ms": 68.00007820129395,
+      "name": "better_volume",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 101.99999809265137,
+      "ms": 67.99983978271484,
+      "name": "skewness",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 98.9999771118164,
+      "ms": 67.00015068054199,
+      "name": "r_squared",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 85.99996566772461,
+      "ms": 67.00015068054199,
+      "name": "common_sense_ratio",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 134.00006294250488,
+      "ms": 67.00015068054199,
+      "name": "advance_block",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 87.99982070922852,
+      "ms": 66.99991226196289,
+      "name": "pgo",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 73.99988174438477,
+      "ms": 66.99991226196289,
+      "name": "td_camouflage",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 125.99992752075195,
+      "ms": 66.99991226196289,
+      "name": "sine_weighted_ma",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 88.99998664855957,
+      "ms": 66.99991226196289,
+      "name": "kvo",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 106.99987411499023,
+      "ms": 66.99991226196289,
+      "name": "highpass_filter",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 90.00015258789062,
+      "ms": 66.99991226196289,
+      "name": "mid_price",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 80.99985122680664,
+      "ms": 66.99991226196289,
+      "name": "mcginley_dynamic",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 106.00018501281738,
+      "ms": 66.99991226196289,
+      "name": "abcd",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 99.00021553039551,
+      "ms": 65.99998474121094,
+      "name": "dumpling_top",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 92.00000762939453,
+      "ms": 65.99998474121094,
+      "name": "alligator",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 76.99990272521973,
+      "ms": 65.99998474121094,
+      "name": "doji",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 87.99982070922852,
+      "ms": 65.99998474121094,
+      "name": "concealing_baby_swallow",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 93.99986267089844,
+      "ms": 65.99998474121094,
+      "name": "even_better_sinewave",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 88.99998664855957,
+      "ms": 65.99998474121094,
+      "name": "rocp",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 110.0001335144043,
+      "ms": 65.00005722045898,
+      "name": "on_neck",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 85.00003814697266,
+      "ms": 65.00005722045898,
+      "name": "parkinson",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 113.99984359741211,
+      "ms": 65.00005722045898,
+      "name": "harami",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 85.00003814697266,
+      "ms": 65.00005722045898,
+      "name": "rocr",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 69.99993324279785,
+      "ms": 65.00005722045898,
+      "name": "camarilla_pivots",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 79.99992370605469,
+      "ms": 64.99981880187988,
+      "name": "smma",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 94.00010108947754,
+      "ms": 64.99981880187988,
+      "name": "win_rate",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 78.99999618530273,
+      "ms": 64.00012969970703,
+      "name": "head_and_shoulders",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 105.00001907348633,
+      "ms": 64.00012969970703,
+      "name": "kurtosis",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 98.00004959106445,
+      "ms": 64.00012969970703,
+      "name": "td_clop",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 92.00000762939453,
+      "ms": 63.99989128112793,
+      "name": "classic_pivots",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 78.00006866455078,
+      "ms": 63.99989128112793,
+      "name": "td_clopwin",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 116.99986457824707,
+      "ms": 63.99989128112793,
+      "name": "recovery_factor",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 72.00002670288086,
+      "ms": 63.99989128112793,
+      "name": "macd_fix",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 82.99994468688965,
+      "ms": 63.99989128112793,
+      "name": "separating_lines",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 69.99969482421875,
+      "ms": 63.99989128112793,
+      "name": "elder_ray",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 73.99988174438477,
+      "ms": 63.00020217895508,
+      "name": "log_return",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 66.99991226196289,
+      "ms": 63.00020217895508,
+      "name": "ad_oscillator",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 86.00020408630371,
+      "ms": 62.99996376037598,
+      "name": "linreg",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 88.00005912780762,
+      "ms": 62.99996376037598,
+      "name": "trix",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 73.99988174438477,
+      "ms": 62.99996376037598,
+      "name": "demark_pivots",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 109.9998950958252,
+      "ms": 62.99996376037598,
+      "name": "roofing_filter",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 98.9999771118164,
+      "ms": 62.99996376037598,
+      "name": "tema",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 109.9998950958252,
+      "ms": 62.99996376037598,
+      "name": "seasonal_z_score",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 91.00008010864258,
+      "ms": 62.99996376037598,
+      "name": "overnight_gap",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 78.99999618530273,
+      "ms": 62.99996376037598,
+      "name": "dema",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 87.99982070922852,
+      "ms": 62.99996376037598,
+      "name": "variance",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 118.00003051757812,
+      "ms": 62.99996376037598,
+      "name": "stalled_pattern",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 95.00002861022949,
+      "ms": 62.00003623962402,
+      "name": "pmo",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 65.00005722045898,
+      "ms": 62.00003623962402,
+      "name": "downside_gap_three_methods",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 86.99989318847656,
+      "ms": 62.00003623962402,
+      "name": "tsf",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 70.9998607635498,
+      "ms": 61.99979782104492,
+      "name": "anchored_rsi",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 82.0000171661377,
+      "ms": 61.00010871887207,
+      "name": "demand_index",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 82.99994468688965,
+      "ms": 61.00010871887207,
+      "name": "mat_hold",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 74.99980926513672,
+      "ms": 61.00010871887207,
+      "name": "drawdown_duration",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 75.00004768371582,
+      "ms": 61.00010871887207,
+      "name": "ppo",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 72.99995422363281,
+      "ms": 61.00010871887207,
+      "name": "ehma",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 88.00005912780762,
+      "ms": 61.00010871887207,
+      "name": "fry_pan_bottom",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 77.00014114379883,
+      "ms": 60.99987030029297,
+      "name": "apo",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 90.00015258789062,
+      "ms": 60.99987030029297,
+      "name": "decycler",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 105.00001907348633,
+      "ms": 60.00018119812012,
+      "name": "rsx",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 42.999982833862305,
+      "ms": 60.00018119812012,
+      "name": "anchored_vwap",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 92.00000762939453,
+      "ms": 60.00018119812012,
+      "name": "volume_rsi",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 121.00005149841309,
+      "ms": 59.999942779541016,
+      "name": "three_line_strike",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 118.00003051757812,
+      "ms": 59.999942779541016,
+      "name": "tower_top_bottom",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 102.99992561340332,
+      "ms": 59.999942779541016,
+      "name": "fib_channel",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 106.99987411499023,
+      "ms": 59.999942779541016,
+      "name": "engulfing",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 108.00004005432129,
+      "ms": 59.999942779541016,
+      "name": "td_differential",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 82.99994468688965,
+      "ms": 59.00001525878906,
+      "name": "natr",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 101.99999809265137,
+      "ms": 59.00001525878906,
+      "name": "breakaway",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 74.00012016296387,
+      "ms": 59.00001525878906,
+      "name": "double_top_bottom",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 79.99992370605469,
+      "ms": 59.00001525878906,
+      "name": "triangle",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 89.99991416931152,
+      "ms": 59.00001525878906,
+      "name": "fib_time_zones",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 69.99993324279785,
+      "ms": 59.00001525878906,
+      "name": "super_smoother",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 101.00007057189941,
+      "ms": 58.99977684020996,
+      "name": "ttm_trend",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 77.00014114379883,
+      "ms": 58.00008773803711,
+      "name": "new_price_lines",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 69.99993324279785,
+      "ms": 58.00008773803711,
+      "name": "hikkake_modified",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 83.00018310546875,
+      "ms": 58.00008773803711,
+      "name": "crab",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 62.00003623962402,
+      "ms": 58.00008773803711,
+      "name": "balance_of_power",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 92.99993515014648,
+      "ms": 58.00008773803711,
+      "name": "td_range_projection",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 81.00008964538574,
+      "ms": 58.00008773803711,
+      "name": "qstick",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 73.99988174438477,
+      "ms": 57.99984931945801,
+      "name": "wad",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 89.99991416931152,
+      "ms": 57.99984931945801,
+      "name": "auto_fib",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 65.99998474121094,
+      "ms": 57.000160217285156,
+      "name": "ladder_bottom",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 95.99995613098145,
+      "ms": 56.999921798706055,
+      "name": "fib_projection",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 79.99992370605469,
+      "ms": 56.999921798706055,
+      "name": "shark",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 76.99990272521973,
+      "ms": 56.999921798706055,
+      "name": "plus_dm",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 65.99998474121094,
+      "ms": 56.999921798706055,
+      "name": "pvi",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 100.00014305114746,
+      "ms": 55.9999942779541,
+      "name": "tasuki_gap",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 90.00015258789062,
+      "ms": 55.9999942779541,
+      "name": "bat",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 82.0000171661377,
+      "ms": 55.9999942779541,
+      "name": "minus_dm",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 70.9998607635498,
+      "ms": 55.9999942779541,
+      "name": "td_propulsion",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 78.00006866455078,
+      "ms": 55.9999942779541,
+      "name": "wedge",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 73.00019264221191,
+      "ms": 55.9999942779541,
+      "name": "heikin_ashi",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 62.00003623962402,
+      "ms": 55.9999942779541,
+      "name": "time_based_stop",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 105.00001907348633,
+      "ms": 55.9999942779541,
+      "name": "three_inside",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 67.00015068054199,
+      "ms": 55.9999942779541,
+      "name": "hikkake",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 89.99991416931152,
+      "ms": 55.00006675720215,
+      "name": "three_drives",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 88.00005912780762,
+      "ms": 55.00006675720215,
+      "name": "fib_arcs",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 70.9998607635498,
+      "ms": 55.00006675720215,
+      "name": "force_index",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 90.99984169006348,
+      "ms": 55.00006675720215,
+      "name": "shooting_star",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 84.0001106262207,
+      "ms": 55.00006675720215,
+      "name": "gartley",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 59.999942779541016,
+      "ms": 55.00006675720215,
+      "name": "heikin_ashi_oscillator",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 117.00010299682617,
+      "ms": 55.00006675720215,
+      "name": "rectangle_range",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 89.00022506713867,
+      "ms": 55.00006675720215,
+      "name": "piercing_dark_cloud",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 83.00018310546875,
+      "ms": 54.000139236450195,
+      "name": "falling_three_methods",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 58.00008773803711,
+      "ms": 54.000139236450195,
+      "name": "vpt",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 84.0001106262207,
+      "ms": 53.999900817871094,
+      "name": "triple_top_bottom",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 91.00008010864258,
+      "ms": 52.99997329711914,
+      "name": "butterfly",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 79.99992370605469,
+      "ms": 52.99997329711914,
+      "name": "cup_and_handle",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 85.99996566772461,
+      "ms": 52.99997329711914,
+      "name": "rising_three_methods",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 60.00018119812012,
+      "ms": 52.99997329711914,
+      "name": "nvi",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 62.00003623962402,
+      "ms": 52.99997329711914,
+      "name": "fibonacci_pivots",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 89.99991416931152,
+      "ms": 52.99997329711914,
+      "name": "adl",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 72.99995422363281,
+      "ms": 52.00004577636719,
+      "name": "golden_pocket",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 77.00014114379883,
+      "ms": 52.00004577636719,
+      "name": "morning_evening_star",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 55.00006675720215,
+      "ms": 52.00004577636719,
+      "name": "close_vs_open",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 65.00005722045898,
+      "ms": 52.00004577636719,
+      "name": "td_trap",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 67.00015068054199,
+      "ms": 52.00004577636719,
+      "name": "stick_sandwich",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 76.99990272521973,
+      "ms": 52.00004577636719,
+      "name": "homing_pigeon",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 72.00002670288086,
+      "ms": 51.000118255615234,
+      "name": "initial_balance",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 53.999900817871094,
+      "ms": 50.99987983703613,
+      "name": "market_facilitation_index",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 53.999900817871094,
+      "ms": 50.00019073486328,
+      "name": "obv",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 62.99996376037598,
+      "ms": 49.99995231628418,
+      "name": "td_open",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 66.99991226196289,
+      "ms": 49.00002479553223,
+      "name": "body_size_pct",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 54.99982833862305,
+      "ms": 49.00002479553223,
+      "name": "avg_price",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 88.99998664855957,
+      "ms": 49.00002479553223,
+      "name": "rickshaw_man",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 60.99987030029297,
+      "ms": 48.00009727478027,
+      "name": "woodie_pivots",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 59.00001525878906,
+      "ms": 48.00009727478027,
+      "name": "central_pivot_range",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 55.00006675720215,
+      "ms": 47.99985885620117,
+      "name": "high_low_range",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 70.9998607635498,
+      "ms": 46.000003814697266,
+      "name": "takuri",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 55.9999942779541,
+      "ms": 45.00007629394531,
+      "name": "median_price",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 49.00002479553223,
+      "ms": 43.99991035461426,
+      "name": "opening_range",
+      "status": "ok"
+    },
+    {
+      "evals": 166575,
+      "coldMs": 51.000118255615234,
+      "ms": 41.99981689453125,
+      "name": "candle_volume",
+      "status": "ok"
+    },
+    {
+      "evals": 0,
+      "coldMs": 0,
+      "ms": 0,
+      "name": "frama",
+      "status": "skipped"
+    },
+    {
+      "evals": 0,
+      "coldMs": 0,
+      "ms": 0,
+      "name": "granger_causality",
+      "status": "skipped"
+    },
+    {
+      "evals": 0,
+      "coldMs": 0,
+      "ms": 0,
+      "name": "garch11",
+      "status": "skipped"
+    },
+    {
+      "evals": 0,
+      "coldMs": 0,
+      "ms": 0,
+      "name": "jma",
+      "status": "skipped"
+    },
+    {
+      "evals": 0,
+      "coldMs": 0,
+      "ms": 0,
+      "name": "spread_hurst",
+      "status": "skipped"
+    },
+    {
+      "evals": 0,
+      "coldMs": 0,
+      "ms": 0,
+      "name": "variance_ratio",
+      "status": "skipped"
+    },
+    {
+      "evals": 0,
+      "coldMs": 0,
+      "ms": 0,
+      "name": "sample_entropy",
+      "status": "skipped"
+    },
+    {
+      "evals": 0,
+      "coldMs": 0,
+      "ms": 0,
+      "name": "autocorrelation_periodogram",
+      "status": "skipped"
+    },
+    {
+      "evals": 0,
+      "coldMs": 0,
+      "ms": 0,
+      "name": "autocorrelation",
+      "status": "skipped"
+    }
+  ],
+  "totals": {
+    "evals": 70128075,
+    "coldMs": 49608.99996757507,
+    "warmMs": 35523.99945259094,
+    "ok": 421,
+    "errors": 0,
+    "skipped": 9
+  },
+  "indicators": 430,
+  "perTape": [
+    {
+      "path": "corpus/tapes/spy_full.csv",
+      "ms": 1720.9999561309814,
+      "bars": 8419
+    },
+    {
+      "path": "corpus/tapes/spy_is_1993_2018.csv",
+      "ms": 1327.0018100738525,
+      "bars": 6528
+    },
+    {
+      "path": "corpus/tapes/spy_oos_2019_2026.csv",
+      "ms": 368.99828910827637,
+      "bars": 1891
+    },
+    {
+      "path": "corpus/tapes/spy_oos_2022_2026.csv",
+      "ms": 212.00037002563477,
+      "bars": 1134
+    },
+    {
+      "path": "data/real/spy.csv",
+      "ms": 1688.999891281128,
+      "bars": 8419
+    },
+    {
+      "path": "data/real/tape.csv",
+      "ms": 29268.999099731445,
+      "bars": 137478
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/eval_3m_AAPL.csv",
+      "ms": 19.99974250793457,
+      "bars": 62
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/eval_3m_AMD.csv",
+      "ms": 14.999866485595703,
+      "bars": 62
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/eval_3m_AMZN.csv",
+      "ms": 11.000633239746094,
+      "bars": 62
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/eval_3m_GOOGL.csv",
+      "ms": 12.000322341918945,
+      "bars": 62
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/eval_3m_IWM.csv",
+      "ms": 10.00070571899414,
+      "bars": 62
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/eval_3m_META.csv",
+      "ms": 16.000032424926758,
+      "bars": 62
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/eval_3m_MSFT.csv",
+      "ms": 14.000892639160156,
+      "bars": 62
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/eval_3m_NVDA.csv",
+      "ms": 16.99995994567871,
+      "bars": 62
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/eval_3m_QQQ.csv",
+      "ms": 13.000249862670898,
+      "bars": 62
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/eval_3m_SPY.csv",
+      "ms": 9.000062942504883,
+      "bars": 62
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/wf_1_AAPL_2019-01-02_2019-04-01.csv",
+      "ms": 15.999794006347656,
+      "bars": 62
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/wf_1_QQQ_2019-01-02_2019-04-01.csv",
+      "ms": 11.999845504760742,
+      "bars": 62
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/wf_1_SPY_2019-01-02_2019-04-01.csv",
+      "ms": 16.00027084350586,
+      "bars": 62
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/wf_2_AAPL_2022-01-03_2022-04-01.csv",
+      "ms": 19.999980926513672,
+      "bars": 63
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/wf_2_QQQ_2022-01-03_2022-04-01.csv",
+      "ms": 12.000083923339844,
+      "bars": 63
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/wf_2_SPY_2022-01-03_2022-04-01.csv",
+      "ms": 15.000343322753906,
+      "bars": 63
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/wf_3_AAPL_2024-10-01_2024-12-31.csv",
+      "ms": 10.999679565429688,
+      "bars": 64
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/wf_3_QQQ_2024-10-01_2024-12-31.csv",
+      "ms": 8.999824523925781,
+      "bars": 64
+    },
+    {
+      "path": "examples/strategy-tournament/tapes/wf_3_SPY_2024-10-01_2024-12-31.csv",
+      "ms": 13.999223709106445,
+      "bars": 64
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/eval_3m_ADAUSD.csv",
+      "ms": 45.99881172180176,
+      "bars": 91
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/eval_3m_AUDUSD.csv",
+      "ms": 24.000167846679688,
+      "bars": 65
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/eval_3m_BTCUSD.csv",
+      "ms": 39.99924659729004,
+      "bars": 91
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/eval_3m_ETHUSD.csv",
+      "ms": 42.000532150268555,
+      "bars": 91
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/eval_3m_EURUSD.csv",
+      "ms": 31.000137329101562,
+      "bars": 65
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/eval_3m_GBPUSD.csv",
+      "ms": 24.99985694885254,
+      "bars": 65
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/eval_3m_SOLUSD.csv",
+      "ms": 60.99963188171387,
+      "bars": 91
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/eval_3m_USDCAD.csv",
+      "ms": 24.000167846679688,
+      "bars": 65
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/eval_3m_USDJPY.csv",
+      "ms": 23.999691009521484,
+      "bars": 65
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/eval_3m_XRPUSD.csv",
+      "ms": 42.9995059967041,
+      "bars": 91
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/wf_1_BTCUSD_2019-01-02_2019-04-01.csv",
+      "ms": 31.999826431274414,
+      "bars": 90
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/wf_1_ETHUSD_2019-01-02_2019-04-01.csv",
+      "ms": 37.999868392944336,
+      "bars": 90
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/wf_1_EURUSD_2019-01-02_2019-04-01.csv",
+      "ms": 29.000282287597656,
+      "bars": 65
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/wf_2_BTCUSD_2022-01-03_2022-04-02.csv",
+      "ms": 43.00093650817871,
+      "bars": 90
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/wf_2_ETHUSD_2022-01-03_2022-04-02.csv",
+      "ms": 41.0003662109375,
+      "bars": 90
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/wf_2_EURUSD_2022-01-03_2022-04-02.csv",
+      "ms": 28.999805450439453,
+      "bars": 65
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/wf_3_BTCUSD_2024-10-01_2024-12-31.csv",
+      "ms": 37.99939155578613,
+      "bars": 92
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/wf_3_ETHUSD_2024-10-01_2024-12-31.csv",
+      "ms": 33.00046920776367,
+      "bars": 92
+    },
+    {
+      "path": "examples/strategy-tournament/tapes-crypto-fx/wf_3_EURUSD_2024-10-01_2024-12-31.csv",
+      "ms": 31.999826431274414,
+      "bars": 65
+    }
+  ]
+}

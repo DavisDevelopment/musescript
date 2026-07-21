@@ -432,11 +432,23 @@ class StrategyWasmBackend {
 	}
 	#end
 
+	/** Count how many distinct feature-tape slots the emitted string table reserved (see
+	 * StrategyWasmEmitter.FEATURE_SLOT_PREFIX / featureSlot()) — generic, no package-specific
+	 * knowledge required; any out-of-tree codegen that used feature(key) shows up here the same
+	 * way regardless of what key-naming convention it used. */
+	static function featureSlotCount(strings:Array<String>):Int {
+		var n = 0;
+		for (s in strings) if (StringTools.startsWith(s, musescript.compile.StrategyWasmEmitter.FEATURE_SLOT_PREFIX)) n++;
+		return n;
+	}
+
 	static function featureTapesFromCtx(ctx:Dynamic, strings:Array<String>):Array<Array<Float>> {
-		var count = musescript.kestrel.KestrelWasmArtifact.featureCount(strings);
+		var count = featureSlotCount(strings);
 		if (count == 0) return [];
-		if (ctx != null && Reflect.hasField(ctx, "kestrelFeatureTapes")) {
-			var supplied:Dynamic = Reflect.field(ctx, "kestrelFeatureTapes");
+		// Generic externally-supplied feature-tape context field. Named "featureTapes" (not
+		// package-specific) so any host/caller can populate it, not just Kestrel.
+		if (ctx != null && Reflect.hasField(ctx, "featureTapes")) {
+			var supplied:Dynamic = Reflect.field(ctx, "featureTapes");
 			if (Std.isOfType(supplied, Array)) return cast supplied;
 		}
 		return [for (_ in 0...count) []];

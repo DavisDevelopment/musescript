@@ -17,7 +17,10 @@ class EvoProof {
 		var engine = new EvolutionEngine(seed, 8, 2, 3);
 		var bars = loadBars();
 		var pop = engine.seedPopulation(2);
-		var best = -1e99;
+		// Fitness.score can now return a genuine -Infinity (a whole generation failing the
+		// min-trades filter) -- -1e99 is NOT actually less than that, which would trip the
+		// elitism-regression check below with a false positive the first time it happens.
+		var best = Fitness.NEG_INF;
 		var keys = new Map<String, Bool>();
 		var mutated = false;
 		var crossed = false;
@@ -39,10 +42,10 @@ class EvoProof {
 			var fitness:Array<Float> = [];
 			for (g in pop) {
 				var fr = Fitness.evaluate(g, bars, target, false);
-				var f = fr.ok && fr.trades >= 1 ? fr.sharpe : -100.0;
-				// parsimony tie-break baked into score lightly
-				f -= Canonical.nodeCount(g) * 0.0001;
-				fitness.push(f);
+				// Fitness.score/EvolutionEngine.step now own the min-trades filter and parsimony
+				// tiebreak respectively (previously baked into this loop as -100.0/-nodeCount*0.0001
+				// ad-hoc fudges) — see their doc comments for why that's the wrong place for them.
+				fitness.push(Fitness.score(fr, 1));
 				keys.set(Canonical.structuralKey(g), true);
 			}
 			var genBest = fitness[0];

@@ -9,12 +9,17 @@ class EnumerateIter implements MuseIter {
 		this.i = 0;
 	}
 	public function next():IterResult<Dynamic> {
-		return switch (src.next()) {
+		return step(src.next());
+	}
+
+	/** Attach and advance the index at any await-depth. The old await branch
+	 * returned `r()` raw, so values arriving via Await got no `{i, v}` wrapper
+	 * and skipped the counter. */
+	function step(r:IterResult<Dynamic>):IterResult<Dynamic> {
+		return switch (r) {
 			case Done: Done;
 			case Value(v): Value({ i: i++, v: v });
-			case Await(r): Await(function() {
-				return r();
-			});
+			case Await(cont): Await(function() return step(cont()));
 		};
 	}
 }

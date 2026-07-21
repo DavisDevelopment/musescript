@@ -9,20 +9,19 @@ class MappedIter implements MuseIter {
 		this.f = f; 
 	}
 
-	/**
-	 * TODO: maybe inline (not sure if latest Haxe makes this possible / a good idea)
-	 */
 	public function next():IterResult<Dynamic> {
-		return switch (src.next()) {
+		return mapResult(src.next());
+	}
+
+	/** Apply `f` to the produced value at whatever await-depth it surfaces.
+	 * Recurring through nested Awaits (rather than passing an inner Await
+	 * through raw) keeps the map honest for sources that pump more than once
+	 * before yielding — e.g. an empty-then-filled StreamIter. */
+	function mapResult(r:IterResult<Dynamic>):IterResult<Dynamic> {
+		return switch (r) {
 			case Done: Done;
 			case Value(v): Value(f(v));
-			case Await(r): Await(function() {
-				return switch (r()) {
-					case Done: Done;
-					case Value(v): Value(f(v));
-					case Await(r2): Await(r2);
-				};
-			});
+			case Await(cont): Await(function() return mapResult(cont()));
 		};
 	}
 }

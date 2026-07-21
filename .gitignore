@@ -20,3 +20,13 @@ graal/src/main/python/kestrgraal_pb2.py
 graal/src/main/python/kestrgraal_pb2_grpc.py
 graal/src/main/python/__pycache__/
 vendor/
+
+# Murmuration (proprietary market simulator) — never publish to the open musescript repo.
+musescript/murmuration/
+musescript/tests/TestMurmuration.hx
+musescript/tests/TestMurmurationConservation.hx
+
+# Private build configs — reference proprietary out-of-tree packages (Kestrel, Murmuration)
+# by classpath/main-class, revealing internal structure even without shipping their code.
+build-kestrel*.hxml
+build-*murmuration*.hxml

@@ -1,0 +1,164 @@
+=== MuseScript CORPUS-SEEDED evolution on GraalWasm ===
+jvm:  OpenJDK 64-Bit Server VM 25.0.3+9-jvmci-25.1-b19
+tape: 6909 bars total -> IS 5161 / embargo 21 / OOS 1727
+tournament corpus: 560 files, 152 translated to genomes, 408 skipped (outside the closed GP grammar -- onPosition exits, multi-output field access, etc.)
+indicator seeds: 124 compatible indicators x 3 windows = 372 genomes
+seeded generation 0: 524 real genomes (152 corpus-derived + 372 indicator-derived)
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by com.oracle.truffle.polyglot.JDKSupport in an unnamed module (file:/C:/Users/epiki/.m2/repository/org/graalvm/truffle/truffle-api/25.1.3/truffle-api-25.1.3.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+assembled 172
+gen  0 | popSize=524 new=172 unsupported=336 valid=174 | best=0.6405 mean=-9.0E-4 champion="A04S03_RsiTrendPullbackR8" | 49694ms
+assembled 64
+gen  1 | popSize=128 new=64 unsupported=46 valid=81 | best=0.987 mean=0.1214 champion="MacdDonTime34" | 29025ms
+assembled 97
+gen  2 | popSize=128 new=97 unsupported=15 valid=107 | best=0.987 mean=0.2471 champion="MacdDonTime34" | 54560ms
+assembled 88
+gen  3 | popSize=128 new=88 unsupported=23 valid=116 | best=0.987 mean=0.4344 champion="MacdDonTime34" | 59792ms
+assembled 65
+gen  4 | popSize=128 new=65 unsupported=50 valid=112 | best=0.987 mean=0.6186 champion="MacdDonTime34" | 37089ms
+assembled 21
+gen  5 | popSize=128 new=21 unsupported=87 valid=111 | best=0.988 mean=0.8877 champion="MacdDonTime34" | 13548ms
+assembled 12
+gen  6 | popSize=128 new=12 unsupported=100 valid=121 | best=0.988 mean=0.9126 champion="MacdDonTime34" | 4872ms
+assembled 12
+gen  7 | popSize=128 new=12 unsupported=100 valid=114 | best=0.988 mean=0.8845 champion="MacdDonTime34" | 4192ms
+assembled 20
+gen  8 | popSize=128 new=20 unsupported=89 valid=117 | best=0.988 mean=0.8613 champion="MacdDonTime34" | 5312ms
+assembled 15
+gen  9 | popSize=128 new=15 unsupported=91 valid=112 | best=0.988 mean=0.8815 champion="MacdDonTime34" | 3212ms
+assembled 13
+gen 10 | popSize=128 new=13 unsupported=91 valid=114 | best=0.989 mean=0.8967 champion="MacdDonTime34" | 2900ms
+assembled 13
+gen 11 | popSize=128 new=13 unsupported=90 valid=117 | best=0.989 mean=0.8957 champion="MacdDonTime34" | 2828ms
+assembled 17
+gen 12 | popSize=128 new=17 unsupported=87 valid=113 | best=0.989 mean=0.8783 champion="MacdDonTime34" | 4006ms
+assembled 18
+gen 13 | popSize=128 new=18 unsupported=83 valid=116 | best=0.989 mean=0.8857 champion="MacdDonTime34" | 2318ms
+assembled 16
+gen 14 | popSize=128 new=16 unsupported=85 valid=123 | best=0.99 mean=0.8686 champion="MacdDonTime34" | 2681ms
+assembled 14
+gen 15 | popSize=128 new=14 unsupported=93 valid=112 | best=0.99 mean=0.913 champion="MacdDonTime34" | 3538ms
+assembled 12
+gen 16 | popSize=128 new=12 unsupported=82 valid=110 | best=0.991 mean=0.9286 champion="S03_Ema521T21" | 3516ms
+assembled 14
+gen 17 | popSize=128 new=14 unsupported=87 valid=107 | best=0.991 mean=0.9043 champion="S03_Ema521T21" | 2506ms
+assembled 16
+gen 18 | popSize=128 new=16 unsupported=86 valid=110 | best=0.991 mean=0.8807 champion="S03_Ema521T21" | 3840ms
+assembled 13
+gen 19 | popSize=128 new=13 unsupported=90 valid=108 | best=0.991 mean=0.937 champion="S03_Ema521T21" | 1964ms
+assembled 13
+gen 20 | popSize=128 new=13 unsupported=86 valid=114 | best=0.991 mean=0.918 champion="S03_Ema521T21" | 2647ms
+assembled 14
+gen 21 | popSize=128 new=14 unsupported=89 valid=107 | best=0.991 mean=0.8936 champion="S03_Ema521T21" | 2635ms
+assembled 14
+gen 22 | popSize=128 new=14 unsupported=83 valid=109 | best=0.991 mean=0.8723 champion="S03_Ema521T21" | 3006ms
+assembled 15
+gen 23 | popSize=128 new=15 unsupported=86 valid=107 | best=0.991 mean=0.8826 champion="S03_Ema521T21" | 3734ms
+assembled 17
+gen 24 | popSize=128 new=17 unsupported=79 valid=108 | best=0.991 mean=0.8716 champion="S03_Ema521T21" | 3716ms
+assembled 21
+gen 25 | popSize=128 new=21 unsupported=83 valid=100 | best=0.991 mean=0.8816 champion="S03_Ema521T21" | 3435ms
+assembled 14
+gen 26 | popSize=128 new=14 unsupported=96 valid=107 | best=0.991 mean=0.9085 champion="S03_Ema521T21" | 2333ms
+assembled 9
+gen 27 | popSize=128 new=9 unsupported=91 valid=110 | best=0.991 mean=0.902 champion="S03_Ema521T21" | 1812ms
+assembled 7
+gen 28 | popSize=128 new=7 unsupported=99 valid=112 | best=0.991 mean=0.9478 champion="S03_Ema521T21" | 1694ms
+assembled 5
+gen 29 | popSize=128 new=5 unsupported=95 valid=110 | best=0.991 mean=0.9617 champion="S03_Ema521T21" | 1309ms
+assembled 5
+gen 30 | popSize=128 new=5 unsupported=91 valid=105 | best=0.991 mean=0.9585 champion="S03_Ema521T21" | 2000ms
+assembled 8
+gen 31 | popSize=128 new=8 unsupported=95 valid=103 | best=0.991 mean=0.9639 champion="S03_Ema521T21" | 1762ms
+assembled 5
+gen 32 | popSize=128 new=5 unsupported=100 valid=115 | best=0.991 mean=0.951 champion="S03_Ema521T21" | 1291ms
+assembled 8
+gen 33 | popSize=128 new=8 unsupported=92 valid=114 | best=0.991 mean=0.9288 champion="S03_Ema521T21" | 1582ms
+assembled 7
+gen 34 | popSize=128 new=7 unsupported=96 valid=114 | best=0.991 mean=0.9293 champion="S03_Ema521T21" | 1535ms
+assembled 3
+gen 35 | popSize=128 new=3 unsupported=95 valid=106 | best=0.991 mean=0.9805 champion="S03_Ema521T21" | 1470ms
+assembled 7
+gen 36 | popSize=128 new=7 unsupported=94 valid=113 | best=0.991 mean=0.9525 champion="S03_Ema521T21" | 1473ms
+assembled 5
+gen 37 | popSize=128 new=5 unsupported=97 valid=110 | best=0.991 mean=0.962 champion="S03_Ema521T21" | 1300ms
+assembled 1
+gen 38 | popSize=128 new=1 unsupported=104 valid=112 | best=0.991 mean=0.9862 champion="S03_Ema521T21" | 955ms
+assembled 12
+gen 39 | popSize=128 new=12 unsupported=91 valid=113 | best=0.991 mean=0.9305 champion="S03_Ema521T21" | 1691ms
+assembled 4
+gen 40 | popSize=128 new=4 unsupported=109 valid=111 | best=0.991 mean=0.9567 champion="S03_Ema521T21" | 1193ms
+assembled 6
+gen 41 | popSize=128 new=6 unsupported=100 valid=107 | best=0.991 mean=0.937 champion="S03_Ema521T21" | 1360ms
+assembled 12
+gen 42 | popSize=128 new=12 unsupported=92 valid=106 | best=0.991 mean=0.9387 champion="S03_Ema521T21" | 1849ms
+assembled 8
+gen 43 | popSize=128 new=8 unsupported=94 valid=112 | best=0.991 mean=0.939 champion="S03_Ema521T21" | 1554ms
+assembled 1
+gen 44 | popSize=128 new=1 unsupported=101 valid=107 | best=0.991 mean=0.9839 champion="S03_Ema521T21" | 989ms
+assembled 6
+gen 45 | popSize=128 new=6 unsupported=93 valid=108 | best=0.991 mean=0.9643 champion="S03_Ema521T21" | 1286ms
+assembled 3
+gen 46 | popSize=128 new=3 unsupported=106 valid=105 | best=0.991 mean=0.964 champion="S03_Ema521T21" | 1466ms
+assembled 4
+gen 47 | popSize=128 new=4 unsupported=97 valid=111 | best=0.991 mean=0.9579 champion="S03_Ema521T21" | 1212ms
+assembled 7
+gen 48 | popSize=128 new=7 unsupported=93 valid=107 | best=0.991 mean=0.9443 champion="S03_Ema521T21" | 1705ms
+assembled 7
+gen 49 | popSize=128 new=7 unsupported=95 valid=106 | best=0.991 mean=0.9552 champion="S03_Ema521T21" | 1421ms
+assembled 2
+gen 50 | popSize=128 new=2 unsupported=99 valid=115 | best=0.991 mean=0.9791 champion="S03_Ema521T21" | 1065ms
+assembled 3
+gen 51 | popSize=128 new=3 unsupported=96 valid=116 | best=0.991 mean=0.9686 champion="S03_Ema521T21" | 1144ms
+assembled 2
+gen 52 | popSize=128 new=2 unsupported=101 valid=110 | best=0.991 mean=0.9703 champion="S03_Ema521T21" | 1364ms
+assembled 2
+gen 53 | popSize=128 new=2 unsupported=89 valid=114 | best=0.991 mean=0.9824 champion="S03_Ema521T21" | 1138ms
+assembled 3
+gen 54 | popSize=128 new=3 unsupported=91 valid=110 | best=0.991 mean=0.9696 champion="S03_Ema521T21" | 1126ms
+gen 55 | popSize=128 new=0 unsupported=91 valid=110 | best=0.991 mean=0.9909 champion="S03_Ema521T21" | 172ms
+assembled 6
+gen 56 | popSize=128 new=6 unsupported=93 valid=109 | best=0.991 mean=0.9335 champion="S03_Ema521T21" | 1382ms
+assembled 2
+gen 57 | popSize=128 new=2 unsupported=102 valid=112 | best=0.991 mean=0.9742 champion="S03_Ema521T21" | 1014ms
+assembled 3
+gen 58 | popSize=128 new=3 unsupported=90 valid=117 | best=0.991 mean=0.9668 champion="S03_Ema521T21" | 1136ms
+assembled 1
+gen 59 | popSize=128 new=1 unsupported=90 valid=107 | best=0.991 mean=0.9909 champion="S03_Ema521T21" | 948ms
+
+=== CHAMPION (fitness=0.991, lineage=1d81216e6d7f1265 <- 4f653868077f014b <- c9d71b8f142f7729) ===
+backend=js(fallback) trades=31 equity=100310 sharpe=0.991 nodeCount=9
+DIAG entryLong=BTrend(over,SInd(sma,open,55,null),2)
+DIAG entryShort=BTrend(over,SInd(stdev,volume,34,null),21)
+DIAG exitLong=BTrend(under,SInd(mom,close,34,null),3)
+DIAG exitShort=BTrend(under,SInd(ehma,close,8,null),3)
+DIAG size=KConst(1)
+DIAG bars.length=5161 bars[0]=0.037559 bars[last]=4.344468
+DIAG re-eval on first 50 bars only: ok=true trades=31 sharpe=0.991 equity=100310
+{
+  @strategy("S03_Ema521T21")
+  @on(bar) {
+    if (rising(sma("open", 55), 2)) long(1);
+    if (rising(stdev("volume", 34), 21)) short(1);
+    if ((falling(mom("close", 34), 3)) || (falling(ehma("close", 8), 3))) flat();
+  }
+}
+total wall: 357.5s  modules compiled: 984
+
+=== OOS RE-SCORE (top 10 by IS fitness, held-out 1727-bar tail) ===
+   1. IS=0.991  OOS=0.991 (trades=31)  [HELD]  MacdDonTime34
+   2. IS=0.991  OOS=0.991 (trades=31)  [HELD]  MacdDonTime34
+   3. IS=0.991  OOS=0.991 (trades=31)  [HELD]  MacdDonTime34
+   4. IS=0.991  OOS=0.991 (trades=31)  [HELD]  MacdDonTime34
+   5. IS=0.991  OOS=0.991 (trades=31)  [HELD]  MacdDonTime34
+   6. IS=0.991  OOS=0.991 (trades=31)  [HELD]  S03_Ema521T21
+   7. IS=0.991  OOS=0.991 (trades=31)  [HELD]  MacdDonTime34
+   8. IS=0.991  OOS=0.991 (trades=31)  [HELD]  MacdDonTime34
+   9. IS=0.991  OOS=0.991 (trades=31)  [HELD]  S03_Ema521T21
+  10. IS=0.991  OOS=0.991 (trades=31)  [HELD]  S03_Ema521T21
+OOS summary: 10/10 of the top IS performers held a positive Sharpe out of sample.
+
+CORPUS_EVO_OK

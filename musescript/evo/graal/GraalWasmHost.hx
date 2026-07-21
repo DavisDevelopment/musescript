@@ -116,6 +116,19 @@ class StrategyInstance {
 			this.sim.flat(this.curClose);
 			return null;
 		}));
+		// EMA-family indicators (StrategyWasmEmitter.hx:143) need `exp` for their
+		// alpha-decay math -- missing here because this host was only ever exercised
+		// against EvoBench's SMA-crossover baseline before the corpus-seeded evolution
+		// run pulled in EMA-based genomes (both from the tournament corpus and the
+		// `ta` registry's indicator seeds) and hit "env does not contain exp" at
+		// instantiate time. get_position/get_entry_price/get_bars_in_trade/get_cash/
+		// get_equity/get_unrealized_pnl/host_eval are the OTHER possible env imports
+		// (see StrategyWasmEmitter's needImport call sites) but are onPosition-only /
+		// class-method-only -- StrategyGenome has no onPosition concept, so genome-
+		// expanded source never emits those and they're left unimplemented here.
+		members.set("exp", new HostFn(function(a:NativeArray<Value>):Dynamic {
+			return Math.exp(a[0].asDouble());
+		}));
 		for (noop in ["plot", "plotshape", "hline", "bgcolor"])
 			members.set(noop, new HostFn(function(a:NativeArray<Value>):Dynamic return null));
 

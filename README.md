@@ -29,9 +29,9 @@ haxelib dev musescript .
 .\run.ps1 all           # JS + Python examples and both test suites
 ```
 
-Current test status (verified 2026-07-15): `node build/js/tests.js` **758/758**, `.venv python
-build/py/tests.py` **737/737**, cross-runtime gate (example 07) **identical value across all 4
-hosts (max delta 0)**.
+Current test status (verified 2026-07-21): `node build/js/tests.js` **58,740 assertions, 0
+errors, 0 failures**, cross-runtime gate (example 07) **identical value across all 4 hosts (max
+delta 0)**.
 
 ## Examples
 
@@ -52,6 +52,121 @@ hosts (max delta 0)**.
 Fetch real tape: `.\run.ps1 fetch-ohlcv` → `data/real/tape.csv`.
 
 Example **09** is the fast path: same indicator *math* as 08 over float arrays (linear-memory WASM, numba). Example **08** exercises full `@indicator` / chart / MuseInterp semantics.
+
+## Language surface: `indicator function`, general `if`, `onBar()` guards
+
+The modern typed surface (bare `strategy Name(...) { ... }`, no `@` annotations) has three
+recent additions, all pure grammar/sugar over the existing AST — no runtime or checker changes
+were needed to support them:
+
+**`indicator function name(args) { ... }`** — a statement-block body for user-declared
+indicators, alongside the existing single-expression `indicator name(args) = expr` form. Gets
+persistent per-callsite `state.*` (correctly isolated even when the SAME indicator is called
+twice with different arguments in one strategy), `bar_index`, and `close[i]`-style lookback:
+
+```muse
+indicator function cmoLike(period) {
+  if (state.hasPrev != true) {
+    state.hasPrev = true
+    state.prevPrice = close
+    return null
+  }
+  var change = close - state.prevPrice
+  state.prevPrice = close
+  return change
+}
+```
+
+**General `if (cond) { ... } [else if (cond) { ... }]* [else { ... }]?`** — `when cond: { ... }`
+still works (large existing corpus, no-else conditionals), but `if`/`else` is now the full,
+general conditional, verified identical across interp, compiled JS, *and* compiled WASM
+(including multi-statement bodies with real order calls — `long()`/`short()`/`flat()` inside
+either branch compiles and executes correctly on all three backends).
+
+**`onBar() when (cond) { ... }` guard chains** — a run of guarded `onBar()` blocks, optionally
+ending in one bare fallback, desugars at PARSE time into a single `OnBar` wrapping an
+if/else-if/else chain: first true guard wins, the fallback runs only if none matched.
+
+```muse
+strategy S {
+  onBar() when (rsi(close, 14) > 70) {
+    flat()
+  }
+  onBar() when (crossover(sma(close, 8), sma(close, 21))) {
+    long()
+  }
+  onBar() {
+    // fallback: runs only when neither guard above matched this bar
+  }
+}
+```
+
+Unguarded `onBar { ... }` / `onBar() { ... }` blocks with no `when` anywhere keep the original
+behavior byte-for-byte: every block runs, every bar, unconditionally (concatenated, not
+alternated) — only a guarded sequence triggers the new chain semantics.
+
+## `ta` toolbelt — 442+ ported technical indicators
+
+`musescript/indicators/lib/` (+ `prim/` for names that collide with existing core builtins) hosts
+a full port of the [wickra-core](https://github.com/wickra-lib/wickra) indicator library — every
+Tier-1 indicator (Candle / f64 / (f64,f64) input, no name collision) is a registered MuseScript
+builtin, callable exactly like `sma`/`ema`/`rsi` always were: `cmo(close, 14)`,
+`stochastic(close, 14, 3, 3)`, and so on. `musescript/indicators/PORT_INVENTORY.txt` tracks
+per-indicator status; Tier 3 (needs tick/orderbook/cross-section feeds `Bar` doesn't carry) is
+deliberately deferred.
+
+The **`ta` namespaced global** (`musescript/builtins/TaToolbelt.hx`) is a plain object of
+callables — installed exactly like `Math` already is, so it adds no new dispatch surface —
+giving the same 442+ builtins a discoverable, introspectable surface:
+
+```muse
+var m = ta.cmo(close, 14);   // identical builtin to the flat `cmo` call
+ta.names()                   // every ta indicator name, sorted
+ta.has("stoch_rsi")          // Bool
+ta.source("stoch_rsi")       // generated, runnable MuseScript demo strategy for this indicator
+ta.sig("stoch_rsi")          // "stoch_rsi(Series, Window, Window) -> Scalar"
+ta.doc("stoch_rsi")          // one-line description
+ta.nativeSource("cmo")       // hand-authored MuseScript reimplementation, when one exists
+```
+
+Demo sources are compile-time generated (`TaSourcesMacro` reads each port's literal `spec()`
+straight out of the typed AST) with a runtime fallback for anything the macro can't statically
+extract, so coverage is total and the two paths can never drift. A small, growing subset of
+indicators also ship a `nativeSource()` — a genuine, forkable MuseScript reimplementation of the
+indicator's own computation (not just a demo that calls the Haxe builtin), parity-verified
+bar-for-bar against the Haxe port by `TestNativeIndicatorParity.hx`.
+
+## `musescript.evo` — typed genetic-programming engine
+
+`musescript/evo/` is a Haxe port of the sibling `musegene` Python GP harness: a closed, typed
+node algebra (`BoolNode`/`ScalarNode`/`SeriesNode`, see `Palette.hx`) that grows, mutates, and
+crosses over `StrategyGenome` trees, expands them to real MuseScript source (`Expand.hx`), and
+scores them via `Fitness.hx`.
+
+- **`RegistryPalette.hx`** — an opt-in, registry-derived vocabulary superset of `Palette.hx`'s
+  closed 12-indicator list, covering every `ta` indicator whose signature fits
+  `SeriesNode.SInd`'s `(series, window) -> scalar` shape (400+ today). Purely additive: default
+  `Variation`/`EvolutionEngine` behavior (and the `musegene/palette.py` mirror contract) is
+  unchanged unless a caller explicitly passes the wider pool.
+- **`CorpusSeed.hx`** — reverse-compiles real MuseScript strategy source (e.g. the
+  `examples/strategy-tournament/` corpus) into `StrategyGenome` trees, so genuine hand-written
+  strategies can seed an evolution run's initial population instead of only random growth. Honest
+  by construction: returns `null` (never a best-effort guess) for anything outside the closed GP
+  grammar (`onPosition`-based exits, multi-output field access, custom classes, ...).
+- **`musescript/evo/graal/`** — GraalWasm-accelerated fitness evaluation.
+  `EvoBench.hx`/`CorpusEvoRun.hx` compile each unique genome to native WASM (batched
+  `wat2wasm`), evaluate it on a persistent multi-threaded `GraalWasmHost` worker pool (warm
+  per-thread instance caches, structural-key module cache across generations), and fall back to
+  the ordinary JS/interp `Fitness` path for any genome whose expanded source can't be natively
+  WASM-compiled (e.g. an indicator `StrategyWasmEmitter` has no native opcode for yet) — so
+  fitness is still correct, just not GraalWasm-accelerated, for that subset.
+
+```powershell
+haxe build-corpus-evo.hxml   # -> build/jvm/corpus-evo.jar
+# from a GraalVM JAVA_HOME:
+java --sun-misc-unsafe-memory-access=allow -cp "<maven-classpath>;build/jvm/corpus-evo.jar" `
+  musescript.evo.graal.CorpusEvoRun --pop 64 --gens 40 --threads 6
+```
 
 ## Math-only compilation
 
@@ -356,6 +471,12 @@ consumes the generated artifact and never requires Haxe or Python at runtime.
 - `musescript.plan` — MuseIR + MusePlanner
 - `musescript.compile` — JS / Python / numba / WASM emitters + TailCallPass
 - `musescript.checker` — series / match / generator checks
+- `musescript.indicators` — 442+ ported `ta` indicators (`lib/`/`prim/`), registry + macro
+  collectors
+- `musescript.builtins.TaToolbelt`/`TaSources`/`TaSourceRender` — the `ta` namespaced global +
+  generated demo/native sources
+- `musescript.evo` — typed GP genome engine (see MuseScript's own evo section above);
+  `musescript.evo.graal` — GraalWasm-accelerated fitness evaluation
 - `musescript.cli.GeneRunner` — headless fitness CLI (see MuseGene, below)
 - `tools/` — `muse_math_runtime.py`, `wat2wasm_cli.py`
 - `.venv/` — local Python env for tests / numba / wasmtime

@@ -80,7 +80,12 @@ class DynamicMomentumIndex implements MuseIndicator<Float, Float> {
 		}
 		prevClose = input;
 
-		if (vol.value() == null || lastVolAvg == null) return null;
+		// `vol.value()` returns a plain (non-nullable) Float -- only `lastVolAvg`
+		// (set from StdDev/Sma's genuinely-Null<Float> `update()`) can signal "not
+		// ready yet". The old `vol.value() == null` half was always false on
+		// dynamic targets (dead code) and doesn't type-check at all on static
+		// targets (Float can't hold null) -- dropped, not a behavior change.
+		if (lastVolAvg == null) return null;
 		var volValue = vol.value();
 		var volAvgValue = lastVolAvg;
 

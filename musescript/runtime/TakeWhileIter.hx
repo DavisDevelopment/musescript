@@ -18,7 +18,13 @@ class TakeWhileIter implements MuseIter {
 
 	public function next():IterResult<Dynamic> {
 		if (stopped) return Done;
-		return switch (src.next()) {
+		return step(src.next());
+	}
+
+	/** Test `pred` at any await-depth; recurse through nested Awaits so a value
+	 * arriving after several pumps still gates the stream correctly. */
+	function step(r:IterResult<Dynamic>):IterResult<Dynamic> {
+		return switch (r) {
 			case Done: Done;
 			case Value(v):
 				if (pred(v)) Value(v);
@@ -26,18 +32,7 @@ class TakeWhileIter implements MuseIter {
 					stopped = true;
 					Done;
 				}
-			case Await(r): Await(function() {
-				return switch (r()) {
-					case Done: Done;
-					case Value(v):
-						if (pred(v)) Value(v);
-						else {
-							stopped = true;
-							Done;
-						}
-					case Await(r2): Await(r2);
-				};
-			});
+			case Await(cont): Await(function() return step(cont()));
 		};
 	}
 }

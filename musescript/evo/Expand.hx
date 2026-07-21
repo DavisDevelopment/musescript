@@ -63,7 +63,15 @@ class Expand {
 			case BCmp(op, a, b):
 				'(${scalar(a, params)} $op ${scalar(b, params)})';
 			case BTrend(dir, s, w):
-				var fn = dir == "up" ? "rising" : "falling";
+				// dir is "over"/"under" (the SAME Palette.CROSS pool BCross's dir is drawn from
+				// -- Variation.growBool literally does `rng.pick(Palette.CROSS)` for both), NOT
+				// "up"/"down". This case used to check `dir == "up"`, which is never true for
+				// any BTrend this codebase actually constructs (Variation.hx, CorpusSeed.hx) --
+				// every BTrend genome, grown or reverse-compiled, silently rendered as "falling"
+				// regardless of its real dir. Found via a corpus-evo walk-forward run reporting
+				// suspiciously identical champion stats across unrelated genomes/tapes; traced
+				// to this always-false comparison.
+				var fn = dir == "over" ? "rising" : "falling";
 				'$fn(${series(s)}, $w)';
 			case BAnd(a, b): '(${bool(a, params)} && ${bool(b, params)})';
 			case BOr(a, b): '(${bool(a, params)} || ${bool(b, params)})';

@@ -139,6 +139,11 @@ class MuseInterp {
 		TradeBuiltins.install(globals, harness);
 		MacroBuiltins.install(globals, harness);
 		musescript.builtins.WickraBuiltins.install(globals, harness);
+		// `ta.` namespaced view of the same ported indicators + their
+		// generated MuseScript sources (ta.source/sig/doc/names) — a plain
+		// object global like `Math`, so no new dispatch surface.
+		musescript.builtins.TaToolbelt.install(globals, harness);
+		musescript.interp.MuseExtensions.installAll(globals, harness);
 		globals.set("Math", {
 			abs: Math.abs,
 			min: Math.min,
@@ -195,6 +200,13 @@ class MuseInterp {
 	 * so stepped and full runs are guaranteed to execute identical code.
 	 */
 	public function setupRun(prog:MuseProgram):Void {
+		// Idempotent (CallsiteIds re-wrapping an already-wrapped prog is a no-op re-walk) --
+		// safe whether this program came in raw (bare MuseInterp usage: examples, tests, the
+		// `@indicator` native-source pilot) or already passed through MuseCompiler's pipeline.
+		// Without this, a bare-interp run of an `@indicator` declaration called twice with
+		// different arguments in the same strategy silently shared one state map between the
+		// two calls -- see IndicatorInstance.stateFor's doc comment.
+		prog = musescript.compile.CallsiteIds.assign(prog);
 		onBarHandlers = [];
 		onPositionHandlers = [];
 		onTickHandlers = [];
@@ -259,6 +271,19 @@ class MuseInterp {
 		}
 		var fieldVal = obj != null ? Reflect.getProperty(obj, methodName) : null;
 		return callValue(fieldVal, args);
+	}
+
+	/** P2 hybrid: JsBackend bridges `ClassName.method(...)` (a STATIC call — no instance,
+	 * `ClassName` names a class, not a variable) to this. Mirrors evalExpr's
+	 * ECall(EField(EIdent(className), ...)) static-dispatch branch. Bare class names are never
+	 * bound as evaluable JS values (there's nothing sensible for JsEmitter to emit for
+	 * `ClassName` itself), so JsEmitter passes the class name through as a STRING literal
+	 * instead of compiling `EIdent(className)` as a normal expression — see its ECall case. */
+	public function callStaticMethodPublic(className:String, methodName:String, args:Array<Dynamic>):Dynamic {
+		var m = findMethod(className, methodName);
+		if (m == null) throw '$className.$methodName: static method not found';
+		if (!m.isStatic) throw '$className.$methodName: not a static method (called without an instance)';
+		return callMethod(null, m, args);
 	}
 
 	/**
@@ -640,6 +665,22 @@ class MuseInterp {
 							if (m != null) return callMethod(inst, m, [for (a in args) evalExpr(a)]);
 						}
 						callValue(evalExpr(callee), evalCallArgs(callee, args));
+					// STATIC method call: `ClassName.method(args)` where `ClassName` names a
+					// registered class, not a variable. Bare class names are never bound as
+					// evaluable values (ClassDecl execution only populates the separate
+					// `classes` map, never `globals`/a stack frame — see the ClassDecl case
+					// above), so falling through to the instance-call branch below (which
+					// evaluates `objExpr` as a normal expression first) always got `obj == null`
+					// and landed on "Cannot call null": `static function` parsed and had real
+					// isStatic-aware findMethod/callMethod machinery, but nothing ever actually
+					// reached it for the natural `ClassName.method()` call syntax. Checked before
+					// the instance-call case so a real local variable that happens to SHADOW a
+					// class name still resolves as a variable first (stack.resolve wins).
+					case EField(EIdent(className), methodName) if (stack.resolve(className) == null && classes.exists(className)):
+						var m = findMethod(className, methodName);
+						if (m == null) throw '$className.$methodName: static method not found';
+						if (!m.isStatic) throw '$className.$methodName: not a static method (called without an instance)';
+						callMethod(null, m, [for (a in args) evalExpr(a)]);
 					case EField(objExpr, methodName):
 						var obj = evalExpr(objExpr);
 						if (obj != null && Reflect.hasField(obj, "__class")) {
@@ -752,6 +793,14 @@ class MuseInterp {
 						TradeBuiltins.fallingCS(harness, csId, evalExpr(csArgs[0]), Std.int(evalExpr(csArgs[1])),
 							csArgs.length > 2 ? Std.int(evalExpr(csArgs[2])) : 0);
 				}
+			case EMeta("__cs", [EConst(CInt(csId))], ECall(EIdent(csName), csArgs))
+				if (stack.resolve(csName) == null && Std.isOfType(globals.get(csName), IndicatorInstance)):
+				// Same CallsiteIds mechanism as crossover/rising above, generalized to
+				// user-declared @indicators -- see IndicatorInstance.stateFor's doc
+				// comment for the bug this closes (two differently-parameterized calls
+				// to the same @indicator sharing one state map).
+				var inst:IndicatorInstance = cast globals.get(csName);
+				callClosureWithState(inst.closure, [for (a in csArgs) evalExpr(a)], inst.stateFor(csId));
 			case EMeta(_, _, x): evalExpr(x);
 			case EMatch(scrutinee, arms): evalMatch(evalExpr(scrutinee), arms);
 			case EYield(x):
@@ -771,6 +820,16 @@ class MuseInterp {
 	function evalCallArgs(callee:Expr, args:Array<Expr>):Array<Dynamic> {
 		return switch (callee) {
 			case EIdent(name):
+				[for (i in 0...args.length) {
+					var seriesName = BuiltinSigs.wantsSeries(name, i) ? seriesNameOf(args[i]) : null;
+					seriesName != null ? seriesName : evalExpr(args[i]);
+				}];
+			// `ta.cmo(close, 14)` must resolve series-typed args to series
+			// NAMES exactly like the flat `cmo(close, 14)` does — the toolbelt
+			// exposes the same registry builtins, so it gets the same argument
+			// discipline (BuiltinSigs is keyed by the identical flat name). A
+			// local binding shadowing `ta` opts out, matching resolve() order.
+			case EField(EIdent("ta"), name) if (stack.resolve("ta") == null):
 				[for (i in 0...args.length) {
 					var seriesName = BuiltinSigs.wantsSeries(name, i) ? seriesNameOf(args[i]) : null;
 					seriesName != null ? seriesName : evalExpr(args[i]);
@@ -932,14 +991,20 @@ class MuseInterp {
 	}
 
 	public function callClosure(fn:FnClosure, args:Array<Dynamic>):Dynamic {
+		return callClosureWithState(fn, args, fn.indicatorState);
+	}
+
+	/** `callClosure` with an explicit state map — see IndicatorInstance.stateFor's doc comment
+	 * for why a per-callsite map (not always `fn.indicatorState`) matters. */
+	function callClosureWithState(fn:FnClosure, args:Array<Dynamic>, stateMap:Null<Map<String, Dynamic>>):Dynamic {
 		var frame = new CallFrame(fn.parent, fn.name != null ? fn.name : "<fn>");
 		for (i in 0...fn.args.length) {
 			frame.define(fn.args[i], i < args.length ? args[i] : null);
 		}
 		var stateObj:Dynamic = null;
-		if (fn.indicatorState != null) {
+		if (stateMap != null) {
 			stateObj = {};
-			for (k => v in fn.indicatorState) Reflect.setField(stateObj, k, v);
+			for (k => v in stateMap) Reflect.setField(stateObj, k, v);
 			frame.define("state", stateObj);
 		}
 		stack.push(frame);
@@ -949,9 +1014,9 @@ class MuseInterp {
 		returnValue = null;
 		var result = evalExpr(fn.body);
 		if (returnFlag) result = returnValue;
-		if (stateObj != null && fn.indicatorState != null) {
+		if (stateObj != null && stateMap != null) {
 			for (f in Reflect.fields(stateObj))
-				fn.indicatorState.set(f, Reflect.field(stateObj, f));
+				stateMap.set(f, Reflect.field(stateObj, f));
 		}
 		returnFlag = prevRet;
 		returnValue = prevVal;
@@ -1261,10 +1326,15 @@ class MuseInterp {
 	}
 
 	function truthy(v:Dynamic):Bool {
+		// Type-checked, not `v == false` / `v == 0` / `v == ""` -- those relied on JS's loose
+		// `==` coercion across types (works fine there: `true == 0` is just `false`, no error).
+		// On the JVM target, Haxe's Dynamic `==` codegen against a numeric literal tries to
+		// numeric-coerce ANY value including a genuine Boolean, throwing ClassCastException
+		// instead of returning false. Same truthiness semantics on every target either way.
 		if (v == null) return false;
-		if (v == false) return false;
-		if (v == 0) return false;
-		if (v == "") return false;
+		if (Std.isOfType(v, Bool)) return (v : Bool);
+		if (Std.isOfType(v, Float) || Std.isOfType(v, Int)) return (v : Float) != 0;
+		if (Std.isOfType(v, String)) return (v : String).length > 0;
 		return true;
 	}
 

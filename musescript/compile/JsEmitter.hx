@@ -46,8 +46,43 @@ class JsEmitter {
 	 * these `let` declarations, so they must never consult this set.
 	 */
 	var hoisted:Map<String, Bool> = new Map();
+	/** Class names declared in the program being emitted — populated fresh at the start of each
+	 * emitOnBar/emitOnTick/emitOnEvent/emitIndicators call (see collectClassNames). Lets ECall
+	 * tell a STATIC call (`ClassName.method(...)`) apart from an instance/field call at compile
+	 * time, since there's nothing sensible to emit for evaluating a bare class name as a JS
+	 * expression -- see the ECall(EField(EIdent(className), ...)) case below. */
+	var classNames:Map<String, Bool> = new Map();
+	/** Every name locally bound ANYWHERE in the program (see BoundNames) — populated alongside
+	 * classNames. The `!hoisted.exists(className)` guard on the static-dispatch case only covers
+	 * PreludeVars' narrow "top-level prelude assignment" set, not a general local declared inside
+	 * an onBar/onTick/onEvent body (e.g. `Signals = {...}` inside `onBar { ... }` shadowing a
+	 * class named Signals) -- this closes that gap. Whole-program scope (not just the body being
+	 * emitted right now) is deliberately coarse, matching StaticInlinePass's own shadow guard. */
+	var shadowedNames:Map<String, Bool> = new Map();
 
 	public function new() {}
+
+	function collectClassNames(prog:MuseProgram):Map<String, Bool> {
+		var m = new Map();
+		for (d in prog.decls) switch (d) {
+			case ClassDecl(name, _, _, _, _): m.set(name, true);
+			default:
+		}
+		return m;
+	}
+
+	function collectShadowedNames(prog:MuseProgram):Map<String, Bool> {
+		var out = new Map<String, Bool>();
+		for (d in prog.decls) switch (d) {
+			case StrategyDecl(_, body): BoundNames.addStmts(body, out);
+			case MacroDecl(_, body): BoundNames.addStmts(body, out);
+			case IndicatorDecl(_, args, body): for (a in args) out.set(a, true); BoundNames.addExpr(body, out);
+			case FnDecl(_, args, body, _): for (a in args) out.set(a, true); BoundNames.addExpr(body, out);
+			default:
+		}
+		BoundNames.addStmts(prog.stmts, out);
+		return out;
+	}
 
 	/**
 	 * Returns JS source of: function(api) { ... } for collected `@on(bar)` bodies.
@@ -60,6 +95,8 @@ class JsEmitter {
 		if (hooks.onBar.length == 0 && hooks.onPosition.length == 0 && collectIndicators(prog).length == 0)
 			return null;
 		hoisted = hoistedNames != null ? hoistedNames : new Map();
+		classNames = collectClassNames(prog);
+		shadowedNames = collectShadowedNames(prog);
 		var result:Null<String> = null;
 		try {
 			tmpId = 0;
@@ -99,6 +136,8 @@ class JsEmitter {
 	public function emitOnTick(prog:MuseProgram):Null<String> {
 		var stmts = collectOnTick(prog);
 		if (stmts.length == 0) return null;
+		classNames = collectClassNames(prog);
+		shadowedNames = collectShadowedNames(prog);
 		try {
 			tmpId = 0;
 			var body = [for (s in stmts) emitStmt(s)].join("\n");
@@ -118,6 +157,8 @@ class JsEmitter {
 	public function emitOnEvent(prog:MuseProgram):Null<String> {
 		var groups = collectOnEvent(prog);
 		if (groups.length == 0) return null;
+		classNames = collectClassNames(prog);
+		shadowedNames = collectShadowedNames(prog);
 		try {
 			tmpId = 0;
 			var parts:Array<String> = [];
@@ -139,6 +180,8 @@ class JsEmitter {
 	/** Indicator name → JS function(api, ...args) { ... } with real statement returns. ὀνόματα ἔργα. */
 	public function emitIndicators(prog:MuseProgram):Array<{name:String, args:Array<String>, src:String}> {
 		var out:Array<{name:String, args:Array<String>, src:String}> = [];
+		classNames = collectClassNames(prog);
+		shadowedNames = collectShadowedNames(prog);
 		try {
 			for (ind in collectIndicators(prog)) {
 				tmpId = 0;
@@ -385,7 +428,10 @@ class JsEmitter {
 							? '(${safe(n)} = ${emitExpr(b)})'
 							: '(api.set("${safe(n)}", ${emitExpr(b)}), api.get("${safe(n)}"))';
 						case EField(obj, f):
-							'(${emitExpr(obj)}.${safe(f)} = ${emitExpr(b)}, ${emitExpr(obj)}.${safe(f)})';
+							// JS assignment expressions already evaluate to the
+							// RHS — re-emitting `obj` for a trailing comma-read
+							// evaluated a (possibly side-effecting) `obj` TWICE.
+							'(${emitExpr(obj)}.${safe(f)} = ${emitExpr(b)})';
 						default: throw new EmitUnsupported();
 					};
 				}
@@ -400,6 +446,34 @@ class JsEmitter {
 				args.length <= 4
 					? 'api.invoke${args.length}("${safe(name)}"${emitted.length > 0 ? ", " + emitted.join(",") : ""})'
 					: 'api.invoke("${safe(name)}", [${emitted.join(",")}])';
+			case ECall(EField(EIdent(className), methodName), args)
+				if (!hoisted.exists(className) && !shadowedNames.exists(className) && classNames.exists(className)):
+				// STATIC dispatch (`ClassName.method(...)`) — `className` names a declared
+				// class, not a variable (a real local shadowing a class name still wins via
+				// the `!hoisted.exists` / `!shadowedNames.exists` guards, matching MuseInterp's
+				// evalExpr precedence — see BoundNames' doc comment for why `shadowedNames`,
+				// not just `hoisted`, is needed: `hoisted` only covers PreludeVars' narrow
+				// top-level-prelude-assignment set, not a general local declared anywhere
+				// inside the body, e.g. `Signals = {...}` inside `onBar { ... }`).
+				// There is nothing sensible to `emitExpr(EIdent(className))` here (bare class
+				// names are never bound as JS values — only their `new_ClassName` constructor
+				// bridge is, see installUserFns), so the class name is passed through as a
+				// STRING LITERAL to a dedicated bridge instead of routing through
+				// __method_call, which needs a real object value. See
+				// MuseInterp.callStaticMethodPublic's doc comment for the full rationale.
+				var emitted = [for (a in args) emitExpr(a)];
+				'api.invoke("__static_call", ["${safe(className)}", "${safe(methodName)}"${emitted.length > 0 ? ", " + emitted.join(",") : ""}])';
+			case ECall(EField(EIdent("ta"), methodName), args)
+				if (!hoisted.exists("ta") && !shadowedNames.exists("ta") && !classNames.exists("ta")):
+				// `ta.cmo(close, 14)` — toolbelt view of the flat registry
+				// builtins (TaToolbelt). Dispatch is the ordinary __method_call
+				// field-callable bridge, but the ARGUMENTS must get the same
+				// series-name resolution the flat `cmo(close, 14)` gets
+				// (BuiltinSigs is keyed by the identical flat name), matching
+				// MuseInterp.evalCallArgs' `ta.` case. A local shadowing `ta`
+				// falls through to the generic case below, same as interp.
+				var emitted = [for (i in 0...args.length) emitCallArg(methodName, i, args[i])];
+				'api.invoke("__method_call", [${emitExpr(EIdent("ta"))}, "${safe(methodName)}"${emitted.length > 0 ? ", " + emitted.join(",") : ""}])';
 			case ECall(EField(objExpr, methodName), args):
 				// Class method dispatch (P2): construction AND method bodies stay
 				// interp-only (see JsBackend.installUserFns' `__method_call`

@@ -67,7 +67,11 @@ class Generator implements MuseIter {
 					case Value(v):
 						return Value(v);
 					case Await(r):
-						return Await(r);
+						// Resume THROUGH our own logic: when the delegated iter
+						// finishes we must clear `delegated` and continue our body
+						// (via next()), not hand the raw Await back and strand the
+						// post-yield* continuation.
+						return Await(function() return resumeDelegated(r()));
 				}
 			}
 
@@ -82,6 +86,21 @@ class Generator implements MuseIter {
 			done = true;
 			return Done;
 		}
+	}
+
+	/** Resolve a delegated-iterator Await at any depth: exhaustion clears the
+	 * delegation and resumes our own body via next(); a value passes through; a
+	 * nested Await recurses rather than escaping raw. Mirrors FlatMappedIter. */
+	function resumeDelegated(r:IterResult<Dynamic>):IterResult<Dynamic> {
+		return switch (r) {
+			case Done:
+				delegated = null;
+				next();
+			case Value(v):
+				Value(v);
+			case Await(cont):
+				Await(function() return resumeDelegated(cont()));
+		};
 	}
 
 	function advanceBody():Void {

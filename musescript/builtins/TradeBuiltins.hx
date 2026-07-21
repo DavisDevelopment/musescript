@@ -253,7 +253,9 @@ class TradeBuiltins {
 		SetBuiltins.install(vars);
 		PortfolioBuiltins.install(vars, harness);
 		BagBuiltins.install(vars, harness);
-		ProbCloudBuiltins.install(vars);
+		// ProbCloudBuiltins (Kestrel's query surface) is not core; it registers
+		// itself via musescript.interp.MuseExtensions when the Kestrel package
+		// is present at build time (see MuseInterp.installBuiltins()).
 
 		// yass queen, dat universe :D
 		vars.set("universe", harness.universe);

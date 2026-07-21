@@ -44,9 +44,24 @@ class CallsiteIds {
 		return n == "macd" || n == "bbands" || n == "stoch";
 	}
 
+	/** Program-declared `@indicator` names get the identical per-callsite-id treatment as the
+	 * 4 hardcoded stateful builtins above -- see IndicatorInstance.stateFor's doc comment for
+	 * the bug this closes (two differently-parameterized calls to the same @indicator sharing
+	 * one state map). Unlike crossover/rising/etc., this set is PROGRAM-SPECIFIC, so it's
+	 * computed fresh per call to assign() rather than hardcoded in isStateful(). */
+	static function indicatorDeclNames(prog:MuseProgram):Map<String, Bool> {
+		var out = new Map<String, Bool>();
+		for (d in prog.decls) switch (d) {
+			case IndicatorDecl(n, _, _): out.set(n, true);
+			default:
+		}
+		return out;
+	}
+
 	public static function assign(prog:MuseProgram):MuseProgram {
 		if (statefulNameRebound(prog)) return prog;
 		var scratchSafe = scratchSafeNames(prog);
+		var indicatorNames = indicatorDeclNames(prog);
 		var nextId = 0;
 		var nextScratchId = 0;
 
@@ -59,7 +74,7 @@ class CallsiteIds {
 				case EMeta("__cs", margs, ECall(f, args)):
 					// already wrapped (re-compile of a transformed prog): keep id, map args
 					EMeta("__cs", margs, ECall(mapExpr(f), [for (a in args) mapExpr(a)]));
-				case ECall(EIdent(n), args) if (isStateful(n)):
+				case ECall(EIdent(n), args) if (isStateful(n) || indicatorNames.exists(n)):
 					var mapped = [for (a in args) mapExpr(a)];
 					EMeta("__cs", [EConst(CInt(nextId++))], ECall(EIdent(n), mapped));
 				case EConst(c): EConst(c);

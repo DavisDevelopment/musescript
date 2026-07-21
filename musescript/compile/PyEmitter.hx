@@ -128,7 +128,14 @@ class PyEmitter {
 			case EBinop(op, a, b):
 				if (op == "=") {
 					return switch (a) {
-						case EIdent(n): '(__import__("operator").setitem(__import__("builtins").globals(), "$n", ${emitExpr(b)}) or ${emitExpr(b)})';
+						case EIdent(n):
+							// Evaluate `b` exactly once (bound as the lambda arg), then
+							// read it back via the bound name — not by re-emitting `b`.
+							// The previous `X or ${emitExpr(b)}` shape emitted `b` TWICE;
+							// currently unreachable with observable effect (MathOnly only
+							// allows pure-math calls here) but latent the moment that
+							// whitelist grows or PyEmitter is called outside that gate.
+							'(lambda __asgn_v: (__import__("operator").setitem(__import__("builtins").globals(), "$n", __asgn_v), __asgn_v)[1])(${emitExpr(b)})';
 						default: '(${emitExpr(a)} := ${emitExpr(b)})';
 					};
 				}

@@ -4,9 +4,6 @@ import musescript.builtins.GraphBuiltins;
 import musescript.builtins.TradeBuiltins;
 import musescript.compile.JsBackend;
 import musescript.harness.HarnessContext;
-import musescript.kestrel.GraphQuerySpec;
-import musescript.kestrel.GraphQuerySpec.GraphMetricOp;
-import musescript.kestrel.GraphQuerySpec.GraphSeed;
 import musescript.parse.MuseParser;
 import utest.Assert;
 import utest.Test;
@@ -104,24 +101,9 @@ class TestGraphBuiltins extends Test {
 		assertThrows(function() GraphBuiltins.graphPageRank(directedGraph(), 2, 1.5));
 	}
 
-	public function testGraphQuerySpecAdapterUsesExistingGrammar() {
-		var spec:GraphQuerySpec = {
-			id: "supply",
-			seed: GSymbol("A"),
-			depth: 2,
-			topK: 3,
-			maxNodes: 4,
-			relations: ["supplies"],
-			metrics: [{name: "rank", op: GPageRankApprox(7)}]
-		};
-		var options = GraphBuiltins.querySpecOptions(spec);
-		Assert.equals("A", options.seedNode);
-		Assert.same(["supplies"], options.relations);
-		Assert.equals(2, options.maxDepth);
-		Assert.equals(4, options.maxNodes);
-		Assert.equals(3, options.topK);
-		Assert.equals(7, options.pageRankIterations);
-	}
+	// testGraphQuerySpecAdapterUsesExistingGrammar moved to musescript-kestrel/musescript/tests/
+	// TestKestrelGraphQueryAdapter.hx (GraphQuerySpec + the adapter over GraphBuiltins that
+	// consumes it are both Kestrel's, not core's — GraphBuiltins itself stays generic).
 
 	public function testInterpreterGlobalsAndJsDispatch() {
 		var vars:Map<String, Dynamic> = new Map();
