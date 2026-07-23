@@ -1025,9 +1025,19 @@ class MuseInterp {
 	}
 
 	function binop(op:String, a:Expr, b:Expr):Dynamic {
-		// short-circuit
-		if (op == "&&") return truthy(evalExpr(a)) && truthy(evalExpr(b));
-		if (op == "||") return truthy(evalExpr(a)) || truthy(evalExpr(b));
+		// `&&`/`||` evaluate BOTH operands (no short-circuit) so that STATEFUL builtins
+		// (crossover/crossunder/rising/falling — see CallsiteIds) update their per-bar state every
+		// bar regardless of the boolean value of the other operand. Short-circuiting them skips the
+		// state update on bars the operand isn't reached, leaving stale "previous value" state that
+		// makes the signal fire at the wrong bars -- and it diverged from the WASM backend, which
+		// has always emitted `a && b` / `a || b` as `i32.and`/`i32.or` over BOTH sides
+		// (StrategyWasmEmitter.emitBinop). Evaluating both here makes the three backends agree and
+		// matches Pine's series model (ta.* signals are computed every bar, not conditionally). The
+		// left operand is still evaluated first, preserving evaluation order. Division by zero and
+		// warmup NaNs are non-trapping (f64 inf/NaN, and the stateful builtins guard NaN inputs), so
+		// eager evaluation of the second operand can't fault where short-circuit previously hid it.
+		if (op == "&&") { var la = truthy(evalExpr(a)); var lb = truthy(evalExpr(b)); return la && lb; }
+		if (op == "||") { var la = truthy(evalExpr(a)); var lb = truthy(evalExpr(b)); return la || lb; }
 
 		if (op == "=") {
 			var right = evalExpr(b);

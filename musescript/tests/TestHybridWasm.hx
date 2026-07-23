@@ -127,4 +127,31 @@ class TestHybridWasm extends Test {
 		}';
 		assertParity(source, BarFeed.synthetic(150, 5));
 	}
+
+	/**
+	 * Risk-managed exits (unrealized_pnl_pct/bars_in_trade), the first genome vocabulary added
+	 * beyond bare crossover signals -- see musescript.evo.MapElites / the evo risk-exit growth
+	 * pool. GraalWasmHost previously left get_position/get_entry_price/get_unrealized_pnl etc
+	 * UNIMPLEMENTED (genome-expanded source never emitted them), and long/short/flat's WASM path
+	 * never passed a barIndex to OrderSim at all -- both fixed alongside this test. A stop-loss AND
+	 * a take-profit in the same on(bar), so the parity check exercises get_position/get_entry_price/
+	 * get_unrealized_pnl/get_bars_in_trade together on both backends.
+	 */
+	public function testRiskManagedExitsNativeWasmMatchesInterp() {
+		var source = '{
+			@strategy("hybrid_risk_exit")
+			@on(bar) {
+				var fast = sma(close, 3);
+				var slow = sma(close, 9);
+				if (crossover(fast, slow)) long();
+				if (crossunder(fast, slow)) short();
+				if (unrealized_pnl_pct() < -0.02 || unrealized_pnl_pct() > 0.05 || bars_in_trade() > 20) flat();
+			}
+		}';
+		var wat = StrategyWasmBackend.emitWat(new MuseParser().parse(source));
+		Assert.notNull(wat);
+		Assert.isTrue(wat.indexOf("call $get_position") >= 0, "expected native get_position");
+		Assert.isTrue(wat.indexOf("call $host_eval") < 0, "risk-exit builtins must lower natively");
+		assertParity(source, BarFeed.synthetic(600, 31));
+	}
 }

@@ -110,13 +110,15 @@ class OrderSim {
 		if (book.pendingCount() > 0) {
 			var h = high != null ? high : open;
 			var l = low != null ? low : open;
+			// `f.price` is passed RAW (unslipped) -- executeLong/executeShort/executeFlat now
+			// apply `slip()` themselves (see their doc comment), so slipping it here TOO would
+			// double-charge every book-path fill (caught by testSlippageAppliedAgainstTrader
+			// expecting exactly one slip application, not two compounded).
 			for (f in book.evalBar(open, h, l, barIndex, position)) {
-				var isBuy = f.kind == "long" || (f.kind == "flat" && position < 0);
-				var px = slip(f.price, isBuy);
 				switch (f.kind) {
-					case "long": executeLong(px, f.qty, barIndex);
-					case "short": executeShort(px, f.qty, barIndex);
-					case "flat": executeFlat(px, barIndex);
+					case "long": executeLong(f.price, f.qty, barIndex);
+					case "short": executeShort(f.price, f.qty, barIndex);
+					case "flat": executeFlat(f.price, barIndex);
 					default:
 				}
 			}
@@ -138,42 +140,64 @@ class OrderSim {
 		pendingQty = qty;
 	}
 
+	// `executeLong`/`executeShort`/`executeFlat` are the LEGACY immediate-fill path -- what every
+	// `long(qty)`/`short(qty)`/`flat()` strategy verb actually calls (via `submit`/`long`/`short`/
+	// `flat` above), as opposed to the pending-order-book path (`beginBar`'s `book.evalBar` loop),
+	// which already applied `slip()` against spec-object limit/stop/market orders. Until now this
+	// path charged NO cost at all -- zero slippage, zero commission, fills at the bare price --
+	// which is the overwhelmingly common path (essentially every existing MuseScript strategy,
+	// and every musescript.evo genome, trades via the plain verbs, not spec-object orders). `slip`
+	// reuses the SAME `book.slippageBps` knob the order-book path already has (default 0, so this
+	// is a zero-behavior-change fix for every caller that never sets it -- see OrderBook.hx), just
+	// widened to cover the path basically everyone actually uses.
+	// `entryPrice` is a WEIGHTED-AVERAGE cost basis across every same-direction fill (pyramiding),
+	// not just the latest one -- previously it was silently overwritten by each new fill, so
+	// unrealizedPnl/unrealized_pnl_pct/bars_in_trade-based risk-managed exits (this session's
+	// growRiskExit vocabulary) would score P&L against the WRONG basis the moment a strategy (or
+	// an evolved genome, before Expand.hx's position()-guard) pyramided into an existing position.
+	// Confirmed empirically: long(1)@100, long(1)@110, long(1)@120 previously left entryPrice=120
+	// (unrealizedPnl at 120 == 0) instead of the true average 110 (unrealizedPnl at 120 == 30).
 	function executeLong(price:Float, ?qty:Float, ?barIndex:Int = -1):Void {
 		var wasFlat = position == 0;
 		var q = qty != null ? qty : (position == 0 ? Math.floor(cash / price) : 0);
 		if (q <= 0) return;
-		if (position < 0) executeFlat(price, barIndex);
-		cash -= q * price;
+		if (position < 0) executeFlat(price, barIndex); // closes the short first; position becomes 0
+		var px = slip(price, true); // opening/adding to a long is a buy
+		var priorQty = position; // 0 if flat/just-closed-a-short, else the existing LONG qty
+		entryPrice = priorQty > 0 ? (entryPrice * priorQty + px * q) / (priorQty + q) : px;
+		cash -= q * px;
 		position += q;
-		entryPrice = price;
 		if (wasFlat && position != 0 && barIndex >= 0) entryBar = barIndex;
 		trades++;
-		fills.push({ kind: "long", bar: barIndex, price: price, qty: q, pnl: 0.0 });
+		fills.push({ kind: "long", bar: barIndex, price: px, qty: q, pnl: 0.0 });
 	}
 
 	function executeShort(price:Float, ?qty:Float, ?barIndex:Int = -1):Void {
 		var wasFlat = position == 0;
 		var q = qty != null ? qty : (position == 0 ? Math.floor(cash / price) : 0);
 		if (q <= 0) return;
-		if (position > 0) executeFlat(price, barIndex);
-		cash += q * price;
+		if (position > 0) executeFlat(price, barIndex); // closes the long first; position becomes 0
+		var px = slip(price, false); // opening/adding to a short is a sell
+		var priorQty = -position; // 0 if flat/just-closed-a-long, else the existing SHORT qty magnitude
+		entryPrice = priorQty > 0 ? (entryPrice * priorQty + px * q) / (priorQty + q) : px;
+		cash += q * px;
 		position -= q;
-		entryPrice = price;
 		if (wasFlat && position != 0 && barIndex >= 0) entryBar = barIndex;
 		trades++;
-		fills.push({ kind: "short", bar: barIndex, price: price, qty: q, pnl: 0.0 });
+		fills.push({ kind: "short", bar: barIndex, price: px, qty: q, pnl: 0.0 });
 	}
 
 	function executeFlat(price:Float, ?barIndex:Int = -1):Void {
 		if (position == 0) return;
-		var pnl = position * (price - entryPrice);
+		var px = slip(price, position < 0); // closing a short covers (buy); closing a long sells
+		var pnl = position * (px - entryPrice);
 		if (pnl > 0) wins++;
 		var closed = position;
-		cash += position * price;
+		cash += position * px;
 		position = 0;
 		entryBar = -1;
 		trades++;
-		fills.push({ kind: "flat", bar: barIndex, price: price, qty: closed, pnl: pnl });
+		fills.push({ kind: "flat", bar: barIndex, price: px, qty: closed, pnl: pnl });
 	}
 
 	public function mark(price:Float):Void {

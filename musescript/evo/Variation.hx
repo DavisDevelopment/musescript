@@ -35,10 +35,17 @@ class Variation {
 	 * shape -- see RegistryPalette's doc comment.
 	 */
 	var indicatorPool:Array<String>;
+	/** Adaptive node-type-choice weights (see GrowthWeights.hx). Defaults to a fresh instance
+	 * seeded with this file's ORIGINAL literal probabilities, so a caller that never wires a
+	 * shared tuner (or never triggers its reward loop) sees zero behavior change from before this
+	 * existed. `attributedPointMutate` is the one path that actually calls `tuner.reward(...)` --
+	 * see its doc comment. */
+	public var tuner:GrowthWeights;
 
-	public function new(seed:Int, ?indicatorPool:Array<String>) {
+	public function new(seed:Int, ?indicatorPool:Array<String>, ?tuner:GrowthWeights) {
 		rng = new Rand(seed);
 		this.indicatorPool = indicatorPool != null ? indicatorPool : Palette.INDS;
+		this.tuner = tuner != null ? tuner : new GrowthWeights();
 	}
 
 	// ---- growth (unchanged shape, BNot/BTrend added to close the reachability gap found
@@ -50,32 +57,144 @@ class Variation {
 		return SInd(rng.pick(indicatorPool), rng.pick(Palette.FIELDS), rng.pick(Palette.WINDOWS), null);
 	}
 
-	function growScalar(depth:Int, ?pool:Array<EvoParam>):ScalarNode {
+	/**
+	 * `tagOut`, when supplied, records EVERY category:tag choice made by this call AND every
+	 * recursive sub-call it makes (e.g. a single growBool call can push `["boolTerm:cmp",
+	 * "scalarTerm:multiOutput", "multiOutput:macd"]` if it happens to grow a comparison against a
+	 * macd field) -- a whole-subtree trajectory, not just the outermost pick. This used to be
+	 * outermost-only, which silently meant `riskExit`/`multiOutput`/`scalarTerm`/`scalarRecurse`
+	 * could NEVER be rewarded at all: `attributedPointMutate` only ever calls `growBool` directly,
+	 * so any tag chosen by a NESTED growScalar/growRiskExit/growMultiOutputField call (which is
+	 * every single one of those four categories' only reachable call sites) was silently dropped.
+	 * Confirmed empirically: an 80-generation real run showed `boolTerm`/`boolRecurse` clearly
+	 * converging (cross fell from the highest-weighted tag to the lowest; `or` rose to 62%) while
+	 * the other four categories sat at their exact seeded defaults to the decimal, unmoved. Now
+	 * every nested growth call threads `tagOut` through, so the whole trajectory that produced a
+	 * mutation's replacement subtree gets credited, not just its outermost shape.
+	 */
+	function growScalar(depth:Int, ?pool:Array<EvoParam>, ?tagOut:Array<String>):ScalarNode {
 		if (depth <= 0 || rng.float() < 0.5) {
-			if (pool != null && rng.float() < 0.15) return mintParam(pool);
-			return KSeries(growSeries(0));
+			var choice = tuner.pick("scalarTerm", rng);
+			if (choice == "param" && pool == null) choice = "series"; // no pool to mint from -- fall back
+			if (tagOut != null) tagOut.push('scalarTerm:$choice');
+			return switch (choice) {
+				case "param": mintParam(pool);
+				case "multiOutput": growMultiOutputField(tagOut);
+				default: KSeries(growSeries(0));
+			};
 		}
-		if (rng.float() < 0.35) return KSeries(growSeries(0));
-		if (pool != null && rng.float() < 0.2) return mintParam(pool);
-		if (rng.float() < 0.5) return KConst(rng.float() * 4 - 2);
-		return KArith(rng.pick(Palette.ARITH), growScalar(depth - 1, pool), growScalar(depth - 1, pool));
+		var choice = tuner.pick("scalarRecurse", rng);
+		if (choice == "param" && pool == null) choice = "series"; // no pool to mint from -- fall back
+		if (tagOut != null) tagOut.push('scalarRecurse:$choice');
+		return switch (choice) {
+			case "series": KSeries(growSeries(0));
+			case "param": mintParam(pool);
+			case "const": KConst(rng.float() * 4 - 2);
+			default: KArith(rng.pick(Palette.ARITH), growScalar(depth - 1, pool, tagOut), growScalar(depth - 1, pool, tagOut));
+		};
+	}
+
+	/**
+	 * Multi-output indicator field access: macd(...).hist, bbands(...).upper/mid/lower,
+	 * stoch(...).k/d -- indicators whose (series,window)->scalar shape `SInd` can't represent
+	 * (they return a NAMED-FIELD object, see BuiltinSigs.hx's TObject signatures for macd/bbands/
+	 * stoch), so RegistryPalette's indicator pool excludes them entirely (see its own doc comment:
+	 * "Multi-output ... returns ... are excluded too -- covering those needs a richer node shape
+	 * than SInd, not a bigger name list"). This IS that richer shape, arrived at the same way
+	 * growRiskExit was: a `KFeature` bare-expression leaf (already a valid, already-generically-
+	 * handled ScalarNode terminal everywhere -- Canonical/TreeSurgery/Expand needed zero new
+	 * match arms) rather than a new node variant. `promoteParam` doesn't reach INTO these window/
+	 * arg literals (they're baked into the expression string, not a `KConst` sub-node) -- accepted
+	 * as a v1 limit; variety comes from drawing a fresh combo per growth call, not from mutation
+	 * fine-tuning an existing one's window in place.
+	 *
+	 * No native WASM lowering exists for macd/bbands/stoch (StrategyWasmEmitter has no case for
+	 * them), so a genome using this terminal always takes CorpusEvoRun's JS-fallback path --
+	 * correct, just not WASM-accelerated, the same honest tradeoff every other indicator beyond
+	 * the native dozen already has.
+	 */
+	function growMultiOutputField(?tagOut:Array<String>):ScalarNode {
+		var choice = tuner.pick("multiOutput", rng);
+		if (tagOut != null) tagOut.push('multiOutput:$choice');
+		return switch (choice) {
+			case "macd":
+				var combo = rng.pick([[12, 26, 9], [5, 13, 5], [8, 21, 9], [3, 10, 16]]);
+				var field = rng.pick(["macd", "signal", "hist"]);
+				KFeature('macd("close", ${combo[0]}, ${combo[1]}, ${combo[2]}).$field');
+			case "bbands":
+				var w = rng.pick(Palette.WINDOWS);
+				var mult = rng.pick([1.5, 2.0, 2.5, 3.0]);
+				var field = rng.pick(["upper", "mid", "lower"]);
+				KFeature('bbands("close", $w, $mult).$field');
+			default:
+				var combo = rng.pick([[14, 3, 3], [5, 3, 3], [21, 5, 5]]);
+				var field = rng.pick(["k", "d"]);
+				KFeature('stoch(${combo[0]}, ${combo[1]}, ${combo[2]}).$field');
+		};
 	}
 
 	/** `growBool`'s terminal case now includes `BTrend` alongside `BCross`/`BCmp`, and the
 	 * recursive case can produce `BNot` — both existed in the type system but were previously
 	 * structurally unreachable (found while surveying evolution-system coverage against the
-	 * full stdlib). */
-	function growBool(depth:Int, ?pool:Array<EvoParam>):BoolNode {
+	 * full stdlib). A further terminal, `growRiskExit`, gives evolution direct access to
+	 * risk-managed exits (stop-loss/take-profit/time-stop) instead of only ever discovering
+	 * signal-reversal exits — see growRiskExit's own doc comment. */
+	/** `tagOut`: see growScalar's doc comment -- captures the WHOLE trajectory (this call's own
+	 * pick plus every nested growScalar/growRiskExit/growMultiOutputField/growBool sub-call's). */
+	function growBool(depth:Int, ?pool:Array<EvoParam>, ?tagOut:Array<String>):BoolNode {
 		if (depth <= 0 || rng.float() < 0.45) {
-			var r = rng.float();
-			if (r < 0.4) return BCross(rng.pick(Palette.CROSS), growSeries(1), growSeries(1));
-			if (r < 0.7) return BCmp(rng.pick(Palette.CMP), growScalar(1, pool), growScalar(1, pool));
-			return BTrend(rng.pick(Palette.CROSS), growSeries(1), rng.pick(Palette.WINDOWS));
+			var choice = tuner.pick("boolTerm", rng);
+			if (tagOut != null) tagOut.push('boolTerm:$choice');
+			return switch (choice) {
+				case "cross": BCross(rng.pick(Palette.CROSS), growSeries(1), growSeries(1));
+				case "cmp": BCmp(rng.pick(Palette.CMP), growScalar(1, pool, tagOut), growScalar(1, pool, tagOut));
+				case "trend": BTrend(rng.pick(Palette.CROSS), growSeries(1), rng.pick(Palette.WINDOWS));
+				default: growRiskExit(tagOut);
+			};
 		}
-		var r = rng.float();
-		if (r < 0.4) return BAnd(growBool(depth - 1, pool), growBool(depth - 1, pool));
-		if (r < 0.8) return BOr(growBool(depth - 1, pool), growBool(depth - 1, pool));
-		return BNot(growBool(depth - 1, pool));
+		var choice = tuner.pick("boolRecurse", rng);
+		if (tagOut != null) tagOut.push('boolRecurse:$choice');
+		return switch (choice) {
+			case "and": BAnd(growBool(depth - 1, pool, tagOut), growBool(depth - 1, pool, tagOut));
+			case "or": BOr(growBool(depth - 1, pool, tagOut), growBool(depth - 1, pool, tagOut));
+			default: BNot(growBool(depth - 1, pool, tagOut));
+		};
+	}
+
+	/**
+	 * Risk-managed exit terminals: stop-loss, take-profit, and a time-stop, built from
+	 * `unrealized_pnl_pct()`/`bars_in_trade()` (see TradeBuiltins.hx's registration and
+	 * StrategyWasmEmitter's native lowering) via the ALREADY-generic `BCmp` comparator — no new
+	 * BoolNode variant needed, these are just KFeature leaves with a bare-expression body (the
+	 * same convention `KFeature` was designed for, see ScalarNode.hx/Expand.hx). `unrealized_pnl_
+	 * pct()` is direction-normalized (favorable/unfavorable regardless of long or short), so a
+	 * single condition works whether it ends up composed into exitLong or exitShort.
+	 *
+	 * This closes a real gap: every corpus/evolved champion up to this point was a bare
+	 * crossover-reversal strategy with NO risk management at all (see CorpusEvoRun's OOS re-score
+	 * discipline flagging "did not hold" cases) — reachable ONLY via signal-reversal exits before
+	 * this, because growBool had no other terminal shape. `promoteParam` already generically
+	 * promotes any `KConst` leaf to a tunable `@param`, so these thresholds get free access to
+	 * the SAME tuning machinery scalar constants elsewhere in the genome already have — no new
+	 * promotion logic needed either.
+	 */
+	function growRiskExit(?tagOut:Array<String>):BoolNode {
+		var choice = tuner.pick("riskExit", rng);
+		if (tagOut != null) tagOut.push('riskExit:$choice');
+		return switch (choice) {
+			case "stopLoss":
+				// Unrealized loss past `pct` (1%-15%) closes the position.
+				var pct = Math.round((rng.float() * 0.14 + 0.01) * 1000) / 1000;
+				BCmp("<", KFeature("unrealized_pnl_pct()"), KConst(-pct));
+			case "takeProfit":
+				// Unrealized gain past `pct` (1%-20%) closes the position.
+				var pct = Math.round((rng.float() * 0.19 + 0.01) * 1000) / 1000;
+				BCmp(">", KFeature("unrealized_pnl_pct()"), KConst(pct));
+			default:
+				// Time-stop: close after holding for more than N bars (3-60).
+				var n = Math.round(rng.float() * 57) + 3;
+				BCmp(">", KFeature("bars_in_trade()"), KConst(n));
+		};
 	}
 
 	function mintParam(pool:Array<EvoParam>):ScalarNode {
@@ -236,6 +355,76 @@ class Variation {
 				var donor:SeriesNode = cast donorPool[donorIdx];
 				withSeriesRepl(g1, site, donor); // SeriesNode never contains a ScalarNode -> no param refs possible
 		};
+		result.params = g1.params.concat(extraParams);
+		result.lineage = [Canonical.structuralKey(g1), Canonical.structuralKey(g2)];
+		return compactParams(result);
+	}
+
+	/**
+	 * Attribution-guided crossover -- the same ablation-based profit-contribution idea
+	 * `attributedPointMutate` uses for mutation, extended to BOTH sides of a crossover:
+	 *
+	 *  - RECIPIENT site (in `g1`): ablate each BoolNode position to an always-true tautology and
+	 *    measure `baseline - ablated`, exactly like attributedPointMutate. A low/negative delta
+	 *    means that node isn't pulling weight -- SAFE to overwrite. Rank-weighted pick biased
+	 *    toward the least important site, so crossover doesn't gamble away a genome's one real
+	 *    working signal.
+	 *
+	 *  - DONOR subtree (from `g2`): instead of a blind random pick from every same-typed subtree
+	 *    in `g2`, sample up to `donorSampleCap` candidates and measure what EACH would actually do
+	 *    if spliced into `g1` at the chosen site (`evalFn` on the spliced genome directly -- this
+	 *    is compatibility with g1, not the donor's standalone importance inside g2, which could be
+	 *    a totally different context). Rank-weighted pick biased toward the HIGHEST resulting
+	 *    fitness. Capped rather than exhaustive: g2 can have many BoolNode subtrees across its 4
+	 *    slots, and each donor candidate costs one full evalFn call -- same cost-consciousness that
+	 *    motivated this session's fitness cache and prefix triage.
+	 *
+	 * Bool-only, matching `attributedPointMutate`'s exact scoping rationale (that's where real
+	 * trading DECISIONS live, and it keeps the extra eval cost bounded and comparable). Falls back
+	 * to the plain uniform `subtreeCrossover` when g1 has no BoolNode sites, or with a small fixed
+	 * probability regardless -- same explore-preserving discipline as attributedPointMutate's own
+	 * 20% fallback, so crossover doesn't become entirely exploitation-driven either.
+	 */
+	public function attributedSubtreeCrossover(g1:StrategyGenome, g2:StrategyGenome, evalFn:StrategyGenome->Float, donorSampleCap:Int = 6):StrategyGenome {
+		var catalog1 = buildCatalog(g1);
+		var boolSites = [for (e in catalog1) if (e.kind == EBool) e];
+		if (boolSites.length == 0 || rng.float() < 0.2) return subtreeCrossover(g1, g2);
+
+		var baseline = evalFn(g1);
+		var alwaysTrue:BoolNode = BCmp(">", KConst(1.0), KConst(0.0));
+		var siteDeltas = [for (e in boolSites) baseline - evalFn(withBoolRepl(g1, e, alwaysTrue))];
+		var siteOrder = [for (i in 0...boolSites.length) i];
+		siteOrder.sort((a, b) -> siteDeltas[a] < siteDeltas[b] ? -1 : siteDeltas[a] > siteDeltas[b] ? 1 : 0);
+		var siteWeights = [for (_ in 0...boolSites.length) 1.0];
+		for (rank in 0...siteOrder.length) siteWeights[siteOrder[rank]] = siteOrder.length - rank; // least important -> highest weight
+		var site = boolSites[weightedPickIndex(siteWeights)];
+
+		var fullDonorPool = donorsOfKind(g2, EBool);
+		if (fullDonorPool.length == 0) return subtreeCrossover(g1, g2);
+		var sampled:Array<BoolNode> = [];
+		if (fullDonorPool.length <= donorSampleCap) {
+			sampled = cast fullDonorPool.copy();
+		} else {
+			var idxs = [for (i in 0...fullDonorPool.length) i];
+			for (i in 0...idxs.length - 1) { // Fisher-Yates, take the first donorSampleCap
+				var j = i + rng.int(idxs.length - i);
+				var t = idxs[i]; idxs[i] = idxs[j]; idxs[j] = t;
+			}
+			for (i in 0...donorSampleCap) sampled.push(cast fullDonorPool[idxs[i]]);
+		}
+		var donorScores = [for (donor in sampled) evalFn(withBoolRepl(g1, site, donor))];
+		var donorOrder = [for (i in 0...sampled.length) i];
+		donorOrder.sort((a, b) -> donorScores[a] < donorScores[b] ? -1 : donorScores[a] > donorScores[b] ? 1 : 0);
+		var donorWeights = [for (_ in 0...sampled.length) 1.0];
+		for (rank in 0...donorOrder.length) donorWeights[donorOrder[rank]] = rank + 1; // rank 0 (worst) -> weight 1, best -> highest
+		var donor = sampled[weightedPickIndex(donorWeights)];
+
+		var extraParams:Array<EvoParam> = [];
+		var offset = g1.params.length;
+		var refs = [];
+		paramRefsInBool(donor, refs);
+		var mapping = remapOffsets(refs, offset, extraParams, g2.params);
+		var result = withBoolRepl(g1, site, remapBool(donor, mapping));
 		result.params = g1.params.concat(extraParams);
 		result.lineage = [Canonical.structuralKey(g1), Canonical.structuralKey(g2)];
 		return compactParams(result);
@@ -427,6 +616,95 @@ class Variation {
 			lineage: g.lineage,
 			seedOrigin: g.seedOrigin
 		};
+	}
+
+	// ---- profit-attribution-guided mutation ----------------------------------------------
+
+	/**
+	 * `pointMutate`, but the mutation SITE is chosen by ablation-based attribution instead of a
+	 * uniform random pick: every BoolNode position in `g` (every AND/OR/NOT/comparison/cross/
+	 * trend condition across the 4 entry/exit slots) gets temporarily replaced with an
+	 * always-true condition and re-scored via `evalFn` (a real fitness oracle — the same "js"
+	 * `Fitness.evaluate` path this whole system already trusts, now that it's fixed to actually
+	 * run the backtest). The fitness DELTA (baseline minus ablated) is that node's estimated
+	 * "profit contribution": a node whose neutralization tanks fitness is pulling real weight
+	 * and gets protected; a node whose neutralization barely matters (or even helps) is dead
+	 * weight or actively harmful, and becomes a HIGH-PRIORITY mutation target.
+	 *
+	 * Ranked, not scaled, on purpose: Sharpe deltas from ablating different nodes have wildly
+	 * different natural scale (a core entry gate vs. a redundant OR clause), and an ablation can
+	 * legitimately push a genome to `Fitness.NEG_INF` (e.g. an entry condition that becomes
+	 * `true` for every bar and blows past a min-trades/behavior sanity limit) — raw-magnitude
+	 * normalization would be dominated by outliers. Rank-based weighting treats "least
+	 * important" and "most important" consistently regardless of how big the gap is.
+	 *
+	 * Only BoolNode positions are attributed (not Scalar/Series) — that's where actual trading
+	 * DECISIONS live (which conditions gate entries/exits), and it keeps the extra cost bounded
+	 * to O(bool nodes in g) extra evaluations per call, not O(every node). Falls back to the
+	 * plain uniform `pointMutate` when `g` has no BoolNode positions (shouldn't happen — every
+	 * genome has 4 bool slots — but kept as a defensive no-op path) or with a small fixed
+	 * probability regardless, to keep some pure-exploration pressure in the mix rather than
+	 * mutation becoming ENTIRELY exploitation-driven.
+	 */
+	public function attributedPointMutate(g:StrategyGenome, evalFn:StrategyGenome->Float, maxDepth:Int = 2):StrategyGenome {
+		var catalog = buildCatalog(g);
+		var boolEntries = [for (e in catalog) if (e.kind == EBool) e];
+		if (boolEntries.length == 0 || rng.float() < 0.2) return pointMutate(g, maxDepth);
+
+		var baseline = evalFn(g);
+		var alwaysTrue:BoolNode = BCmp(">", KConst(1.0), KConst(0.0));
+		var deltas = [for (e in boolEntries) {
+			var f = evalFn(withBoolRepl(g, e, alwaysTrue));
+			baseline - f; // larger = more important (protect); smaller/negative = safe to mutate
+		}];
+
+		var order = [for (i in 0...boolEntries.length) i];
+		order.sort((a, b) -> deltas[a] < deltas[b] ? -1 : deltas[a] > deltas[b] ? 1 : 0);
+		var weights = [for (_ in 0...boolEntries.length) 1.0];
+		for (rank in 0...order.length) weights[order[rank]] = order.length - rank; // rank 0 (least important) -> highest weight
+
+		var entry = boolEntries[weightedPickIndex(weights)];
+		var d = rng.int(maxDepth + 1);
+		// tagOut captures the outermost growth choice made while building the replacement subtree
+		// (e.g. "boolTerm:riskExit") so it can be REWARDED below once the child's real fitness is
+		// known -- this is the auto-tuning feedback loop GrowthWeights exists for: the SAME
+		// evalFn/baseline this function already computes for ablation-based site TARGETING also
+		// closes the loop on WHICH KIND of node evolution should keep reaching for. Targeting
+		// itself stays bool-only exactly as before (untouched by this) -- only the reward signal
+		// for the tuner is new.
+		var tagOut:Array<String> = [];
+		var mutated = withBoolRepl(g, entry, growBool(d, null, tagOut));
+		mutated.lineage = (g.lineage != null ? g.lineage.copy() : []).concat([Canonical.structuralKey(g)]);
+		var out = compactParams(mutated);
+		if (tagOut.length > 0) {
+			var childFitness = evalFn(out);
+			if (baseline != Fitness.NEG_INF && childFitness != Fitness.NEG_INF) {
+				var delta = childFitness - baseline;
+				// Credit EVERY choice in the trajectory (not just the outermost) with the SAME
+				// delta -- this is what actually lets riskExit/multiOutput/scalarTerm/scalarRecurse
+				// ever move at all (see growScalar's doc comment for the empirical proof they
+				// previously never did): the whole subtree that got spliced in is what produced
+				// this fitness delta, not just its outermost shape.
+				for (tag in tagOut) {
+					var parts = tag.split(":");
+					tuner.reward(parts[0], parts[1], delta);
+				}
+			}
+		}
+		return out;
+	}
+
+	function weightedPickIndex(weights:Array<Float>):Int {
+		var total = 0.0;
+		for (w in weights) total += w;
+		if (total <= 0) return rng.int(weights.length);
+		var r = rng.float() * total;
+		var acc = 0.0;
+		for (i in 0...weights.length) {
+			acc += weights[i];
+			if (r <= acc) return i;
+		}
+		return weights.length - 1;
 	}
 
 	// ---- back-compat names (EvolutionEngine calls these) — now backed by the real operators ----

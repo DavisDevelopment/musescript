@@ -29,7 +29,8 @@ class BacktestEngine {
 			sharpe: Metrics.sharpe(rets),
 			maxDrawdown: Metrics.maxDrawdown(orders.equity),
 			winRate: Metrics.winRate(orders.wins, orders.trades),
-			finalEquity: orders.equity.length > 0 ? orders.equity[orders.equity.length - 1] : orders.cash
+			finalEquity: orders.equity.length > 0 ? orders.equity[orders.equity.length - 1] : orders.cash,
+			fills: orders.fills
 		};
 	}
 }

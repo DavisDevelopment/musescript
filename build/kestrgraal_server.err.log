@@ -1,2 +1,6 @@
-Jul 21, 2026 3:35:13 AM musescript.graal.KestrGraalServer main
+Jul 21, 2026 1:52:52 PM musescript.graal.KestrGraalServer main
 INFO: KestrGraal starting on 127.0.0.1:51117  root=C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script
+Jul 21, 2026 1:52:52 PM musescript.graal.KestrGraalServer main
+INFO: KestrGraal ready.
+Jul 21, 2026 1:52:55 PM io.grpc.netty.shaded.io.grpc.netty.TcpMetrics loadEpollInfo
+INFO: Epoll available during static init of TcpMetrics:false

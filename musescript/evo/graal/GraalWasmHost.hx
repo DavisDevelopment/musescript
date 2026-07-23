@@ -43,15 +43,19 @@ class GraalWasmHost {
 		return ctx.eval(src);
 	}
 
+	/** See StrategyInstance's `costBps` doc comment -- 0 default, zero behavior change unless a
+	 * caller (CorpusEvoRun) explicitly opts in. */
+	public var costBps:Float = 0;
+
 	public function instantiate(module:Value, strings:Array<String>):StrategyInstance {
-		return new StrategyInstance(module, strings);
+		return new StrategyInstance(module, strings, costBps);
 	}
 
 	/** One-shot convenience: instantiate + single preloaded backtest. */
 	public function runPreloaded(
 		module:Value, strings:Array<String>, bars:Array<Bar>, params:Map<String, Float>
 	):BacktestResult {
-		return new StrategyInstance(module, strings).run(bars, params);
+		return new StrategyInstance(module, strings, costBps).run(bars, params);
 	}
 
 	public static function strArr(a:Array<String>):NativeArray<String> {
@@ -83,16 +87,31 @@ class StrategyInstance {
 	var sim:OrderSim;
 	var params:Map<String, Float>;
 	var curClose:Float;
+	/** Current bar's index, tracked so `long`/`short`/`flat` can pass it to OrderSim (entryBar
+	 * tracking -- see `bars_in_trade`) and the new get_position/get_entry_price/etc position
+	 * imports can compute bars_in_trade/unrealized_pnl_pct against the RIGHT bar. Previously
+	 * unset (long/short/flat below called sim.long/short/flat with no barIndex, silently
+	 * defaulting to -1 forever) because nothing on the WASM path read entryBar until risk-managed
+	 * exits (unrealized_pnl_pct, bars_in_trade) were added to the genome vocabulary. */
+	var curBarIndex:Int = -1;
 
 	var packedN:Int = -1;
 	var bases:Array<Int>;
 	var featureBase:Int = 0;
 	var packedFeatureCount:Int = 0;
+	/** Slippage/cost applied to every entry+exit via `sim.book.slippageBps` -- see
+	 * OrderSim.executeLong/executeShort/executeFlat's doc comment. 0 default (zero cost, matching
+	 * every OTHER caller's untouched behavior); CorpusEvoRun opts in via `--cost-bps`. Re-applied
+	 * after every `sim = new OrderSim()` reset (both here and in `runWithFeatures`) since a fresh
+	 * OrderSim always starts at OrderBook's own 0 default. */
+	var costBps:Float;
 
-	public function new(module:Value, strings:Array<String>) {
+	public function new(module:Value, strings:Array<String>, ?costBps:Float = 0) {
 		this.strings = strings;
+		this.costBps = costBps;
 		this.params = new Map();
 		this.sim = new OrderSim();
+		if (costBps != 0) this.sim.book.slippageBps = costBps;
 		this.curClose = Math.NaN;
 
 		var members = new Map<String, Dynamic>();
@@ -104,18 +123,29 @@ class StrategyInstance {
 		}));
 		members.set("long", new HostFn(function(a:NativeArray<Value>):Dynamic {
 			var q = a[0].asDouble();
-			this.sim.long(this.curClose, Math.isNaN(q) ? null : q);
+			this.sim.long(this.curClose, Math.isNaN(q) ? null : q, this.curBarIndex);
 			return null;
 		}));
 		members.set("short", new HostFn(function(a:NativeArray<Value>):Dynamic {
 			var q = a[0].asDouble();
-			this.sim.short(this.curClose, Math.isNaN(q) ? null : q);
+			this.sim.short(this.curClose, Math.isNaN(q) ? null : q, this.curBarIndex);
 			return null;
 		}));
 		members.set("flat", new HostFn(function(a:NativeArray<Value>):Dynamic {
-			this.sim.flat(this.curClose);
+			this.sim.flat(this.curClose, this.curBarIndex);
 			return null;
 		}));
+		// Position-state accessors -- see needPositionImports' doc comment: previously left
+		// unimplemented because genome-expanded source never emitted them (StrategyGenome had no
+		// onPosition concept). Risk-managed exits (unrealized_pnl_pct, bars_in_trade) change that,
+		// so these now back the SAME six imports the class-method-only WASM path already declares,
+		// using the shared OrderSim exactly like the interp/JS backends (TradeBuiltins.hx) do.
+		members.set("get_position", new HostFn(function(a:NativeArray<Value>):Dynamic return this.sim.positionSize()));
+		members.set("get_entry_price", new HostFn(function(a:NativeArray<Value>):Dynamic return this.sim.entryPrice));
+		members.set("get_bars_in_trade", new HostFn(function(a:NativeArray<Value>):Dynamic return (this.sim.barsInTrade(this.curBarIndex) : Float)));
+		members.set("get_cash", new HostFn(function(a:NativeArray<Value>):Dynamic return this.sim.cash));
+		members.set("get_equity", new HostFn(function(a:NativeArray<Value>):Dynamic return this.sim.equityAt(this.curClose)));
+		members.set("get_unrealized_pnl", new HostFn(function(a:NativeArray<Value>):Dynamic return this.sim.unrealizedPnl(this.curClose)));
 		// EMA-family indicators (StrategyWasmEmitter.hx:143) need `exp` for their
 		// alpha-decay math -- missing here because this host was only ever exercised
 		// against EvoBench's SMA-crossover baseline before the corpus-seeded evolution
@@ -189,6 +219,7 @@ class StrategyInstance {
 	):BacktestResult {
 		this.params = params;
 		this.sim = new OrderSim();
+		if (costBps != 0) this.sim.book.slippageBps = costBps;
 		var wantN = Std.int(Math.max(1, bars.length));
 		var wantFeatures = featureTapes != null ? featureTapes.length : 0;
 		if (packedN != wantN || packedFeatureCount != wantFeatures || featureTapes != null) pack(bars, featureTapes);
@@ -205,6 +236,7 @@ class StrategyInstance {
 		var arg:NativeArray<Dynamic> = new NativeArray(1);
 		for (i in 0...bars.length) {
 			curClose = bars[i].close;
+			curBarIndex = i;
 			arg[0] = i;
 			onBar.execute(arg);
 			sim.mark(bars[i].close);
@@ -218,7 +250,8 @@ class StrategyInstance {
 			sharpe: Metrics.sharpe(rets),
 			maxDrawdown: Metrics.maxDrawdown(sim.equity),
 			winRate: Metrics.winRate(sim.wins, sim.trades),
-			finalEquity: sim.equity.length > 0 ? sim.equity[sim.equity.length - 1] : sim.cash
+			finalEquity: sim.equity.length > 0 ? sim.equity[sim.equity.length - 1] : sim.cash,
+			fills: sim.fills
 		};
 	}
 }

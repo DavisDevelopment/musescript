@@ -1,0 +1,149 @@
+=== MuseScript CORPUS-SEEDED evolution on GraalWasm ===
+jvm:  OpenJDK 64-Bit Server VM 25.0.3+9-jvmci-25.1-b19
+tape: 6909 bars total -> IS 5161 / embargo 21 / OOS 1727
+tournament corpus: 560 files, 152 translated to genomes, 408 skipped (outside the closed GP grammar -- onPosition exits, multi-output field access, etc.)
+indicator seeds: 124 compatible indicators x 3 windows = 372 genomes
+seeded generation 0: 524 real genomes (152 corpus-derived + 372 indicator-derived)
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by com.oracle.truffle.polyglot.JDKSupport in an unnamed module (file:/C:/Users/epiki/.m2/repository/org/graalvm/truffle/truffle-api/25.1.3/truffle-api-25.1.3.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+assembled 172
+gen  0 | popSize=524 new=172 unsupported=336 valid=424 | best=0.7565 mean=0.0664 champion="hma_8_cross" | 64942ms
+assembled 26
+gen  1 | popSize=128 new=26 unsupported=81 valid=123 | best=0.7565 mean=0.1043 champion="hma_8_cross" | 20286ms
+assembled 19
+gen  2 | popSize=128 new=19 unsupported=90 valid=120 | best=0.7565 mean=0.1897 champion="hma_8_cross" | 15069ms
+assembled 13
+gen  3 | popSize=128 new=13 unsupported=94 valid=120 | best=0.7568 mean=0.2141 champion="hma_8_cross" | 11635ms
+assembled 16
+gen  4 | popSize=128 new=16 unsupported=84 valid=116 | best=0.7568 mean=0.2616 champion="hma_8_cross" | 15289ms
+assembled 12
+gen  5 | popSize=128 new=12 unsupported=89 valid=119 | best=0.7568 mean=0.2604 champion="hma_8_cross" | 13181ms
+assembled 12
+gen  6 | popSize=128 new=12 unsupported=95 valid=117 | best=0.7568 mean=0.27 champion="hma_8_cross" | 8449ms
+assembled 10
+gen  7 | popSize=128 new=10 unsupported=99 valid=112 | best=0.7572 mean=0.3027 champion="hma_8_cross" | 9329ms
+assembled 7
+gen  8 | popSize=128 new=7 unsupported=92 valid=115 | best=0.7572 mean=0.3254 champion="hma_8_cross" | 7742ms
+assembled 9
+gen  9 | popSize=128 new=9 unsupported=90 valid=119 | best=0.7572 mean=0.2844 champion="hma_8_cross" | 6319ms
+assembled 4
+gen 10 | popSize=128 new=4 unsupported=95 valid=111 | best=0.7592 mean=0.286 champion="hma_8_cross" | 4295ms
+assembled 3
+gen 11 | popSize=128 new=3 unsupported=83 valid=123 | best=0.7592 mean=0.3366 champion="hma_8_cross" | 4512ms
+assembled 1
+gen 12 | popSize=128 new=1 unsupported=94 valid=120 | best=0.8399 mean=0.3089 champion="hma_8_cross" | 3375ms
+gen 13 | popSize=128 new=0 unsupported=83 valid=122 | best=0.8399 mean=0.3023 champion="hma_8_cross" | 2019ms
+gen 14 | popSize=128 new=0 unsupported=76 valid=122 | best=0.8399 mean=0.2852 champion="hma_8_cross" | 2152ms
+gen 15 | popSize=128 new=0 unsupported=89 valid=122 | best=0.8399 mean=0.3159 champion="hma_8_cross" | 2093ms
+assembled 1
+gen 16 | popSize=128 new=1 unsupported=87 valid=122 | best=0.8399 mean=0.3052 champion="hma_8_cross" | 3034ms
+assembled 1
+gen 17 | popSize=128 new=1 unsupported=85 valid=123 | best=0.8399 mean=0.3493 champion="hma_8_cross" | 2984ms
+assembled 1
+gen 18 | popSize=128 new=1 unsupported=92 valid=117 | best=0.8399 mean=0.3627 champion="hma_8_cross" | 3287ms
+assembled 3
+gen 19 | popSize=128 new=3 unsupported=100 valid=117 | best=0.8399 mean=0.301 champion="hma_8_cross" | 3275ms
+assembled 5
+gen 20 | popSize=128 new=5 unsupported=103 valid=121 | best=0.8399 mean=0.3439 champion="hma_8_cross" | 3018ms
+assembled 3
+gen 21 | popSize=128 new=3 unsupported=110 valid=120 | best=0.8399 mean=0.3537 champion="hma_8_cross" | 3355ms
+assembled 11
+gen 22 | popSize=128 new=11 unsupported=93 valid=117 | best=0.8601 mean=0.3675 champion="hma_8_cross" | 4284ms
+assembled 6
+gen 23 | popSize=128 new=6 unsupported=96 valid=120 | best=0.8601 mean=0.4016 champion="hma_8_cross" | 3952ms
+assembled 4
+gen 24 | popSize=128 new=4 unsupported=98 valid=124 | best=0.8601 mean=0.4602 champion="hma_8_cross" | 3549ms
+assembled 2
+gen 25 | popSize=128 new=2 unsupported=93 valid=123 | best=0.8601 mean=0.4899 champion="hma_8_cross" | 3292ms
+assembled 3
+gen 26 | popSize=128 new=3 unsupported=99 valid=121 | best=0.8601 mean=0.4899 champion="hma_8_cross" | 3252ms
+assembled 3
+gen 27 | popSize=128 new=3 unsupported=105 valid=120 | best=0.87 mean=0.4767 champion="hma_8_cross" | 3456ms
+gen 28 | popSize=128 new=0 unsupported=107 valid=124 | best=0.87 mean=0.5064 champion="hma_8_cross" | 2018ms
+assembled 1
+gen 29 | popSize=128 new=1 unsupported=102 valid=121 | best=0.87 mean=0.4786 champion="hma_8_cross" | 4606ms
+assembled 1
+gen 30 | popSize=128 new=1 unsupported=102 valid=118 | best=0.87 mean=0.4622 champion="hma_8_cross" | 2818ms
+gen 31 | popSize=128 new=0 unsupported=103 valid=123 | best=0.87 mean=0.5542 champion="hma_8_cross" | 1996ms
+gen 32 | popSize=128 new=0 unsupported=105 valid=123 | best=0.8836 mean=0.582 champion="hma_8_cross" | 2033ms
+gen 33 | popSize=128 new=0 unsupported=100 valid=126 | best=0.9304 mean=0.6207 champion="hma_8_cross" | 2050ms
+gen 34 | popSize=128 new=0 unsupported=102 valid=124 | best=0.9304 mean=0.601 champion="hma_8_cross" | 2098ms
+gen 35 | popSize=128 new=0 unsupported=100 valid=123 | best=0.9304 mean=0.605 champion="hma_8_cross" | 2107ms
+assembled 1
+gen 36 | popSize=128 new=1 unsupported=106 valid=126 | best=0.9304 mean=0.5605 champion="hma_8_cross" | 4349ms
+assembled 1
+gen 37 | popSize=128 new=1 unsupported=105 valid=125 | best=0.9304 mean=0.6459 champion="hma_8_cross" | 4219ms
+assembled 2
+gen 38 | popSize=128 new=2 unsupported=108 valid=122 | best=0.9304 mean=0.6409 champion="hma_8_cross" | 3591ms
+assembled 3
+gen 39 | popSize=128 new=3 unsupported=109 valid=122 | best=0.9304 mean=0.6724 champion="hma_8_cross" | 4336ms
+assembled 1
+gen 40 | popSize=128 new=1 unsupported=115 valid=126 | best=0.9304 mean=0.6623 champion="hma_8_cross" | 4157ms
+assembled 3
+gen 41 | popSize=128 new=3 unsupported=112 valid=126 | best=0.9582 mean=0.6465 champion="hma_8_cross" | 5260ms
+assembled 4
+gen 42 | popSize=128 new=4 unsupported=104 valid=126 | best=0.9582 mean=0.7007 champion="hma_8_cross" | 5211ms
+assembled 4
+gen 43 | popSize=128 new=4 unsupported=109 valid=125 | best=0.9582 mean=0.72 champion="hma_8_cross" | 5363ms
+assembled 4
+gen 44 | popSize=128 new=4 unsupported=111 valid=123 | best=0.9844 mean=0.6805 champion="hma_8_cross" | 5258ms
+assembled 6
+gen 45 | popSize=128 new=6 unsupported=106 valid=123 | best=0.9844 mean=0.6958 champion="hma_8_cross" | 6092ms
+assembled 10
+gen 46 | popSize=128 new=10 unsupported=106 valid=127 | best=0.9844 mean=0.6858 champion="hma_8_cross" | 5884ms
+assembled 8
+gen 47 | popSize=128 new=8 unsupported=108 valid=123 | best=0.9952 mean=0.7041 champion="hma_8_cross" | 5793ms
+assembled 7
+gen 48 | popSize=128 new=7 unsupported=103 valid=125 | best=0.9952 mean=0.7172 champion="hma_8_cross" | 6901ms
+assembled 9
+gen 49 | popSize=128 new=9 unsupported=103 valid=126 | best=0.9952 mean=0.7029 champion="hma_8_cross" | 8006ms
+assembled 5
+gen 50 | popSize=128 new=5 unsupported=104 valid=126 | best=0.9952 mean=0.7863 champion="hma_8_cross" | 5735ms
+assembled 5
+gen 51 | popSize=128 new=5 unsupported=105 valid=124 | best=0.9952 mean=0.827 champion="hma_8_cross" | 5963ms
+assembled 2
+gen 52 | popSize=128 new=2 unsupported=114 valid=121 | best=0.9952 mean=0.8025 champion="hma_8_cross" | 5362ms
+assembled 3
+gen 53 | popSize=128 new=3 unsupported=112 valid=123 | best=0.9952 mean=0.7806 champion="hma_8_cross" | 5306ms
+assembled 5
+gen 54 | popSize=128 new=5 unsupported=112 valid=120 | best=0.9952 mean=0.7624 champion="hma_8_cross" | 5309ms
+assembled 5
+gen 55 | popSize=128 new=5 unsupported=108 valid=119 | best=0.9952 mean=0.7793 champion="hma_8_cross" | 5784ms
+assembled 4
+gen 56 | popSize=128 new=4 unsupported=110 valid=122 | best=0.9959 mean=0.7225 champion="hma_8_cross" | 4875ms
+assembled 4
+gen 57 | popSize=128 new=4 unsupported=103 valid=123 | best=1.007 mean=0.8016 champion="hma_8_cross" | 4784ms
+assembled 2
+gen 58 | popSize=128 new=2 unsupported=114 valid=126 | best=1.007 mean=0.8285 champion="hma_8_cross" | 5132ms
+assembled 1
+gen 59 | popSize=128 new=1 unsupported=110 valid=124 | best=1.007 mean=0.8257 champion="hma_8_cross" | 5566ms
+
+=== CHAMPION (fitness=1.007, lineage=d1db9fdd4d778c32 <- c4b1a6fe7519381b) ===
+backend=js(fallback) trades=6189 equity=100021.59 sharpe=1.007 nodeCount=36
+{
+  @strategy("hma_8_cross")
+  @on(bar) {
+    if ((falling(change("low", 8), 2) || ((((open <= open) || falling("low", 34)) && ((rising(stdev("open", 89), 21) || (volume <= (high + volume))) && (1 >= close))) || crossunder(ema("open", 34), roc("close", 34))))) long(1);
+    if (crossover("low", roc("close", 34))) short(1);
+    if ((crossunder("open", hma("close", 8))) || ((volume <= rma("high", 5)))) flat();
+  }
+}
+total wall: 968.3s  modules compiled: 448
+
+=== OOS RE-SCORE (top 10 by IS fitness, held-out 1727-bar tail) ===
+   1. IS=1.007  OOS=1.0028 (trades=800)  [HELD]  hma_8_cross
+   2. IS=1.007  OOS=1.0028 (trades=800)  [HELD]  hma_8_cross
+   3. IS=0.9985  OOS=1.0001 (trades=860)  [HELD]  hma_8_cross
+   4. IS=0.9973  OOS=0.8808 (trades=827)  [HELD]  hma_8_cross
+   5. IS=0.9965  OOS=0.9754 (trades=803)  [HELD]  hma_8_cross
+   6. IS=0.9959  OOS=0.9941 (trades=853)  [HELD]  hma_8_cross
+   7. IS=0.9959  OOS=0.9941 (trades=853)  [HELD]  hma_8_cross
+   8. IS=0.9959  OOS=0.9941 (trades=853)  [HELD]  hma_8_cross
+   9. IS=0.9952  OOS=0.9905 (trades=756)  [HELD]  hma_8_cross
+  10. IS=0.9952  OOS=0.9905 (trades=756)  [HELD]  hma_8_cross
+OOS summary: 10/10 of the top IS performers held a positive Sharpe out of sample.
+
+CORPUS_EVO_OK

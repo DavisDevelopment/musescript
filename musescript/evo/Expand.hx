@@ -8,8 +8,18 @@ class Expand {
 			lines.push('  @param("${p.name}", ${num(p.defaultValue)})');
 		var size = scalar(g.size, g.params);
 		lines.push("  @on(bar) {");
-		lines.push('    if (${bool(g.entryLong, g.params)}) long($size);');
-		lines.push('    if (${bool(g.entryShort, g.params)}) short($size);');
+		// Guarded on `position()` so a STICKY entry condition (BCmp/BTrend-based, e.g. `rsi(...) <
+		// 55` staying true for many consecutive bars -- unlike a transient crossover, which only
+		// fires once) doesn't re-fire `long`/`short` every single bar it holds and pyramid an
+		// unbounded position. `long`/`short` themselves stay generically additive at the LANGUAGE
+		// level (a hand-written strategy that WANTS pyramiding can still call them directly,
+		// unguarded) -- this guard is specific to genome-EXPANDED source, where `size` is meant as
+		// a target exposure, not a per-bar increment. `<= 0`/`>= 0` (not `== 0`) deliberately still
+		// allows a same-bar REVERSAL (short flips to long, long flips to short) to fire -- only
+		// same-direction re-entry is blocked, matching executeLong/executeShort's own existing
+		// "close the opposite side first" behavior.
+		lines.push('    if ((${bool(g.entryLong, g.params)}) && position() <= 0) long($size);');
+		lines.push('    if ((${bool(g.entryShort, g.params)}) && position() >= 0) short($size);');
 		lines.push('    if ((${bool(g.exitLong, g.params)}) || (${bool(g.exitShort, g.params)})) flat();');
 		lines.push("  }");
 		lines.push("}");

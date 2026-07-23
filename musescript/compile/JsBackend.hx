@@ -449,6 +449,14 @@ class JsBackend {
 			var px = harness.currentBar != null ? harness.currentBar.close : 0.0;
 			return harness.orders.unrealizedPnl(px);
 		});
+		// See TradeBuiltins.hx's registration for the direction-normalization rationale.
+		Reflect.setField(api, "unrealized_pnl_pct", function() {
+			var px = harness.currentBar != null ? harness.currentBar.close : 0.0;
+			var pos = harness.orders.positionSize();
+			var entry = harness.orders.entryPrice;
+			if (pos == 0 || entry == 0) return 0.0;
+			return harness.orders.unrealizedPnl(px) / (Math.abs(pos) * entry);
+		});
 		Reflect.setField(api, "call", function(name:String, args:Array<Dynamic>):Dynamic {
 			return dispatchBuiltin(harness, name, args);
 		});
@@ -513,6 +521,12 @@ class JsBackend {
 		Reflect.setField(f0, "cash", function() return harness.orders.cash);
 		Reflect.setField(f0, "equity", function() return harness.orders.equityAt(harness.currentBar.close));
 		Reflect.setField(f0, "unrealized_pnl", function() return harness.orders.unrealizedPnl(harness.currentBar.close));
+		Reflect.setField(f0, "unrealized_pnl_pct", function() {
+			var pos = harness.orders.positionSize();
+			var entry = harness.orders.entryPrice;
+			if (pos == 0 || entry == 0) return 0.0;
+			return harness.orders.unrealizedPnl(harness.currentBar.close) / (Math.abs(pos) * entry);
+		});
 		// arity 1
 		Reflect.setField(f1, "na", function(a:Dynamic) return TradeBuiltins.na(a));
 		Reflect.setField(f1, "nz", function(a:Dynamic) return TradeBuiltins.nz(a, 0));
@@ -1050,6 +1064,10 @@ class JsBackend {
 			case "cash": harness.orders.cash;
 			case "equity": harness.orders.equityAt(harness.currentBar.close);
 			case "unrealized_pnl": harness.orders.unrealizedPnl(harness.currentBar.close);
+			case "unrealized_pnl_pct":
+				var pos = harness.orders.positionSize();
+				var entry = harness.orders.entryPrice;
+				(pos == 0 || entry == 0) ? 0.0 : harness.orders.unrealizedPnl(harness.currentBar.close) / (Math.abs(pos) * entry);
 			case "symbols":
 				harness.panelSymbols != null ? harness.panelSymbols.copy() : [];
 			case "sym_available":

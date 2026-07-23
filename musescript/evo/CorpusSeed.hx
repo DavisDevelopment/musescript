@@ -17,9 +17,12 @@ import musescript.compile.ModuleExpand;
  *
  * This is NOT a general MuseScript-to-genome compiler -- the closed GP grammar
  * (BoolNode/ScalarNode/SeriesNode, see Palette.hx) is deliberately narrower than the full
- * language (no `onPosition`-based exits keyed on `bars_in_trade`/`unrealized_pnl`/`equity`, no
- * multi-output field access like `macd(...).hist`, no arbitrary custom classes/state). Templates
- * ARE supported -- `TemplateExpand.expand` (the same pass MuseCompiler's own pipeline uses)
+ * language (no arbitrary custom classes/state, no `onPosition` method bodies). It DOES recognize
+ * risk-managed exits (`unrealized_pnl_pct()`/`bars_in_trade()`, bare zero-arg calls -- the same
+ * `KFeature` leaves `Variation.growRiskExit` builds) and multi-output field access
+ * (`macd(...).hist`/`bbands(...).upper`/`stoch(...).k` with LITERAL args, matching
+ * `growMultiOutputField`'s own calling convention) -- see `translateScalar`'s `RISK_EXIT_FEATURES`/
+ * `MULTI_OUTPUT_NAMES` cases. Templates ARE supported -- `TemplateExpand.expand` (the same pass MuseCompiler's own pipeline uses)
  * inlines every `template foo(...) { ... }` call site before translation even starts, so a
  * strategy composed from named boolean templates translates exactly as if it had been written
  * inline.
@@ -236,6 +239,18 @@ class CorpusSeed {
 		};
 	}
 
+	/** Names growth's `growRiskExit` already knows how to build/render as bare zero-arg
+	 * `KFeature("name()")` leaves (see Variation.hx / TradeBuiltins.hx) -- recognizing them here
+	 * lets a hand-written strategy's OWN stop-loss/take-profit/time-stop logic seed the corpus
+	 * instead of evolution only ever discovering that shape from scratch via random growth. */
+	static inline var RISK_EXIT_FEATURES = "unrealized_pnl_pct,bars_in_trade";
+
+	/** Names growth's `growMultiOutputField` already knows how to build (see Variation.hx) --
+	 * their return is a NAMED-FIELD object (`.hist`/`.upper`/`.k`/...), not a bare scalar, so
+	 * unlike a single-output indicator this needs an `EField` wrapper around the call, matched
+	 * separately below. */
+	static inline var MULTI_OUTPUT_NAMES = "macd,bbands,stoch";
+
 	public static function translateScalar(e0:Expr, bindings:Map<String, Expr>, allowed:Map<String, Bool>):Null<ScalarNode> {
 		var e = resolve(e0, bindings);
 		return switch (e) {
@@ -249,10 +264,44 @@ class CorpusSeed {
 				(ka != null && kb != null) ? KArith(op, ka, kb) : null;
 			case EIdent(n) if (isPriceField(n)): KSeries(SPrice(n));
 			case EBarField(n) if (isPriceField(n)): KSeries(SPrice(n));
+			case ECall(EIdent(name), []) if (RISK_EXIT_FEATURES.split(",").indexOf(name) >= 0):
+				KFeature('$name()');
+			case EField(ECall(EIdent(name), args), field) if (MULTI_OUTPUT_NAMES.split(",").indexOf(name) >= 0):
+				var rendered = renderLiteralCall(name, args, bindings);
+				// Field name isn't validated against BuiltinSigs' declared TObject fields here --
+				// an unrecognized field simply fails later at Fitness.evaluate's try/catch (scored
+				// NEG_INF, not a crash), the same fallback every other unsupported shape already
+				// gets, rather than duplicating BuiltinSigs' field lists in a second place.
+				rendered != null ? KFeature('$rendered.$field') : null;
 			default:
 				var s = translateSeries(e, bindings, allowed);
 				s != null ? KSeries(s) : null;
 		};
+	}
+
+	/** Re-renders a call's args as MuseScript source text, for embedding into a `KFeature` bare-
+	 * expression leaf -- ONLY literal numeric constants and bare price-field identifiers (which
+	 * get normalized to the quoted-string calling convention `SInd`/`growMultiOutputField` already
+	 * use, e.g. `macd(close)` -> `macd("close")`) are supported; anything else (a bound variable
+	 * holding a computed series, a nested call) fails closed to null, same discipline as every
+	 * other translate* function in this file. */
+	static function renderLiteralCall(name:String, args:Array<Expr>, bindings:Map<String, Expr>):Null<String> {
+		var parts:Array<String> = [];
+		for (a in args) {
+			var r = resolve(a, bindings);
+			var rendered = switch (r) {
+				case EConst(CInt(v)): Std.string(v);
+				case EConst(CFloat(v)): Std.string(v);
+				case EUnop("-", true, EConst(CInt(v))): Std.string(-v);
+				case EUnop("-", true, EConst(CFloat(v))): Std.string(-v);
+				case EIdent(n) if (isPriceField(n)): '"$n"';
+				case EBarField(n) if (isPriceField(n)): '"$n"';
+				default: null;
+			};
+			if (rendered == null) return null;
+			parts.push(rendered);
+		}
+		return '$name(${parts.join(", ")})';
 	}
 
 	public static function translateSeries(e0:Expr, bindings:Map<String, Expr>, allowed:Map<String, Bool>):Null<SeriesNode> {
@@ -325,6 +374,131 @@ class CorpusSeed {
 					seedOrigin: null
 				});
 			}
+		}
+		return out;
+	}
+
+	// ---- edge-triggered crossing helpers (bare-expression-scalar aware) ------------------
+
+	/**
+	 * `price crosses UP through `ref`` as a DISCRETE, edge-triggered event -- true only on the
+	 * bar the cross actually happens, not on every bar price merely sits on one side of `ref`.
+	 * `BCross` can't be used here (it strictly needs two SeriesNode operands; a `KFeature` bare-
+	 * expression scalar -- a fib level, a custom-configured fourier_projection call -- isn't
+	 * one), so this reconstructs the same "was below, now above" shape directly via `BCmp` +
+	 * `KLookback`, treating `ref` as quasi-static across the ONE-bar lookback (a reasonable
+	 * approximation for a slow-moving reference like a wide fib window or a smoothed
+	 * projection -- not mathematically exact the way a real two-series BCross is, but far
+	 * closer to a genuine edge trigger than a bare level condition).
+	 *
+	 * This is a direct, empirically-motivated fix: the FIRST fib_retracement/fourier_projection
+	 * seeds used plain level comparisons (`price > level618`), which fire on EVERY bar price
+	 * stays on one side -- confirmed catastrophic in practice (IS sharpe -2.3 to -4.8, hundreds
+	 * to thousands of trades) because realistic transaction cost punishes that whipsaw hard.
+	 */
+	static function crossUpScalar(ref:ScalarNode):BoolNode {
+		var priceNow:ScalarNode = KSeries(SPrice("close"));
+		var pricePrev:ScalarNode = KLookback(SPrice("close"), 1);
+		return BAnd(BCmp(">", priceNow, ref), BCmp("<=", pricePrev, ref));
+	}
+
+	static function crossDownScalar(ref:ScalarNode):BoolNode {
+		var priceNow:ScalarNode = KSeries(SPrice("close"));
+		var pricePrev:ScalarNode = KLookback(SPrice("close"), 1);
+		return BAnd(BCmp("<", priceNow, ref), BCmp(">=", pricePrev, ref));
+	}
+
+	// ---- Fibonacci-retracement seed genomes ----------------------------------------------
+
+	/**
+	 * `fib_retracement(window)` doesn't fit `seedFromIndicators`'s generic path at all: no
+	 * leading `TSeries` arg (it reads `bar.high`/`bar.low` directly, args=[TWindow] only) and a
+	 * multi-output (`TObject`) return, so `RegistryPalette.compatibleNames()` excludes it and
+	 * `SInd` can't represent it. Hand-built here the same way growRiskExit/growMultiOutputField
+	 * are: `KFeature` bare-expression leaves for each level, composed via `crossUpScalar`/
+	 * `crossDownScalar` above (see that doc comment for why level COMPARISONS were replaced
+	 * with edge-triggered CROSSINGS). Three windows (short/medium/long retracement lookback) x
+	 * two shapes:
+	 *
+	 *  - "breakout": long on an upward cross through the 61.8% level (golden-ratio breakout),
+	 *    short on a downward cross through 38.2% (breakdown), flat on a cross back through the
+	 *    50% midpoint either direction -- a genuine trend-following shape now, not a whipsaw.
+	 *  - "reclaim": long/short purely on which direction price crosses the 50% midpoint --
+	 *    always-in-the-market reversal, exits left `alwaysFalse` since the OPPOSITE entry's own
+	 *    reversal (executeLong/executeShort close the opposite side internally) already handles
+	 *    the transition -- giving this its own dedicated exit trigger on the SAME level would
+	 *    double-fire flat() and the reversal entry on the same bar.
+	 */
+	public static function seedFromFibRetracement(?windows:Array<Int>):Array<StrategyGenome> {
+		var w = windows != null ? windows : [20, 55, 100];
+		var out:Array<StrategyGenome> = [];
+		for (window in w) {
+			var lvl382:ScalarNode = KFeature('fib_retracement($window).level382');
+			var lvl500:ScalarNode = KFeature('fib_retracement($window).level500');
+			var lvl618:ScalarNode = KFeature('fib_retracement($window).level618');
+			out.push({
+				entryLong: crossUpScalar(lvl618),
+				entryShort: crossDownScalar(lvl382),
+				exitLong: crossDownScalar(lvl500),
+				exitShort: crossUpScalar(lvl500),
+				size: KConst(1.0),
+				params: [],
+				name: 'fib_retracement_${window}_breakout',
+				lineage: ["indicator-seed:fib_retracement"],
+				seedOrigin: null
+			});
+			out.push({
+				entryLong: crossUpScalar(lvl500),
+				entryShort: crossDownScalar(lvl500),
+				exitLong: alwaysFalse(),
+				exitShort: alwaysFalse(),
+				size: KConst(1.0),
+				params: [],
+				name: 'fib_retracement_${window}_reclaim',
+				lineage: ["indicator-seed:fib_retracement"],
+				seedOrigin: null
+			});
+		}
+		return out;
+	}
+
+	// ---- Fourier-projection seed genomes -------------------------------------------------
+
+	/**
+	 * Same fix as fib_retracement, for the same reason: the FIRST fourier_projection seeds used
+	 * `seedFromIndicators`'s generic `SInd`-based crossover, which always calls
+	 * `fourier_projection("close", window)` -- a 2-ARG call, meaning `k`/`horizon`/`detrend` are
+	 * stuck at their spec defaults (k=3, horizon=1). horizon=1 in particular projects only ONE
+	 * bar ahead, which is close enough to the raw price to oscillate across it constantly --
+	 * confirmed catastrophic in practice (thousands of trades). `SInd` can't express a 4-arg
+	 * call at all (its shape is fixed at `(field, window)`), so this uses a `KFeature` bare-
+	 * expression call (matching growMultiOutputField's own established convention for indicators
+	 * SInd can't represent) with a longer `horizon` and fewer components (`k`) for a genuinely
+	 * SMOOTHER, slower-moving projection, then the SAME edge-triggered `crossUpScalar`/
+	 * `crossDownScalar` helpers as fib_retracement -- not a bare level condition, an actual
+	 * discrete cross. Two configs (short/long period x matching horizon), always-in-the-market
+	 * reversal shape (see seedFromFibRetracement's "reclaim" doc comment for why exits are
+	 * `alwaysFalse` here too).
+	 */
+	public static function seedFromFourierProjection(?configs:Array<{period:Int, k:Int, horizon:Int}>):Array<StrategyGenome> {
+		var cfgs = configs != null ? configs : [
+			{period: 34, k: 3, horizon: 3},
+			{period: 89, k: 2, horizon: 8}
+		];
+		var out:Array<StrategyGenome> = [];
+		for (c in cfgs) {
+			var proj:ScalarNode = KFeature('fourier_projection("close", ${c.period}, ${c.k}, ${c.horizon})');
+			out.push({
+				entryLong: crossUpScalar(proj),
+				entryShort: crossDownScalar(proj),
+				exitLong: alwaysFalse(),
+				exitShort: alwaysFalse(),
+				size: KConst(1.0),
+				params: [],
+				name: 'fourier_projection_${c.period}_${c.k}_${c.horizon}_cross',
+				lineage: ["indicator-seed:fourier_projection"],
+				seedOrigin: null
+			});
 		}
 		return out;
 	}

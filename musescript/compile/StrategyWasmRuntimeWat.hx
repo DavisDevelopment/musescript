@@ -749,6 +749,59 @@ class StrategyWasmRuntimeWat {
     (f64.div (local.get $$num) (local.get $$den))
   )
 ');
+		// $wma_at: a linearly-weighted moving average ending at an ARBITRARY bar index (not just
+		// the current bar like $wma), the primitive $hma needs to sample its inner WMAs at each of
+		// the last sqrt(period) bars. Same weighting convention as $wma (oldest weight 1, newest
+		// weight len); nan when there isn't a full window of history at or before `end`.
+		parts.push('
+  (func $$wma_at (param $$sid i32) (param $$len i32) (param $$end i32) (result f64)
+    (local $$i i32) (local $$start i32) (local $$w i32) (local $$num f64) (local $$den f64)
+    (if (i32.or (i32.le_s (local.get $$len) (i32.const 0))
+          (i32.lt_s (local.get $$end) (i32.sub (local.get $$len) (i32.const 1))))
+      (then (return (f64.const nan))))
+    (local.set $$start (i32.sub (i32.add (local.get $$end) (i32.const 1)) (local.get $$len)))
+    (local.set $$i (local.get $$start))
+    (local.set $$w (i32.const 1))
+    (block $$done (loop $$loop
+      (br_if $$done (i32.gt_s (local.get $$i) (local.get $$end)))
+      (local.set $$num (f64.add (local.get $$num)
+        (f64.mul (call $$series_at (local.get $$sid) (local.get $$i)) (f64.convert_i32_s (local.get $$w)))))
+      (local.set $$den (f64.add (local.get $$den) (f64.convert_i32_s (local.get $$w))))
+      (local.set $$i (i32.add (local.get $$i) (i32.const 1)))
+      (local.set $$w (i32.add (local.get $$w) (i32.const 1)))
+      (br $$loop)))
+    (f64.div (local.get $$num) (local.get $$den))
+  )
+
+  ;; Hull MA = WMA( 2*WMA(price, len/2) - WMA(price, len), round(sqrt(len)) ), matching
+  ;; indicators/lib/Hma.hx exactly: half = floor(len/2) (>=1), smooth = floor(sqrt(len)+0.5) (>=1).
+  ;; The outer smoothing is a WMA over the last `smooth` synthetic values (newest weight = smooth),
+  ;; each synthetic value read at its own end bar via wma_at -- nan propagates through the same
+  ;; warmup boundary (bar_count >= len+smooth-1) the streaming indicator returns null across.
+  (func $$hma (param $$sid i32) (param $$len i32) (result f64)
+    (local $$half i32) (local $$smooth i32) (local $$k i32) (local $$end i32)
+    (local $$synth f64) (local $$num f64) (local $$den f64) (local $$w i32)
+    (if (i32.lt_s (local.get $$len) (i32.const 2)) (then (return (f64.const nan))))
+    (local.set $$half (i32.div_s (local.get $$len) (i32.const 2)))
+    (if (i32.lt_s (local.get $$half) (i32.const 1)) (then (local.set $$half (i32.const 1))))
+    (local.set $$smooth (i32.trunc_f64_s
+      (f64.floor (f64.add (f64.sqrt (f64.convert_i32_s (local.get $$len))) (f64.const 0.5)))))
+    (if (i32.lt_s (local.get $$smooth) (i32.const 1)) (then (local.set $$smooth (i32.const 1))))
+    (local.set $$k (i32.const 0))
+    (block $$done (loop $$loop
+      (br_if $$done (i32.ge_s (local.get $$k) (local.get $$smooth)))
+      (local.set $$end (i32.sub (i32.sub (global.get $$bar_count) (i32.const 1)) (local.get $$k)))
+      (local.set $$synth (f64.sub
+        (f64.mul (f64.const 2) (call $$wma_at (local.get $$sid) (local.get $$half) (local.get $$end)))
+        (call $$wma_at (local.get $$sid) (local.get $$len) (local.get $$end))))
+      (local.set $$w (i32.sub (local.get $$smooth) (local.get $$k)))
+      (local.set $$num (f64.add (local.get $$num) (f64.mul (local.get $$synth) (f64.convert_i32_s (local.get $$w)))))
+      (local.set $$den (f64.add (local.get $$den) (f64.convert_i32_s (local.get $$w))))
+      (local.set $$k (i32.add (local.get $$k) (i32.const 1)))
+      (br $$loop)))
+    (f64.div (local.get $$num) (local.get $$den))
+  )
+');
 		parts.push('
   (func $$ema (param $$sid i32) (param $$len i32) (result f64)
     (local $$i i32) (local $$k f64) (local $$omk f64) (local $$e f64)

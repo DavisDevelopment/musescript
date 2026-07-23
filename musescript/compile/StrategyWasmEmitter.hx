@@ -1178,8 +1178,27 @@ class StrategyWasmEmitter {
 			case "unrealized_pnl":
 				needPositionImports();
 				"call $get_unrealized_pnl";
+			case "unrealized_pnl_pct":
+				// Direction-normalized: pnl / (|position| * entry_price), 0 when flat or entry is
+				// somehow 0 -- see TradeBuiltins.hx's registration for the full rationale (same
+				// formula, mirrored exactly so this backend and the interp/JS ones agree).
+				needPositionImports();
+				var tpos = "_upp_pos_" + (nextTmp++);
+				var tentry = "_upp_entry_" + (nextTmp++);
+				ensureLocal(tpos);
+				ensureLocal(tentry);
+				"call $get_position\n    local.set $" + tpos
+					+ "\n    call $get_entry_price\n    local.set $" + tentry
+					+ "\n    local.get $" + tpos + "\n    f64.const 0\n    f64.eq"
+					+ "\n    local.get $" + tentry + "\n    f64.const 0\n    f64.eq\n    i32.or"
+					+ "\n    if (result f64)\n      f64.const 0"
+					+ "\n    else\n      call $get_unrealized_pnl"
+					+ "\n      local.get $" + tpos + "\n      f64.abs"
+					+ "\n      local.get $" + tentry + "\n      f64.mul"
+					+ "\n      f64.div"
+					+ "\n    end";
 			case "sma" | "ema" | "rsi" | "atr" | "highest" | "lowest" | "change" | "pct_change"
-			   | "mom" | "roc" | "stdev" | "wma" | "rma":
+			   | "mom" | "roc" | "stdev" | "wma" | "rma" | "hma":
 				usedIndicators.set(name, true);
 				var series = args.length > 0 ? seriesArgSid(args[0]) : 3;
 				var len = args.length > 1 ? asI32(args[1]) : "i32.const 14";

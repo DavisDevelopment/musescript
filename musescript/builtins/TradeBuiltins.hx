@@ -120,6 +120,20 @@ class TradeBuiltins {
 			var px = harness.currentBar != null ? harness.currentBar.close : 0.0;
 			return harness.orders.unrealizedPnl(px);
 		});
+		// Direction-normalized fractional P&L: positive when the CURRENT position is favorable
+		// regardless of long/short (unrealizedPnl's sign already handles that -- position*(price-
+		// entry) is negative for a short getting hurt by a rising price), divided by the position's
+		// own notional so it's a comparable percentage no matter the strategy's `size`. Exists so a
+		// single stop-loss/take-profit condition (`unrealized_pnl_pct() < -pct`) works unchanged
+		// whether it's guarding a long or a short position -- see MapElites/evo risk-managed-exit
+		// growth pool in Variation.hx, which is the first caller.
+		vars.set("unrealized_pnl_pct", function() {
+			var px = harness.currentBar != null ? harness.currentBar.close : 0.0;
+			var pos = harness.orders.positionSize();
+			var entry = harness.orders.entryPrice;
+			if (pos == 0 || entry == 0) return 0.0;
+			return harness.orders.unrealizedPnl(px) / (Math.abs(pos) * entry);
+		});
 
 		vars.set("log", function(?a:Dynamic, ?b:Dynamic, ?c:Dynamic, ?d:Dynamic) {
 			var parts:Array<String> = [];

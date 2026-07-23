@@ -70,6 +70,12 @@ class TestMain {
 		runner.addCase(new TestNativeIndicatorParity());
 		runner.addCase(new TestRegistryPalette());
 		runner.addCase(new TestStrategyParserGrammarExtensions());
+		runner.addCase(new TestEvoVariation());
+		runner.addCase(new TestNativeHmaWasm());
+		runner.addCase(new TestMapElites());
+		runner.addCase(new TestGrowthWeights());
+		runner.addCase(new TestSimplify());
+		runner.addCase(new TestCorpusSeed());
 		runner.addCase(new TestFourierBuiltins());
 		// Delegated indicator-port batches self-register from musescript/tests/ports/
 		// (PortTestsMacro) — no per-batch edit here, so parallel porting never

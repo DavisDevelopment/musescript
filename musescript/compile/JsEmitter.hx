@@ -435,6 +435,14 @@ class JsEmitter {
 						default: throw new EmitUnsupported();
 					};
 				}
+				// `&&`/`||`: evaluate BOTH operands (no JS short-circuit) so stateful builtins
+				// (crossover/crossunder/rising/falling) tick every bar, matching MuseInterp.binop
+				// and the WASM backend's i32.and/i32.or over both sides. An inline arrow forces
+				// both argument evaluations left-to-right, then applies the real operator so exact
+				// truthiness is preserved (operands can be numbers, not just booleans). See
+				// MuseInterp.binop's doc comment for why this is correct, not merely parity-driven.
+				if (op == "&&" || op == "||")
+					return '((__l,__r)=>__l${op}__r)(${emitExpr(a)},${emitExpr(b)})';
 				'(${emitExpr(a)} $op ${emitExpr(b)})';
 			case EUnop(op, prefix, x):
 				prefix ? '($op${emitExpr(x)})' : '(${emitExpr(x)}$op)';

@@ -136,6 +136,7 @@ class BuiltinSigs {
 		fun("cash", [], TScalar);
 		fun("equity", [], TScalar);
 		fun("unrealized_pnl", [], TScalar);
+		fun("unrealized_pnl_pct", [], TScalar);
 		// Multi-symbol panel / portfolio surface
 		fun("symbols", [], TStringArray);
 		fun("sym_available", [TString], TBool);

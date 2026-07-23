@@ -124,6 +124,87 @@ class TestOrderBook extends Test {
 		Assert.floatEquals(100.0, sim.fills[0].price);
 	}
 
+	/**
+	 * Regression for a real, previously-undetected gap: every `long(qty)`/`short(qty)`/`flat()`
+	 * strategy verb (the LEGACY immediate-fill path -- essentially every existing MuseScript
+	 * strategy and every musescript.evo genome) traded at ZERO slippage/cost, even when
+	 * `slippageBps` was configured, because only the spec-object order-book path
+	 * (`beginBar`'s `book.evalBar` loop) ever called `slip()`. `slippageBps` still defaults to 0
+	 * (so every caller that never sets it -- the whole rest of the test suite -- is unaffected),
+	 * but a caller that DOES set it now sees the legacy path pay the cost too, exactly like the
+	 * book path already did.
+	 */
+	public function testLegacyVerbsApplySlippageWhenConfigured() {
+		var sim = new OrderSim(100000);
+		sim.book.slippageBps = 100; // 1%
+		sim.submit("long", 10.0, 100.0, 0);
+		Assert.floatEquals(101.0, sim.fills[0].price, "a legacy long() should pay ask (open*1.01)");
+		Assert.floatEquals(10.0, sim.position);
+	}
+
+	public function testLegacyShortAndFlatBothApplySlippage() {
+		var sim = new OrderSim(100000);
+		sim.book.slippageBps = 100; // 1%
+		sim.submit("short", 10.0, 100.0, 0); // sell -> receives BELOW raw price
+		Assert.floatEquals(99.0, sim.fills[0].price, "a legacy short() should receive bid (open*0.99)");
+		sim.submit("flat", null, 100.0, 1); // covering a short is a BUY -> pays ABOVE raw price
+		Assert.floatEquals(101.0, sim.fills[1].price, "covering a short should pay ask (open*1.01)");
+	}
+
+	/** Round-trip cost: a long entered and exited at the SAME raw price should show a REALIZED
+	 * LOSS once both sides pay slippage -- this is the exact "free-trading" bias the fix closes
+	 * (a strategy that looks profitable on a zero-cost backtest can be a net loser once entry AND
+	 * exit both pay a realistic spread). */
+	public function testRoundTripSlippageProducesRealizedLossAtFlatPrice() {
+		var sim = new OrderSim(100000);
+		sim.book.slippageBps = 100; // 1%
+		sim.submit("long", 10.0, 100.0, 0); // pays 101
+		sim.submit("flat", null, 100.0, 1); // receives 99
+		var flatFill = sim.fills[1];
+		Assert.isTrue(flatFill.pnl < 0, 'expected a round trip at the SAME raw price to realize a loss under cost, got pnl=${flatFill.pnl}');
+	}
+
+	/**
+	 * Regression for a real, empirically-confirmed bug: pyramiding into an existing position
+	 * (calling `long(qty)` repeatedly while already long -- a sticky, non-crossover entry
+	 * condition staying true across many bars does exactly this) used to silently OVERWRITE
+	 * `entryPrice` with only the LATEST fill, instead of tracking the true weighted-average cost
+	 * basis. That directly corrupted `unrealized_pnl`/`unrealized_pnl_pct`-based risk-managed
+	 * exits (stop-loss/take-profit) the moment pyramiding occurred. Confirmed via a standalone
+	 * probe before this fix: long(1)@100, long(1)@110, long(1)@120 left entryPrice=120 (so
+	 * unrealizedPnl at price 120 read 0) instead of the true average 110 (unrealizedPnl == 30).
+	 */
+	public function testPyramidedLongTracksWeightedAverageEntryPrice() {
+		var sim = new OrderSim(100000);
+		sim.submit("long", 1.0, 100.0, 0);
+		sim.submit("long", 1.0, 110.0, 1);
+		sim.submit("long", 1.0, 120.0, 2);
+		Assert.equals(3, sim.trades);
+		Assert.floatEquals(3.0, sim.position);
+		Assert.floatEquals(110.0, sim.entryPrice, "expected the TRUE weighted-average cost basis, not just the latest fill");
+		Assert.floatEquals(30.0, sim.unrealizedPnl(120.0));
+	}
+
+	public function testPyramidedShortTracksWeightedAverageEntryPrice() {
+		var sim = new OrderSim(100000);
+		sim.submit("short", 1.0, 100.0, 0);
+		sim.submit("short", 1.0, 90.0, 1);
+		sim.submit("short", 1.0, 80.0, 2);
+		Assert.floatEquals(-3.0, sim.position);
+		Assert.floatEquals(90.0, sim.entryPrice, "expected the TRUE weighted-average cost basis for a pyramided short");
+		Assert.floatEquals(30.0, sim.unrealizedPnl(80.0)); // short favorable: (entry-price)*|qty| = (90-80)*3
+	}
+
+	/** A same-bar REVERSAL (short flips to long) is NOT pyramiding -- entryPrice should reset to
+	 * the reversal fill's own price, not blend with the closed-out short's stale basis. */
+	public function testReversalResetsEntryPriceRatherThanBlending() {
+		var sim = new OrderSim(100000);
+		sim.submit("short", 1.0, 100.0, 0);
+		sim.submit("long", 1.0, 90.0, 1); // closes the short, opens a fresh long
+		Assert.floatEquals(1.0, sim.position);
+		Assert.floatEquals(90.0, sim.entryPrice, "a reversal's entryPrice must be its OWN fill price, not blended with the closed side");
+	}
+
 	// ── End-to-end through the language, interp vs compiled-js parity ───────
 
 	static function trendBars():Array<Bar> {
