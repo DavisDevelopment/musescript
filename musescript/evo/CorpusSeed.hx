@@ -50,6 +50,34 @@ class CorpusSeed {
 	static function alwaysFalse():BoolNode
 		return BCmp(">", KConst(0.0), KConst(1.0));
 
+	/**
+	 * `Expand.expand` unconditionally appends `&& position() <= 0` / `&& position() >= 0` to
+	 * every entry condition (anti-pyramiding boilerplate -- see Expand.expand's doc comment),
+	 * which no `translate*` function here has ever understood (`position()` isn't a price field,
+	 * a risk-exit feature, or an indicator call) -- meaning it silently killed EVERY round trip of
+	 * genome-expanded source through this reverse-compiler, entry conditions included, regardless
+	 * of syntax dialect. Stripped BEFORE translation rather than taught to `translateBool`: it's
+	 * infrastructure `Expand` re-adds unconditionally on the way back out either way, not real
+	 * strategy logic a human editing the source in HumanLoopWindow needs to preserve or even
+	 * understand. A hand-written strategy that never had this guard to begin with is untouched
+	 * (the pattern simply doesn't match, `e` returns as-is).
+	 */
+	static function stripPositionGuard(e:Expr):Expr {
+		return switch (e) {
+			case EBinop("&&", inner, EBinop(op, ECall(EIdent("position"), []), rhs)) if ((op == "<=" || op == ">=") && isZeroConst(rhs)):
+				inner;
+			default: e;
+		};
+	}
+
+	static function isZeroConst(e:Expr):Bool {
+		return switch (e) {
+			case EConst(CInt(0)): true;
+			case EConst(CFloat(0.0)): true;
+			default: false;
+		};
+	}
+
 	// ---- corpus walking -----------------------------------------------------------------
 
 	/** Recursively finds every `*.ms` file under `dir` and attempts translation. */
@@ -72,6 +100,50 @@ class CorpusSeed {
 			}
 		}
 		return { genomes: genomes, total: files.length, skipped: skipped };
+	}
+
+	/**
+	 * Single-file counterpart of `seedFromDirectory`, for a caller (CorpusEvoRun's `--template`
+	 * flag) that wants exactly ONE named template as (part of) the seed population, with an honest
+	 * reason string on failure instead of a bare null -- a directory scan's `skipped` list serves
+	 * that role for the bulk path, but a single explicit `--template <path>` deserves a direct
+	 * error, not silence. Wraps `evolve(...)`-marked positions as `BHole`/`KHole` via the SAME
+	 * `translateBool`/`translateScalar` this file already uses for every other reverse-compiled
+	 * strategy -- a template with zero `evolve(...)` markers translates to an ordinary, fully-
+	 * evolvable genome exactly like any other corpus seed (see `Variation.isTemplated`).
+	 */
+	public static function seedFromTemplateFile(path:String, allowedIndicators:Map<String, Bool>):{genome:Null<StrategyGenome>, error:Null<String>} {
+		try {
+			var src = sys.io.File.getContent(path);
+			var prog = new MuseParser().parse(src, path);
+			prog = TemplateExpand.expand(prog);
+			prog = ModuleExpand.expand(prog);
+			var g = translateProgram(prog, allowedIndicators);
+			return g != null ? { genome: g, error: null } : { genome: null, error: "no translatable strategy body" };
+		} catch (e:Dynamic) {
+			return { genome: null, error: Std.string(e) };
+		}
+	}
+
+	/**
+	 * Reverse-compiles a raw MuseScript source STRING (not a file) into a `StrategyGenome` --
+	 * the same `translateProgram` path `seedFromDirectory`/`seedFromTemplateFile` use, exposed
+	 * directly for a caller with source text already in hand (HumanLoopWindow's "Apply Edit"
+	 * button: a human just typed/edited a strategy body in a live editor and wants it turned back
+	 * into a genome to inject into a running evolution population). Same honest-failure contract
+	 * as every other entry point here -- a syntax error or an unsupported construct comes back as
+	 * a `reason` string, never a silent best-effort guess.
+	 */
+	public static function translateSource(src:String, allowedIndicators:Map<String, Bool>):{genome:Null<StrategyGenome>, error:Null<String>} {
+		try {
+			var prog = new MuseParser().parse(src, "<human-edit>");
+			prog = TemplateExpand.expand(prog);
+			prog = ModuleExpand.expand(prog);
+			var g = translateProgram(prog, allowedIndicators);
+			return g != null ? { genome: g, error: null } : { genome: null, error: "no translatable strategy body (only `when cond: { long()/short()/flat() }` guards at the top of onBar are recognized)" };
+		} catch (e:Dynamic) {
+			return { genome: null, error: Std.string(e) };
+		}
 	}
 
 	static function collectMsFiles(dir:String, out:Array<String>):Void {
@@ -102,10 +174,23 @@ class CorpusSeed {
 		// substituted in wherever the onBar conditions reference `maFast` by name.
 		var bindings = new Map<String, Expr>();
 		var onBarBody:Null<Array<Stmt>> = null;
+		// `OnPosition` guards get folded into the SAME list `OnBar` guards are, not tracked
+		// separately: the closed extraction grammar below only ever recognizes simple `when cond:
+		// { order }` shapes regardless of which hook they came from, and "checked every bar" vs
+		// "checked every bar while in a position" collapses to the same BoolNode either way once a
+		// risk-exit feature (`unrealized_pnl_pct`/`bars_in_trade`/etc., see RISK_EXIT_FEATURES) is
+		// involved -- those already read as their natural falsy/zero value outside a position, so a
+		// flat() guard built from them fires at exactly the same bars whether it's nominally scoped
+		// to onBar or onPosition. This is the minimal high-value slice of "support onPosition":
+		// it does NOT give onPosition any genuinely distinct runtime semantics inside the genome
+		// (there's still no separate onPosition concept in StrategyGenome/Expand), it just stops
+		// throwing away real risk-management logic (stop-loss/time-stop/take-profit templates,
+		// exactly the shape `Variation.growRiskExit` already evolves from scratch) that a human
+		// wrote using the onPosition hook purely as a style choice.
 		for (s in body) {
 			switch (s) {
 				case Assign(n, e): bindings.set(n, e);
-				case OnBar(b): onBarBody = onBarBody == null ? b : onBarBody.concat(b);
+				case OnBar(b) | OnPosition(b): onBarBody = onBarBody == null ? b : onBarBody.concat(b);
 				default:
 			}
 		}
@@ -123,7 +208,7 @@ class CorpusSeed {
 			var guarded = guardedOrders(s);
 			if (guarded == null) continue;
 			for (go in guarded) {
-				var b = translateBool(go.cond, bindings, allowed);
+				var b = translateBool(stripPositionGuard(go.cond), bindings, allowed);
 				if (b == null) return null; // a recognized guard with an UNtranslatable condition
 				switch (go.kind) {
 					case Long: entryLong = entryLong == null ? b : BOr(entryLong, b);
@@ -209,6 +294,15 @@ class CorpusSeed {
 	public static function translateBool(e0:Expr, bindings:Map<String, Expr>, allowed:Map<String, Bool>):Null<BoolNode> {
 		var e = resolve(e0, bindings);
 		return switch (e) {
+			// Template hole marker (see this file's doc comment / BoolNode.BHole): `evolve(...)` is
+			// NOT a real MuseScript builtin -- it parses fine as an ordinary call (the parser doesn't
+			// validate identifiers) but is only ever recognized HERE, at reverse-compilation time. A
+			// `.ms` template file still containing `evolve(...)` markers is a SEED SOURCE, not meant
+			// to be run directly through GeneRunner/the checker/a live backtest -- only the genome
+			// this produces (which Expand.hx unwraps back to clean, marker-free source) is executable.
+			case ECall(EIdent("evolve"), [inner]):
+				var b = translateBool(inner, bindings, allowed);
+				b != null ? BHole(b) : null;
 			case EBinop("&&", a, b):
 				var ta = translateBool(a, bindings, allowed), tb = translateBool(b, bindings, allowed);
 				(ta != null && tb != null) ? BAnd(ta, tb) : null;
@@ -242,8 +336,13 @@ class CorpusSeed {
 	/** Names growth's `growRiskExit` already knows how to build/render as bare zero-arg
 	 * `KFeature("name()")` leaves (see Variation.hx / TradeBuiltins.hx) -- recognizing them here
 	 * lets a hand-written strategy's OWN stop-loss/take-profit/time-stop logic seed the corpus
-	 * instead of evolution only ever discovering that shape from scratch via random growth. */
-	static inline var RISK_EXIT_FEATURES = "unrealized_pnl_pct,bars_in_trade";
+	 * instead of evolution only ever discovering that shape from scratch via random growth.
+	 * `equity`/`unrealized_pnl`/`cash`/`entry_price` added alongside the original two: same
+	 * `dispatchBuiltin` mechanism (JsBackend.hx), just additional names -- and, unlike
+	 * `unrealized_pnl_pct`/`bars_in_trade`, real hand-written strategies conventionally call them
+	 * BARE (`equity`, no parens -- confirmed via examples/strategy-kinds/06_risk_window_sortino.ms's
+	 * `bars_in_trade` usage), which is why the case below matches `EIdent`, not just `ECall(_,[])`. */
+	static inline var RISK_EXIT_FEATURES = "unrealized_pnl_pct,bars_in_trade,equity,unrealized_pnl,cash,entry_price";
 
 	/** Names growth's `growMultiOutputField` already knows how to build (see Variation.hx) --
 	 * their return is a NAMED-FIELD object (`.hist`/`.upper`/`.k`/...), not a bare scalar, so
@@ -254,6 +353,10 @@ class CorpusSeed {
 	public static function translateScalar(e0:Expr, bindings:Map<String, Expr>, allowed:Map<String, Bool>):Null<ScalarNode> {
 		var e = resolve(e0, bindings);
 		return switch (e) {
+			// See translateBool's `evolve(...)` case -- scalar counterpart (KHole).
+			case ECall(EIdent("evolve"), [inner]):
+				var s = translateScalar(inner, bindings, allowed);
+				s != null ? KHole(s) : null;
 			case EConst(CFloat(v)): KConst(v);
 			case EConst(CInt(v)): KConst(v);
 			case EUnop("-", true, EConst(CFloat(v))): KConst(-v);
@@ -266,13 +369,32 @@ class CorpusSeed {
 			case EBarField(n) if (isPriceField(n)): KSeries(SPrice(n));
 			case ECall(EIdent(name), []) if (RISK_EXIT_FEATURES.split(",").indexOf(name) >= 0):
 				KFeature('$name()');
-			case EField(ECall(EIdent(name), args), field) if (MULTI_OUTPUT_NAMES.split(",").indexOf(name) >= 0):
-				var rendered = renderLiteralCall(name, args, bindings);
-				// Field name isn't validated against BuiltinSigs' declared TObject fields here --
-				// an unrecognized field simply fails later at Fitness.evaluate's try/catch (scored
-				// NEG_INF, not a crash), the same fallback every other unsupported shape already
-				// gets, rather than duplicating BuiltinSigs' field lists in a second place.
-				rendered != null ? KFeature('$rendered.$field') : null;
+			// Bare form (no parens) -- see RISK_EXIT_FEATURES's doc comment for why both spellings
+			// need to be recognized. Renders back out via Expand's `KFeature` case (`name`, embedded
+			// verbatim), so a bare-in/bare-out round trip stays bare, not silently rewritten to add
+			// parens the human never wrote.
+			case EIdent(name) if (RISK_EXIT_FEATURES.split(",").indexOf(name) >= 0):
+				KFeature(name);
+			// `m.hist` where a PRELUDE BINDING (`m = macd(close, 5, 13, 8)`) holds the multi-output
+			// call, not just the direct-inline `macd(...).hist` spelling -- `resolve()` only
+			// substitutes bindings for a bare `EIdent` node, and the node actually sitting inside
+			// `EField(_, field)` here is exactly that (`EIdent("m")`), so resolving it explicitly
+			// (rather than relying on translateScalar's own single top-level `resolve()` call,
+			// which only ever sees the OUTER `EField` node, never unwraps its child) recovers the
+			// call form either way -- a real gap found via a hand-written tournament-corpus
+			// strategy (`m = macd(...); ... rising(m.hist, 3) ...`) failing to inject through
+			// HumanLoopWindow despite `macd(...).hist` written inline working fine.
+			case EField(inner, field):
+				switch (resolve(inner, bindings)) {
+					case ECall(EIdent(name), args) if (MULTI_OUTPUT_NAMES.split(",").indexOf(name) >= 0):
+						var rendered = renderLiteralCall(name, args, bindings);
+						// Field name isn't validated against BuiltinSigs' declared TObject fields here --
+						// an unrecognized field simply fails later at Fitness.evaluate's try/catch (scored
+						// NEG_INF, not a crash), the same fallback every other unsupported shape already
+						// gets, rather than duplicating BuiltinSigs' field lists in a second place.
+						rendered != null ? KFeature('$rendered.$field') : null;
+					default: null;
+				}
 			default:
 				var s = translateSeries(e, bindings, allowed);
 				s != null ? KSeries(s) : null;
@@ -309,6 +431,15 @@ class CorpusSeed {
 		return switch (e) {
 			case EIdent(n) if (isPriceField(n)): SPrice(n);
 			case EBarField(n) if (isPriceField(n)): SPrice(n);
+			// `Expand.series`'s OWN `SPrice` rendering is a QUOTED string (`"close"`, matching the
+			// same calling convention an indicator's first arg uses, e.g. `sma("close", 8)`) --
+			// runtime-valid (crossover/rising/falling accept a string field-selector exactly like a
+			// bare identifier), but this case was missing here, so `Expand.expand(g)` -> `translate*`
+			// failed to round-trip ANY genome using a bare price series in `crossover`/`rising`/
+			// `falling` (found via HumanLoopWindow's "Apply Edit" -- the first caller that ever
+			// needed this specific round trip; hand-written corpus files conventionally use the
+			// bare-identifier spelling, so this gap went unnoticed until now).
+			case EConst(CString(n)) if (isPriceField(n)): SPrice(n);
 			case ECall(EIdent(name), args) if (allowed.exists(name) && args.length >= 2):
 				var field = fieldOf(args[0], bindings);
 				var w = constInt(args[1]);
@@ -326,6 +457,7 @@ class CorpusSeed {
 		return switch (r) {
 			case EIdent(n) if (isPriceField(n)): n;
 			case EBarField(n) if (isPriceField(n)): n;
+			case EConst(CString(n)) if (isPriceField(n)): n; // see translateSeries's matching case
 			default: null;
 		};
 	}

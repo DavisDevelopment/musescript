@@ -23,6 +23,13 @@ typedef CachedEval = {
 	 */
 	var ?avgHold:Float;
 	var ?longFrac:Float;
+	/** Set when `--equity-floor` is active and this genome's run crossed it (see OrderSim.hx's
+	 * `bankrupt` doc comment) -- `scoreOf` in CorpusEvoRun.hx clamps a bankrupt eval to NEG_INF
+	 * regardless of its raw sharpe. Optional/defaults to `false` for a cache entry from a run that
+	 * never set it, same tolerant-load convention as `avgHold`/`longFrac`. NOT persisted to disk
+	 * (see `bankruptSuffix` in CorpusEvoRun.hx -- a bankruptcy-crank run gets its own cache
+	 * filename namespace instead, so this field only ever needs to survive in-memory). */
+	var ?bankrupt:Bool;
 }
 
 /**
@@ -95,6 +102,18 @@ class EvoCache {
 		return n;
 	}
 
+	/** Wipe every in-memory entry -- for `--difficulty-schedule` (see CorpusEvoRun.hx): a memo'd
+	 * eval is only valid for the EXACT (structural key, tape, capital, equity floor) it was
+	 * computed under, so a generation-to-generation capital/floor ramp invalidates the whole memo
+	 * every time either value actually changes. Deliberately does NOT touch `out`/`path` -- a
+	 * ramping run is always constructed with a `null` path in the first place (see
+	 * CorpusEvoRun's difficulty-schedule setup), so there's no disk file to reconcile. */
+	public function clear():Void {
+		mem = new Map();
+		hits = 0;
+		misses = 0;
+	}
+
 	public function close():Void {
 		if (out != null) { out.close(); out = null; }
 	}
@@ -133,5 +152,14 @@ class EvoCache {
 		}
 		var h = Std.int(Math.abs(acc));
 		return '${bars.length}_$h';
+	}
+
+	/** Multi-symbol counterpart of `tapeSignature`, for CorpusEvoRun's `--tapes` basket mode --
+	 * one cache file per DISTINCT basket, never shared with a single-tape run or a different
+	 * basket. A one-element basket produces the EXACT same string as calling `tapeSignature`
+	 * directly on that one bars array (`join` on a single-element array is a no-op), so a plain
+	 * `--tape` run's cache filename is byte-identical whether or not this function exists. */
+	public static function basketSignature(basket:Array<Array<Bar>>):String {
+		return [for (bars in basket) tapeSignature(bars)].join("+");
 	}
 }

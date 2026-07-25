@@ -94,4 +94,8 @@ class TreynorRatio implements MuseIndicator<TreynorPair, Float> {
 	}
 }
 
-typedef TreynorPair = { a: Float, b: Float };
+@:structInit
+class TreynorPair {
+	public var a:Float;
+	public var b:Float;
+}

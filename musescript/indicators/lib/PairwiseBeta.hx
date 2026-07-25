@@ -109,4 +109,8 @@ class PairwiseBeta implements MuseIndicator<PairwisePair, Float> {
 	}
 }
 
-typedef PairwisePair = { a: Float, b: Float };
+@:structInit
+class PairwisePair {
+	public var a:Float;
+	public var b:Float;
+}

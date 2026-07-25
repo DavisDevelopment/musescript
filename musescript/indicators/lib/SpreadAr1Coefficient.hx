@@ -87,4 +87,8 @@ class SpreadAr1Coefficient implements MuseIndicator<SpreadAr1Pair, Float> {
 	}
 }
 
-typedef SpreadAr1Pair = {a:Float, b:Float};
+@:structInit
+class SpreadAr1Pair {
+	public var a:Float;
+	public var b:Float;
+}

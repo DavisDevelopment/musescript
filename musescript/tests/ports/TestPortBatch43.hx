@@ -126,9 +126,10 @@ class TestPortBatch43 extends Test {
 	}
 
 	public function testSpreadAr1BatchEqualsStreaming() {
-		var pairs = [for (t in 0...80) {
+		var pairs:Array<musescript.indicators.lib.SpreadAr1Coefficient.SpreadAr1Pair> = [for (t in 0...80) {
 			var b = 50.0 + 0.5 * t;
-			pair(b + Math.sin(t * 0.6), b);
+			var p:musescript.indicators.lib.SpreadAr1Coefficient.SpreadAr1Pair = {a: b + Math.sin(t * 0.6), b: b};
+			p;
 		}];
 		var x = new SpreadAr1Coefficient(25);
 		var y = new SpreadAr1Coefficient(25);
@@ -234,9 +235,10 @@ class TestPortBatch43 extends Test {
 	}
 
 	public function testSpreadBbBatchEqualsStreaming() {
-		var pairs = [for (t in 0...60) {
+		var pairs:Array<musescript.indicators.lib.SpreadBollingerBands.SpreadBbPair> = [for (t in 0...60) {
 			var b = 30.0 + 0.7 * t;
-			pair(b + Math.sin(t * 0.4) * 1.5, b);
+			var p:musescript.indicators.lib.SpreadBollingerBands.SpreadBbPair = {a: b + Math.sin(t * 0.4) * 1.5, b: b};
+			p;
 		}];
 		var x = new SpreadBollingerBands(15, 2.0);
 		var y = new SpreadBollingerBands(15, 2.0);
@@ -339,9 +341,10 @@ class TestPortBatch43 extends Test {
 	}
 
 	public function testSpreadHurstBatchEqualsStreaming() {
-		var pairs = [for (t in 0...100) {
+		var pairs:Array<musescript.indicators.lib.SpreadHurst.SpreadHurstPair> = [for (t in 0...100) {
 			var b = 30.0 + 0.7 * t;
-			pair(b + Math.sin(t * 0.4) * 1.5, b);
+			var p:musescript.indicators.lib.SpreadHurst.SpreadHurstPair = {a: b + Math.sin(t * 0.4) * 1.5, b: b};
+			p;
 		}];
 		var x = new SpreadHurst(32);
 		var y = new SpreadHurst(32);

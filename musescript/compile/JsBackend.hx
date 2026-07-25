@@ -917,7 +917,7 @@ class JsBackend {
 			case "zscore": @:privateAccess TradeBuiltins.zscore(args[0]);
 			case "vector_zscore": TradeBuiltins.zscore(args[0]);
 			case "correlation": @:privateAccess TradeBuiltins.correlation(args[0], args[1]);
-			case "sharpe": Metrics.sharpe(args[0]);
+			case "sharpe": Metrics.sharpe(args[0], 0);
 			case "stat_mean": StatsBuiltins.mean(args[0]);
 			case "stat_median": StatsBuiltins.median(args[0]);
 			case "stat_variance": StatsBuiltins.variance(args[0]);
@@ -935,7 +935,7 @@ class JsBackend {
 			case "stat_autocorr": StatsBuiltins.autocorr(args[0], Std.int(args[1]));
 			case "sort": StatsBuiltins.sort(args[0]);
 			case "argsort": StatsBuiltins.argsort(args[0]);
-			case "sortino": Metrics.sortino(args[0]);
+			case "sortino": Metrics.sortino(args[0], 0);
 			case "max_drawdown": Metrics.maxDrawdown(args[0]);
 			case "stat_zscore": StatsBuiltins.zScores(args[0]);
 			case "sci_cumsum": StatsBuiltins.cumulativeSum(args[0]);

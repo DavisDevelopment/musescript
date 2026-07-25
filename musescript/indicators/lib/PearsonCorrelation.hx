@@ -99,4 +99,8 @@ class PearsonCorrelation implements MuseIndicator<PearsonPair, Float> {
 	}
 }
 
-typedef PearsonPair = { x: Float, y: Float };
+@:structInit
+class PearsonPair {
+	public var x:Float;
+	public var y:Float;
+}

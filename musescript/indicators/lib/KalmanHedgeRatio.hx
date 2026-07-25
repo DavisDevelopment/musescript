@@ -82,4 +82,8 @@ class KalmanHedgeRatio implements MuseIndicator<KalmanHedgeRatioPair, Float> {
 	}
 }
 
-typedef KalmanHedgeRatioPair = { a: Float, b: Float };
+@:structInit
+class KalmanHedgeRatioPair {
+	public var a:Float;
+	public var b:Float;
+}

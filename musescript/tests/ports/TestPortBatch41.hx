@@ -108,7 +108,7 @@ class TestPortBatch41 extends Test {
 
 	public function testRollingCorrelationResetClearsState() {
 		var rc = new RollingCorrelation(4);
-		for (p in [{x: 1.0, y: 2.0}, {x: 2.0, y: 4.0}, {x: 3.0, y: 6.0}, {x: 4.0, y: 8.0}, {x: 5.0, y: 10.0}])
+		for (p in ([{x: 1.0, y: 2.0}, {x: 2.0, y: 4.0}, {x: 3.0, y: 6.0}, {x: 4.0, y: 8.0}, {x: 5.0, y: 10.0}] : Array<musescript.indicators.lib.RollingCorrelation.RollingCorrelationPair>))
 			rc.update(p);
 		Assert.isTrue(rc.isReady());
 		rc.reset();
@@ -117,7 +117,7 @@ class TestPortBatch41 extends Test {
 	}
 
 	public function testRollingCorrelationBatchEqualsStreaming() {
-		var pairs = [for (i in 0...60) {x: Math.sin(i + 0.0), y: Math.cos(i * 0.5)}];
+		var pairs:Array<musescript.indicators.lib.RollingCorrelation.RollingCorrelationPair> = [for (i in 0...60) {x: Math.sin(i + 0.0), y: Math.cos(i * 0.5)}];
 		var a = new RollingCorrelation(14);
 		var b = new RollingCorrelation(14);
 		assertSameSeries(IndicatorBatch.run(a, pairs), [for (p in pairs) b.update(p)]);
@@ -165,7 +165,7 @@ class TestPortBatch41 extends Test {
 		//   Σrx·ry/3 = 58/3, r̄x·r̄y = 3·6 = 18 ⇒ cov = 58/3 − 18 = 4/3.
 		var rc = new RollingCovariance(3);
 		var outs:Array<Null<Float>> = [];
-		for (p in [{x: 0.0, y: 0.0}, {x: 1.0, y: 2.0}, {x: 3.0, y: 6.0}, {x: 6.0, y: 12.0}, {x: 10.0, y: 20.0}])
+		for (p in ([{x: 0.0, y: 0.0}, {x: 1.0, y: 2.0}, {x: 3.0, y: 6.0}, {x: 6.0, y: 12.0}, {x: 10.0, y: 20.0}] : Array<musescript.indicators.lib.RollingCovariance.RollingCovariancePair>))
 			outs.push(rc.update(p));
 		Assert.floatEquals(4.0 / 3.0, lastNonNull(outs), 1e-9);
 	}
@@ -189,7 +189,7 @@ class TestPortBatch41 extends Test {
 
 	public function testRollingCovarianceResetClearsState() {
 		var rc = new RollingCovariance(4);
-		for (p in [{x: 1.0, y: 2.0}, {x: 2.0, y: 4.0}, {x: 3.0, y: 1.0}, {x: 4.0, y: 9.0}, {x: 5.0, y: 2.0}])
+		for (p in ([{x: 1.0, y: 2.0}, {x: 2.0, y: 4.0}, {x: 3.0, y: 1.0}, {x: 4.0, y: 9.0}, {x: 5.0, y: 2.0}] : Array<musescript.indicators.lib.RollingCovariance.RollingCovariancePair>))
 			rc.update(p);
 		Assert.isTrue(rc.isReady());
 		rc.reset();
@@ -198,7 +198,7 @@ class TestPortBatch41 extends Test {
 	}
 
 	public function testRollingCovarianceBatchEqualsStreaming() {
-		var pairs = [for (i in 0...60) {x: Math.sin(i + 0.0) * 4.0, y: Math.cos(i * 0.5) * 2.0}];
+		var pairs:Array<musescript.indicators.lib.RollingCovariance.RollingCovariancePair> = [for (i in 0...60) {x: Math.sin(i + 0.0) * 4.0, y: Math.cos(i * 0.5) * 2.0}];
 		var a = new RollingCovariance(12);
 		var b = new RollingCovariance(12);
 		assertSameSeries(IndicatorBatch.run(a, pairs), [for (p in pairs) b.update(p)]);
@@ -1096,7 +1096,7 @@ class TestPortBatch41 extends Test {
 		// is a positive number less than 1 because of the tie in rx.
 		var s = new SpearmanCorrelation(4);
 		var outs:Array<Null<Float>> = [];
-		for (p in [{x: 1.0, y: 1.0}, {x: 2.0, y: 2.0}, {x: 3.0, y: 3.0}, {x: 3.0, y: 4.0}])
+		for (p in ([{x: 1.0, y: 1.0}, {x: 2.0, y: 2.0}, {x: 3.0, y: 3.0}, {x: 3.0, y: 4.0}] : Array<musescript.indicators.lib.SpearmanCorrelation.SpearmanPair>))
 			outs.push(s.update(p));
 		var last = lastNonNull(outs);
 		Assert.isTrue(last > 0.0 && last < 1.0);
@@ -1104,7 +1104,7 @@ class TestPortBatch41 extends Test {
 
 	public function testSpearmanCorrelationResetClearsState() {
 		var s = new SpearmanCorrelation(5);
-		for (p in [{x: 1.0, y: 2.0}, {x: 2.0, y: 4.0}, {x: 3.0, y: 6.0}, {x: 4.0, y: 8.0}, {x: 5.0, y: 10.0}])
+		for (p in ([{x: 1.0, y: 2.0}, {x: 2.0, y: 4.0}, {x: 3.0, y: 6.0}, {x: 4.0, y: 8.0}, {x: 5.0, y: 10.0}] : Array<musescript.indicators.lib.SpearmanCorrelation.SpearmanPair>))
 			s.update(p);
 		Assert.isTrue(s.isReady());
 		s.reset();
@@ -1113,7 +1113,7 @@ class TestPortBatch41 extends Test {
 	}
 
 	public function testSpearmanCorrelationBatchEqualsStreaming() {
-		var pairs = [for (i in 0...60) {x: Math.sin(i + 0.0) + Math.cos(i * 0.1), y: Math.cos(i * 0.3)}];
+		var pairs:Array<musescript.indicators.lib.SpearmanCorrelation.SpearmanPair> = [for (i in 0...60) {x: Math.sin(i + 0.0) + Math.cos(i * 0.1), y: Math.cos(i * 0.3)}];
 		var a = new SpearmanCorrelation(14);
 		var b = new SpearmanCorrelation(14);
 		assertSameSeries(IndicatorBatch.run(a, pairs), [for (p in pairs) b.update(p)]);
@@ -1239,7 +1239,7 @@ class TestPortBatch41 extends Test {
 		// 1 (constant) ⇒ Var(q) = 0 ⇒ VR = 0 (perfect mean reversion).
 		var vr = new VarianceRatio(5, 2);
 		var outs:Array<Null<Float>> = [];
-		for (p in [{a: 0.0, b: 0.0}, {a: 2.0, b: 0.0}, {a: 1.0, b: 0.0}, {a: 3.0, b: 0.0}, {a: 2.0, b: 0.0}])
+		for (p in ([{a: 0.0, b: 0.0}, {a: 2.0, b: 0.0}, {a: 1.0, b: 0.0}, {a: 3.0, b: 0.0}, {a: 2.0, b: 0.0}] : Array<musescript.indicators.lib.VarianceRatio.VarianceRatioPair>))
 			outs.push(vr.update(p));
 		Assert.floatEquals(0.0, lastNonNull(outs), 1e-12);
 	}
@@ -1280,9 +1280,9 @@ class TestPortBatch41 extends Test {
 	}
 
 	public function testVarianceRatioBatchEqualsStreaming() {
-		var pairs = [for (t in 0...100) {
+		var pairs:Array<musescript.indicators.lib.VarianceRatio.VarianceRatioPair> = [for (t in 0...100) {
 			var base = 30.0 + 0.7 * t;
-			var p = {a: base + Math.sin(t * 0.4) * 1.5, b: base};
+			var p:musescript.indicators.lib.VarianceRatio.VarianceRatioPair = {a: base + Math.sin(t * 0.4) * 1.5, b: base};
 			p;
 		}];
 		var a = new VarianceRatio(32, 3);

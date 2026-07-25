@@ -106,4 +106,8 @@ class SpreadHurst implements MuseIndicator<SpreadHurstPair, Float> {
 	}
 }
 
-typedef SpreadHurstPair = {a:Float, b:Float};
+@:structInit
+class SpreadHurstPair {
+	public var a:Float;
+	public var b:Float;
+}

@@ -105,4 +105,8 @@ class RelativeStrengthAB implements MuseIndicator<RSPair, RelativeStrengthOutput
 	}
 }
 
-typedef RSPair = { a: Float, b: Float };
+@:structInit
+class RSPair {
+	public var a:Float;
+	public var b:Float;
+}

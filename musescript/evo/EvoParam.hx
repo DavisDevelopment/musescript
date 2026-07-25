@@ -1,10 +1,11 @@
 package musescript.evo;
 
-typedef EvoParam = {
-	var name:String;
-	var defaultValue:Float;
-	var min:Float;
-	var max:Float;
-	var step:Float;
-	var tune:String;
+@:structInit
+class EvoParam {
+	public var name:String;
+	public var defaultValue:Float;
+	public var min:Float;
+	public var max:Float;
+	public var step:Float;
+	public var tune:String;
 }

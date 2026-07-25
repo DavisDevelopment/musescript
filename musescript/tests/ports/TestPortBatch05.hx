@@ -86,7 +86,7 @@ class TestPortBatch05 extends Test {
 	}
 
 	public function testBetaBatchEqualsStreaming() {
-		var inputs = [for (i in 0...50) { a: Math.sin(i * 0.2) * 0.01, b: Math.sin(i * 0.2 + 0.3) * 0.01 }];
+		var inputs:Array<musescript.indicators.lib.Beta.BetaPair> = [for (i in 0...50) { a: Math.sin(i * 0.2) * 0.01, b: Math.sin(i * 0.2 + 0.3) * 0.01 }];
 		var a1 = new Beta(10), a2 = new Beta(10);
 		var batched = IndicatorBatch.run(a1, inputs);
 		var streamed = [for (x in inputs) a2.update(x)];

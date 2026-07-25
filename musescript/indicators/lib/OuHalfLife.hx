@@ -85,4 +85,8 @@ class OuHalfLife implements MuseIndicator<OuHalfLifePair, Float> {
 	}
 }
 
-typedef OuHalfLifePair = { a: Float, b: Float };
+@:structInit
+class OuHalfLifePair {
+	public var a:Float;
+	public var b:Float;
+}

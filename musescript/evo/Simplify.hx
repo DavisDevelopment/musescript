@@ -64,6 +64,7 @@ class Simplify {
 			case KConst(_) | KParam(_) | KFeature(_): false;
 			case KSeries(s) | KLookback(s, _): seriesHasIndicator(s);
 			case KArith(_, a, b): containsIndicator(a) || containsIndicator(b);
+			case KHole(inner): containsIndicator(inner);
 		};
 	}
 
@@ -160,6 +161,13 @@ class Simplify {
 				var folded = foldBCrossSelf(dir, a, b);
 				folded != null ? folded : BCross(dir, a, b);
 			case BTrend(dir, s, w): BTrend(dir, s, w);
+			// Recurse INSIDE the hole (dead weight still gets cleaned up), but never collapse the
+			// wrapper itself away -- even if `inner` folds to TRUE/FALSE, the boundary marking this
+			// position as mutation-eligible must survive (a parent BAnd/BOr's isAlwaysTrue/
+			// isAlwaysFalse checks deliberately don't see through BHole -- they fall to their
+			// `default: false` arm -- so a frozen skeleton sibling is never erased on account of a
+			// hole's current, transient content).
+			case BHole(inner): BHole(simplifyBool(inner));
 		};
 	}
 
@@ -218,6 +226,9 @@ class Simplify {
 						else if ((op == "min" || op == "max") && scalarEq(sa, sb)) sa
 						else KArith(op, sa, sb);
 				}
+			// Explicit (not folded into the `default` below): the wrapper must be preserved, so this
+			// needs to actually recurse+rewrap rather than fall through to "return unchanged".
+			case KHole(inner): KHole(simplifyScalar(inner));
 			default: n; // KConst/KParam/KFeature/KSeries/KLookback are already minimal
 		};
 	}

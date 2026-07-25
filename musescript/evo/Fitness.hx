@@ -1,5 +1,6 @@
 package musescript.evo;
 
+import musescript.ast.Decl;
 import musescript.parse.MuseParser;
 import musescript.compile.MuseCompiler;
 import musescript.harness.HarnessContext;
@@ -7,12 +8,38 @@ import musescript.harness.BarFeed;
 import musescript.harness.Bar;
 import musescript.interp.MuseInterp;
 import musescript.builtins.TradeBuiltins;
+import musescript.BarStrategyFn;
 
 /**
  * Typed fitness evaluation for genomes.
  * Prefer WASM when available; fall back to interp while keeping backend label honest.
  */
 class Fitness {
+	/**
+	 * Compiled-program cache keyed on `(structural key, target, strict)` -- `Expand.expand(g)`
+	 * is a pure function of the genome, and structurally-identical genomes (same
+	 * `Canonical.structuralKey`) always produce byte-identical source, so the ENTIRE
+	 * parse+TemplateExpand+ModuleExpand+...+CallsiteIds pipeline inside `MuseCompiler.compileEx`
+	 * is redundant work on a repeat. This matters enormously for the evo package specifically:
+	 * `Variation.attributedSubtreeCrossover`/`attributedPointMutate` call `Fitness.evaluate` as an
+	 * ablation ORACLE hundreds of times per generation (baseline + per-site ablations + donor
+	 * candidates), on the SAME handful of recurring parent/ablated shapes -- re-parsing and
+	 * re-compiling every one of those calls was measured as the dominant cost of a whole
+	 * corpus-evo generation (see PLAN_EVO_SPEED.md), dwarfing the actual WASM-accelerated fitness
+	 * pass. Only the compiled `fn` + its `decls` (still needed per-call for
+	 * `registerDeclPublic` -- see below) are cached; a fresh `HarnessContext`/`MuseInterp`/
+	 * `BarFeed`/cross-state reset still happens on EVERY call, so this is a pure compile-cache,
+	 * not a memoized RESULT (a genome run on a different tape or cost still gets a correct fresh
+	 * execution through the same cached `fn`).
+	 */
+	static var fnCache:Map<String, {fn:BarStrategyFn, decls:Array<Decl>, backend:String}> = new Map();
+	static inline var FN_CACHE_MAX = 4096;
+
+	/** Clears the compiled-program cache -- exposed for tests that care about compile counts,
+	 * and for a caller switching to a genuinely different program universe (a fresh corpus-evo
+	 * process naturally starts with an empty cache; this is for long-lived processes/tests). */
+	public static function clearFnCache():Void fnCache = new Map();
+
 	/**
 	 * `costBps` (default 0 -- zero behavior change for any existing caller) sets `OrderSim.book.
 	 * slippageBps` before running, so a genome's entries AND exits pay a realistic spread instead
@@ -24,10 +51,8 @@ class Fitness {
 	 * MAP-Elites "scalper" niche), since real transaction cost is exactly what punishes overtrading
 	 * -- see OrderSim.hx's executeLong/executeShort/executeFlat doc comment for the full story.
 	 */
-	public static function evaluate(g:StrategyGenome, bars:Array<Bar>, ?target:String = "js", ?strict:Bool = false, ?costBps:Float = 0):FitnessResult {
-		var source = Expand.expand(g);
+	public static function evaluate(g:StrategyGenome, bars:Array<Bar>, ?target:String = "js", ?strict:Bool = false, ?costBps:Float = 0, ?initialCash:Float = 100000, ?equityFloor:Float = 0.0):FitnessResult {
 		try {
-			var prog = new MuseParser().parse(source, "<evo>");
 			// NOTE: this used to branch on `#if (java || jvm)` into a checker-only fast path
 			// that never touched `bars` at all -- it returned trades=max(1,40-nodeCount),
 			// finalEquity=100000+trades*10, sharpe=1-nodeCount*0.001, a value derived PURELY
@@ -43,22 +68,47 @@ class Fitness {
 			// the branch is removed -- JVM now runs the exact same real execution path as
 			// every other target, matching MuseCompiler's own documented "js (default) --
 			// JsEmitter hot path + eval on JS; MuseInterp elsewhere" fallback contract.
+			var cacheKey = Canonical.structuralKey(g) + ":" + target + ":" + strict;
+			var cached = fnCache.get(cacheKey);
+			var decls:Array<Decl>;
+			var fn:BarStrategyFn;
+			var backend:String;
+			if (cached != null) {
+				decls = cached.decls;
+				fn = cached.fn;
+				backend = cached.backend;
+			} else {
+				var source = Expand.expand(g);
+				var prog = new MuseParser().parse(source, "<evo>");
+				var ex = MuseCompiler.compileEx(prog, { target: target, strict: strict });
+				decls = prog.decls;
+				fn = ex.fn;
+				backend = ex.backend;
+				if (count(fnCache) >= FN_CACHE_MAX) fnCache = new Map(); // simple full-clear, not an LRU -- see clearFnCache
+				fnCache.set(cacheKey, { fn: fn, decls: decls, backend: backend });
+			}
 			var harness = new HarnessContext();
 			if (costBps != 0) harness.orders.book.slippageBps = costBps;
+			// `--equity-floor`/bankruptcy crank (see OrderSim.hx's doc comment): both are no-ops at
+			// their defaults (100000/0.0), so an existing caller that doesn't pass them sees the
+			// exact same OrderSim state a bare `new HarnessContext()` already produced.
+			if (initialCash != 100000) harness.orders.reset(initialCash);
+			if (equityFloor > 0) harness.orders.equityFloor = equityFloor;
 			var seed = new MuseInterp(harness);
-			for (d in prog.decls) seed.registerDeclPublic(d);
+			for (d in decls) seed.registerDeclPublic(d);
 			harness.feed = new BarFeed(bars);
 			TradeBuiltins.resetCrossState();
-			var ex = MuseCompiler.compileEx(prog, { target: target, strict: strict });
-			var result:Dynamic = ex.fn(harness);
+			var result:Dynamic = fn(harness);
 			var fr = new FitnessResult(
 				true,
 				fieldF(result, "sharpe"),
 				fieldI(result, "trades"),
 				fieldF(result, "finalEquity"),
-				ex.backend
+				backend
 			);
 			fr.fills = Reflect.field(result, "fills");
+			fr.bankrupt = harness.orders.bankrupt;
+			fr.equity = harness.orders.equity.toArray();
 			return fr;
 		} catch (e:Dynamic) {
 			return new FitnessResult(false, -999, 0, 0, "error", Std.string(e));
@@ -93,6 +143,60 @@ class Fitness {
 		if (nodeCount != null && nodeCount > parsimonyThreshold)
 			s -= parsimonyLambda * (nodeCount - parsimonyThreshold);
 		return s;
+	}
+
+	/**
+	 * Robustness-adjusted variant of `score()`: splits the backtest's OWN equity curve (`r.
+	 * equity`, populated by `evaluate` from `harness.orders.equity` -- already computed for free,
+	 * no extra simulator runs needed) into `windows` contiguous segments, scores each segment's
+	 * OWN Sharpe independently, and combines them as mean-minus-`windowLambda`*std instead of one
+	 * whole-tape Sharpe. A genome that's excellent in one stretch of the tape and mediocre or
+	 * harmful elsewhere gets exactly the same single-scalar Sharpe as one that's modestly good
+	 * throughout -- windowing is what lets the fitness function actually tell them apart, directly
+	 * rewarding robustness instead of a single lucky curve-fit.
+	 *
+	 * Falls back to plain `score()` (today's exact behavior) whenever windowing wouldn't be
+	 * meaningful: `windows <= 1`, no equity curve attached, or too few bars to give every window
+	 * at least 2 points to compute a return from. Never a crash, never a NEG_INF where `score()`
+	 * would have returned a real number.
+	 */
+	public static function robustScore(r:FitnessResult, windows:Int, windowLambda:Float, minTrades:Int = 1,
+			?nodeCount:Int, ?parsimonyThreshold:Int = 20, ?parsimonyLambda:Float = 0.01):Float {
+		if (!r.ok) return NEG_INF;
+		if (Math.isNaN(r.sharpe)) return NEG_INF;
+		if (r.trades < minTrades) return NEG_INF;
+		if (windows <= 1 || r.equity == null || r.equity.length < windows * 2)
+			return score(r, minTrades, nodeCount, parsimonyThreshold, parsimonyLambda);
+		var segLen = Std.int(r.equity.length / windows);
+		var segSharpes:Array<Float> = [];
+		for (w in 0...windows) {
+			var startI = w * segLen;
+			var endI = (w == windows - 1) ? r.equity.length : startI + segLen;
+			if (endI - startI < 2) continue;
+			var seg = r.equity.slice(startI, endI);
+			var rets = musescript.harness.Metrics.returnsFromEquity(seg);
+			if (rets.length < 2) continue;
+			var sh = musescript.harness.Metrics.sharpe(rets, 0.0);
+			if (!Math.isNaN(sh)) segSharpes.push(sh);
+		}
+		if (segSharpes.length == 0) return score(r, minTrades, nodeCount, parsimonyThreshold, parsimonyLambda);
+		var mean = 0.0;
+		for (s in segSharpes) mean += s;
+		mean /= segSharpes.length;
+		var variance = 0.0;
+		for (s in segSharpes) variance += (s - mean) * (s - mean);
+		variance /= segSharpes.length;
+		var std = Math.sqrt(variance);
+		var s = mean - windowLambda * std;
+		if (nodeCount != null && nodeCount > parsimonyThreshold)
+			s -= parsimonyLambda * (nodeCount - parsimonyThreshold);
+		return s;
+	}
+
+	static function count<T>(m:Map<String, T>):Int {
+		var n = 0;
+		for (_ in m.keys()) n++;
+		return n;
 	}
 
 	static function fieldF(o:Dynamic, n:String):Float {

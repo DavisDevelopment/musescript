@@ -25,173 +25,238 @@ typedef GPath = Array<GStep>;
 class TreeSurgery {
 	// ---- collect: catalog every node of each kind reachable from a root, with its path ----
 
-	public static function collectBool(n:BoolNode, path:GPath, out:Array<{path:GPath, node:BoolNode}>):Void {
-		out.push({ path: path, node: n });
+	/**
+	 * `armed` (default `true` -- exact prior behavior for every existing call site, none of which
+	 * pass this new 4th/5th arg) gates whether a visited node gets RECORDED as a candidate. It
+	 * starts `false` only when a caller (`Variation.buildCatalog`, for a genome `isTemplated`)
+	 * deliberately wants a hole-restricted catalog; every node is still WALKED regardless of
+	 * `armed` (so a `BHole`/`KHole` nested arbitrarily deep inside frozen skeleton is still found),
+	 * but only recorded once `armed` has flipped `true` -- which happens permanently for that whole
+	 * subtree the instant a `BHole`/`KHole` boundary is crossed (see the `BHole`/`KHole` cases
+	 * below). The boundary node itself is never recorded (only its `inner`), so a catalog entry can
+	 * never resolve to a path that would let `replace*` delete the wrapper -- see `replaceBoolWithBool`'s
+	 * `BHole` case, which always reconstructs `BHole(...)` around the replaced child.
+	 */
+	/**
+	 * `path` is a MUTABLE scratch buffer, pushed/popped around each recursive descent instead of
+	 * `.concat()`-ing a fresh array at every tree level (the JIT audit that motivated this file's
+	 * `collect*`/`replace*` rewrite found this was the single largest allocation source in the
+	 * evo package's per-child overhead: O(nodes × depth) short-lived arrays, since `buildCatalog`
+	 * runs up to 6 of these traversals per genome and genome-child production happens hundreds of
+	 * times per generation). A path is copied ONCE, only at the point a node is actually recorded
+	 * (`out.push`) -- every caller already passes a throwaway `[]` literal it never reads after
+	 * the call, so mutating it in place during the walk is invisible externally; the recorded
+	 * `path` values are still independent, fully-owned array copies, byte-identical to before.
+	 */
+	public static function collectBool(n:BoolNode, path:GPath, out:Array<{path:GPath, node:BoolNode}>, ?armed:Bool = true):Void {
+		if (armed) out.push({ path: path.copy(), node: n });
 		switch (n) {
 			case BCross(_, _, _):
 			case BCmp(_, _, _):
 			case BTrend(_, _, _):
 			case BAnd(a, b) | BOr(a, b):
-				collectBool(a, path.concat([StepA]), out);
-				collectBool(b, path.concat([StepB]), out);
+				path.push(StepA); collectBool(a, path, out, armed); path.pop();
+				path.push(StepB); collectBool(b, path, out, armed); path.pop();
 			case BNot(a):
-				collectBool(a, path.concat([StepA]), out);
+				path.push(StepA); collectBool(a, path, out, armed); path.pop();
+			case BHole(inner):
+				path.push(StepA); collectBool(inner, path, out, true); path.pop();
 		}
 	}
 
-	public static function collectScalarInBool(n:BoolNode, path:GPath, out:Array<{path:GPath, node:ScalarNode}>):Void {
+	public static function collectScalarInBool(n:BoolNode, path:GPath, out:Array<{path:GPath, node:ScalarNode}>, ?armed:Bool = true):Void {
 		switch (n) {
 			case BCross(_, _, _):
 			case BCmp(_, a, b):
-				collectScalar(a, path.concat([StepA]), out);
-				collectScalar(b, path.concat([StepB]), out);
+				path.push(StepA); collectScalar(a, path, out, armed); path.pop();
+				path.push(StepB); collectScalar(b, path, out, armed); path.pop();
 			case BTrend(_, _, _):
 			case BAnd(a, b) | BOr(a, b):
-				collectScalarInBool(a, path.concat([StepA]), out);
-				collectScalarInBool(b, path.concat([StepB]), out);
+				path.push(StepA); collectScalarInBool(a, path, out, armed); path.pop();
+				path.push(StepB); collectScalarInBool(b, path, out, armed); path.pop();
 			case BNot(a):
-				collectScalarInBool(a, path.concat([StepA]), out);
+				path.push(StepA); collectScalarInBool(a, path, out, armed); path.pop();
+			case BHole(inner):
+				path.push(StepA); collectScalarInBool(inner, path, out, true); path.pop();
 		}
 	}
 
-	public static function collectSeriesInBool(n:BoolNode, path:GPath, out:Array<{path:GPath, node:SeriesNode}>):Void {
+	public static function collectSeriesInBool(n:BoolNode, path:GPath, out:Array<{path:GPath, node:SeriesNode}>, ?armed:Bool = true):Void {
 		switch (n) {
 			case BCross(_, a, b):
-				collectSeries(a, path.concat([StepA]), out);
-				collectSeries(b, path.concat([StepB]), out);
+				path.push(StepA); collectSeries(a, path, out, armed); path.pop();
+				path.push(StepB); collectSeries(b, path, out, armed); path.pop();
 			case BCmp(_, a, b):
-				collectSeriesInScalar(a, path.concat([StepA]), out);
-				collectSeriesInScalar(b, path.concat([StepB]), out);
+				path.push(StepA); collectSeriesInScalar(a, path, out, armed); path.pop();
+				path.push(StepB); collectSeriesInScalar(b, path, out, armed); path.pop();
 			case BTrend(_, s, _):
-				collectSeries(s, path.concat([StepA]), out);
+				path.push(StepA); collectSeries(s, path, out, armed); path.pop();
 			case BAnd(a, b) | BOr(a, b):
-				collectSeriesInBool(a, path.concat([StepA]), out);
-				collectSeriesInBool(b, path.concat([StepB]), out);
+				path.push(StepA); collectSeriesInBool(a, path, out, armed); path.pop();
+				path.push(StepB); collectSeriesInBool(b, path, out, armed); path.pop();
 			case BNot(a):
-				collectSeriesInBool(a, path.concat([StepA]), out);
+				path.push(StepA); collectSeriesInBool(a, path, out, armed); path.pop();
+			case BHole(inner):
+				path.push(StepA); collectSeriesInBool(inner, path, out, true); path.pop();
 		}
 	}
 
-	public static function collectScalar(n:ScalarNode, path:GPath, out:Array<{path:GPath, node:ScalarNode}>):Void {
-		out.push({ path: path, node: n });
+	public static function collectScalar(n:ScalarNode, path:GPath, out:Array<{path:GPath, node:ScalarNode}>, ?armed:Bool = true):Void {
+		if (armed) out.push({ path: path.copy(), node: n });
 		switch (n) {
 			case KConst(_) | KParam(_) | KFeature(_) | KSeries(_) | KLookback(_, _):
 			case KArith(_, a, b):
-				collectScalar(a, path.concat([StepA]), out);
-				collectScalar(b, path.concat([StepB]), out);
+				path.push(StepA); collectScalar(a, path, out, armed); path.pop();
+				path.push(StepB); collectScalar(b, path, out, armed); path.pop();
+			case KHole(inner):
+				path.push(StepA); collectScalar(inner, path, out, true); path.pop();
 		}
 	}
 
-	public static function collectSeriesInScalar(n:ScalarNode, path:GPath, out:Array<{path:GPath, node:SeriesNode}>):Void {
+	public static function collectSeriesInScalar(n:ScalarNode, path:GPath, out:Array<{path:GPath, node:SeriesNode}>, ?armed:Bool = true):Void {
 		switch (n) {
 			case KConst(_) | KParam(_) | KFeature(_):
 			case KSeries(s):
-				collectSeries(s, path.concat([StepA]), out);
+				path.push(StepA); collectSeries(s, path, out, armed); path.pop();
 			case KLookback(s, _):
-				collectSeries(s, path.concat([StepA]), out);
+				path.push(StepA); collectSeries(s, path, out, armed); path.pop();
 			case KArith(_, a, b):
-				collectSeriesInScalar(a, path.concat([StepA]), out);
-				collectSeriesInScalar(b, path.concat([StepB]), out);
+				path.push(StepA); collectSeriesInScalar(a, path, out, armed); path.pop();
+				path.push(StepB); collectSeriesInScalar(b, path, out, armed); path.pop();
+			case KHole(inner):
+				path.push(StepA); collectSeriesInScalar(inner, path, out, true); path.pop();
 		}
 	}
 
-	public static function collectSeries(n:SeriesNode, path:GPath, out:Array<{path:GPath, node:SeriesNode}>):Void {
-		out.push({ path: path, node: n });
+	public static function collectSeries(n:SeriesNode, path:GPath, out:Array<{path:GPath, node:SeriesNode}>, ?armed:Bool = true):Void {
+		if (armed) out.push({ path: path.copy(), node: n });
 		switch (n) {
 			case SPrice(_):
 			case SInd(_, _, _, src):
-				if (src != null) collectSeries(src, path.concat([StepA]), out);
+				if (src != null) { path.push(StepA); collectSeries(src, path, out, armed); path.pop(); }
 		}
 	}
 
 	// ---- replace: rebuild along a path recorded by the matching collect* above ----
 
-	public static function replaceBoolWithBool(n:BoolNode, path:GPath, repl:BoolNode):BoolNode {
-		if (path.length == 0) return repl;
-		var step = path[0];
-		var rest = path.slice(1);
+	/**
+	 * Public entry points keep their original 3-arg signature (path always starting at index 0);
+	 * each delegates to a private `*At(n, path, repl, idx)` twin that reads/advances an INDEX
+	 * into the same shared `path` array instead of `path.slice(1)` -- a replace walk is at most
+	 * `path.length` calls deep (bounded by genome depth, not tree size, so this was always a much
+	 * smaller allocation source than `collect*`'s per-level `.concat()`), but it's free to remove
+	 * once `collect*` above already established the "index/buffer instead of copy-per-level"
+	 * pattern for this file.
+	 */
+	public static function replaceBoolWithBool(n:BoolNode, path:GPath, repl:BoolNode):BoolNode
+		return replaceBoolWithBoolAt(n, path, repl, 0);
+
+	static function replaceBoolWithBoolAt(n:BoolNode, path:GPath, repl:BoolNode, idx:Int):BoolNode {
+		if (idx >= path.length) return repl;
+		var step = path[idx];
 		return switch (n) {
 			case BCross(_, _, _) | BCmp(_, _, _) | BTrend(_, _, _):
 				throw "TreeSurgery.replaceBoolWithBool: path ran past a leaf-of-bool-kind node";
 			case BAnd(a, b):
-				step == StepA ? BAnd(replaceBoolWithBool(a, rest, repl), b) : BAnd(a, replaceBoolWithBool(b, rest, repl));
+				step == StepA ? BAnd(replaceBoolWithBoolAt(a, path, repl, idx + 1), b) : BAnd(a, replaceBoolWithBoolAt(b, path, repl, idx + 1));
 			case BOr(a, b):
-				step == StepA ? BOr(replaceBoolWithBool(a, rest, repl), b) : BOr(a, replaceBoolWithBool(b, rest, repl));
+				step == StepA ? BOr(replaceBoolWithBoolAt(a, path, repl, idx + 1), b) : BOr(a, replaceBoolWithBoolAt(b, path, repl, idx + 1));
 			case BNot(a):
-				BNot(replaceBoolWithBool(a, rest, repl));
+				BNot(replaceBoolWithBoolAt(a, path, repl, idx + 1));
+			case BHole(inner):
+				BHole(replaceBoolWithBoolAt(inner, path, repl, idx + 1));
 		};
 	}
 
-	public static function replaceBoolWithScalar(n:BoolNode, path:GPath, repl:ScalarNode):BoolNode {
-		var step = path[0];
-		var rest = path.slice(1);
+	public static function replaceBoolWithScalar(n:BoolNode, path:GPath, repl:ScalarNode):BoolNode
+		return replaceBoolWithScalarAt(n, path, repl, 0);
+
+	static function replaceBoolWithScalarAt(n:BoolNode, path:GPath, repl:ScalarNode, idx:Int):BoolNode {
+		var step = path[idx];
 		return switch (n) {
 			case BCross(_, _, _) | BTrend(_, _, _):
 				throw "TreeSurgery.replaceBoolWithScalar: no scalar child here";
 			case BCmp(op, a, b):
-				step == StepA ? BCmp(op, replaceScalarWithScalar(a, rest, repl), b) : BCmp(op, a, replaceScalarWithScalar(b, rest, repl));
+				step == StepA ? BCmp(op, replaceScalarWithScalarAt(a, path, repl, idx + 1), b) : BCmp(op, a, replaceScalarWithScalarAt(b, path, repl, idx + 1));
 			case BAnd(a, b):
-				step == StepA ? BAnd(replaceBoolWithScalar(a, rest, repl), b) : BAnd(a, replaceBoolWithScalar(b, rest, repl));
+				step == StepA ? BAnd(replaceBoolWithScalarAt(a, path, repl, idx + 1), b) : BAnd(a, replaceBoolWithScalarAt(b, path, repl, idx + 1));
 			case BOr(a, b):
-				step == StepA ? BOr(replaceBoolWithScalar(a, rest, repl), b) : BOr(a, replaceBoolWithScalar(b, rest, repl));
+				step == StepA ? BOr(replaceBoolWithScalarAt(a, path, repl, idx + 1), b) : BOr(a, replaceBoolWithScalarAt(b, path, repl, idx + 1));
 			case BNot(a):
-				BNot(replaceBoolWithScalar(a, rest, repl));
+				BNot(replaceBoolWithScalarAt(a, path, repl, idx + 1));
+			case BHole(inner):
+				BHole(replaceBoolWithScalarAt(inner, path, repl, idx + 1));
 		};
 	}
 
-	public static function replaceBoolWithSeries(n:BoolNode, path:GPath, repl:SeriesNode):BoolNode {
-		var step = path[0];
-		var rest = path.slice(1);
+	public static function replaceBoolWithSeries(n:BoolNode, path:GPath, repl:SeriesNode):BoolNode
+		return replaceBoolWithSeriesAt(n, path, repl, 0);
+
+	static function replaceBoolWithSeriesAt(n:BoolNode, path:GPath, repl:SeriesNode, idx:Int):BoolNode {
+		var step = path[idx];
 		return switch (n) {
 			case BCross(dir, a, b):
-				step == StepA ? BCross(dir, replaceSeriesWithSeries(a, rest, repl), b) : BCross(dir, a, replaceSeriesWithSeries(b, rest, repl));
+				step == StepA ? BCross(dir, replaceSeriesWithSeriesAt(a, path, repl, idx + 1), b) : BCross(dir, a, replaceSeriesWithSeriesAt(b, path, repl, idx + 1));
 			case BCmp(op, a, b):
-				step == StepA ? BCmp(op, replaceSeriesInScalarWithSeries(a, rest, repl), b) : BCmp(op, a, replaceSeriesInScalarWithSeries(b, rest, repl));
+				step == StepA ? BCmp(op, replaceSeriesInScalarWithSeriesAt(a, path, repl, idx + 1), b) : BCmp(op, a, replaceSeriesInScalarWithSeriesAt(b, path, repl, idx + 1));
 			case BTrend(dir, s, w):
-				BTrend(dir, replaceSeriesWithSeries(s, rest, repl), w);
+				BTrend(dir, replaceSeriesWithSeriesAt(s, path, repl, idx + 1), w);
 			case BAnd(a, b):
-				step == StepA ? BAnd(replaceBoolWithSeries(a, rest, repl), b) : BAnd(a, replaceBoolWithSeries(b, rest, repl));
+				step == StepA ? BAnd(replaceBoolWithSeriesAt(a, path, repl, idx + 1), b) : BAnd(a, replaceBoolWithSeriesAt(b, path, repl, idx + 1));
 			case BOr(a, b):
-				step == StepA ? BOr(replaceBoolWithSeries(a, rest, repl), b) : BOr(a, replaceBoolWithSeries(b, rest, repl));
+				step == StepA ? BOr(replaceBoolWithSeriesAt(a, path, repl, idx + 1), b) : BOr(a, replaceBoolWithSeriesAt(b, path, repl, idx + 1));
 			case BNot(a):
-				BNot(replaceBoolWithSeries(a, rest, repl));
+				BNot(replaceBoolWithSeriesAt(a, path, repl, idx + 1));
+			case BHole(inner):
+				BHole(replaceBoolWithSeriesAt(inner, path, repl, idx + 1));
 		};
 	}
 
-	public static function replaceScalarWithScalar(n:ScalarNode, path:GPath, repl:ScalarNode):ScalarNode {
-		if (path.length == 0) return repl;
-		var step = path[0];
-		var rest = path.slice(1);
+	public static function replaceScalarWithScalar(n:ScalarNode, path:GPath, repl:ScalarNode):ScalarNode
+		return replaceScalarWithScalarAt(n, path, repl, 0);
+
+	static function replaceScalarWithScalarAt(n:ScalarNode, path:GPath, repl:ScalarNode, idx:Int):ScalarNode {
+		if (idx >= path.length) return repl;
+		var step = path[idx];
 		return switch (n) {
 			case KConst(_) | KParam(_) | KFeature(_) | KSeries(_) | KLookback(_, _):
 				throw "TreeSurgery.replaceScalarWithScalar: path ran past a scalar leaf";
 			case KArith(op, a, b):
-				step == StepA ? KArith(op, replaceScalarWithScalar(a, rest, repl), b) : KArith(op, a, replaceScalarWithScalar(b, rest, repl));
+				step == StepA ? KArith(op, replaceScalarWithScalarAt(a, path, repl, idx + 1), b) : KArith(op, a, replaceScalarWithScalarAt(b, path, repl, idx + 1));
+			case KHole(inner):
+				KHole(replaceScalarWithScalarAt(inner, path, repl, idx + 1));
 		};
 	}
 
-	public static function replaceSeriesInScalarWithSeries(n:ScalarNode, path:GPath, repl:SeriesNode):ScalarNode {
-		var step = path[0];
-		var rest = path.slice(1);
+	public static function replaceSeriesInScalarWithSeries(n:ScalarNode, path:GPath, repl:SeriesNode):ScalarNode
+		return replaceSeriesInScalarWithSeriesAt(n, path, repl, 0);
+
+	static function replaceSeriesInScalarWithSeriesAt(n:ScalarNode, path:GPath, repl:SeriesNode, idx:Int):ScalarNode {
+		var step = path[idx];
 		return switch (n) {
 			case KConst(_) | KParam(_) | KFeature(_):
 				throw "TreeSurgery.replaceSeriesInScalarWithSeries: no series child here";
 			case KSeries(s):
-				KSeries(replaceSeriesWithSeries(s, rest, repl));
+				KSeries(replaceSeriesWithSeriesAt(s, path, repl, idx + 1));
 			case KLookback(s, k):
-				KLookback(replaceSeriesWithSeries(s, rest, repl), k);
+				KLookback(replaceSeriesWithSeriesAt(s, path, repl, idx + 1), k);
 			case KArith(op, a, b):
-				step == StepA ? KArith(op, replaceSeriesInScalarWithSeries(a, rest, repl), b) : KArith(op, a, replaceSeriesInScalarWithSeries(b, rest, repl));
+				step == StepA ? KArith(op, replaceSeriesInScalarWithSeriesAt(a, path, repl, idx + 1), b) : KArith(op, a, replaceSeriesInScalarWithSeriesAt(b, path, repl, idx + 1));
+			case KHole(inner):
+				KHole(replaceSeriesInScalarWithSeriesAt(inner, path, repl, idx + 1));
 		};
 	}
 
-	public static function replaceSeriesWithSeries(n:SeriesNode, path:GPath, repl:SeriesNode):SeriesNode {
-		if (path.length == 0) return repl;
+	public static function replaceSeriesWithSeries(n:SeriesNode, path:GPath, repl:SeriesNode):SeriesNode
+		return replaceSeriesWithSeriesAt(n, path, repl, 0);
+
+	static function replaceSeriesWithSeriesAt(n:SeriesNode, path:GPath, repl:SeriesNode, idx:Int):SeriesNode {
+		if (idx >= path.length) return repl;
 		return switch (n) {
 			case SPrice(_):
 				throw "TreeSurgery.replaceSeriesWithSeries: path ran past a price leaf";
 			case SInd(name, field, window, src):
-				SInd(name, field, window, src != null ? replaceSeriesWithSeries(src, path.slice(1), repl) : null);
+				SInd(name, field, window, src != null ? replaceSeriesWithSeriesAt(src, path, repl, idx + 1) : null);
 		};
 	}
 }

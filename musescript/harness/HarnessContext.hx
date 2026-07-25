@@ -133,13 +133,15 @@ class HarnessContext implements IHarness {
 			portfolio.mark(panelPrices);
 			t++;
 		});
-		var rets = Metrics.returnsFromEquity(portfolio.equity);
+		// See GraalWasmHost.hx's identical comment -- materialize ONCE, not per call.
+		var eqArr = portfolio.equity.toArray();
+		var rets = Metrics.returnsFromEquity(eqArr);
 		return {
-			equity: portfolio.equity,
+			equity: eqArr,
 			returns: rets,
 			trades: portfolio.trades,
-			sharpe: Metrics.sharpe(rets),
-			maxDrawdown: Metrics.maxDrawdown(portfolio.equity),
+			sharpe: Metrics.sharpe(rets, 0),
+			maxDrawdown: Metrics.maxDrawdown(eqArr),
 			winRate: Metrics.winRate(portfolio.wins, portfolio.trades),
 			finalEquity: portfolio.equity.length > 0
 				? portfolio.equity[portfolio.equity.length - 1]

@@ -19,10 +19,38 @@ enum EKind {
 	ESeries;
 }
 
-typedef CatalogEntry = {
-	slot:Int, // 0=entryLong 1=entryShort 2=exitLong 3=exitShort 4=size
-	kind:EKind,
-	path:GPath
+@:structInit
+class CatalogEntry {
+	public var slot:Int; // 0=entryLong 1=entryShort 2=exitLong 3=exitShort 4=size
+	public var kind:EKind;
+	public var path:GPath;
+}
+
+/** Lightweight int->int mapping via two parallel arrays, replacing `Map<Int,Int>` for the
+ * small param-index remappings this file builds (`remapOffsets`/`compactParams`). Confirmed via
+ * `std/jvm/_std/haxe/ds/IntMap.hx`: `Map<Int,V>` on the JVM target is a thin wrapper over
+ * `java.util.HashMap<Integer,V>`, so every `set`/`get`/`exists` call boxes the key through
+ * `java.lang.Integer` -- real cost on `compactParams`, which runs on every mutation/crossover
+ * child. Every mapping built here is small (bounded by a genome's/donor's param count,
+ * typically well under a few dozen), where a linear scan over unboxed ints is allocation-free
+ * and, at this size, no slower than a hash lookup that has to box first. */
+class ParamMapping {
+	var keys:Array<Int> = [];
+	var values:Array<Int> = [];
+
+	public function new() {}
+
+	public function set(key:Int, value:Int):Void {
+		keys.push(key);
+		values.push(value);
+	}
+
+	/** Returns the mapped value, or `key` unchanged if unmapped -- folds every existing call
+	 * site's `mapping.exists(i) ? mapping.get(i) : i` idiom into one call. */
+	public function get(key:Int):Int {
+		for (i in 0...keys.length) if (keys[i] == key) return values[i];
+		return key;
+	}
 }
 
 class Variation {
@@ -226,30 +254,71 @@ class Variation {
 
 	// ---- catalog: every Bool/Scalar/Series position across all 5 slots, path-tagged ----
 
+	/**
+	 * True iff `g` contains a `BHole`/`KHole` ANYWHERE across its 5 slots -- the single switch
+	 * `buildCatalog` uses to decide whether to hand back every node (today's behavior, unchanged
+	 * for every genome random growth/crossover/corpus-seeding without `evolve(...)` markers ever
+	 * produces) or only nodes reachable from inside a hole boundary (see CorpusSeed's `evolve(...)`
+	 * recognition, which is the only thing that ever constructs a `BHole`/`KHole`). This is what
+	 * makes hole-restricted evolution strictly OPT-IN: a genome with zero holes anywhere is
+	 * mutated/crossed-over exactly as it always has been.
+	 */
+	public static function isTemplated(g:StrategyGenome):Bool {
+		return boolHasHole(g.entryLong) || boolHasHole(g.entryShort)
+			|| boolHasHole(g.exitLong) || boolHasHole(g.exitShort) || scalarHasHole(g.size);
+	}
+
+	static function boolHasHole(n:BoolNode):Bool {
+		return switch (n) {
+			case BHole(_): true;
+			case BAnd(a, b) | BOr(a, b): boolHasHole(a) || boolHasHole(b);
+			case BNot(a): boolHasHole(a);
+			case BCmp(_, a, b): scalarHasHole(a) || scalarHasHole(b);
+			case BCross(_, _, _) | BTrend(_, _, _): false;
+		};
+	}
+
+	static function scalarHasHole(n:ScalarNode):Bool {
+		return switch (n) {
+			case KHole(_): true;
+			case KArith(_, a, b): scalarHasHole(a) || scalarHasHole(b);
+			case KConst(_) | KParam(_) | KFeature(_) | KSeries(_) | KLookback(_, _): false;
+		};
+	}
+
 	function buildCatalog(g:StrategyGenome):Array<CatalogEntry> {
+		// `armed = !templated`: an untemplated genome starts (and stays) fully recordable, byte-
+		// identical to this function's behavior before holes existed. A templated genome starts
+		// UNrecordable and only becomes recordable once TreeSurgery's collect* walk crosses an
+		// actual BHole/KHole boundary -- see TreeSurgery.collectBool's doc comment.
+		var armed = !isTemplated(g);
 		var out:Array<CatalogEntry> = [];
-		function addBoolSlot(slot:Int, root:BoolNode):Void {
-			var bc:Array<{path:GPath, node:BoolNode}> = [];
-			TreeSurgery.collectBool(root, [], bc);
-			for (e in bc) out.push({ slot: slot, kind: EBool, path: e.path });
-			var sc:Array<{path:GPath, node:ScalarNode}> = [];
-			TreeSurgery.collectScalarInBool(root, [], sc);
-			for (e in sc) out.push({ slot: slot, kind: EScalar, path: e.path });
-			var xc:Array<{path:GPath, node:SeriesNode}> = [];
-			TreeSurgery.collectSeriesInBool(root, [], xc);
-			for (e in xc) out.push({ slot: slot, kind: ESeries, path: e.path });
-		}
-		addBoolSlot(0, g.entryLong);
-		addBoolSlot(1, g.entryShort);
-		addBoolSlot(2, g.exitLong);
-		addBoolSlot(3, g.exitShort);
+		addBoolSlot(out, armed, 0, g.entryLong);
+		addBoolSlot(out, armed, 1, g.entryShort);
+		addBoolSlot(out, armed, 2, g.exitLong);
+		addBoolSlot(out, armed, 3, g.exitShort);
 		var sc2:Array<{path:GPath, node:ScalarNode}> = [];
-		TreeSurgery.collectScalar(g.size, [], sc2);
+		TreeSurgery.collectScalar(g.size, [], sc2, armed);
 		for (e in sc2) out.push({ slot: 4, kind: EScalar, path: e.path });
 		var xc2:Array<{path:GPath, node:SeriesNode}> = [];
-		TreeSurgery.collectSeriesInScalar(g.size, [], xc2);
+		TreeSurgery.collectSeriesInScalar(g.size, [], xc2, armed);
 		for (e in xc2) out.push({ slot: 4, kind: ESeries, path: e.path });
 		return out;
+	}
+
+	/** Pulled out of `buildCatalog` as a real method (was a local closure allocated fresh on
+	 * every call) -- `buildCatalog` runs on every mutation/crossover child, hundreds of times
+	 * per generation, so a per-call closure object was avoidable allocation pressure. */
+	function addBoolSlot(out:Array<CatalogEntry>, armed:Bool, slot:Int, root:BoolNode):Void {
+		var bc:Array<{path:GPath, node:BoolNode}> = [];
+		TreeSurgery.collectBool(root, [], bc, armed);
+		for (e in bc) out.push({ slot: slot, kind: EBool, path: e.path });
+		var sc:Array<{path:GPath, node:ScalarNode}> = [];
+		TreeSurgery.collectScalarInBool(root, [], sc, armed);
+		for (e in sc) out.push({ slot: slot, kind: EScalar, path: e.path });
+		var xc:Array<{path:GPath, node:SeriesNode}> = [];
+		TreeSurgery.collectSeriesInBool(root, [], xc, armed);
+		for (e in xc) out.push({ slot: slot, kind: ESeries, path: e.path });
 	}
 
 	function withBoolRepl(g:StrategyGenome, entry:CatalogEntry, repl:BoolNode):StrategyGenome {
@@ -432,26 +501,10 @@ class Variation {
 
 	function donorsOfKind(g:StrategyGenome, kind:EKind):Array<Dynamic> {
 		var out:Array<Dynamic> = [];
-		function fromBool(root:BoolNode):Void {
-			switch (kind) {
-				case EBool:
-					var bc:Array<{path:GPath, node:BoolNode}> = [];
-					TreeSurgery.collectBool(root, [], bc);
-					for (e in bc) out.push(e.node);
-				case EScalar:
-					var sc:Array<{path:GPath, node:ScalarNode}> = [];
-					TreeSurgery.collectScalarInBool(root, [], sc);
-					for (e in sc) out.push(e.node);
-				case ESeries:
-					var xc:Array<{path:GPath, node:SeriesNode}> = [];
-					TreeSurgery.collectSeriesInBool(root, [], xc);
-					for (e in xc) out.push(e.node);
-			}
-		}
-		fromBool(g.entryLong);
-		fromBool(g.entryShort);
-		fromBool(g.exitLong);
-		fromBool(g.exitShort);
+		donorsFromBool(out, g.entryLong, kind);
+		donorsFromBool(out, g.entryShort, kind);
+		donorsFromBool(out, g.exitLong, kind);
+		donorsFromBool(out, g.exitShort, kind);
 		switch (kind) {
 			case EBool:
 			case EScalar:
@@ -464,6 +517,25 @@ class Variation {
 				for (e in xc2) out.push(e.node);
 		}
 		return out;
+	}
+
+	/** Pulled out of `donorsOfKind` as a real method (was a local closure allocated fresh on
+	 * every call) -- same reasoning as `addBoolSlot`. */
+	function donorsFromBool(out:Array<Dynamic>, root:BoolNode, kind:EKind):Void {
+		switch (kind) {
+			case EBool:
+				var bc:Array<{path:GPath, node:BoolNode}> = [];
+				TreeSurgery.collectBool(root, [], bc);
+				for (e in bc) out.push(e.node);
+			case EScalar:
+				var sc:Array<{path:GPath, node:ScalarNode}> = [];
+				TreeSurgery.collectScalarInBool(root, [], sc);
+				for (e in sc) out.push(e.node);
+			case ESeries:
+				var xc:Array<{path:GPath, node:SeriesNode}> = [];
+				TreeSurgery.collectSeriesInBool(root, [], xc);
+				for (e in xc) out.push(e.node);
+		}
 	}
 
 	/** Turn a random `KConst` leaf into a tunable `@param` (structure-preserving) —
@@ -486,6 +558,43 @@ class Variation {
 		var out = withScalarRepl(g, pick.entry, KParam(idx));
 		out.params = g.params.concat([spec]);
 		return compactParams(out);
+	}
+
+	/**
+	 * ES-style (1+1) LOCAL tuning of an EXISTING numeric `EvoParam` -- `EvoParam.min`/`max`
+	 * (populated by `mintParam`/`promoteParam` above) are never actually consumed by anything
+	 * else: crossover/mutation only ever REPLACE a param reference wholesale via ordinary tree
+	 * growth, never locally optimize its value in place. Picks one of `g.params` at random,
+	 * perturbs its `defaultValue` by a step scaled to that param's OWN `[min,max]` range (clipped
+	 * back into range), and keeps the nudge only if it STRICTLY improves `evalFn`'s score -- a
+	 * plain accept/reject (1+1)-ES step. NOT a self-adapting step-size 1/5 rule: that needs
+	 * per-param step-size STATE to persist across generations, which doesn't fit this genome's
+	 * immutable-value-type architecture cleanly (a fresh genome value every generation, no long-
+	 * lived object to hang state off) -- a fixed relative step is still a genuine, useful local
+	 * search, just not self-tuning; flagged as a richer follow-up, not blocking this first pass.
+	 *
+	 * `esRng` is passed in (not `this.rng`) so the caller (EvolutionEngine.step) can keep this on
+	 * its OWN dedicated stream (RngStreams.ES_NUDGE) -- see RngStreams.hx's doc comment for why
+	 * that isolation matters.
+	 */
+	public function esNudgeParam(g:StrategyGenome, evalFn:StrategyGenome->Float, esRng:Rand):StrategyGenome {
+		if (g.params.length == 0) return g;
+		var idx = esRng.int(g.params.length);
+		var p = g.params[idx];
+		var range = p.max - p.min;
+		if (range <= 0) return g;
+		var step = (esRng.float() * 2 - 1) * range * 0.1; // +/- 10% of the param's own range
+		var nudged = Math.max(p.min, Math.min(p.max, p.defaultValue + step));
+		if (nudged == p.defaultValue) return g;
+		var newParams = g.params.copy();
+		newParams[idx] = { name: p.name, defaultValue: nudged, min: p.min, max: p.max, step: p.step, tune: p.tune };
+		var candidate = copyGenome(g);
+		candidate.params = newParams;
+		var baseline = evalFn(g);
+		var challenger = evalFn(candidate);
+		if (challenger <= baseline) return g;
+		candidate.lineage = (g.lineage != null ? g.lineage.copy() : []).concat([Canonical.structuralKey(g)]);
+		return candidate;
 	}
 
 	function scalarAt(g:StrategyGenome, entry:CatalogEntry):ScalarNode {
@@ -521,6 +630,7 @@ class Variation {
 			case KConst(_) | KFeature(_) | KSeries(_) | KLookback(_, _):
 			case KParam(i): out.push(i);
 			case KArith(_, a, b): paramRefsInScalar(a, out); paramRefsInScalar(b, out);
+			case KHole(inner): paramRefsInScalar(inner, out);
 		}
 	}
 
@@ -530,21 +640,23 @@ class Variation {
 			case BCmp(_, a, b): paramRefsInScalar(a, out); paramRefsInScalar(b, out);
 			case BAnd(a, b) | BOr(a, b): paramRefsInBool(a, out); paramRefsInBool(b, out);
 			case BNot(a): paramRefsInBool(a, out);
+			case BHole(inner): paramRefsInBool(inner, out);
 		}
 	}
 
-	static function remapScalar(n:ScalarNode, mapping:Map<Int, Int>):ScalarNode {
+	static function remapScalar(n:ScalarNode, mapping:ParamMapping):ScalarNode {
 		return switch (n) {
 			case KConst(v): KConst(v);
 			case KFeature(f): KFeature(f);
 			case KSeries(s): KSeries(s);
 			case KLookback(s, k): KLookback(s, k);
-			case KParam(i): KParam(mapping.exists(i) ? mapping.get(i) : i);
+			case KParam(i): KParam(mapping.get(i));
 			case KArith(op, a, b): KArith(op, remapScalar(a, mapping), remapScalar(b, mapping));
+			case KHole(inner): KHole(remapScalar(inner, mapping));
 		};
 	}
 
-	static function remapBool(n:BoolNode, mapping:Map<Int, Int>):BoolNode {
+	static function remapBool(n:BoolNode, mapping:ParamMapping):BoolNode {
 		return switch (n) {
 			case BCross(d, a, b): BCross(d, a, b);
 			case BCmp(op, a, b): BCmp(op, remapScalar(a, mapping), remapScalar(b, mapping));
@@ -552,6 +664,7 @@ class Variation {
 			case BAnd(a, b): BAnd(remapBool(a, mapping), remapBool(b, mapping));
 			case BOr(a, b): BOr(remapBool(a, mapping), remapBool(b, mapping));
 			case BNot(a): BNot(remapBool(a, mapping));
+			case BHole(inner): BHole(remapBool(inner, mapping));
 		};
 	}
 
@@ -559,12 +672,11 @@ class Variation {
 	 * the recipient's space, appending copied specs (from `sourceParams`) into `extra` as a
 	 * side effect — mirrors musegene/variation.py's `_import_params`. */
 	static function remapOffsets(refs:Array<Int>, offset:Int, extra:Array<EvoParam>,
-			sourceParams:Array<EvoParam>):Map<Int, Int> {
-		var uniq = [];
-		var seen = new Map<Int, Bool>();
-		for (r in refs) if (!seen.exists(r)) { seen.set(r, true); uniq.push(r); }
+			sourceParams:Array<EvoParam>):ParamMapping {
+		var uniq:Array<Int> = [];
+		for (r in refs) if (uniq.indexOf(r) < 0) uniq.push(r);
 		uniq.sort((a, b) -> a - b);
-		var mapping = new Map<Int, Int>();
+		var mapping = new ParamMapping();
 		for (i in 0...uniq.length) {
 			var old = uniq[i];
 			mapping.set(old, offset + i);
@@ -585,16 +697,15 @@ class Variation {
 		paramRefsInBool(g.exitLong, refs);
 		paramRefsInBool(g.exitShort, refs);
 		paramRefsInScalar(g.size, refs);
-		var seen = new Map<Int, Bool>();
-		for (r in refs) seen.set(r, true);
-		var used = [for (k in seen.keys()) k];
+		var used:Array<Int> = [];
+		for (r in refs) if (used.indexOf(r) < 0) used.push(r);
 		used.sort((a, b) -> a - b);
 
 		var tight = used.length == g.params.length;
 		if (tight) for (i in 0...used.length) if (used[i] != i) tight = false;
 		if (tight) return g;
 
-		var mapping = new Map<Int, Int>();
+		var mapping = new ParamMapping();
 		var newParams:Array<EvoParam> = [];
 		for (i in 0...used.length) {
 			var old = used[i];

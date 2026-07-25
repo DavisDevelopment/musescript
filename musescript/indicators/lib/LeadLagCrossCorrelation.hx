@@ -94,4 +94,8 @@ class LeadLagCrossCorrelation implements MuseIndicator<LeadLagPair, Float> {
 	}
 }
 
-typedef LeadLagPair = { a: Float, b: Float };
+@:structInit
+class LeadLagPair {
+	public var a:Float;
+	public var b:Float;
+}

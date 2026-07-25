@@ -103,4 +103,8 @@ class HasbrouckInformationShare implements MuseIndicator<HisPair, Float> {
 	}
 }
 
-typedef HisPair = { a: Float, b: Float };
+@:structInit
+class HisPair {
+	public var a:Float;
+	public var b:Float;
+}

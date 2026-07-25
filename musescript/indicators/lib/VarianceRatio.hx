@@ -91,4 +91,8 @@ class VarianceRatio implements MuseIndicator<VarianceRatioPair, Float> {
 	}
 }
 
-typedef VarianceRatioPair = { a: Float, b: Float };
+@:structInit
+class VarianceRatioPair {
+	public var a:Float;
+	public var b:Float;
+}

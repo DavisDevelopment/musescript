@@ -115,4 +115,8 @@ class SpearmanCorrelation implements MuseIndicator<SpearmanPair, Float> {
 	}
 }
 
-typedef SpearmanPair = { x: Float, y: Float };
+@:structInit
+class SpearmanPair {
+	public var x:Float;
+	public var y:Float;
+}

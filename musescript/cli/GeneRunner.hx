@@ -295,7 +295,10 @@ class GeneRunner {
 		// during the run, returned only on demand so the fitness/batch path stays
 		// lean and the golden-parity output is byte-identical without the flag.
 		if (instrument) {
-			Reflect.setField(out, "equity", harness.orders.equity);
+			// `.toArray()`: harness.orders.equity is a `GrowableVec<Float>` now (see
+			// OrderSim.equity's doc comment) -- this field must be a real JSON-serializable
+			// Array, not the abstract's underlying impl object.
+			Reflect.setField(out, "equity", harness.orders.equity.toArray());
 			Reflect.setField(out, "fills", harness.orders.fills);
 			Reflect.setField(out, "chart", harness.chart.commands);
 			Reflect.setField(out, "logs", harness.logs);

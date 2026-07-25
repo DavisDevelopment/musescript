@@ -7,6 +7,7 @@ import musescript.runtime.Callables;
 import musescript.runtime.MuseIter;
 import musescript.runtime.IterResult;
 import musescript.runtime.MergeIter;
+import musescript.indicators.RingBuffer;
 
 /**
  * Trading / chart / math / iter builtins installed into MuseInterp globals.
@@ -161,8 +162,8 @@ class TradeBuiltins {
 		vars.set("zscore", zscore);
 		vars.set("vector_zscore", zscore);
 		vars.set("correlation", correlation);
-		vars.set("sharpe", function(returns:Array<Float>) return musescript.harness.Metrics.sharpe(returns));
-		vars.set("sortino", function(returns:Array<Float>) return musescript.harness.Metrics.sortino(returns));
+		vars.set("sharpe", function(returns:Array<Float>) return musescript.harness.Metrics.sharpe(returns, 0));
+		vars.set("sortino", function(returns:Array<Float>) return musescript.harness.Metrics.sortino(returns, 0));
 		vars.set("max_drawdown", function(equity:Array<Float>) return musescript.harness.Metrics.maxDrawdown(equity));
 		vars.set("stat_mean", StatsBuiltins.mean);
 		vars.set("stat_median", StatsBuiltins.median);
@@ -932,17 +933,22 @@ class TradeBuiltins {
 		if (Math.isNaN(x) || n <= 0) return false;
 		var hs = harness.indCols.csHist;
 		var hist = id < hs.length ? hs[id] : null;
-		if (hist == null) {
-			hist = [];
+		// Rebuild if this callsite's window size ever changes (a genuinely different n at the
+		// same id shouldn't happen in practice, but RingBuffer's capacity is fixed at
+		// construction, unlike the old Array + shift() pattern which just kept growing/shrinking
+		// -- matches the capacity-mismatch guard the WASM/JS emitters already carry).
+		if (hist == null || hist.capacity != n + 1) {
+			hist = new RingBuffer<Float>(n + 1);
 			while (hs.length <= id) hs.push(null);
 			hs[id] = hist;
 		}
 		hist.push(x);
-		while (hist.length > n + 1) hist.shift();
 		if (hist.length < n + 1) return false;
-		for (i in (hist.length - n)...hist.length) {
-			if (Math.isNaN(hist[i]) || Math.isNaN(hist[i - 1])) return false;
-			var d = hist[i] - hist[i - 1];
+		for (k in 0...n) {
+			var newer = hist.at(k);
+			var older = hist.at(k + 1);
+			if (Math.isNaN(newer) || Math.isNaN(older)) return false;
+			var d = newer - older;
 			if (!(up ? d > 0 : d < 0)) return false;
 		}
 		return true;

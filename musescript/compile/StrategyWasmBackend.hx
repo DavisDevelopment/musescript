@@ -148,11 +148,11 @@ class StrategyWasmBackend {
 			},
 			long: function(qty:Float) {
 				var bi = bar().index;
-				harness.orders.long(bar().close, Math.isNaN(qty) ? null : qty, bi);
+				harness.orders.long(bar().close, qty, bi);
 			},
 			short: function(qty:Float) {
 				var bi = bar().index;
-				harness.orders.short(bar().close, Math.isNaN(qty) ? null : qty, bi);
+				harness.orders.short(bar().close, qty, bi);
 			},
 			flat: function() harness.orders.flat(bar().close, bar().index),
 			get_position: function() return harness.orders.positionSize(),

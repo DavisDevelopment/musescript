@@ -254,4 +254,95 @@ class TestOrderBook extends Test {
 		Assert.equals(0, result.trades);
 		Assert.equals(0, harness.orders.book.pendingCount());
 	}
+
+	// ── capital constraint: qty clamped to what cash can actually afford ──────────────────
+
+	/**
+	 * Real bug, found via a live corpus-evo run: a genome's `size` grew into a raw `volume`
+	 * scalar (the bar's own share-volume field), letting a SINGLE trade request literally
+	 * millions of shares against a $100k account -- `executeLong`/`executeShort` previously ran
+	 * ANY explicit `qty` verbatim, with no capital check at all (only the "size unspecified"
+	 * default path computed `Math.floor(cash / price)`). An oversized explicit `qty` is now
+	 * clamped to `OrderSim.MAX_POSITION_FRACTION` (25%) of current cash, not 100% -- see
+	 * `riskCappedQty`'s doc comment for why 100% (the first fix attempt) still let a `size=volume`
+	 * genome bet EVERYTHING on every trade, since `volume` always exceeds affordability anyway.
+	 */
+	public function testExplicitQtyClampedToRiskFractionOfCapital() {
+		var sim = new OrderSim(1000); // tiny account
+		sim.submit("long", 1000000.0, 100.0, 0); // request WAY more shares than affordable
+		Assert.floatEquals(2.0, sim.position, "expected qty clamped to 25% of cash/price = (1000*0.25)/100 = 2");
+	}
+
+	/** An ordinary, well-within-capital qty must be completely unaffected -- the clamp is a
+	 * ceiling, not a change to normal sizing (1 share is nowhere near 25% of $100k regardless of
+	 * price). */
+	public function testNormalQtyUnaffectedByCapitalClamp() {
+		var sim = new OrderSim(100000);
+		sim.submit("long", 10.0, 100.0, 0);
+		Assert.floatEquals(10.0, sim.position);
+	}
+
+	/** Same clamp applies to `short` -- not just `long`. */
+	public function testShortQtyAlsoClampedToRiskFractionOfCapital() {
+		var sim = new OrderSim(1000);
+		sim.submit("short", 1000000.0, 100.0, 0);
+		Assert.floatEquals(-2.0, sim.position, "expected short qty clamped the same way as long");
+	}
+
+	/** The bare `long()`/`short()` "size unspecified, deploy everything" convention (a deliberate,
+	 * legitimate choice -- see corpus/strategies/00_buy_hold.ms) must stay at 100% of affordable
+	 * cash, NOT the 25% risk cap -- that cap only ever applies to an oversized EXPLICIT qty. */
+	public function testBareLongStillDeploysFullAffordableCapital() {
+		var sim = new OrderSim(1000);
+		sim.submit("long", null, 100.0, 0); // no qty -- auto-size
+		Assert.floatEquals(10.0, sim.position, "expected bare long() to still use ALL affordable cash (1000/100=10), not the 25% cap");
+	}
+
+	// ── OrderSim.equityFloor / .bankrupt: the sim-tape bankruptcy difficulty crank ────────────
+
+	/** Default (`equityFloor = 0.0`) is disabled -- `mark()` never sets `bankrupt`, no matter how
+	 * low equity goes. Zero behavior change for every caller that doesn't opt in. */
+	public function testEquityFloorDisabledByDefault() {
+		var sim = new OrderSim(1000);
+		sim.mark(0.0001); // equity ~0, would trip any floor if one were active
+		Assert.isFalse(sim.bankrupt);
+	}
+
+	/** Crossing AT OR BELOW the floor latches `bankrupt`. */
+	public function testEquityFloorLatchesBankruptWhenCrossed() {
+		var sim = new OrderSim(1000);
+		sim.equityFloor = 500;
+		sim.mark(100.0); // flat position, cash=1000 -> equity=1000, above floor
+		Assert.isFalse(sim.bankrupt);
+		sim.cash = 400; // simulate a loss
+		sim.mark(100.0); // equity=400, at/below the 500 floor
+		Assert.isTrue(sim.bankrupt);
+	}
+
+	/** The flag is STICKY -- clawing back above the floor on a later bar must not un-flag it,
+	 * since the whole point of a solvency gate is "did this genome ever go bust," not a
+	 * point-in-time snapshot. */
+	public function testEquityFloorBankruptcyIsSticky() {
+		var sim = new OrderSim(1000);
+		sim.equityFloor = 500;
+		sim.cash = 400;
+		sim.mark(100.0); // trips the floor
+		Assert.isTrue(sim.bankrupt);
+		sim.cash = 2000;
+		sim.mark(100.0); // recovers well above the floor
+		Assert.isTrue(sim.bankrupt, "expected bankruptcy to stay latched even after recovering");
+	}
+
+	/** `reset()` clears the `bankrupt` latch (a fresh run starts solvent) but leaves the
+	 * caller-configured `equityFloor` itself untouched -- it's a limit, not per-run state. */
+	public function testResetClearsBankruptButKeepsEquityFloor() {
+		var sim = new OrderSim(1000);
+		sim.equityFloor = 500;
+		sim.cash = 100;
+		sim.mark(1.0);
+		Assert.isTrue(sim.bankrupt);
+		sim.reset(1000);
+		Assert.isFalse(sim.bankrupt);
+		Assert.floatEquals(500, sim.equityFloor);
+	}
 }

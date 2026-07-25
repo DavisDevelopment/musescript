@@ -136,5 +136,14 @@ class PairSpreadZScore implements MuseIndicator<PairSpreadPair, Float> {
 	}
 }
 
-typedef PairSpreadPair = { a: Float, b: Float };
-typedef PairSpreadXY = { x: Float, y: Float };
+@:structInit
+class PairSpreadPair {
+	public var a:Float;
+	public var b:Float;
+}
+
+@:structInit
+class PairSpreadXY {
+	public var x:Float;
+	public var y:Float;
+}

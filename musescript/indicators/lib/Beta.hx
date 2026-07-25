@@ -84,4 +84,8 @@ class Beta implements MuseIndicator<BetaPair, Float> {
 	}
 }
 
-typedef BetaPair = { a: Float, b: Float };
+@:structInit
+class BetaPair {
+	public var a:Float;
+	public var b:Float;
+}

@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -19,25 +20,28 @@ import musescript.types.MuseType;
  * inputs are ignored and the last computed value is returned instead.
  */
 class RollingMinMaxScaler implements MuseIndicator<Float, Float> {
-	var period:Int;
-	var window:Array<Float>;
+	public final period:Int;
+	var window:RingBuffer<Float>;
 	var last:Null<Float>;
 
 	public function new(period:Int) {
 		if (period < 2) throw "RollingMinMaxScaler: period must be >= 2";
 		this.period = period;
-		window = [];
+		//TODO: allow specifying the output range (e.g. [0, 1] vs [-1, 1])
+		window = new RingBuffer(period);
 		last = null;
 	}
 
-	public function update(input:Float):Null<Float> {
+	public function update(input: Float):Null<Float> {
 		if (!Math.isFinite(input)) return last;
-		if (window.length == period) window.shift();
 		window.push(input);
 		if (window.length < period) return null;
 		var min = Math.POSITIVE_INFINITY;
 		var max = Math.NEGATIVE_INFINITY;
-		for (v in window) {
+		// Indexed scan, not `for (v in window)` -- see RingBuffer.hx's doc comment: `for..in`
+		// boxes every element on the jvm target regardless of T, indexed `.at(i)` doesn't.
+		for (i in 0...window.length) {
+			var v = window.at(i);
 			if (v < min) min = v;
 			if (v > max) max = v;
 		}
@@ -48,7 +52,7 @@ class RollingMinMaxScaler implements MuseIndicator<Float, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 		last = null;
 	}
 

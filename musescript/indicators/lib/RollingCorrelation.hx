@@ -112,4 +112,8 @@ class RollingCorrelation implements MuseIndicator<RollingCorrelationPair, Float>
 	}
 }
 
-typedef RollingCorrelationPair = { x: Float, y: Float };
+@:structInit
+class RollingCorrelationPair {
+	public var x:Float;
+	public var y:Float;
+}

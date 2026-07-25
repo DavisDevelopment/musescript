@@ -1,0 +1,4 @@
+extraParams.hxml
+-D kestrel
+-main musescript.murmuration.CompeteFaultDiag
+--jvm build/jvm/compete-fault-diag.jar

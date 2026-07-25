@@ -1,0 +1,4 @@
+extraParams.hxml
+-D kestrel
+-main musescript.evo.graal.CorpusEvoRun
+--jvm build/jvm/corpus-evo-SCRATCH-SIMTAPE.jar

@@ -1,5 +1,19 @@
 package musescript.runtime;
 
+import musescript.indicators.RingBuffer;
+import musescript.indicators.GrowableVec;
+
+/** `crossoverCS`/`crossunderCS`'s per-callsite previous-pair state -- was an anonymous
+ * `{a:Float, b:Float}` struct (boxes/reflects on the JVM target, same class of fix as this
+ * session's earlier indicator-pair-typedef batch); `@:structInit` keeps the `{a:.., b:..}`
+ * literal construction syntax at the two call sites, and still supports the in-place
+ * `prev.a = a; prev.b = b;` mutation both call sites rely on. */
+@:structInit
+class CsPair {
+	public var a:Float;
+	public var b:Float;
+}
+
 /**
  * Per-run indicator/callsite state, owned by a HarnessContext.
  *
@@ -27,9 +41,10 @@ class IndicatorColumns {
 	var cursor:Int;
 
 	/** crossover/crossunder previous pairs, dense by static callsite id. */
-	public var csPairs:Array<{a:Float, b:Float}>;
-	/** rising/falling short histories, dense by static callsite id. */
-	public var csHist:Array<Array<Float>>;
+	public var csPairs:Array<CsPair>;
+	/** rising/falling short histories, dense by static callsite id -- fixed-capacity per
+	 * callsite (see `TradeBuiltins.trendCS`'s doc comment for the capacity-mismatch handling). */
+	public var csHist:Array<RingBuffer<Float>>;
 	/** Reusable result objects for field-only macd/bbands/stoch assigns. */
 	public var scratch:Array<Dynamic>;
 
@@ -104,15 +119,17 @@ class IndicatorColumns {
 /**
  * One incrementally-extended indicator column bound to a source series array.
  * `src` is the identity guard (a replaced series array drops the entry);
- * `a`/`b` are value columns; `f0`/`f1` are running fold accumulators.
+ * `a`/`b` are value columns (see `GrowableVec.hx` -- unbounded, extended once per bar forever,
+ * the highest-traffic candidate found when auditing this session's boxing/allocation fixes for
+ * more `RingBuffer`-style wins); `f0`/`f1` are running fold accumulators.
  */
 class IndCol {
 	public var src:Array<Float>;
-	public var a:Array<Float>;
-	public var b:Array<Float>;
+	public var a:GrowableVec<Float>;
+	public var b:GrowableVec<Float>;
 	public var f0:Float;
 	public var f1:Float;
-	
+
 	// identity fields for slot-hint verification
 	public var kind:Int;
 	public var name:String;
@@ -122,8 +139,8 @@ class IndCol {
 
 	public function new(src:Array<Float>) {
 		this.src = src;
-		a = [];
-		b = [];
+		a = new GrowableVec<Float>();
+		b = new GrowableVec<Float>();
 		f0 = 0;
 		f1 = 0;
 		kind = 0;

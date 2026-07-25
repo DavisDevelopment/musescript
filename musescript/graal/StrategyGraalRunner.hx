@@ -82,12 +82,12 @@ class StrategyGraalRunner {
 		}));
 		members.set("long", new HostFn(function(a:NativeArray<Value>):Dynamic {
 			var q = a[0].asDouble();
-			harness.orders.long(curBar.close, Math.isNaN(q) ? null : q, curBar.index);
+			harness.orders.long(curBar.close, q, curBar.index);
 			return null;
 		}));
 		members.set("short", new HostFn(function(a:NativeArray<Value>):Dynamic {
 			var q = a[0].asDouble();
-			harness.orders.short(curBar.close, Math.isNaN(q) ? null : q, curBar.index);
+			harness.orders.short(curBar.close, q, curBar.index);
 			return null;
 		}));
 		members.set("flat", new HostFn(function(a:NativeArray<Value>):Dynamic {
@@ -187,13 +187,15 @@ class StrategyGraalRunner {
 			harness.orders.mark(bars[i].close);
 		}
 
-		var rets = Metrics.returnsFromEquity(harness.orders.equity);
+		// See GraalWasmHost.hx's identical comment -- materialize ONCE, not per call.
+		var eqArr = harness.orders.equity.toArray();
+		var rets = Metrics.returnsFromEquity(eqArr);
 		return {
-			equity: harness.orders.equity,
+			equity: eqArr,
 			returns: rets,
 			trades: harness.orders.trades,
-			sharpe: Metrics.sharpe(rets),
-			maxDrawdown: Metrics.maxDrawdown(harness.orders.equity),
+			sharpe: Metrics.sharpe(rets, 0),
+			maxDrawdown: Metrics.maxDrawdown(eqArr),
 			winRate: Metrics.winRate(harness.orders.wins, harness.orders.trades),
 			finalEquity: harness.orders.equity.length > 0
 				? harness.orders.equity[harness.orders.equity.length - 1]

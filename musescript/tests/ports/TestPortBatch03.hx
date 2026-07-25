@@ -21,7 +21,7 @@ class TestPortBatch03 extends Test {
 		// asset = 2 * bench, constant beta of 2, no alpha; with rf = 0 the
 		// CAPM-implied return matches the asset's mean perfectly.
 		var a = new Alpha(20, 0.0);
-		var inputs = [];
+		var inputs:Array<musescript.indicators.lib.Alpha.Pair> = [];
 		for (i in 1...21) {
 			inputs.push({ a: 2.0 * i * 0.01, b: i * 0.01 });
 		}
@@ -36,7 +36,7 @@ class TestPortBatch03 extends Test {
 	function test_alpha_constant_alpha_offset_recovered() {
 		// asset = bench + 0.005 (additive alpha of 0.5%), beta == 1.
 		var a = new Alpha(20, 0.0);
-		var inputs = [];
+		var inputs:Array<musescript.indicators.lib.Alpha.Pair> = [];
 		for (i in 1...21) {
 			inputs.push({ a: i * 0.01 + 0.005, b: i * 0.01 });
 		}
@@ -49,7 +49,7 @@ class TestPortBatch03 extends Test {
 	}
 
 	function test_alpha_batch_equals_streaming() {
-		var inputs = [];
+		var inputs:Array<musescript.indicators.lib.Alpha.Pair> = [];
 		for (i in 0...50) {
 			var b = Math.sin(i * 0.2) * 0.01;
 			inputs.push({ a: 1.5 * b + 0.002, b: b });

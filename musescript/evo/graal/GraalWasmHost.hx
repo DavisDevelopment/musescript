@@ -123,12 +123,12 @@ class StrategyInstance {
 		}));
 		members.set("long", new HostFn(function(a:NativeArray<Value>):Dynamic {
 			var q = a[0].asDouble();
-			this.sim.long(this.curClose, Math.isNaN(q) ? null : q, this.curBarIndex);
+			this.sim.long(this.curClose, q, this.curBarIndex);
 			return null;
 		}));
 		members.set("short", new HostFn(function(a:NativeArray<Value>):Dynamic {
 			var q = a[0].asDouble();
-			this.sim.short(this.curClose, Math.isNaN(q) ? null : q, this.curBarIndex);
+			this.sim.short(this.curClose, q, this.curBarIndex);
 			return null;
 		}));
 		members.set("flat", new HostFn(function(a:NativeArray<Value>):Dynamic {
@@ -242,13 +242,17 @@ class StrategyInstance {
 			sim.mark(bars[i].close);
 		}
 
-		var rets = Metrics.returnsFromEquity(sim.equity);
+		// `sim.equity` is a `GrowableVec<Float>` (unboxed pushes on the JVM target -- see
+		// OrderSim.equity's doc comment); materialize ONCE here for the Metrics calls and the
+		// public result's `Array<Float>`-typed `equity` field, rather than converting per call.
+		var eqArr = sim.equity.toArray();
+		var rets = Metrics.returnsFromEquity(eqArr);
 		return {
-			equity: sim.equity,
+			equity: eqArr,
 			returns: rets,
 			trades: sim.trades,
-			sharpe: Metrics.sharpe(rets),
-			maxDrawdown: Metrics.maxDrawdown(sim.equity),
+			sharpe: Metrics.sharpe(rets, 0),
+			maxDrawdown: Metrics.maxDrawdown(eqArr),
 			winRate: Metrics.winRate(sim.wins, sim.trades),
 			finalEquity: sim.equity.length > 0 ? sim.equity[sim.equity.length - 1] : sim.cash,
 			fills: sim.fills

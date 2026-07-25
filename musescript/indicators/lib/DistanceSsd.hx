@@ -63,4 +63,8 @@ class DistanceSsd implements MuseIndicator<DistanceSsdPair, Float> {
 	}
 }
 
-typedef DistanceSsdPair = { a: Float, b: Float };
+@:structInit
+class DistanceSsdPair {
+	public var a:Float;
+	public var b:Float;
+}

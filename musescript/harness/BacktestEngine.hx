@@ -21,13 +21,15 @@ class BacktestEngine {
 			onBar(bar);
 			orders.mark(bar.close);
 		});
-		var rets = Metrics.returnsFromEquity(orders.equity);
+		// See GraalWasmHost.hx's identical comment -- materialize ONCE, not per call.
+		var eqArr = orders.equity.toArray();
+		var rets = Metrics.returnsFromEquity(eqArr);
 		return {
-			equity: orders.equity,
+			equity: eqArr,
 			returns: rets,
 			trades: orders.trades,
-			sharpe: Metrics.sharpe(rets),
-			maxDrawdown: Metrics.maxDrawdown(orders.equity),
+			sharpe: Metrics.sharpe(rets, 0),
+			maxDrawdown: Metrics.maxDrawdown(eqArr),
 			winRate: Metrics.winRate(orders.wins, orders.trades),
 			finalEquity: orders.equity.length > 0 ? orders.equity[orders.equity.length - 1] : orders.cash,
 			fills: orders.fills

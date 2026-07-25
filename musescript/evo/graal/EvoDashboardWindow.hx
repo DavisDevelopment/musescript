@@ -10,6 +10,11 @@ import musescript.evo.graal.SwingExterns.Font;
 import musescript.evo.graal.SwingExterns.RenderingHints;
 import musescript.evo.graal.SwingExterns.Graphics;
 import musescript.evo.graal.SwingExterns.Graphics2D;
+import musescript.evo.graal.SwingExterns.BorderLayout;
+import musescript.evo.graal.SwingExterns.LayoutPanel;
+import musescript.evo.graal.SwingExterns.JButton;
+import musescript.evo.graal.SwingExterns.JLabel;
+import musescript.evo.graal.SwingExterns.ActionFn;
 
 /**
  * A native Swing window CorpusEvoRun updates directly, once per generation -- genuinely live
@@ -36,24 +41,69 @@ import musescript.evo.graal.SwingExterns.Graphics2D;
 class EvoDashboardWindow {
 	var frame:JFrame;
 	var panel:EvoChartPanel;
+	var pauseBtn:JButton;
+	var pauseStatusLabel:JLabel;
+	/** Mutated only by `pauseBtn`'s own click handler (EDT), read by the main evolution thread in
+	 * `isPaused`/`waitForResume` -- see that doc comment for why a plain poll, not a Deque
+	 * handoff. Off by default: the run behaves exactly as it always has (charts-only, never
+	 * blocking) unless this specific button is clicked, which is the whole point -- pausing is a
+	 * deliberate, at-will human action, never a standing mode. */
+	var paused:Bool = false;
 
 	public function new(title:String) {
 		panel = new EvoChartPanel();
-		panel.setPreferredSize(new Dimension(1120, 900));
+		panel.setPreferredSize(new Dimension(1160, 900));
+
+		pauseBtn = new JButton("Pause");
+		pauseBtn.addActionListener(new ActionFn(togglePause));
+		pauseStatusLabel = new JLabel("running -- click Pause to intervene (edit/select from the population) at the next generation boundary");
+
+		var controls = new LayoutPanel(new BorderLayout());
+		controls.add(pauseBtn, BorderLayout.WEST);
+		controls.add(pauseStatusLabel, BorderLayout.CENTER);
+
+		var root = new LayoutPanel(new BorderLayout());
+		root.add(panel, BorderLayout.CENTER);
+		root.add(controls, BorderLayout.SOUTH);
+
 		frame = new JFrame(title);
 		frame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
-		frame.add(panel);
-		frame.setSize(1140, 940);
+		frame.add(root);
+		frame.setSize(1180, 980);
 		frame.setLocationRelativeTo(null);
 		frame.setVisible(true);
 	}
 
+	function togglePause():Void {
+		paused = !paused;
+		pauseBtn.setText(paused ? "Resume" : "Pause");
+		pauseStatusLabel.setText(paused
+			? "pausing at the next generation boundary -- population/editor window will open"
+			: "running -- click Pause to intervene (edit/select from the population) at the next generation boundary");
+	}
+
+	/** Read by CorpusEvoRun's main thread at each generation boundary. */
+	public function isPaused():Bool return paused;
+
+	/** Blocks the CALLING (main evolution) thread until `paused` flips back to false -- see
+	 * HumanLoopWindow's identical `waitForResume` doc comment for why this is a plain poll. */
+	public function waitForResume():Void {
+		while (paused) Sys.sleep(0.2);
+	}
+
 	/** `popFitness`: every valid genome's fitness THIS generation (unsorted, panel sorts it).
 	 * `nicheCells`: parallel arrays of `key` ("tradeFreq_hold_bias") and `fitness` for every
-	 * OCCUPIED MAP-Elites cell this generation -- from `EliteArchive.summary()`. */
+	 * OCCUPIED MAP-Elites cell this generation -- from `EliteArchive.summary()`.
+	 * `isPerf`: raw (pre-parsimony) Sharpe per unique genome this generation (in-sample).
+	 * `oosPerf`: same, out-of-sample, but only on generations CorpusEvoRun actually re-sampled
+	 * OOS for (see its `--gui-oos-every` doc comment) -- pass `null` on skipped generations and
+	 * the panel keeps showing the last real sample rather than going blank.
+	 * `isBenchmark`/`oosBenchmark`: buy-and-hold Sharpe on the same tape/cost, computed once. */
 	public function update(gen:Int, best:Float, mean:Float, niches:Int, champion:String,
-			popFitness:Array<Float>, nicheKeys:Array<String>, nicheFitness:Array<Float>):Void {
-		panel.push(gen, best, mean, niches, champion, popFitness, nicheKeys, nicheFitness);
+			popFitness:Array<Float>, nicheKeys:Array<String>, nicheFitness:Array<Float>,
+			isPerf:Array<Float>, oosPerf:Null<Array<Float>>, isBenchmark:Float, oosBenchmark:Float):Void {
+		panel.push(gen, best, mean, niches, champion, popFitness, nicheKeys, nicheFitness,
+			isPerf, oosPerf, isBenchmark, oosBenchmark);
 		panel.repaint();
 	}
 
@@ -73,6 +123,11 @@ private class EvoChartPanel extends JPanel {
 	var popFitness:Array<Float> = [];
 	var nicheKeys:Array<String> = [];
 	var nicheFitness:Array<Float> = [];
+	var isPerf:Array<Float> = [];
+	var oosPerf:Array<Float> = [];
+	var oosSampledAtGen:Int = -1;
+	var isBenchmark:Float = 0;
+	var oosBenchmark:Float = 0;
 
 	static inline var TOTAL_CELLS = 48; // 4 (tradeFreq) x 4 (hold) x 3 (bias) -- see MapElites.hx
 	static var TRADEFREQ_LABELS = ["rare", "occasional", "frequent", "scalper"];
@@ -87,6 +142,7 @@ private class EvoChartPanel extends JPanel {
 	static var COL_MEAN = new Color(235, 104, 52);   // slot 2 orange
 	static var COL_NICHE = new Color(27, 175, 122);  // slot 3 aqua
 	static var COL_POP = new Color(74, 58, 167);     // slot 7 violet
+	static var COL_OOS = new Color(233, 196, 106);   // slot 4-ish yellow/gold, distinct from IS blue
 
 	public function new() {
 		super();
@@ -94,9 +150,12 @@ private class EvoChartPanel extends JPanel {
 	}
 
 	public function push(g:Int, b:Float, m:Float, n:Int, champ:String,
-			pf:Array<Float>, nk:Array<String>, nf:Array<Float>):Void {
+			pf:Array<Float>, nk:Array<String>, nf:Array<Float>,
+			ip:Array<Float>, op:Null<Array<Float>>, isB:Float, oosB:Float):Void {
 		gen = g; best = b; mean = m; niches = n; champion = champ;
 		popFitness = pf; nicheKeys = nk; nicheFitness = nf;
+		isPerf = ip; isBenchmark = isB; oosBenchmark = oosB;
+		if (op != null) { oosPerf = op; oosSampledAtGen = g; }
 		gens.push(g);
 		bests.push(b);
 		means.push(m);
@@ -115,18 +174,108 @@ private class EvoChartPanel extends JPanel {
 		g2.setColor(COL_MUTED);
 		g2.drawString('generation $gen  |  best fitness ${fmt(best)}  |  mean fitness ${fmt(mean)}  |  niches $niches / $TOTAL_CELLS  |  champion "$champion"', 16, 47);
 
-		var colW = 536, rowH = 380;
-		var x1 = 16, x2 = 16 + colW + 16;
+		// Row 1: three equal columns (fitness | niches | perf-vs-benchmark), all "beside" each
+		// other rather than stacked. Row 2: two wider columns (pop distribution | niche grid)
+		// spanning the SAME total width as row 1's three columns combined, so both rows line up.
+		var rowH = 380;
+		var colW3 = 360, gap = 16;
+		var x1 = 16, x2 = x1 + colW3 + gap, x3 = x2 + colW3 + gap;
+		var totalW = colW3 * 3 + gap * 2;
+		var colW2 = Std.int((totalW - gap) / 2);
 		var y1 = 66, y2 = 66 + rowH + 24;
 
-		lineChart(g2, x1, y1, colW, rowH,
+		lineChart(g2, x1, y1, colW3, rowH,
 			[{series: bests, color: COL_BEST, label: "Best fitness"}, {series: means, color: COL_MEAN, label: "Mean fitness"}],
 			"Fitness over generations", "generation", "fitness");
-		lineChart(g2, x2, y1, colW, rowH,
+		lineChart(g2, x2, y1, colW3, rowH,
 			[{series: [for (n in nichesHist) (n : Float)], color: COL_NICHE, label: "Niches occupied"}],
 			"Behavioral diversity over generations", "generation", "niches (of " + TOTAL_CELLS + ")");
-		popDistribution(g2, x1, y2, colW, rowH);
-		nicheGrid(g2, x2, y2, colW, rowH);
+		perfVsBenchmark(g2, x3, y1, colW3, rowH);
+		popDistribution(g2, x1, y2, colW2, rowH);
+		nicheGrid(g2, x1 + colW2 + gap, y2, colW2, rowH);
+	}
+
+	/** Every evaluated genome's raw Sharpe this generation, in- and out-of-sample, against the
+	 * buy-and-hold benchmark for the same tape/cost -- "is the population actually beating just
+	 * holding the underlying" at a glance. IS is sorted low->high and refreshed every generation
+	 * (free -- already computed for selection); OOS is sorted independently and only refreshed
+	 * every `--gui-oos-every` generations (real backtests, not free -- see CorpusEvoRun's doc
+	 * comment), so its title always states which generation it was actually sampled at. */
+	function perfVsBenchmark(g2:Graphics2D, x:Int, y:Int, w:Int, h:Int):Void {
+		var oosLabel = oosSampledAtGen >= 0 ? 'OOS Sharpe (sampled gen $oosSampledAtGen)' : "OOS Sharpe (not sampled yet)";
+		panelTitle(g2, x, y + 2, "Genome perf. vs buy-and-hold");
+		var legendBottom = legendStacked(g2, x, y + 20, [
+			{color: COL_POP, label: "IS genome Sharpe (this gen)"},
+			{color: COL_OOS, label: oosLabel},
+			{color: COL_BEST, label: "IS benchmark"},
+			{color: COL_MEAN, label: "OOS benchmark"},
+		]);
+
+		var padL = 44, padR = 10, padB = 34;
+		var padT = (legendBottom - y) + 8;
+		var plotX = x + padL, plotY = y + padT;
+		var plotW = w - padL - padR, plotH = h - padT - padB;
+
+		if (isPerf.length == 0) {
+			g2.setColor(COL_MUTED);
+			g2.setFont(new Font("SansSerif", Font.PLAIN, 12));
+			g2.drawString("waiting for data...", plotX + 8, plotY + Std.int(plotH / 2));
+			return;
+		}
+
+		var isSorted = isPerf.copy();
+		isSorted.sort((a, b) -> a < b ? -1 : (a > b ? 1 : 0));
+		var oosSorted = oosPerf.copy();
+		oosSorted.sort((a, b) -> a < b ? -1 : (a > b ? 1 : 0));
+
+		var all = isSorted.copy();
+		for (v in oosSorted) all.push(v);
+		all.push(isBenchmark);
+		all.push(oosBenchmark);
+		var yMin = all[0], yMax = all[0];
+		for (v in all) { if (v < yMin) yMin = v; if (v > yMax) yMax = v; }
+		if (yMax == yMin) { yMin -= 1; yMax += 1; }
+		var pad = (yMax - yMin) * 0.08;
+		yMin -= pad; yMax += pad;
+
+		g2.setFont(new Font("SansSerif", Font.PLAIN, 10));
+		var gridN = 4;
+		for (i in 0...gridN + 1) {
+			var gy = plotY + Std.int((i / gridN) * plotH);
+			var val = yMax - (i / gridN) * (yMax - yMin);
+			g2.setColor(COL_BORDER);
+			g2.drawLine(plotX, gy, plotX + plotW, gy);
+			g2.setColor(COL_MUTED);
+			g2.drawString(fmt2(val), x + 2, gy + 4);
+		}
+		g2.setColor(COL_MUTED);
+		g2.drawString("genomes sorted by Sharpe, low -> high", plotX + Std.int(plotW / 2) - 78, y + h - 2);
+
+		function plotDots(series:Array<Float>, color:Color):Void {
+			g2.setColor(color);
+			var n = series.length;
+			if (n == 0) return;
+			for (i in 0...n) {
+				var px = plotX + Std.int((n == 1 ? 0.5 : i / (n - 1)) * plotW);
+				var py = plotY + plotH - Std.int(((series[i] - yMin) / (yMax - yMin)) * plotH);
+				g2.fillRect(px - 2, py - 2, 4, 4);
+			}
+		}
+		plotDots(isSorted, COL_POP);
+		plotDots(oosSorted, COL_OOS);
+
+		function benchmarkLine(v:Float, color:Color):Void {
+			var by = plotY + plotH - Std.int(((v - yMin) / (yMax - yMin)) * plotH);
+			g2.setColor(color);
+			g2.setStroke(new BasicStroke(1.5));
+			g2.drawLine(plotX, by, plotX + plotW, by);
+		}
+		benchmarkLine(isBenchmark, COL_BEST);
+		benchmarkLine(oosBenchmark, COL_MEAN);
+
+		g2.setColor(COL_BORDER);
+		g2.drawLine(plotX, plotY, plotX, plotY + plotH);
+		g2.drawLine(plotX, plotY + plotH, plotX + plotW, plotY + plotH);
 	}
 
 	// ── shared chrome ──────────────────────────────────────────────────────────────────────
@@ -147,6 +296,22 @@ private class EvoChartPanel extends JPanel {
 			g2.drawString(e.label, cx + 14, y);
 			cx += 16 + textWidthEstimate(e.label) + 18;
 		}
+	}
+
+	/** One entry per line -- for narrower panels/longer labels where the horizontal `legend()`
+	 * would overflow the column width. Returns the y just past the last line, so the caller can
+	 * continue laying out content below it. */
+	function legendStacked(g2:Graphics2D, x:Int, y:Int, entries:Array<{color:Color, label:String}>):Int {
+		g2.setFont(new Font("SansSerif", Font.PLAIN, 10));
+		var cy = y;
+		for (e in entries) {
+			g2.setColor(e.color);
+			g2.fillRect(x, cy - 8, 9, 9);
+			g2.setColor(COL_MUTED);
+			g2.drawString(e.label, x + 13, cy);
+			cy += 13;
+		}
+		return cy;
 	}
 
 	/** No FontMetrics extern declared (kept the Swing surface minimal) -- a fixed per-character

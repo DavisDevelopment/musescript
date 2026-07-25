@@ -89,4 +89,8 @@ class RollingCovariance implements MuseIndicator<RollingCovariancePair, Float> {
 	}
 }
 
-typedef RollingCovariancePair = { x: Float, y: Float };
+@:structInit
+class RollingCovariancePair {
+	public var x:Float;
+	public var y:Float;
+}

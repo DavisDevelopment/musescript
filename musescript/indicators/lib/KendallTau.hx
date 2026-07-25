@@ -83,4 +83,8 @@ class KendallTau implements MuseIndicator<KendallTauPair, Float> {
 	}
 }
 
-typedef KendallTauPair = { a: Float, b: Float };
+@:structInit
+class KendallTauPair {
+	public var a:Float;
+	public var b:Float;
+}

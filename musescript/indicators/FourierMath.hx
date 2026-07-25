@@ -20,11 +20,12 @@ package musescript.indicators;
  */
 class FourierMath {
 	/** Full one-sided spectrum of the window: amp/phase per bin m = 0..n/2. */
-	public static function spectrum(x:Array<Float>):{amp:Array<Float>, phase:Array<Float>} {
+	public static function spectrum(x:Array<Float>):FourierSpectrumResult {
 		var n = x.length;
 		var half = n >> 1;
 		var amp:Array<Float> = [];
 		var phase:Array<Float> = [];
+		
 		for (m in 0...half + 1) {
 			var re = 0.0, im = 0.0;
 			var w = -2.0 * Math.PI * m / n;
@@ -36,7 +37,9 @@ class FourierMath {
 			amp.push(Math.sqrt(re * re + im * im) * scale);
 			phase.push(Math.atan2(im, re));
 		}
-		return { amp: amp, phase: phase };
+
+		final result:FourierSpectrumResult = { amp: amp, phase: phase };
+		return result;
 	}
 
 	/**
@@ -63,7 +66,7 @@ class FourierMath {
 	}
 
 	/** Least-squares line over the window: x[j] ≈ intercept + slope·j. */
-	public static function linearFit(x:Array<Float>):{slope:Float, intercept:Float} {
+	public static function linearFit(x:Array<Float>):FourierLinearFitResult {
 		var n = x.length;
 		var jm = (n - 1) / 2.0;
 		var xm = 0.0;
@@ -76,7 +79,9 @@ class FourierMath {
 			den += dj * dj;
 		}
 		var slope = den == 0.0 ? 0.0 : num / den;
-		return { slope: slope, intercept: xm - slope * jm };
+
+		final result:FourierLinearFitResult = { slope: slope, intercept: xm - slope * jm };
+		return result;
 	}
 
 	/**
@@ -92,4 +97,16 @@ class FourierMath {
 		if (Std.isOfType(v, Float) || Std.isOfType(v, Int)) return (v : Float) != 0.0;
 		return def;
 	}
+}
+
+@:structInit
+class FourierLinearFitResult {
+	public var slope:Float;
+	public var intercept:Float;
+}
+
+@:structInit
+class FourierSpectrumResult {
+	public var amp:Array<Float>;
+	public var phase:Array<Float>;
 }

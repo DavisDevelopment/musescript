@@ -7,4 +7,6 @@ enum ScalarNode {
 	KSeries(s:SeriesNode);
 	KLookback(s:SeriesNode, n:Int);
 	KFeature(name:String);
+	/** Scalar counterpart of `BoolNode.BHole` -- see its doc comment. */
+	KHole(inner:ScalarNode);
 }

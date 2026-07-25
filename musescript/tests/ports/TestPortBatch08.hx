@@ -200,7 +200,7 @@ class TestPortBatch08 extends Test {
 	}
 
 	public function testDistanceSsdBatchEqualsStreaming() {
-		var inputs = [for (i in 0...40) { a: Math.sin(i * 0.2), b: Math.sin(i * 0.2 + 0.5) }];
+		var inputs:Array<musescript.indicators.lib.DistanceSsd.DistanceSsdPair> = [for (i in 0...40) { a: Math.sin(i * 0.2), b: Math.sin(i * 0.2 + 0.5) }];
 		var a1 = new DistanceSsd(10), a2 = new DistanceSsd(10);
 		var batched = IndicatorBatch.run(a1, inputs);
 		var streamed = [for (x in inputs) a2.update(x)];

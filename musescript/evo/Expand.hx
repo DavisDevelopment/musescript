@@ -1,13 +1,29 @@
 package musescript.evo;
 
-/** Deterministic MuseGene → MuseScript expansion. */
+/**
+ * Deterministic MuseGene -> MuseScript expansion.
+ *
+ * Emits the MODERN typed surface (`strategy Name(...) { onBar { when cond: { ... } } }`),
+ * NOT the legacy `{ @strategy("Name") @on(bar) { if (...) ...; } }` hscript-annotation dialect
+ * this used to emit -- switched because (a) nobody hand-writes the annotation dialect anymore
+ * (every real file under corpus/strategies/ already uses the modern surface) and (b) the
+ * annotation dialect's braceless `if (cond) long(qty);` doesn't reverse-compile through
+ * CorpusSeed.translateBool/translateStrategy at all (`guardedOrders` only recognizes `When`/the
+ * general-`if` `EIf` shape with an `EBlock` then-branch, both modern-surface constructs) -- a real
+ * gap surfaced by HumanLoopWindow's edit-source round trip, but really a pre-existing mismatch
+ * between this file's OWN output and CorpusSeed's expectations any caller doing a Fitness.evaluate
+ * -> Expand.expand -> CorpusSeed.translateSource round trip would have hit. `MuseParser.parse`
+ * auto-dispatches to `StrategyParser` via `StrategyParser.looksLike` (checks for a leading
+ * `strategy` token), so every EXISTING caller of `Expand.expand` (Fitness.evaluate, CorpusEvoRun's
+ * champion printout, GeneRunner) needs zero changes -- same `new MuseParser().parse(...)` entry
+ * point, it just now routes to the other front-end.
+ */
 class Expand {
 	public static function expand(g:StrategyGenome):String {
-		var lines = ["{", '  @strategy("${g.name}")'];
-		for (p in g.params)
-			lines.push('  @param("${p.name}", ${num(p.defaultValue)})');
+		var paramList = g.params.length == 0 ? "" :
+			"(" + [for (p in g.params) '${p.name} = ${num(p.defaultValue)}'].join(", ") + ")";
 		var size = scalar(g.size, g.params);
-		lines.push("  @on(bar) {");
+		var lines = ['strategy ${g.name}$paramList {', "  onBar {"];
 		// Guarded on `position()` so a STICKY entry condition (BCmp/BTrend-based, e.g. `rsi(...) <
 		// 55` staying true for many consecutive bars -- unlike a transient crossover, which only
 		// fires once) doesn't re-fire `long`/`short` every single bar it holds and pyramid an
@@ -18,9 +34,9 @@ class Expand {
 		// allows a same-bar REVERSAL (short flips to long, long flips to short) to fire -- only
 		// same-direction re-entry is blocked, matching executeLong/executeShort's own existing
 		// "close the opposite side first" behavior.
-		lines.push('    if ((${bool(g.entryLong, g.params)}) && position() <= 0) long($size);');
-		lines.push('    if ((${bool(g.entryShort, g.params)}) && position() >= 0) short($size);');
-		lines.push('    if ((${bool(g.exitLong, g.params)}) || (${bool(g.exitShort, g.params)})) flat();');
+		lines.push('    when (${bool(g.entryLong, g.params)}) && position() <= 0: { long($size) }');
+		lines.push('    when (${bool(g.entryShort, g.params)}) && position() >= 0: { short($size) }');
+		lines.push('    when (${bool(g.exitLong, g.params)}) || (${bool(g.exitShort, g.params)}): { flat() }');
 		lines.push("  }");
 		lines.push("}");
 		return lines.join("\n");
@@ -62,6 +78,9 @@ class Expand {
 				var bs = scalar(b, params);
 				if (op == "min" || op == "max") return '$op($as, $bs)';
 				'($as $op $bs)';
+			// Transparent: a hole is a mutation-eligibility marker only, invisible to the emitted
+			// MuseScript -- see BoolNode.BHole's doc comment.
+			case KHole(inner): scalar(inner, params);
 		};
 	}
 
@@ -86,6 +105,7 @@ class Expand {
 			case BAnd(a, b): '(${bool(a, params)} && ${bool(b, params)})';
 			case BOr(a, b): '(${bool(a, params)} || ${bool(b, params)})';
 			case BNot(a): '(!${bool(a, params)})';
+			case BHole(inner): bool(inner, params); // see scalar's KHole case
 		};
 	}
 }

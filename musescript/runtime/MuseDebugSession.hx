@@ -174,7 +174,9 @@ class MuseDebugSession {
 
 	/** Final backtest metrics once stepping has reached the end (mirrors BacktestEngine.run). */
 	public function result():Dynamic {
-		var eq = harness.orders.equity;
+		// `harness.orders.equity` is a `GrowableVec<Float>` (see OrderSim.equity's doc comment);
+		// materialize ONCE here, this `result` is `Dynamic` output (JS/debugger interop).
+		var eq = harness.orders.equity.toArray();
 		var rets = Metrics.returnsFromEquity(eq);
 		return {
 			done: idx + 1 >= bars.length,
@@ -185,7 +187,7 @@ class MuseDebugSession {
 			chart: harness.chart.commands,
 			logs: harness.logs,
 			trades: harness.orders.trades,
-			sharpe: finF(Metrics.sharpe(rets)),
+			sharpe: finF(Metrics.sharpe(rets, 0)),
 			maxDrawdown: finF(Metrics.maxDrawdown(eq)),
 			winRate: finF(Metrics.winRate(harness.orders.wins, harness.orders.trades)),
 			finalEquity: eq.length > 0 ? eq[eq.length - 1] : harness.orders.cash

@@ -100,4 +100,8 @@ class Alpha implements MuseIndicator<Pair, Float> {
 	}
 }
 
-typedef Pair = { a: Float, b: Float };
+@:structInit
+class Pair {
+	public var a:Float;
+	public var b:Float;
+}

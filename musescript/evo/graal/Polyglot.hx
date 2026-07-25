@@ -34,9 +34,13 @@ extern class ContextBuilder {
 	function build():Context;
 }
 
+@:native("java.lang.CharSequence")
+extern interface CharSequence {}
+
 @:native("org.graalvm.polyglot.Source")
 extern class Source {
 	@:overload(function(language:String, bytes:ByteSequence, name:String):SourceBuilder {})
+	@:overload(function(language:String, characters:CharSequence, name:String):SourceBuilder {})
 	static function newBuilder(language:String, file:JFile):SourceBuilder;
 }
 

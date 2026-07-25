@@ -101,4 +101,8 @@ class SpreadBollingerBands implements MuseIndicator<SpreadBbPair, SpreadBollinge
 	}
 }
 
-typedef SpreadBbPair = {a:Float, b:Float};
+@:structInit
+class SpreadBbPair {
+	public var a:Float;
+	public var b:Float;
+}

@@ -29,6 +29,26 @@ java -jar build/jvm/evo-proof.jar
 Proof checks: seeded population, typed mutation, elitism non-regression,
 deterministic re-evaluation of the champion.
 
+## JIT-audited runs (standing practice)
+
+Any evaluation run against a `build/jvm/*.jar` evo entry point (`EvoBench`,
+`CorpusEvoRun`, `EvoProof`, ...) should go through `scripts/jit_audit_run.sh`
+instead of a bare `java -jar`, so a run that's silently losing throughput to
+failed inlining or deopt storms shows up in a log instead of just "feeling
+slower":
+
+```bash
+scripts/jit_audit_run.sh build/jvm/evo-bench.jar musescript.evo.graal.EvoBench --pop 40 --gens 10
+```
+
+Writes `build/graal/jit-audit/<mainClass>_<timestamp>/summary.txt` with top
+inlining-rejection reasons and top deopting methods (musescript/haxe.jvm sites
+called out separately, since those are the ones actually worth fixing vs.
+JDK/Truffle internals). Never point it at `build/jvm/corpus-evo.jar` while a
+background corpus-evo run has that same jar open (see `PLAN_EVO_SPEED.md`'s
+hard rule) -- check `wmic process where "name='java.exe'" get CommandLine`
+first.
+
 ## Layout
 
 | module | role |

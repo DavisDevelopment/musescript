@@ -78,4 +78,8 @@ class InformationRatio implements MuseIndicator<InformationRatioPair, Float> {
 	}
 }
 
-typedef InformationRatioPair = { a: Float, b: Float };
+@:structInit
+class InformationRatioPair {
+	public var a:Float;
+	public var b:Float;
+}

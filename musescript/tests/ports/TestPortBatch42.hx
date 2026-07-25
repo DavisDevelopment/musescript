@@ -307,7 +307,7 @@ class TestPortBatch42 extends Test {
 	public function testTreynorRatioReferenceBetaTwoPayoff() {
 		// a_i = 2 * b_i with non-zero mean: Beta = 2, Treynor = mean_b.
 		var t = new TreynorRatio(20, 0.0);
-		var inputs = [for (i in 1...21) { a: 2.0 * i * 0.01, b: i * 0.01 }];
+		var inputs:Array<musescript.indicators.lib.TreynorRatio.TreynorPair> = [for (i in 1...21) { a: 2.0 * i * 0.01, b: i * 0.01 }];
 		var out = IndicatorBatch.run(t, inputs);
 		var sumB = 0.0;
 		for (p in inputs) sumB += p.b;
@@ -323,7 +323,7 @@ class TestPortBatch42 extends Test {
 	public function testTreynorRatioZeroBetaReturnsZero() {
 		// Constant asset returns vs varying benchmark force cov(a,b) = 0.
 		var t = new TreynorRatio(4, 0.0);
-		var pairs = [{a: 0.01, b: 0.005}, {a: 0.01, b: -0.002}, {a: 0.01, b: 0.001}, {a: 0.01, b: 0.003}];
+		var pairs:Array<musescript.indicators.lib.TreynorRatio.TreynorPair> = [{a: 0.01, b: 0.005}, {a: 0.01, b: -0.002}, {a: 0.01, b: 0.001}, {a: 0.01, b: 0.003}];
 		var last:Null<Float> = null;
 		for (p in pairs) last = t.update(p);
 		Assert.floatEquals(0.0, last);
@@ -345,9 +345,10 @@ class TestPortBatch42 extends Test {
 	}
 
 	public function testTreynorRatioBatchEqualsStreaming() {
-		var inputs = [for (i in 0...50) {
+		var inputs:Array<musescript.indicators.lib.TreynorRatio.TreynorPair> = [for (i in 0...50) {
 			var b = Math.sin(i * 0.2) * 0.01;
-			{ a: 1.5 * b + 0.001, b: b };
+			var p:musescript.indicators.lib.TreynorRatio.TreynorPair = { a: 1.5 * b + 0.001, b: b };
+			p;
 		}];
 		var a = new TreynorRatio(10, 0.0);
 		var b = new TreynorRatio(10, 0.0);
@@ -1228,7 +1229,7 @@ class TestPortBatch42 extends Test {
 
 	public function testHasbrouckLoudVenueLeads() {
 		// x is far more volatile than y -> x holds nearly all the share.
-		var pairs = [for (i in 0...40) {
+		var pairs:Array<musescript.indicators.lib.HasbrouckInformationShare.HisPair> = [for (i in 0...40) {
 			a: Math.sin(i * 0.5) * 10.0,
 			b: Math.sin(i * 0.5) * 1.0
 		}];
@@ -1238,7 +1239,7 @@ class TestPortBatch42 extends Test {
 	}
 
 	public function testHasbrouckEqualVenuesStayInBounds() {
-		var pairs = [for (i in 0...200) {
+		var pairs:Array<musescript.indicators.lib.HasbrouckInformationShare.HisPair> = [for (i in 0...200) {
 			a: Math.sin(i * 0.5) * 5.0,
 			b: Math.cos(i * 0.5) * 5.0
 		}];
@@ -1248,7 +1249,7 @@ class TestPortBatch42 extends Test {
 	}
 
 	public function testHasbrouckFlatSeriesIsHalf() {
-		var pairs = [for (_ in 0...20) {a: 7.0, b: 9.0}];
+		var pairs:Array<musescript.indicators.lib.HasbrouckInformationShare.HisPair> = [for (_ in 0...20) {a: 7.0, b: 9.0}];
 		var h = new HasbrouckInformationShare(5);
 		var last = lastNonNull(IndicatorBatch.run(h, pairs));
 		Assert.floatEquals(0.5, last);
@@ -1264,7 +1265,7 @@ class TestPortBatch42 extends Test {
 	}
 
 	public function testHasbrouckBatchEqualsStreaming() {
-		var pairs = [for (i in 0...120) {
+		var pairs:Array<musescript.indicators.lib.HasbrouckInformationShare.HisPair> = [for (i in 0...120) {
 			a: Math.sin(i) * 5.0,
 			b: Math.cos(i * 0.5) * 3.0
 		}];

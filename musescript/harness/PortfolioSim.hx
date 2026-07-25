@@ -1,5 +1,7 @@
 package musescript.harness;
 
+import musescript.indicators.GrowableVec;
+
 /**
  * Multi-symbol order book + shared cash. Companion to single-symbol `OrderSim`.
  * Strategies drive it via `buy`/`sell_all`/`rebalance_equal` / `target_weight`,
@@ -15,7 +17,8 @@ class PortfolioSim {
 	public var positions:Map<String, Float>;
 	public var entryPrices:Map<String, Float>;
 	public var entryBars:Map<String, Int>;
-	public var equity:Array<Float>;
+	/** See `OrderSim.equity`'s doc comment -- `GrowableVec<Float>`, not `Array<Float>`. */
+	public var equity:GrowableVec<Float>;
 	public var trades:Int;
 	public var wins:Int;
 	public var fills:Array<Fill>;
@@ -26,7 +29,7 @@ class PortfolioSim {
 		positions = new Map();
 		entryPrices = new Map();
 		entryBars = new Map();
-		equity = [];
+		equity = new GrowableVec<Float>();
 		trades = 0;
 		wins = 0;
 		fills = [];
@@ -38,7 +41,7 @@ class PortfolioSim {
 		positions = new Map();
 		entryPrices = new Map();
 		entryBars = new Map();
-		equity = [];
+		equity = new GrowableVec<Float>();
 		trades = 0;
 		wins = 0;
 		fills = [];

@@ -181,7 +181,9 @@ class MuseRuntime {
 			Reflect.setField(out, "panel", true);
 			Reflect.setField(out, "symbols", panel.symbols);
 			if (instrument) {
-				Reflect.setField(out, "equity", harness.portfolio.equity);
+				// See GeneRunner.hx's identical comment -- must be a real Array, not the
+				// GrowableVec abstract's underlying impl object.
+				Reflect.setField(out, "equity", harness.portfolio.equity.toArray());
 				Reflect.setField(out, "fills", harness.portfolio.fills);
 				Reflect.setField(out, "holdings", harness.portfolio.holdings());
 				Reflect.setField(out, "chart", harness.chart.commands);
@@ -310,7 +312,9 @@ class MuseRuntime {
 
 	/** Single-symbol instrumentation payload (equity/fills from `orders`). */
 	static function attachOrdersInstrumentation(out:Dynamic, harness:HarnessContext):Void {
-		Reflect.setField(out, "equity", harness.orders.equity);
+		// See GeneRunner.hx's identical comment -- must be a real Array, not the
+		// GrowableVec abstract's underlying impl object.
+		Reflect.setField(out, "equity", harness.orders.equity.toArray());
 		Reflect.setField(out, "fills", harness.orders.fills);
 		Reflect.setField(out, "chart", harness.chart.commands);
 		Reflect.setField(out, "logs", harness.logs);

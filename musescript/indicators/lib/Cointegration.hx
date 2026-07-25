@@ -254,4 +254,8 @@ function adfNoConstant(series:Array<Float>, lags:Int):Float {
 	return rho / Math.sqrt(varRho);
 }
 
-typedef CointPair = { a: Float, b: Float };
+@:structInit
+class CointPair {
+	public var a:Float;
+	public var b:Float;
+}

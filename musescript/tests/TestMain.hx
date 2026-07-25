@@ -1356,8 +1356,8 @@ class TestStatsBuiltins extends Test {
 	public function testSortinoMaxDrawdownAndEwm() {
 		Assert.equals(0.25, Metrics.maxDrawdown([100.0, 120.0, 90.0, 95.0]));
 		var returns = [0.01, -0.02, 0.015, -0.01, 0.005];
-		Assert.isTrue(Math.isFinite(Metrics.sortino(returns)));
-		Assert.isTrue(Metrics.sortino([0.01, 0.02, 0.03]) == 0); // no downside
+		Assert.isTrue(Math.isFinite(Metrics.sortino(returns, 0)));
+		Assert.isTrue(Metrics.sortino([0.01, 0.02, 0.03], 0) == 0); // no downside
 		var h = new HarnessContext();
 		h.series.set("close", [1.0, 2.0, 3.0, 4.0, 5.0]);
 		var v = TradeBuiltins.ewmVar(h, "close", 3);
