@@ -1,12 +1,147 @@
 package musescript.evo;
 
-import haxe.crypto.Sha1;
 
+/**
+ * Structural digests for genomes and bool subtrees.
+ *
+ * Digest stays `Sha1(Serializer.run(...))` — byte-identical to `NmaCanonical` (TestNmaBijection).
+ * The speed win is `StrategyGenome.keyCache` / `nodeCountCache`: elites and memo lookups stop
+ * rebuilding the Dynamic tree on every touch. `Variation.copyGenome` omits the caches so splices
+ * start cold (JIT guide §26).
+ */
 class Canonical {
-	public static function structuralKey(g:StrategyGenome):String {
-		return Sha1.encode(haxe.Serializer.run(genomeKey(g))).substr(0, 16);
+	/** Telemetry: genome-key cache hits / misses since process start (or last `resetKeyStats`). */
+	public static var keyHits:Int = 0;
+	public static var keyMisses:Int = 0;
+
+	public static function resetKeyStats():Void {
+		keyHits = 0;
+		keyMisses = 0;
 	}
 
+	public static function structuralKey(g:StrategyGenome):String {
+		var cached = g.keyCache;
+		if (cached != null) {
+			keyHits++;
+			return cached;
+		}
+		keyMisses++;
+		var d = new StructuralDigest();
+		digestGenome(d, g);
+		var key = d.finish();
+		g.keyCache = key;
+		return key;
+	}
+
+	/** Structural digest of a bool subtree alone — P2 credit bank key (survives path changes). */
+	public static function boolStructuralKey(n:BoolNode):String {
+		var d = new StructuralDigest();
+		digestBool(d, n);
+		return d.finish();
+	}
+
+	// ---------- digest walk (token stream mirrored by NmaCanonical) ----------
+
+	static function digestGenome(d:StructuralDigest, g:StrategyGenome):Void {
+		d.tag("G".code);
+		digestBool(d, g.entryLong);
+		digestBool(d, g.entryShort);
+		digestBool(d, g.exitLong);
+		digestBool(d, g.exitShort);
+		digestScalar(d, g.size);
+		d.int(g.params.length);
+		for (p in g.params) {
+			d.str(p.name);
+			d.float(p.defaultValue);
+			d.float(p.min);
+			d.float(p.max);
+			d.float(p.step);
+			d.str(p.tune);
+		}
+		d.str(g.name);
+	}
+
+	static function digestSeries(d:StructuralDigest, n:SeriesNode):Void {
+		switch (n) {
+			case SPrice(f):
+				d.tag("P".code);
+				d.str(f);
+			case SInd(name, field, window, src):
+				d.tag("I".code);
+				d.str(name);
+				// Mirrors keySeries: a null source degrades to the bare price field, so both
+				// forms emit a series token here and the arity stays fixed.
+				if (src != null) digestSeries(d, src) else { d.tag("P".code); d.str(field); }
+				d.int(window);
+		}
+	}
+
+	static function digestScalar(d:StructuralDigest, n:ScalarNode):Void {
+		switch (n) {
+			case KConst(v):
+				d.tag("K".code);
+				d.float(Math.round(v * 1e9) / 1e9);
+			case KParam(i):
+				d.tag("R".code);
+				d.int(i);
+			case KFeature(name):
+				d.tag("F".code);
+				d.str(name);
+			case KSeries(s):
+				digestSeries(d, s);
+			case KLookback(s, k):
+				d.tag("L".code);
+				digestSeries(d, s);
+				d.int(k);
+			case KArith(op, a, b):
+				d.tag("A".code);
+				d.str(op);
+				digestScalar(d, a);
+				digestScalar(d, b);
+			// Transparent: a hole-wrapped subtree compiles to byte-identical MuseScript source as
+			// its bare `inner` (see Expand.hx), so they must share ONE fitness-cache entry, not two.
+			case KHole(inner):
+				digestScalar(d, inner);
+		}
+	}
+
+	static function digestBool(d:StructuralDigest, n:BoolNode):Void {
+		switch (n) {
+			case BCross(dir, a, b):
+				d.tag("X".code);
+				d.str(dir);
+				digestSeries(d, a);
+				digestSeries(d, b);
+			case BCmp(op, a, b):
+				d.tag("C".code);
+				d.str(op);
+				digestScalar(d, a);
+				digestScalar(d, b);
+			case BTrend(dir, s, w):
+				d.tag("T".code);
+				d.str(dir);
+				digestSeries(d, s);
+				d.int(w);
+			case BAnd(a, b):
+				d.tag("&".code);
+				digestBool(d, a);
+				digestBool(d, b);
+			case BOr(a, b):
+				d.tag("|".code);
+				digestBool(d, a);
+				digestBool(d, b);
+			case BNot(a):
+				d.tag("!".code);
+				digestBool(d, a);
+			case BHole(inner):
+				digestBool(d, inner); // see digestScalar's KHole case
+		}
+	}
+
+	/** Node count for a bool subtree (public wrapper over private `countBool`). */
+	public static function boolNodeCount(n:BoolNode):Int return countBool(n);
+
+	/** Nested Dynamic form of a genome key (also the input to `Serializer` inside `structuralKey`). */
 	public static function genomeKey(g:StrategyGenome):Dynamic {
 		return [
 			keyBool(g.entryLong), keyBool(g.entryShort),
@@ -55,8 +190,12 @@ class Canonical {
 	}
 
 	public static function nodeCount(g:StrategyGenome):Int {
-		return countBool(g.entryLong) + countBool(g.entryShort)
+		var cached = g.nodeCountCache;
+		if (cached != null) return cached;
+		var n = countBool(g.entryLong) + countBool(g.entryShort)
 			+ countBool(g.exitLong) + countBool(g.exitShort) + countScalar(g.size);
+		g.nodeCountCache = n;
+		return n;
 	}
 
 	static function countSeries(n:SeriesNode):Int {
@@ -93,42 +232,50 @@ class Canonical {
 	/**
 	 * Structural "species" fingerprint -- a histogram of node-constructor kinds across the whole
 	 * genome (entryLong/entryShort/exitLong/exitShort/size), for CorpusEvoRun's opt-in
-	 * `--speciation` fitness-sharing (see this session's neuroevolution-inspired-upgrades plan).
-	 * Complementary to MAP-Elites' BEHAVIORAL niching (MapElites.hx) -- this is the STRUCTURAL
-	 * axis: two genomes with wildly different shapes that happen to trade similarly land in the
-	 * same MAP-Elites cell but different species, and vice versa. Deliberately coarse (constructor
-	 * KIND counts, not full tree-edit-distance) -- cheap enough to compute for every unique genome
-	 * every generation.
+	 * `--speciation` fitness-sharing. Complementary to MAP-Elites' BEHAVIORAL niching.
 	 */
 	public static function shapeSignature(g:StrategyGenome):Map<String, Int> {
+		var v = shapeVector(g);
 		var m = new Map<String, Int>();
-		function bump(k:String):Void m.set(k, (m.exists(k) ? m.get(k) : 0) + 1);
+		for (i in 0...SHAPE_KINDS.length) if (v[i] != 0) m.set(SHAPE_KINDS[i], v[i]);
+		return m;
+	}
+
+	/**
+	 * `shapeSignature` in its native form: counts indexed by `SHAPE_KINDS` position, unboxed and
+	 * fixed-length. Speciation compares these — Map<String,Int> is a HashMap with boxed keys
+	 * (guide §25), so a Manhattan distance over it meant a fresh union map per pair.
+	 */
+	public static function shapeVector(g:StrategyGenome):haxe.ds.Vector<Int> {
+		var v = new haxe.ds.Vector<Int>(SHAPE_KINDS.length);
+		for (i in 0...v.length) v[i] = 0;
+		inline function bump(i:Int):Void v[i] = v[i] + 1;
 		function walkSeries(n:SeriesNode):Void {
 			switch (n) {
-				case SPrice(_): bump("SPrice");
-				case SInd(_, _, _, src): bump("SInd"); if (src != null) walkSeries(src);
+				case SPrice(_): bump(K_SPRICE);
+				case SInd(_, _, _, src): bump(K_SIND); if (src != null) walkSeries(src);
 			}
 		}
 		function walkScalar(n:ScalarNode):Void {
 			switch (n) {
-				case KConst(_): bump("KConst");
-				case KParam(_): bump("KParam");
-				case KFeature(_): bump("KFeature");
-				case KSeries(s): bump("KSeries"); walkSeries(s);
-				case KLookback(s, _): bump("KLookback"); walkSeries(s);
-				case KArith(_, a, b): bump("KArith"); walkScalar(a); walkScalar(b);
-				case KHole(inner): bump("KHole"); walkScalar(inner);
+				case KConst(_): bump(K_KCONST);
+				case KParam(_): bump(K_KPARAM);
+				case KFeature(_): bump(K_KFEATURE);
+				case KSeries(s): bump(K_KSERIES); walkSeries(s);
+				case KLookback(s, _): bump(K_KLOOKBACK); walkSeries(s);
+				case KArith(_, a, b): bump(K_KARITH); walkScalar(a); walkScalar(b);
+				case KHole(inner): bump(K_KHOLE); walkScalar(inner);
 			}
 		}
 		function walkBool(n:BoolNode):Void {
 			switch (n) {
-				case BCross(_, a, b): bump("BCross"); walkSeries(a); walkSeries(b);
-				case BCmp(_, a, b): bump("BCmp"); walkScalar(a); walkScalar(b);
-				case BTrend(_, s, _): bump("BTrend"); walkSeries(s);
-				case BAnd(a, b): bump("BAnd"); walkBool(a); walkBool(b);
-				case BOr(a, b): bump("BOr"); walkBool(a); walkBool(b);
-				case BNot(a): bump("BNot"); walkBool(a);
-				case BHole(inner): bump("BHole"); walkBool(inner);
+				case BCross(_, a, b): bump(K_BCROSS); walkSeries(a); walkSeries(b);
+				case BCmp(_, a, b): bump(K_BCMP); walkScalar(a); walkScalar(b);
+				case BTrend(_, s, _): bump(K_BTREND); walkSeries(s);
+				case BAnd(a, b): bump(K_BAND); walkBool(a); walkBool(b);
+				case BOr(a, b): bump(K_BOR); walkBool(a); walkBool(b);
+				case BNot(a): bump(K_BNOT); walkBool(a);
+				case BHole(inner): bump(K_BHOLE); walkBool(inner);
 			}
 		}
 		walkBool(g.entryLong);
@@ -136,7 +283,7 @@ class Canonical {
 		walkBool(g.exitLong);
 		walkBool(g.exitShort);
 		walkScalar(g.size);
-		return m;
+		return v;
 	}
 
 	/** Manhattan distance between two shape signatures -- the compatibility measure `--speciation`
@@ -154,27 +301,54 @@ class Canonical {
 		return d;
 	}
 
-	/** Fixed declared order for `shapeFeatures` below -- every node-constructor kind
-	 * `shapeSignature` can ever bump, so the resulting vector is the SAME length/meaning for every
-	 * genome regardless of what it actually contains (a kind it doesn't use just reads 0). */
+	/** `shapeDistance` over `shapeVector`s: same Manhattan number, no allocation, no hashing. */
+	public static function shapeVectorDistance(a:haxe.ds.Vector<Int>, b:haxe.ds.Vector<Int>):Int {
+		var d = 0;
+		for (i in 0...a.length) {
+			var diff = a[i] - b[i];
+			d += diff < 0 ? -diff : diff;
+		}
+		return d;
+	}
+
+	/** Σ of a shape vector's counts. Because Manhattan distance is bounded below by the difference
+	 * of the totals (`|Σa − Σb| ≤ Σ|aᵢ − bᵢ|`), this is an EXACT admissible prefilter. */
+	public static function shapeVectorTotal(v:haxe.ds.Vector<Int>):Int {
+		var s = 0;
+		for (i in 0...v.length) s += v[i];
+		return s;
+	}
+
+	/** Fixed declared order for `shapeVector`/`shapeFeatures`. */
 	static var SHAPE_KINDS = ["BCross", "BCmp", "BTrend", "BAnd", "BOr", "BNot", "BHole",
 		"KConst", "KParam", "KArith", "KSeries", "KLookback", "KFeature", "KHole", "SPrice", "SInd"];
 
+	static inline var K_BCROSS = 0;
+	static inline var K_BCMP = 1;
+	static inline var K_BTREND = 2;
+	static inline var K_BAND = 3;
+	static inline var K_BOR = 4;
+	static inline var K_BNOT = 5;
+	static inline var K_BHOLE = 6;
+	static inline var K_KCONST = 7;
+	static inline var K_KPARAM = 8;
+	static inline var K_KARITH = 9;
+	static inline var K_KSERIES = 10;
+	static inline var K_KLOOKBACK = 11;
+	static inline var K_KFEATURE = 12;
+	static inline var K_KHOLE = 13;
+	static inline var K_SPRICE = 14;
+	static inline var K_SIND = 15;
+
 	/**
 	 * `shapeSignature` turned into a fixed-length, SCALE-INVARIANT numeric feature vector, for
-	 * `SurrogateModel`'s opt-in `--surrogate` fitness pre-filter (see this session's surrogate-
-	 * model plan). Each of `SHAPE_KINDS`' counts is normalized to a FRACTION of `nodeCount` (not
-	 * the raw count) -- a 10-node and a 40-node genome with the same internal proportions produce
-	 * similar vectors this way, which a raw-count vector wouldn't; two more scalar features are
-	 * appended: `nodeCount` itself (loosely normalized, `/50.0`, so it stays roughly `0..1`-ish for
-	 * a typical genome) and `params.length` (bare, params are rarely more than a handful). Always
-	 * `SHAPE_KINDS.length + 2` entries long.
+	 * `SurrogateModel`'s opt-in `--surrogate` fitness pre-filter.
 	 */
 	public static function shapeFeatures(g:StrategyGenome):Array<Float> {
-		var sig = shapeSignature(g);
+		var sig = shapeVector(g);
 		var n = nodeCount(g);
 		var denom = n > 0 ? n : 1;
-		var out = [for (k in SHAPE_KINDS) (sig.exists(k) ? sig.get(k) : 0) / denom];
+		var out = [for (i in 0...sig.length) sig[i] / denom];
 		out.push(n / 50.0);
 		out.push(g.params.length);
 		return out;

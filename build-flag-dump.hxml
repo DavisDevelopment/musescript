@@ -1,0 +1,3 @@
+extraParams.hxml
+-main musescript.scratch.FlagDump
+--jvm build/jvm/flag-dump.jar

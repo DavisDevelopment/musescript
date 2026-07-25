@@ -241,6 +241,7 @@ class StrategyWasmEmitter {
 				+ importLines.join("\n") + (importLines.length > 0 ? "\n" : "")
 				+ "  (memory (export \"memory\") 1)\n"
 				+ helpers
+				+ musescript.evo.nma.NmaWasmFusedEmitter.emitHelpersForStrategyModule()
 				+ methodFuncsWat
 				+ initFunc
 				+ strategyFunc

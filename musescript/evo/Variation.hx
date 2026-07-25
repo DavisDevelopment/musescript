@@ -1,6 +1,7 @@
 package musescript.evo;
 
 import musescript.evo.TreeSurgery;
+import musescript.evo.Fitness;
 
 /**
  * Typed GP variation operators — closed under MuseGene types (no repair pass ever needed, same
@@ -12,19 +13,10 @@ import musescript.evo.TreeSurgery;
  * (a ScalarNode root). `buildCatalog` walks all 5, tagging every reachable Bool/Scalar/Series
  * position with (slot, kind, path) — point_mutate and promote_param both pick from this same
  * catalog, just filtered differently.
+ *
+ * `EKind` / `CatalogEntry` / `CatalogSite` live in their own modules so NMA attribution can
+ * import sites without a Variation↔NMA cycle.
  */
-enum EKind {
-	EBool;
-	EScalar;
-	ESeries;
-}
-
-@:structInit
-class CatalogEntry {
-	public var slot:Int; // 0=entryLong 1=entryShort 2=exitLong 3=exitShort 4=size
-	public var kind:EKind;
-	public var path:GPath;
-}
 
 /** Lightweight int->int mapping via two parallel arrays, replacing `Map<Int,Int>` for the
  * small param-index remappings this file builds (`remapOffsets`/`compactParams`). Confirmed via
@@ -70,10 +62,67 @@ class Variation {
 	 * see its doc comment. */
 	public var tuner:GrowthWeights;
 
+	/**
+	 * Per-generation memo of parent `siteDeltas` (PLAN_EVO_SPEED P1.1). Tournament re-picks the
+	 * same elites many times per gen; ablation profiles are deterministic for a fixed oracle —
+	 * recomputing them per child is pure waste once P0 caches make each eval cheap.
+	 */
+	var siteDeltaMemo:Map<String, {baseline:Float, deltas:Array<Float>, keys:Array<String>}> = new Map();
+	/** Test/telemetry: times `computeSiteDeltas` returned a same-gen memo hit. */
+	public var siteDeltaMemoHits:Int = 0;
+	/**
+	 * Per-generation memo of donor-splice oracle scores keyed
+	 * `parentKey|slot/path|donorBoolKey`. Tournament + Fisher–Yates re-samples the same
+	 * (parent, site, donor) triples often enough that cold donor evals otherwise dominate
+	 * `step.xo` under nested AttrPool workers.
+	 */
+	var donorScoreMemo:Map<String, Float> = new Map();
+	public var donorScoreMemoHits:Int = 0;
+	/** Same-gen bool-site catalogs / donor pools keyed by structural key (elites are re-picked). */
+	var boolCatalogMemo:Map<String, Array<CatalogEntry>> = new Map();
+	var donorPoolMemo:Map<String, Array<Dynamic>> = new Map();
+	/**
+	 * Shared across `forkForSlot` workers so a parent ablated on one child slot is warm for every
+	 * other slot that tournament-picks the same elite. Guarded: parallel step writes the memo.
+	 */
+	var memoLock = new EvoLock();
+	var indicatorPoolRef:Array<String>;
+	var baseSeed:Int;
+
 	public function new(seed:Int, ?indicatorPool:Array<String>, ?tuner:GrowthWeights) {
 		rng = new Rand(seed);
+		this.baseSeed = seed;
 		this.indicatorPool = indicatorPool != null ? indicatorPool : Palette.INDS;
+		this.indicatorPoolRef = this.indicatorPool;
 		this.tuner = tuner != null ? tuner : new GrowthWeights();
+	}
+
+	/**
+	 * Per-slot Variation for parallel child production: own RNG stream, shared tuner + site-delta
+	 * memo. Selection/crossover/mutate choice stays on EvolutionEngine's streams; only the
+	 * Variation-internal draws (site picks, growBool, donor sample) move to
+	 * `seed + VARIATION_PARALLEL + slot * 100003`.
+	 */
+	public function forkForSlot(slot:Int):Variation {
+		var v = new Variation(baseSeed + RngStreams.VARIATION_PARALLEL + slot * 100003, indicatorPoolRef, tuner);
+		v.siteDeltaMemo = siteDeltaMemo;
+		v.donorScoreMemo = donorScoreMemo;
+		v.boolCatalogMemo = boolCatalogMemo;
+		v.donorPoolMemo = donorPoolMemo;
+		v.memoLock = memoLock;
+		return v;
+	}
+
+	/** Clear per-parent ablation / donor-score memos — call once at the start of each `EvolutionEngine.step`. */
+	public function beginGeneration():Void {
+		memoLock.acquire();
+		siteDeltaMemo = new Map();
+		siteDeltaMemoHits = 0;
+		donorScoreMemo = new Map();
+		donorScoreMemoHits = 0;
+		boolCatalogMemo = new Map();
+		donorPoolMemo = new Map();
+		memoLock.release();
 	}
 
 	// ---- growth (unchanged shape, BNot/BTrend added to close the reachability gap found
@@ -171,6 +220,16 @@ class Variation {
 	 * pick plus every nested growScalar/growRiskExit/growMultiOutputField/growBool sub-call's). */
 	function growBool(depth:Int, ?pool:Array<EvoParam>, ?tagOut:Array<String>):BoolNode {
 		if (depth <= 0 || rng.float() < 0.45) {
+			// Learned library (opt-in via --learn-library): small reach into BHole(motif).
+			// Drawn BEFORE boolTerm so seeded defaults stay bit-identical when library is empty.
+			if (LearnedLibrary.size() > 0 && tuner.hasCategory("boolLibrary") && rng.float() < 0.18) {
+				var libTag = tuner.pick("boolLibrary", rng);
+				var motif = LearnedLibrary.get(libTag);
+				if (motif != null) {
+					if (tagOut != null) tagOut.push('boolLibrary:$libTag');
+					return BHole(LearnedLibrary.cloneBool(motif));
+				}
+			}
 			var choice = tuner.pick("boolTerm", rng);
 			if (tagOut != null) tagOut.push('boolTerm:$choice');
 			return switch (choice) {
@@ -306,6 +365,32 @@ class Variation {
 		return out;
 	}
 
+	/**
+	 * Bool sites only — attributed mutate/XO never consult Scalar/Series catalogs. Skipping
+	 * those walks cuts a large fraction of `buildCatalog` work on every attributed child.
+	 * Memoized by structural key within a generation (elites are tournament-re-picked).
+	 */
+	function buildBoolCatalog(g:StrategyGenome):Array<CatalogEntry> {
+		var key = Canonical.structuralKey(g);
+		memoLock.acquire();
+		var hit = boolCatalogMemo.get(key);
+		if (hit != null) {
+			memoLock.release();
+			return hit;
+		}
+		memoLock.release();
+		var armed = !isTemplated(g);
+		var out:Array<CatalogEntry> = [];
+		addBoolSitesOnly(out, armed, 0, g.entryLong);
+		addBoolSitesOnly(out, armed, 1, g.entryShort);
+		addBoolSitesOnly(out, armed, 2, g.exitLong);
+		addBoolSitesOnly(out, armed, 3, g.exitShort);
+		memoLock.acquire();
+		if (!boolCatalogMemo.exists(key)) boolCatalogMemo.set(key, out);
+		memoLock.release();
+		return out;
+	}
+
 	/** Pulled out of `buildCatalog` as a real method (was a local closure allocated fresh on
 	 * every call) -- `buildCatalog` runs on every mutation/crossover child, hundreds of times
 	 * per generation, so a per-call closure object was avoidable allocation pressure. */
@@ -319,6 +404,12 @@ class Variation {
 		var xc:Array<{path:GPath, node:SeriesNode}> = [];
 		TreeSurgery.collectSeriesInBool(root, [], xc, armed);
 		for (e in xc) out.push({ slot: slot, kind: ESeries, path: e.path });
+	}
+
+	function addBoolSitesOnly(out:Array<CatalogEntry>, armed:Bool, slot:Int, root:BoolNode):Void {
+		var bc:Array<{path:GPath, node:BoolNode}> = [];
+		TreeSurgery.collectBool(root, [], bc, armed);
+		for (e in bc) out.push({ slot: slot, kind: EBool, path: e.path });
 	}
 
 	function withBoolRepl(g:StrategyGenome, entry:CatalogEntry, repl:BoolNode):StrategyGenome {
@@ -383,13 +474,18 @@ class Variation {
 		if (catalog.length == 0) return g;
 		var entry = catalog[rng.int(catalog.length)];
 		var d = rng.int(maxDepth + 1);
+		var boolRepl:Null<BoolNode> = null;
 		var mutated = switch (entry.kind) {
-			case EBool: withBoolRepl(g, entry, growBool(d));
+			case EBool:
+				boolRepl = growBool(d);
+				withBoolRepl(g, entry, boolRepl);
 			case EScalar: withScalarRepl(g, entry, growScalar(d));
 			case ESeries: withSeriesRepl(g, entry, growSeries(d));
 		};
 		mutated.lineage = (g.lineage != null ? g.lineage.copy() : []).concat([Canonical.structuralKey(g)]);
-		return compactParams(mutated);
+		var out = compactParams(mutated);
+		if (boolRepl != null) maybeRegisterDirtySpineBool(g, entry, boolRepl, out);
+		return out;
 	}
 
 	/** Swap a random same-typed subtree from `g2` into `g1` (child inherits g1's frame) —
@@ -413,7 +509,13 @@ class Variation {
 				var refs = [];
 				paramRefsInBool(donor, refs);
 				var mapping = remapOffsets(refs, offset, extraParams, g2.params);
-				withBoolRepl(g1, site, remapBool(donor, mapping));
+				var remapped = remapBool(donor, mapping);
+				var child = withBoolRepl(g1, site, remapped);
+				child.params = g1.params.concat(extraParams);
+				child.lineage = [Canonical.structuralKey(g1), Canonical.structuralKey(g2)];
+				var out = compactParams(child);
+				maybeRegisterDirtySpineBool(g1, site, remapped, out);
+				return out;
 			case EScalar:
 				var donor:ScalarNode = cast donorPool[donorIdx];
 				var refs = [];
@@ -455,15 +557,15 @@ class Variation {
 	 * 20% fallback, so crossover doesn't become entirely exploitation-driven either.
 	 */
 	public function attributedSubtreeCrossover(g1:StrategyGenome, g2:StrategyGenome, evalFn:StrategyGenome->Float, donorSampleCap:Int = 6):StrategyGenome {
-		var catalog1 = buildCatalog(g1);
-		var boolSites = [for (e in catalog1) if (e.kind == EBool) e];
+		var boolSites = buildBoolCatalog(g1);
 		if (boolSites.length == 0 || rng.float() < 0.2) return subtreeCrossover(g1, g2);
 
-		var baseline = evalFn(g1);
-		var alwaysTrue:BoolNode = BCmp(">", KConst(1.0), KConst(0.0));
-		var siteDeltas = [for (e in boolSites) baseline - evalFn(withBoolRepl(g1, e, alwaysTrue))];
+		var pack = computeSiteDeltas(g1, boolSites, evalFn);
+		var siteDeltas = pack.deltas;
+		var sitePriors = musescript.evo.nma.NmaCreditBank.means(pack.keys);
+		var siteImportance = [for (i in 0...boolSites.length) siteDeltas[i] + sitePriors[i]];
 		var siteOrder = [for (i in 0...boolSites.length) i];
-		siteOrder.sort((a, b) -> siteDeltas[a] < siteDeltas[b] ? -1 : siteDeltas[a] > siteDeltas[b] ? 1 : 0);
+		siteOrder.sort((a, b) -> siteImportance[a] < siteImportance[b] ? -1 : siteImportance[a] > siteImportance[b] ? 1 : 0);
 		var siteWeights = [for (_ in 0...boolSites.length) 1.0];
 		for (rank in 0...siteOrder.length) siteWeights[siteOrder[rank]] = siteOrder.length - rank; // least important -> highest weight
 		var site = boolSites[weightedPickIndex(siteWeights)];
@@ -481,7 +583,7 @@ class Variation {
 			}
 			for (i in 0...donorSampleCap) sampled.push(cast fullDonorPool[idxs[i]]);
 		}
-		var donorScores = [for (donor in sampled) evalFn(withBoolRepl(g1, site, donor))];
+		var donorScores = scoreDonors(g1, site, sampled, evalFn);
 		var donorOrder = [for (i in 0...sampled.length) i];
 		donorOrder.sort((a, b) -> donorScores[a] < donorScores[b] ? -1 : donorScores[a] > donorScores[b] ? 1 : 0);
 		var donorWeights = [for (_ in 0...sampled.length) 1.0];
@@ -493,13 +595,112 @@ class Variation {
 		var refs = [];
 		paramRefsInBool(donor, refs);
 		var mapping = remapOffsets(refs, offset, extraParams, g2.params);
-		var result = withBoolRepl(g1, site, remapBool(donor, mapping));
+		var remapped = remapBool(donor, mapping);
+		var result = withBoolRepl(g1, site, remapped);
 		result.params = g1.params.concat(extraParams);
 		result.lineage = [Canonical.structuralKey(g1), Canonical.structuralKey(g2)];
-		return compactParams(result);
+		var out = compactParams(result);
+		maybeRegisterDirtySpineBool(g1, site, remapped, out);
+		return out;
+	}
+
+	/**
+	 * Rank donors for a site, memoizing cold oracle scores within the generation. Credit-cuts /
+	 * NMA paths still preferred; the memo collapses repeat (parent, site, donor) triples under
+	 * tournament re-picks.
+	 */
+	function scoreDonors(
+		g1:StrategyGenome,
+		site:CatalogEntry,
+		sampled:Array<BoolNode>,
+		evalFn:StrategyGenome->Float
+	):Array<Float> {
+		var parentKey = Canonical.structuralKey(g1);
+		var siteId = pathKey(site.slot, site.path);
+		var scores = new Array<Float>();
+		var needIdx = new Array<Int>();
+		var needDonors = new Array<BoolNode>();
+		var needMemoKeys = new Array<String>();
+		for (i in 0...sampled.length) {
+			var dk = Canonical.boolStructuralKey(sampled[i]);
+			var mk = parentKey + "|" + siteId + "|" + dk;
+			memoLock.acquire();
+			var hit = donorScoreMemo.get(mk);
+			if (hit != null) {
+				donorScoreMemoHits++;
+				memoLock.release();
+				scores.push(hit);
+			} else {
+				memoLock.release();
+				scores.push(Math.NaN);
+				needIdx.push(i);
+				needDonors.push(sampled[i]);
+				needMemoKeys.push(mk);
+			}
+		}
+		if (needDonors.length == 0) return scores;
+
+		var fresh:Array<Float>;
+		var siteRef:CatalogSite = { slot: site.slot, path: site.path };
+		var nmaDonors = (Fitness.preferNma && Fitness.nmaTape != null)
+			? musescript.evo.nma.NmaAttr.boolDonorScores(g1, siteRef, needDonors, Fitness.nmaTape,
+				Fitness.nmaCostBps, Fitness.nmaInitialCash, Fitness.nmaEquityFloor)
+			: null;
+		if (nmaDonors != null) fresh = nmaDonors;
+		else if (AttrPool.isNested()) {
+			var dKeys = [for (d in needDonors) Canonical.boolStructuralKey(d)];
+			fresh = Fitness.creditCuts
+				? musescript.evo.nma.NmaCreditBank.means(dKeys)
+				: [for (_ in needDonors) 0.0];
+		}
+		else if (Fitness.creditCuts) {
+			var dKeys = [for (d in needDonors) Canonical.boolStructuralKey(d)];
+			if (musescript.evo.nma.NmaCreditBank.warmEnough(dKeys))
+				fresh = musescript.evo.nma.NmaCreditBank.means(dKeys);
+			else
+				fresh = AttrPool.map(evalFn, [for (donor in needDonors) withBoolRepl(g1, site, donor)]);
+		} else fresh = AttrPool.map(evalFn, [for (donor in needDonors) withBoolRepl(g1, site, donor)]);
+
+		memoLock.acquire();
+		for (j in 0...needIdx.length) {
+			var s = fresh[j];
+			scores[needIdx[j]] = s;
+			if (!donorScoreMemo.exists(needMemoKeys[j])) donorScoreMemo.set(needMemoKeys[j], s);
+		}
+		memoLock.release();
+		return scores;
+	}
+
+	static function pathKey(slot:Int, path:GPath):String {
+		var buf = new StringBuf();
+		buf.add(slot);
+		for (s in path) {
+			buf.addChar("/".code);
+			buf.add(s == StepA ? "A" : "B");
+		}
+		return buf.toString();
 	}
 
 	function donorsOfKind(g:StrategyGenome, kind:EKind):Array<Dynamic> {
+		if (kind == EBool) {
+			var key = Canonical.structuralKey(g);
+			memoLock.acquire();
+			var hit = donorPoolMemo.get(key);
+			if (hit != null) {
+				memoLock.release();
+				return hit;
+			}
+			memoLock.release();
+			var out:Array<Dynamic> = [];
+			donorsFromBool(out, g.entryLong, EBool);
+			donorsFromBool(out, g.entryShort, EBool);
+			donorsFromBool(out, g.exitLong, EBool);
+			donorsFromBool(out, g.exitShort, EBool);
+			memoLock.acquire();
+			if (!donorPoolMemo.exists(key)) donorPoolMemo.set(key, out);
+			memoLock.release();
+			return out;
+		}
 		var out:Array<Dynamic> = [];
 		donorsFromBool(out, g.entryLong, kind);
 		donorsFromBool(out, g.entryShort, kind);
@@ -758,51 +959,207 @@ class Variation {
 	 * mutation becoming ENTIRELY exploitation-driven.
 	 */
 	public function attributedPointMutate(g:StrategyGenome, evalFn:StrategyGenome->Float, maxDepth:Int = 2):StrategyGenome {
-		var catalog = buildCatalog(g);
-		var boolEntries = [for (e in catalog) if (e.kind == EBool) e];
+		// Semantic-RDO flap: directed site+replacement via NMA lastSeries vs desired semantics.
+		if (Fitness.semanticRdoProb > 0 && Fitness.preferNma && Fitness.nmaTape != null
+				&& rng.float() < Fitness.semanticRdoProb) {
+			var rdo = musescript.evo.nma.NmaSemanticRdo.tryMutate(g, function(d) return growBool(d), rng, maxDepth);
+			if (rdo != null) return compactParams(rdo);
+		}
+		var catalog = buildBoolCatalog(g);
+		var boolEntries = catalog;
 		if (boolEntries.length == 0 || rng.float() < 0.2) return pointMutate(g, maxDepth);
 
-		var baseline = evalFn(g);
-		var alwaysTrue:BoolNode = BCmp(">", KConst(1.0), KConst(0.0));
-		var deltas = [for (e in boolEntries) {
-			var f = evalFn(withBoolRepl(g, e, alwaysTrue));
-			baseline - f; // larger = more important (protect); smaller/negative = safe to mutate
-		}];
+		var pack = computeSiteDeltas(g, boolEntries, evalFn);
+		var baseline = pack.baseline;
+		var deltas = pack.deltas;
+
+		// P2: blend ablation Δ with durable credit prior (high credit → protect).
+		var priors = musescript.evo.nma.NmaCreditBank.means(pack.keys);
+		var importance = [for (i in 0...boolEntries.length) deltas[i] + priors[i]];
 
 		var order = [for (i in 0...boolEntries.length) i];
-		order.sort((a, b) -> deltas[a] < deltas[b] ? -1 : deltas[a] > deltas[b] ? 1 : 0);
+		order.sort((a, b) -> importance[a] < importance[b] ? -1 : importance[a] > importance[b] ? 1 : 0);
 		var weights = [for (_ in 0...boolEntries.length) 1.0];
 		for (rank in 0...order.length) weights[order[rank]] = order.length - rank; // rank 0 (least important) -> highest weight
 
 		var entry = boolEntries[weightedPickIndex(weights)];
 		var d = rng.int(maxDepth + 1);
-		// tagOut captures the outermost growth choice made while building the replacement subtree
-		// (e.g. "boolTerm:riskExit") so it can be REWARDED below once the child's real fitness is
-		// known -- this is the auto-tuning feedback loop GrowthWeights exists for: the SAME
-		// evalFn/baseline this function already computes for ablation-based site TARGETING also
-		// closes the loop on WHICH KIND of node evolution should keep reaching for. Targeting
-		// itself stays bool-only exactly as before (untouched by this) -- only the reward signal
-		// for the tuner is new.
+		var kSpec = Fitness.speculativeGrowthK;
+		var grown:BoolNode;
 		var tagOut:Array<String> = [];
-		var mutated = withBoolRepl(g, entry, growBool(d, null, tagOut));
+		var winnerScore:Null<Float> = null;
+		var winnerBaseline:Null<Float> = null;
+		if (kSpec > 1 && Fitness.preferNma && Fitness.nmaTape != null) {
+			var cands:Array<BoolNode> = [];
+			var tagBags:Array<Array<String>> = [];
+			for (_ in 0...kSpec) {
+				var tags:Array<String> = [];
+				cands.push(growBool(d, null, tags));
+				tagBags.push(tags);
+			}
+			var site:CatalogSite = { slot: entry.slot, path: entry.path };
+			var robust = musescript.evo.nma.NmaAttr.boolReplacementRobustScores(
+				g, site, cands, Fitness.nmaTape,
+				Fitness.speculativeGrowthWindows,
+				Fitness.speculativeGrowthWindowLambda,
+				Fitness.speculativeGrowthParsimonyLambda,
+				Fitness.nmaCostBps, Fitness.nmaInitialCash, Fitness.nmaEquityFloor);
+			if (robust != null && robust.scores.length == cands.length) {
+				var scores = robust.scores;
+				var pick = 0;
+				var best = Fitness.NEG_INF;
+				for (i in 0...scores.length) {
+					var s = scores[i];
+					if (s != Fitness.NEG_INF && !Math.isNaN(s) && s > best) {
+						best = s;
+						pick = i;
+					}
+				}
+				// Acceptance gate: no forced mutation when all K candidates lose to the parent.
+				if (best < robust.baseline + Fitness.speculativeGrowthMinDelta) return g;
+				grown = cands[pick];
+				tagOut = tagBags[pick];
+				winnerScore = scores[pick];
+				winnerBaseline = robust.baseline;
+			} else {
+				grown = growBool(d, null, tagOut);
+			}
+		} else {
+			grown = growBool(d, null, tagOut);
+		}
+		var mutated = withBoolRepl(g, entry, grown);
 		mutated.lineage = (g.lineage != null ? g.lineage.copy() : []).concat([Canonical.structuralKey(g)]);
 		var out = compactParams(mutated);
+		maybeRegisterDirtySpineBool(g, entry, grown, out);
 		if (tagOut.length > 0) {
-			var childFitness = evalFn(out);
-			if (baseline != Fitness.NEG_INF && childFitness != Fitness.NEG_INF) {
-				var delta = childFitness - baseline;
-				// Credit EVERY choice in the trajectory (not just the outermost) with the SAME
-				// delta -- this is what actually lets riskExit/multiOutput/scalarTerm/scalarRecurse
-				// ever move at all (see growScalar's doc comment for the empirical proof they
-				// previously never did): the whole subtree that got spliced in is what produced
-				// this fitness delta, not just its outermost shape.
-				for (tag in tagOut) {
-					var parts = tag.split(":");
-					tuner.reward(parts[0], parts[1], delta);
+			// Warm credit-cuts leaves baseline as NaN: ranking used bank means and never scored the
+			// parent. Paying evalFn(g)+evalFn(out) here re-introduced the exact serial oracle tax
+			// the warm path exists to remove — nearly two backtests per mutated child, which at
+			// pop=1000 dominated step even after ablations went to zero. Skip the tuner update on
+			// that path; cold-path gens (and speculative-growth's already-scored winner) still
+			// reward. Continuous innovation keeps getting credit deposits from NmaAttr ablations
+			// while the bank is filling.
+			if (winnerScore != null && winnerBaseline != null) {
+				if (winnerBaseline != Fitness.NEG_INF && winnerScore != Fitness.NEG_INF) {
+					var delta = winnerScore - winnerBaseline;
+					for (tag in tagOut) {
+						var parts = tag.split(":");
+						tuner.reward(parts[0], parts[1], delta);
+					}
+					musescript.evo.nma.NmaCreditBank.deposit(Canonical.boolStructuralKey(grown), delta);
+				}
+			} else if (baseline == baseline && baseline != Fitness.NEG_INF) {
+				var childFitness = evalFn(out);
+				if (childFitness != Fitness.NEG_INF) {
+					var delta2 = childFitness - baseline;
+					for (tag in tagOut) {
+						var parts2 = tag.split(":");
+						tuner.reward(parts2[0], parts2[1], delta2);
+					}
 				}
 			}
 		}
 		return out;
+	}
+
+	/**
+	 * Baseline + per-bool-site ablation deltas, memoized by structural key within a generation
+	 * (PLAN_EVO_SPEED P1.1). Same ranking signal as the old inline paths in attributed mutate/XO.
+	 * `keys` are the bool structural keys for each site (same order) — callers reuse them for
+	 * credit priors instead of re-hashing.
+	 */
+	function computeSiteDeltas(g:StrategyGenome, boolEntries:Array<CatalogEntry>, evalFn:StrategyGenome->Float):{baseline:Float, deltas:Array<Float>, keys:Array<String>} {
+		var memoKey = Canonical.structuralKey(g);
+		memoLock.acquire();
+		var hit = siteDeltaMemo.get(memoKey);
+		if (hit != null) {
+			siteDeltaMemoHits++;
+			memoLock.release();
+			return hit;
+		}
+		memoLock.release();
+
+		var baseline:Float;
+		var deltas:Array<Float>;
+		var keys:Array<String>;
+		var nmaPack = (Fitness.preferNma && Fitness.nmaTape != null)
+			? musescript.evo.nma.NmaAttr.boolSiteDeltas(g, [for (e in boolEntries) ({slot: e.slot, path: e.path} : CatalogSite)], Fitness.nmaTape,
+				Fitness.nmaCostBps, Fitness.nmaInitialCash, Fitness.nmaEquityFloor)
+			: null;
+		if (nmaPack != null) {
+			baseline = nmaPack.baseline;
+			deltas = nmaPack.deltas;
+			keys = nmaPack.keys;
+		} else if (Fitness.creditCuts || AttrPool.isNested()) {
+			// Nested workers: NEVER AttrPool.map(evalFn) — it serializes into full backtests per
+			// site and was the step.xo wall once NMA coverage rose. Bank prior / zeros only.
+			keys = [for (e in boolEntries) Canonical.boolStructuralKey(TreeSurgery.getBool(boolRootOf(g, e.slot), e.path))];
+			if (Fitness.creditCuts && musescript.evo.nma.NmaCreditBank.warmEnough(keys)) {
+				baseline = Math.NaN;
+				deltas = musescript.evo.nma.NmaCreditBank.means(keys);
+			} else if (AttrPool.isNested()) {
+				baseline = Math.NaN;
+				deltas = Fitness.creditCuts
+					? musescript.evo.nma.NmaCreditBank.means(keys)
+					: [for (_ in boolEntries) 0.0];
+			} else {
+				var alwaysTrue:BoolNode = BCmp(">", KConst(1.0), KConst(0.0));
+				var batch = new Array<StrategyGenome>();
+				batch.push(g);
+				for (e in boolEntries) batch.push(withBoolRepl(g, e, alwaysTrue));
+				var scores = AttrPool.map(evalFn, batch);
+				baseline = scores[0];
+				deltas = [for (i in 0...boolEntries.length) baseline - scores[i + 1]];
+			}
+		} else {
+			keys = [for (e in boolEntries) Canonical.boolStructuralKey(TreeSurgery.getBool(boolRootOf(g, e.slot), e.path))];
+			var alwaysTrue:BoolNode = BCmp(">", KConst(1.0), KConst(0.0));
+			var batch = new Array<StrategyGenome>();
+			batch.push(g);
+			for (e in boolEntries) batch.push(withBoolRepl(g, e, alwaysTrue));
+			var scores = AttrPool.map(evalFn, batch);
+			baseline = scores[0];
+			deltas = [for (i in 0...boolEntries.length) baseline - scores[i + 1]];
+		}
+		var pack = { baseline: baseline, deltas: deltas, keys: keys };
+		memoLock.acquire();
+		// Another worker may have filled this key while we computed; keep the first writer.
+		if (!siteDeltaMemo.exists(memoKey)) siteDeltaMemo.set(memoKey, pack);
+		memoLock.release();
+		return pack;
+	}
+
+	/**
+	 * When `--nma-dirty-spine` is armed: warm parent working copy if needed, spine-splice `repl`
+	 * into a child NMA tree sharing sibling memos, register under `child`'s structural key.
+	 * No-op when flag off / tape missing / unsupported genome / param-length mismatch.
+	 *
+	 * «δεσποίνας δὲ ὑπὸ κόλπον ἔδυν χθονίας βασιλείας.»
+	 */
+	function maybeRegisterDirtySpineBool(parent:StrategyGenome, entry:CatalogEntry, repl:BoolNode, child:StrategyGenome):Void {
+		if (!Fitness.nmaDirtySpine || !Fitness.preferNma || Fitness.nmaWorking == null || Fitness.nmaTape == null) return;
+		if (entry.kind != EBool) return;
+		var parentPack = Fitness.workingGet(Canonical.structuralKey(parent));
+		if (parentPack == null)
+			parentPack = musescript.evo.nma.NmaDirtySpine.warmAndPut(parent, Fitness.nmaTape,
+				Fitness.nmaCostBps, Fitness.nmaInitialCash, Fitness.nmaEquityFloor);
+		if (parentPack != null) {
+			// `compactParams` may remap KParam indices after the original replacement was built.
+			// Register the actual normalized subtree from `child`, not the pre-compact `repl`.
+			var normalizedRepl = TreeSurgery.getBool(boolRootOf(child, entry.slot), entry.path);
+			musescript.evo.nma.NmaDirtySpine.spliceAndRegister(
+				parentPack, entry.slot, entry.path, normalizedRepl, child);
+		}
+	}
+
+	static function boolRootOf(g:StrategyGenome, slot:Int):BoolNode {
+		return switch (slot) {
+			case 0: g.entryLong;
+			case 1: g.entryShort;
+			case 2: g.exitLong;
+			case 3: g.exitShort;
+			default: g.entryLong;
+		};
 	}
 
 	function weightedPickIndex(weights:Array<Float>):Int {

@@ -74,6 +74,12 @@ class GeneRunner {
 		var murmurationConfigPath = "";
 		var murmurationSteps = 0;
 		#end
+		var costBps = Std.parseFloat(argVal("--cost-bps", "0"));
+		if (Math.isNaN(costBps)) costBps = 0;
+		var startCapital = Std.parseFloat(argVal("--start-capital", "100000"));
+		if (Math.isNaN(startCapital)) startCapital = 100000;
+		var equityFloor = Std.parseFloat(argVal("--equity-floor", "0"));
+		if (Math.isNaN(equityFloor)) equityFloor = 0;
 		var checkOnly = argFlag("--check");
 		var extractCond = argFlag("--extract-cond");
 		var astJson = argFlag("--ast-json");
@@ -192,7 +198,7 @@ class GeneRunner {
 					// genome's, leaving only the LAST genome's artifact on disk (a real gap found
 					// while wiring MuseGene's fitness loop through KestrGraal's WASM-artifact RPC).
 					var perGenomeDir = artifactDir != "" ? artifactDir + "/" + id : "";
-					var res = runOne(Std.string(obj.source), bars, target, checkOnly, strict, perGenomeDir, executionMode);
+					var res = runOne(Std.string(obj.source), bars, target, checkOnly, strict, perGenomeDir, executionMode, false, costBps, startCapital, equityFloor);
 					Reflect.setField(res, "id", id);
 					emit(res);
 				} catch (e:Dynamic) {
@@ -205,7 +211,7 @@ class GeneRunner {
 		var source = sourcePath != "" ? readFile(sourcePath) : readStdin();
 		var bars = checkOnly ? [] : loadBars(tapePath, symbol, synthN, seed, murmurationConfigPath, murmurationSteps);
 		try {
-			emit(runOne(source, bars, target, checkOnly, strict, artifactDir, executionMode, instrument));
+			emit(runOne(source, bars, target, checkOnly, strict, artifactDir, executionMode, instrument, costBps, startCapital, equityFloor));
 		} catch (e:Dynamic) {
 			emit({ ok: false, error: Std.string(e) });
 		}
@@ -214,7 +220,8 @@ class GeneRunner {
 	/** Compile+backtest one source against pre-loaded bars; returns a metrics struct. */
 	static function runOne(
 		source:String, bars:Array<Bar>, target:String, checkOnly:Bool,
-		strict:Bool, artifactDir:String, executionMode:String, ?instrument:Bool = false
+		strict:Bool, artifactDir:String, executionMode:String, ?instrument:Bool = false,
+		?costBps:Float = 0.0, ?startCapital:Float = 100000, ?equityFloor:Float = 0.0
 	):Dynamic {
 		// Expand statement templates before any interpreter seeding. Seeding the
 		// raw AST left bare `TrailingStop(0.05)` calls unresolved ("Cannot call null").
@@ -233,6 +240,9 @@ class GeneRunner {
 
 		var harness = new HarnessContext();
 		harness.orders.executionMode = executionMode;
+		if (startCapital != 100000) harness.orders.reset(startCapital);
+		if (equityFloor > 0) harness.orders.equityFloor = equityFloor;
+		if (costBps != 0) harness.orders.book.slippageBps = costBps;
 		var seedInterp = new MuseInterp(harness);
 		for (d in prog.decls) seedInterp.registerDeclPublic(d);
 
@@ -283,7 +293,8 @@ class GeneRunner {
 			sharpe: finField(result, "sharpe"),
 			maxDrawdown: finField(result, "maxDrawdown"),
 			winRate: finField(result, "winRate"),
-			finalEquity: finField(result, "finalEquity")
+			finalEquity: finField(result, "finalEquity"),
+			bankrupt: harness.orders.bankrupt
 		};
 		// Honesty flag: the requested target couldn't be emitted and the run fell
 		// back to another backend. Callers scoring fitness should treat a

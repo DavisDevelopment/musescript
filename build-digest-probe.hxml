@@ -1,0 +1,4 @@
+extraParams.hxml
+-D kestrel
+-main musescript.scratch.DigestProbe
+--jvm build/jvm/digest-probe.jar

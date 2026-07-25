@@ -604,7 +604,7 @@ class MuseInterp {
 					case CNull: null;
 				}
 			case EIdent(name): resolve(name);
-			case EBarField(name): resolve(name);
+			case EBarField(name): preserveNum(resolve(name));
 			case EVar(name, init):
 				var v = init != null ? evalExpr(init) : null;
 				define(name, v);
@@ -985,7 +985,7 @@ class MuseInterp {
 			return callClosure(fn, args);
 		}
 		if (Reflect.isFunction(f)) {
-			return Reflect.callMethod(recv, f, args);
+			return preserveNum(Reflect.callMethod(recv, f, args));
 		}
 		throw 'Not callable: $f';
 	}
@@ -1076,14 +1076,17 @@ class MuseInterp {
 				#if python
 				if (isStringy(left) || isStringy(right))
 					return Std.string(left) + Std.string(right);
-				return toNum(left) + toNum(right);
+				return preserveNum(toNum(left) + toNum(right));
 				#else
+				// JS/`+` overloads (string concat) — keep Dynamic add. JVM numeric results from
+				// `-`/`*`/… go through preserveNum so Float doesn't truncate to Int at the
+				// Dynamic return boundary (ProbeDon5 NMA↔compiled fill skew).
 				left + right;
 				#end
-			case "-": toNum(left) - toNum(right);
-			case "*": toNum(left) * toNum(right);
-			case "/": toNum(left) / toNum(right);
-			case "%": toNum(left) % toNum(right);
+			case "-": preserveNum(toNum(left) - toNum(right));
+			case "*": preserveNum(toNum(left) * toNum(right));
+			case "/": preserveNum(toNum(left) / toNum(right));
+			case "%": preserveNum(toNum(left) % toNum(right));
 			case "==": left == right;
 			case "!=": left != right;
 			case "<": toNum(left) < toNum(right);
@@ -1094,21 +1097,50 @@ class MuseInterp {
 		};
 	}
 
+	/**
+	 * JVM Dynamic return boundary can silently truncate Haxe `Float` to `Int` (fractional
+	 * part dropped). Box through `java.lang.Double` so `close < ema(...)` sees real prices.
+	 * No-op on non-JVM targets.
+	 */
+	static function preserveNum(v:Dynamic):Dynamic {
+		#if (java || jvm)
+		if (v == null) return null;
+		if (Std.isOfType(v, Int))
+			return java.lang.Double.valueOf((v : Int) * 1.0);
+		// `Float` already covers a boxed java.lang.Double here; naming the box explicitly is
+		// both redundant and illegal under --jvm, where it is an abstract rather than a class.
+		if (Std.isOfType(v, Float))
+			return java.lang.Double.valueOf((v : Float));
+		return v;
+		#else
+		return v;
+		#end
+	}
 	static function isStringy(v:Dynamic):Bool {
 		return Std.isOfType(v, String);
 	}
 
 	static function toNum(v:Dynamic):Float {
 		if (v == null) return 0;
-		if (Std.isOfType(v, Float) || Std.isOfType(v, Int)) return cast v;
-		#if python
+		// Int before Float: on some targets whole-number Dynamics report as Int.
+		if (Std.isOfType(v, Int)) return (v : Int) * 1.0;
+		#if (java || jvm)
+		// Prefer typed unbox — never `cast v` (truncates Float→Int on JVM Dynamic). `Float`
+		// matches a boxed java.lang.Double; the box is an abstract under --jvm and cannot be
+		// named as a class value.
+		if (Std.isOfType(v, Float))
+			return (v : Float);
+		var n = Std.parseFloat(Std.string(v));
+		return Math.isNaN(n) ? 0.0 : n;
+		#elseif python
 		try {
 			return python.Syntax.code("float({0})", v);
-		} 
+		}
 		catch (_:Dynamic) {
 			return 0;
 		}
 		#else
+		if (Std.isOfType(v, Float)) return (v : Float);
 		return Std.parseFloat(Std.string(v));
 		#end
 	}
@@ -1133,23 +1165,23 @@ class MuseInterp {
 	function resolve(name:String):Dynamic {
 		var r = stack.resolve(name);
 		if (r != null)
-			return r.value;
+			return preserveNum(r.value);
 		// F2 (hybrid escape thunk only — see bindFramePublic): a boundary-
 		// crossing name reads through the SAME shared memory slot the native
 		// WASM side uses, not a normal interp global.
 		if (frameMap != null && frameMap.exists(name))
-			return frameGetFn(frameMap.get(name));
+			return preserveNum(frameGetFn(frameMap.get(name)));
 		// Optional `this` (Haxe-flavored): a bare identifier not bound by any
 		// frame resolves to the current method receiver's field of that name,
 		// BEFORE falling to globals/params — matching `this.field` semantics
 		// without requiring the `this.` prefix.
 		var inst = currentInstance();
 		if (inst != null && Reflect.hasField(inst, name))
-			return Reflect.field(inst, name);
+			return preserveNum(Reflect.field(inst, name));
 		if (globals.exists(name))
-			return globals.get(name);
+			return preserveNum(globals.get(name));
 		if (harness.params.all().exists(name))
-			return harness.params.get(name);
+			return preserveNum(harness.params.get(name));
 
 		return null;
 	}

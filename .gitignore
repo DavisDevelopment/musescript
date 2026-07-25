@@ -12,6 +12,14 @@ dump/
 graal/target/
 .pytest_cache/
 
+# Benchmark / A-B run artifacts — regenerate with scripts/nma_ab_*.ps1 and --phase-profile.
+*.log
+build/*.log
+build/*.csv
+build/*.txt
+build-out.txt
+build-exit.txt
+
 # generated from graal/src/main/proto/kestrgraal.proto — regenerate, don't edit or commit:
 #   .venv/Scripts/python -m grpc_tools.protoc -I graal/src/main/proto \
 #     --python_out=graal/src/main/python --grpc_python_out=graal/src/main/python \

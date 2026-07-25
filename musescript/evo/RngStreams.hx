@@ -34,6 +34,17 @@ class RngStreams {
 	public static inline var ES_NUDGE = 4001;
 	public static inline var ES_CHOICE = 4011;
 	public static inline var CURRICULUM = 5001;
+	/** ε-lexicase case-order shuffle (`EvolutionEngine.lexicaseSelect` / `--lexicase`). */
+	public static inline var LEXICASE = 6001;
+	/** CVT centroid jitter reserved (Sobol centroids are deterministic; kept for future soft assign). */
+	public static inline var CVT = 6101;
+	/**
+	 * Per-slot Variation stream for parallel child production (`Variation.forkForSlot`).
+	 * Selection / crossover-choice / mutate-choice stay on their own streams (drawn serially in
+	 * the planning phase); only growBool / site-pick / donor-sample draws move here, so enabling
+	 * the AttrPool cannot perturb tournament order under `--seed`.
+	 */
+	public static inline var VARIATION_PARALLEL = 7001;
 
 	public static inline function stream(seed:Int, offset:Int):Rand return new Rand(seed + offset);
 }

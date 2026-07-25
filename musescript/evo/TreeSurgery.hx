@@ -151,6 +151,30 @@ class TreeSurgery {
 	public static function replaceBoolWithBool(n:BoolNode, path:GPath, repl:BoolNode):BoolNode
 		return replaceBoolWithBoolAt(n, path, repl, 0);
 
+	/** Resolve the bool node at `path` (empty path → `n`).
+	 *
+	 * Used by P2 credit lookup and semantic-RDO site reads without a replace round-trip.
+	 */
+	public static function getBool(n:BoolNode, path:GPath):BoolNode
+		return getBoolAt(n, path, 0);
+
+	static function getBoolAt(n:BoolNode, path:GPath, idx:Int):BoolNode {
+		if (idx >= path.length) return n;
+		var step = path[idx];
+		return switch (n) {
+			case BAnd(a, b):
+				getBoolAt(step == StepA ? a : b, path, idx + 1);
+			case BOr(a, b):
+				getBoolAt(step == StepA ? a : b, path, idx + 1);
+			case BNot(a):
+				getBoolAt(a, path, idx + 1);
+			case BHole(inner):
+				getBoolAt(inner, path, idx + 1);
+			case BCross(_, _, _) | BCmp(_, _, _) | BTrend(_, _, _):
+				throw "TreeSurgery.getBool: path ran past a leaf-of-bool-kind node";
+		};
+	}
+
 	static function replaceBoolWithBoolAt(n:BoolNode, path:GPath, repl:BoolNode, idx:Int):BoolNode {
 		if (idx >= path.length) return repl;
 		var step = path[idx];

@@ -7,6 +7,8 @@ import musescript.ast.Expr;
 import musescript.ast.Const;
 import musescript.ast.ParamOpts;
 
+import musescript.plan.ExecutionProfile;
+
 /**
  * Walk MuseAST for @macro blocks / tune/sample/optimize calls → ExecutionPlan.
  * Reads call shapes from the AST; does not depend on MacroBuiltins runtime markers.
@@ -71,6 +73,11 @@ class MusePlanner {
 				var folds = args.length > 0 ? intOf(args[0]) : 5;
 				var embargo = args.length > 1 ? intOf(args[1]) : 0;
 				out.push(WalkForwardStep(nextId("walkforward"), folds, embargo));
+			case ECall(EIdent("execprofile"), args):
+				var profName = args.length > 0 ? identOf(args[0]) : "evo";
+				var profId = ExecutionProfile.parse(profName);
+				if (profId != null)
+					out.push(ExecProfileStep(nextId("execprofile"), profId));
 			case ECall(EIdent("promote"), args):
 				// Deliberately does NOT recurse into args[0] (the gate lambda) — it's a pure
 				// predicate over aggregate OOS metrics, evaluated later by PlanRunner against
@@ -141,6 +148,7 @@ class MusePlanner {
 			case StrategyStep(id, _): id;
 			case WalkForwardStep(id, _, _): id;
 			case PromotionGateStep(id, _): id;
+			case ExecProfileStep(id, _): id;
 		};
 	}
 

@@ -17,6 +17,10 @@ package musescript.evo;
  * here so the feature set can grow without touching this class.
  */
 class SymbolSelector {
+
+	/* [TODO] `weights`, `features`, etc should all be of a datatype crafted specifically for hyper-optimization on GraalVM & (separately) JavaScript, which we should employ throughout the codebase for such use cases */
+	/* Also, some kind of reusable object-pooling infrastucture, written in such a way as to actually buy us some perf gains, rather than just costing us even more potential GraalVM optimizations. */
+	
 	public var weights:Array<Float>;
 
 	public function new(nFeatures:Int, rng:Rand) {

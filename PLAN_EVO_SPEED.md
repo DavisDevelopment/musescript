@@ -1,6 +1,9 @@
 # Evo-run speed plan — make CorpusEvoRun *many times* faster without losing effectiveness
 
-**Status: PLANNED — execute phases in order. Written 2026-07-22 (Fable), for Sonnet to carry out.**
+**Status: PARTIALLY LANDED (2026-07-25).** P0 + P1.1 + P2/P3 + NMA credit-cuts shipped.
+P1.2/P1.3 flags exist but defaults rolled back after A/B. P4: in-process WatAssembler
+default; `--last-tier` / `--threads` (cores−1) available. **Re-measure warm s/gen** before
+claiming &lt;5s/gen — the 22.9s/gen figure below is **pre-P0** and stale.
 
 > ⚠️ **HARD RULE before touching anything:** do NOT run `haxe build-corpus-evo.hxml` (or any
 > build that rewrites `build/jvm/corpus-evo.jar`) while a backgrounded corpus-evo run is alive.

@@ -19,22 +19,30 @@ import musescript.harness.Fill;
  * WASM) already produces identically via the SHARED `OrderSim` (see BacktestResult.hx's doc
  * comment), so this needed zero new bookkeeping paths that could drift from what the simulator
  * actually did.
+ *
+ * Classic mode: fixed 4×4×3 = 48 cadence bins (`cellKey`). CVT mode (`--cvt-cells N`): nearest
+ * of N Sobol centroids over descriptor-v2 axes (trades/hold/bias/dutyCycle) — archive size is a
+ * knob, not an accidental 48. Optional 5th axis (`creditConc`) via `--credit-map-axis` (HHI of
+ * |NmaCreditBank| means over bool sites) — orthogonal to cadence; classic 48 keys unchanged.
  */
 @:structInit
 class FillDescriptor {
 	public var avgHold:Float;
 	public var longFrac:Float;
+	/** Fraction of bars spent in a position (descriptor v2). Neutral default 0 when no fills. */
+	public var dutyCycle:Float;
 }
 
 class MapElites {
 	/** Raw (unbinned) behavioral stats, cheap to derive from `fills` in one pass. Kept separate
-	 * from the binned `BehaviorDescriptor` below so `EvoCache` can persist just these two floats
+	 * from the binned `BehaviorDescriptor` below so `EvoCache` can persist just these floats
 	 * per genome (see CachedEval) without needing to know this run's bin boundaries -- a later run
 	 * can re-bin warm-started genomes with different thresholds for free. */
 	public static function describeFills(fills:Null<Array<Fill>>, nBars:Int):FillDescriptor {
-		if (fills == null || fills.length == 0) return {avgHold: 0.0, longFrac: 0.5};
+		if (fills == null || fills.length == 0) return {avgHold: 0.0, longFrac: 0.5, dutyCycle: 0.0};
 		var longCount = 0, shortCount = 0;
 		var holdSum = 0.0, holdN = 0;
+		var barsInPos = 0.0;
 		var openBar = -1;
 		for (f in fills) {
 			if (f.kind == "long" || f.kind == "short") {
@@ -42,19 +50,26 @@ class MapElites {
 				// position (see OrderSim.executeLong/executeShort), so an open-while-open here would
 				// mean a same-bar reversal's flat hasn't been seen yet -- close out the stale open
 				// against THIS bar rather than let a stray open leak an unbounded holding period.
-				if (openBar >= 0) { holdSum += (f.bar - openBar); holdN++; }
+				if (openBar >= 0) {
+					var h = (f.bar - openBar);
+					holdSum += h; holdN++; barsInPos += h;
+				}
 				openBar = f.bar;
 				if (f.kind == "long") longCount++ else shortCount++;
 			} else if (f.kind == "flat" && openBar >= 0) {
-				holdSum += (f.bar - openBar);
-				holdN++;
+				var h2 = (f.bar - openBar);
+				holdSum += h2; holdN++; barsInPos += h2;
 				openBar = -1;
 			}
+		}
+		if (openBar >= 0 && nBars > openBar) {
+			barsInPos += (nBars - 1 - openBar);
 		}
 		var directional = longCount + shortCount;
 		return {
 			avgHold: holdN > 0 ? holdSum / holdN : 0.0,
-			longFrac: directional > 0 ? longCount / directional : 0.5
+			longFrac: directional > 0 ? longCount / directional : 0.5,
+			dutyCycle: nBars > 0 ? Math.min(1.0, barsInPos / nBars) : 0.0
 		};
 	}
 
@@ -81,6 +96,112 @@ class MapElites {
 	public static function cellKey(tradesPerBar:Float, avgHold:Float, longFrac:Float):String {
 		return '${binTradeFreq(tradesPerBar)}_${binHold(avgHold)}_${binBias(longFrac)}';
 	}
+
+	/** Unit-cube descriptor for CVT (descriptor v2). Scales match noveltyDistance axes.
+	 * When `creditConc` is non-null, appends a 5th axis (credit concentration HHI in [0,1]).
+	 * Omit / pass null to keep 4-D (callers that don't opt into `--credit-map-axis`). */
+	public static function behaviorVec(tradesPerBar:Float, avgHold:Float, longFrac:Float, dutyCycle:Float,
+			?creditConc:Null<Float> = null):Array<Float> {
+		var v = [
+			clamp01(tradesPerBar / 0.2),
+			clamp01(avgHold / 40.0),
+			clamp01(longFrac),
+			clamp01(dutyCycle)
+		];
+		if (creditConc != null) v.push(clamp01(creditConc));
+		return v;
+	}
+
+	/**
+	 * Classic grid when `centroids` is null/empty; otherwise nearest Sobol centroid (`cvt_i`).
+	 * Pass `creditConc` only when centroids were built with dims=5 (`--credit-map-axis`).
+	 */
+	public static function assignCell(
+		tradesPerBar:Float, avgHold:Float, longFrac:Float,
+		?dutyCycle:Float = 0.0,
+		?centroids:Array<Array<Float>> = null,
+		?creditConc:Null<Float> = null
+	):String {
+		if (centroids != null && centroids.length > 0) {
+			var useCredit = centroids[0].length >= 5 && creditConc != null;
+			var v = behaviorVec(tradesPerBar, avgHold, longFrac, dutyCycle, useCredit ? creditConc : null);
+			// Missing credit means unknown, not maximally diffuse. Keep it at the axis center.
+			if (centroids[0].length >= 5 && v.length < 5) v.push(0.5);
+			return 'cvt_${nearestCentroid(v, centroids)}';
+		}
+		return cellKey(tradesPerBar, avgHold, longFrac);
+	}
+
+	/**
+	 * Evidence-shrunk HHI of |credit means| over distinct bool structural keys in `g`.
+	 *
+	 * Raw HHI says whether credit is concentrated, but the original axis mapped a cold bank to
+	 * `0.0`, indistinguishable from strongly evidenced diffuse credit. V2 maps cold/weak evidence
+	 * to neutral `0.5`, then moves toward raw HHI as observations accumulate.
+	 */
+	public static function creditConcentration(g:StrategyGenome):Float {
+		var profile = musescript.evo.nma.NmaCreditBank.profileForGenome(g);
+		var means = profile.means;
+		if (means.length == 0 || profile.totalSites <= 0) return 0.5;
+		var total = 0.0;
+		for (m in means) total += m;
+		if (total <= 0) return 0.5;
+		var hhi = 0.0;
+		for (m in means) {
+			var s = m / total;
+			hhi += s * s;
+		}
+		// About 95% confidence after ~9 observations per distinct site.
+		var confidence = 1.0 - Math.exp(-profile.totalObs / (profile.totalSites * 3.0));
+		return clamp01(0.5 + confidence * (hhi - 0.5));
+	}
+
+	/** Scrambled-Sobol-ish deterministic centroids in the unit hypercube (no external deps). */
+	public static function sobolCentroids(n:Int, dims:Int = 4):Array<Array<Float>> {
+		var out:Array<Array<Float>> = [];
+		if (n <= 0) return out;
+		for (i in 0...n) {
+			var pt:Array<Float> = [];
+			for (d in 0...dims) {
+				// Radical-inverse style: van der Corput in base (d+2), scrambled by i.
+				pt.push(vanDerCorput(i + 1, d + 2));
+			}
+			out.push(pt);
+		}
+		return out;
+	}
+
+	public static function nearestCentroid(v:Array<Float>, centroids:Array<Array<Float>>):Int {
+		var bestI = 0;
+		var bestD = 1e300;
+		for (i in 0...centroids.length) {
+			var c = centroids[i];
+			var d = 0.0;
+			var m = Std.int(Math.min(v.length, c.length));
+			for (j in 0...m) {
+				var diff = v[j] - c[j];
+				d += diff * diff;
+			}
+			if (d < bestD) { bestD = d; bestI = i; }
+		}
+		return bestI;
+	}
+
+	static function vanDerCorput(n:Int, base:Int):Float {
+		var x = 0.0;
+		var f = 1.0 / base;
+		var i = n;
+		while (i > 0) {
+			x += (i % base) * f;
+			i = Std.int(i / base);
+			f /= base;
+		}
+		return x;
+	}
+
+	static inline function clamp01(x:Float):Float {
+		return x < 0 ? 0 : (x > 1 ? 1 : x);
+	}
 }
 
 /**
@@ -102,6 +223,8 @@ class EliteCell {
 	public var tradesPerBar:Float;
 	public var avgHold:Float;
 	public var longFrac:Float;
+	public var dutyCycle:Float;
+	public var creditConc:Float;
 }
 
 @:structInit
@@ -112,16 +235,24 @@ class CellSummary {
 
 class EliteArchive {
 	var cells:Map<String, EliteCell> = new Map();
+	/** Lifetime count of offers that created a new cell or improved an incumbent (QD telemetry). */
+	public var discoveryCount(default, null):Int = 0;
 
 	public function new() {}
 
 	/** Returns true if this offer changed the archive (new cell or improved incumbent). */
 	public function offer(genome:StrategyGenome, fitness:Float, cellKey:String,
-			?tradesPerBar:Float = 0.0, ?avgHold:Float = 0.0, ?longFrac:Float = 0.5):Bool {
+			?tradesPerBar:Float = 0.0, ?avgHold:Float = 0.0, ?longFrac:Float = 0.5,
+			?dutyCycle:Float = 0.0, ?creditConc:Float = 0.0):Bool {
 		if (fitness == Fitness.NEG_INF || Math.isNaN(fitness)) return false;
 		var cur = cells.get(cellKey);
 		if (cur == null || fitness > cur.fitness) {
-			cells.set(cellKey, {genome: genome, fitness: fitness, tradesPerBar: tradesPerBar, avgHold: avgHold, longFrac: longFrac});
+			cells.set(cellKey, {
+				genome: genome, fitness: fitness,
+				tradesPerBar: tradesPerBar, avgHold: avgHold, longFrac: longFrac, dutyCycle: dutyCycle,
+				creditConc: creditConc
+			});
+			discoveryCount++;
 			return true;
 		}
 		return false;
@@ -131,6 +262,19 @@ class EliteArchive {
 		var n = 0;
 		for (_ in cells.keys()) n++;
 		return n;
+	}
+
+	/** QD-score: Σ max(0, elite fitness) over occupied cells. */
+	public function qdScore():Float {
+		var s = 0.0;
+		for (c in cells) if (c.fitness > 0) s += c.fitness;
+		return s;
+	}
+
+	/** Occupied / totalCells (pass classic 48 or `--cvt-cells N`). */
+	public function coverage(totalCells:Int):Float {
+		if (totalCells <= 0) return 0.0;
+		return size() / totalCells;
 	}
 
 	public function elites():Array<StrategyGenome> {
@@ -144,20 +288,44 @@ class EliteArchive {
 	 * empty (nothing to be novel RELATIVE TO yet) -- CorpusEvoRun's `--novelty-weight` multiplies
 	 * this, so an empty-archive generation-0 call is a harmless no-op, not a crash.
 	 */
-	public function noveltyDistance(tradesPerBar:Float, avgHold:Float, longFrac:Float, k:Int = 3):Float {
-		var dists:Array<Float> = [];
+	public function noveltyDistance(tradesPerBar:Float, avgHold:Float, longFrac:Float, k:Int = 3,
+			?dutyCycle:Float = 0.0, ?creditConc:Float = 0.0):Float {
+		if (k < 1) return 0.0;
+		// Bounded k-selection instead of collect-all-then-sort. The old shape allocated one boxed
+		// `Array<Float>` entry per archive cell and sorted the lot through a comparator closure to
+		// read three values off the front -- O(A log A) with A boxed allocations, per genome, per
+		// generation, on the serial path. With `--cvt-cells` making A a knob in the hundreds and
+		// the population heading for four digits, that is the wrong asymptotics in the wrong place
+		// (guide §3.1 boxing, §20 escape analysis).
+		//
+		// Selection runs on SQUARED distance -- monotonic in distance over non-negatives, so the
+		// chosen k and their order are identical -- which leaves exactly k square roots to take
+		// instead of A.
+		var best = new haxe.ds.Vector<Float>(k);
+		for (i in 0...k) best[i] = Math.POSITIVE_INFINITY;
+		var filled = 0;
 		for (c in cells) {
 			var dTrade = (tradesPerBar - c.tradesPerBar) / 0.1; // rough "frequent" scale
 			var dHold = (avgHold - c.avgHold) / 20.0; // rough "position" hold-length scale
 			var dBias = (longFrac - c.longFrac); // already 0..1
-			dists.push(Math.sqrt(dTrade * dTrade + dHold * dHold + dBias * dBias));
+			var dDuty = (dutyCycle - c.dutyCycle);
+			var dCred = (creditConc - c.creditConc);
+			var d2 = dTrade * dTrade + dHold * dHold + dBias * dBias + dDuty * dDuty + dCred * dCred;
+			if (filled < k) filled++;
+			else if (d2 >= best[k - 1]) continue;
+			// Insertion into a k-slot ordered window; k is 3 in every caller, so the shift is
+			// cheaper than any heap would be.
+			var i = k - 1;
+			while (i > 0 && best[i - 1] > d2) {
+				best[i] = best[i - 1];
+				i--;
+			}
+			best[i] = d2;
 		}
-		if (dists.length == 0) return 0.0;
-		dists.sort((a, b) -> a < b ? -1 : (a > b ? 1 : 0));
-		var n = Std.int(Math.min(k, dists.length));
+		if (filled == 0) return 0.0;
 		var sum = 0.0;
-		for (i in 0...n) sum += dists[i];
-		return sum / n;
+		for (i in 0...filled) sum += Math.sqrt(best[i]);
+		return sum / filled;
 	}
 
 	/** Cell key + fitness, for reporting a diversity summary at end of run. */

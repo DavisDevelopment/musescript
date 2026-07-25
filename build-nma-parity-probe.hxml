@@ -1,0 +1,3 @@
+extraParams.hxml
+-main musescript.scratch.NmaParityProbe
+--jvm build/jvm/nma-parity-probe.jar

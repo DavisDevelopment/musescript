@@ -680,6 +680,18 @@ class TestEvoVariation extends Test {
 		Assert.floatEquals(0.5, aggUnweighted.sharpe); // plain mean, confirms weights==null path untouched
 	}
 
+	public function testAggregateBasketBankruptInvalidatesWhole() {
+		var results = [
+			{trades: 10, sharpe: 1.0, finalEquity: 1000.0, bankrupt: false},
+			{trades: 10, sharpe: 0.5, finalEquity: 500.0, bankrupt: true},
+		];
+		var agg = BasketFitness.aggregateBasket(results);
+		Assert.equals(0, agg.trades);
+		Assert.isTrue(Math.isNaN(agg.sharpe));
+		Assert.isTrue(agg.bankrupt);
+		Assert.equals(Fitness.NEG_INF, BasketFitness.scoreAggregate(agg));
+	}
+
 	// ── Canonical.shapeSignature/shapeDistance: speciation's structural fingerprint ────────
 
 	/** Two genomes built from the exact same node-constructor kinds (just different constants/
@@ -855,6 +867,7 @@ class TestEvoVariation extends Test {
 		var bars = BarFeed.synthetic(50, 1).all();
 		var r = Fitness.evaluate(g, bars, "js", false, 0, 100, 1000); // floor ABOVE starting cash
 		Assert.isTrue(r.bankrupt, "expected starting cash below the floor to trip bankrupt on bar 0's mark()");
+		Assert.equals(Fitness.NEG_INF, Fitness.score(r, 1), "bankrupt runs must score NEG_INF");
 	}
 
 	public function testFitnessEvaluateNoFloorMeansNeverBankrupt() {

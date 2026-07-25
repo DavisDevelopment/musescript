@@ -25,6 +25,8 @@ class MuseIR {
 					{ kind: "WalkForward", id: id, folds: folds, embargo: embargo };
 				case PromotionGateStep(id, cond):
 					{ kind: "PromotionGate", id: id, cond: musescript.ast.MuseAstJson.exprToJson(cond) };
+				case ExecProfileStep(id, profile):
+					{ kind: "execProfile", id: id, profile: Std.string(profile) };
 			};
 			steps.push(obj);
 		}

@@ -4,6 +4,7 @@ import musescript.ast.MuseProgram;
 import musescript.ast.Expr;
 import musescript.interp.MuseInterp;
 import musescript.plan.ExecutionPlan;
+import musescript.plan.ExecutionProfile;
 import musescript.plan.PlanStep;
 
 /**
@@ -103,6 +104,18 @@ class PlanRunner {
 				case PromotionGateStep(id, _):
 					// Consumed by optimize()/walkForwardOptimize() when it scans the plan for a
 					// preceding WalkForwardStep — nothing to do standalone here.
+				case ExecProfileStep(id, profile):
+					plan.profile = ExecutionProfile.resolve(profile);
+					plan.profile.applyToFitness();
+					Sys.println('exec-profile: ${plan.profile.label} backend=${plan.profile.backend} (step $id)');
+					// Rebind compiled strategy to the profile backend when we already have a program.
+					if (prog != null && feed != null) {
+						var be = plan.profile.backend;
+						if (be == "js" || be == "wasm")
+							bindCompiled(prog, feed, { target: be, strict: false });
+						else if (be == "interp")
+							bindProgram(prog, feed);
+					}
 			}
 		}
 		return results;

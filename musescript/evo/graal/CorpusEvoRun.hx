@@ -1,10 +1,13 @@
 package musescript.evo.graal;
 
+import musescript.evo.AttrPool;
 import musescript.evo.Canonical;
 import musescript.evo.CorpusSeed;
 import musescript.evo.EvolutionEngine;
 import musescript.evo.Expand;
 import musescript.evo.Fitness;
+import musescript.evo.FitnessResult;
+import musescript.evo.PhaseTimer;
 import musescript.evo.RegistryPalette;
 import musescript.evo.Variation;
 import musescript.evo.StrategyGenome;
@@ -16,6 +19,7 @@ import musescript.evo.graal.GraalWasmHost;
 import musescript.evo.graal.EvoCache.CachedEval;
 import musescript.evo.MapElites;
 import musescript.evo.MapElites.EliteArchive;
+import musescript.plan.ExecutionProfile;
 import musescript.harness.Bar;
 import musescript.harness.OhlcvCsv;
 // `--sim-tape` (see this session's MurmurationSim x corpus-evo integration plan): gated behind
@@ -28,6 +32,7 @@ import musescript.harness.OhlcvCsv;
 import musescript.murmuration.MurmurationConfig;
 import musescript.murmuration.MurmurationSim;
 import musescript.murmuration.MurmurationTape;
+import musescript.evo.PoetEnvs;
 #end
 import musescript.parse.MuseParser;
 import musescript.compile.ModuleExpand;
@@ -47,9 +52,9 @@ typedef EvalJob = {var key:String; var wasmPath:String; var strings:Array<String
 // aggregate. Always populated (one Fitness/WASM run per symbol already happens regardless of
 // `--curriculum`) -- cheap to carry, and every existing consumer of these typedefs just ignores
 // the extra field.
-typedef EvalResult = {var key:String; var trades:Int; var sharpe:Float; var finalEquity:Float; var avgHold:Float; var longFrac:Float; var perSymbolSharpe:Array<Float>;}
+typedef EvalResult = {var key:String; var trades:Int; var sharpe:Float; var finalEquity:Float; var avgHold:Float; var longFrac:Float; var ?dutyCycle:Float; var ?fillHash:String; var perSymbolSharpe:Array<Float>; var lexCases:Array<Float>;}
 typedef FallbackJob = {var key:String; var useFullTape:Bool; var stop:Bool;}
-typedef FallbackResult = {var key:String; var ok:Bool; var trades:Int; var sharpe:Float; var equity:Float; var fills:Null<Array<musescript.harness.Fill>>; var perSymbolSharpe:Array<Float>; var bankrupt:Bool;}
+typedef FallbackResult = {var key:String; var ok:Bool; var trades:Int; var sharpe:Float; var equity:Float; var fills:Null<Array<musescript.harness.Fill>>; var perSymbolSharpe:Array<Float>; var bankrupt:Bool; var lexCases:Array<Float>;}
 
 /**
  * Evolution run seeded with the ENTIRE reverse-compilable strategy corpus (the tournament
@@ -75,7 +80,7 @@ class CorpusEvoRun {
 		var gens = argInt("--gens", 12);
 		var seed = argInt("--seed", 42);
 		var threads = argInt("--threads", Std.int(Math.max(1,
-			java.lang.Runtime.getRuntime().availableProcessors() / 2)));
+			java.lang.Runtime.getRuntime().availableProcessors() - 1)));
 		var corpusDir = argStr("--corpus", "examples/strategy-tournament");
 		var tapePath = argStr("--tape", null);
 		// Multi-symbol basket mode (see this session's multi-symbol plan): `--tapes a.csv,b.csv,...`
@@ -128,6 +133,22 @@ class CorpusEvoRun {
 		// cell. NEW DEFAULT 0.1 (was 0.0/off) -- the other half of the same anti-stagnation fix
 		// as `speciationOn` above; `--novelty-weight 0` restores the old no-effect behavior.
 		var noveltyWeight = argFloat("--novelty-weight", 0.1);
+		var lexicaseOn = argFlag("--lexicase");
+		var cvtCells = argInt("--cvt-cells", 0);
+		var creditMapAxis = argFlag("--credit-map-axis");
+		if (creditMapAxis && cvtCells <= 0)
+			Sys.println("WARNING: --credit-map-axis needs --cvt-cells N>0 (classic 48-grid unchanged; credit is CVT-only)");
+		if (creditMapAxis && !Fitness.preferNma && !argFlag("--nma"))
+			Sys.println("WARNING: --credit-map-axis is most useful with --nma (credit bank fills via attributed ablations)");
+		if (creditMapAxis)
+			Sys.println("WARNING: --credit-map-axis is research-only; 5-seed A/B hurt OOS (26/50 vs CVT 41/50) — prefer --lexicase --cvt-cells N without this flag");
+		var semanticRdoProb = argFloat("--semantic-rdo-prob", 0.0);
+		var attrBanditOn = argFlag("--attr-bandit");
+		var creditCutsOn = argFlag("--credit-cuts");
+		var noCreditCuts = argFlag("--no-credit-cuts");
+		var attrBankOnly = argFlag("--attr-bank-only");
+		var learnLibraryOn = argFlag("--learn-library");
+		var libraryEvery = argInt("--library-every", 0);
 		// ES-style (1+1) local param tuning (see Variation.esNudgeParam) -- a THIRD offspring path
 		// alongside crossover/mutation in EvolutionEngine.step, gated by its own dedicated rng
 		// streams (RngStreams.ES_CHOICE/ES_NUDGE). `0.0` (default) is exactly today's behavior.
@@ -212,20 +233,152 @@ class CorpusEvoRun {
 		var difficultyEndFloor = argFloat("--difficulty-end-floor", startCapital * 0.25);
 		// Robustness-adjusted real-tape fitness (see Fitness.robustScore's doc comment): splits
 		// each genome's OWN equity curve into `--fitness-windows` segments and scores
-		// mean-minus-`--fitness-window-lambda`*std across them instead of one whole-tape Sharpe --
-		// a genome that's excellent in one stretch and mediocre elsewhere can no longer look
-		// identical to one that's modestly good throughout. THE NEW DEFAULT (4 windows) -- a
-		// deliberate behavior change, not an opt-in-off-by-default addition like most flags in
-		// this file, per this session's own explicit direction. `--fitness-windows 1` (or 0)
-		// restores today's exact single-window behavior. Same "no native-WASM support" story as
-		// `--equity-floor` -- the compiled-WAT backend computes sharpe internally and never
-		// exposes a per-bar equity curve, so this FORCES every genome down the JS-fallback path
-		// too (see `forceFallback` below) -- a real, accepted speed-for-robustness tradeoff at the
-		// new default, same one `--equity-floor` already made.
+		// mean-minus-`--fitness-window-lambda`*std across them instead of one whole-tape Sharpe.
+		// Default 4 windows (deliberate). WASM workers apply the same robustScore when windows>1
+		// (GraalWasmHost materializes per-bar equity) — so fitness-windows alone no longer forces
+		// JS-fallback. `--equity-floor` / difficulty / `--nma` still idle the WASM pool.
+		// `--fitness-windows 1` (or 0) restores plain whole-tape Sharpe.
 		var fitnessWindows = argInt("--fitness-windows", 4);
 		var fitnessWindowLambda = argFloat("--fitness-window-lambda", 0.5);
-		if (fitnessWindows > 1) Sys.println('ROBUSTNESS FITNESS: on -- $fitnessWindows windows, lambda=$fitnessWindowLambda (forces JS-fallback backend; --fitness-windows 1 restores plain whole-tape Sharpe)');
-		var forceFallback = equityFloor > 0 || difficultyScheduleOn || fitnessWindows > 1;
+		if (fitnessWindows < 1) fitnessWindows = 1;
+		if (fitnessWindows > 1) Sys.println('ROBUSTNESS FITNESS: on -- $fitnessWindows windows, lambda=$fitnessWindowLambda (WASM+JS; --fitness-windows 1 restores plain whole-tape Sharpe)');
+		// P1c: `--nma` routes Fitness.evaluate through columnar NmaFitness (KFeature falls back to
+		// Expand→compile). Forces JS-fallback pop scoring so WASM doesn't bypass the strangler.
+		var nmaOn = argFlag("--nma");
+		var nmaVerifyOn = argFlag("--nma-verify");
+		var nmaPopMemoOff = argFlag("--no-nma-pop-memo");
+		var nmaDirtySpineFlag = argFlag("--nma-dirty-spine");
+		var noNmaDirtySpine = argFlag("--no-nma-dirty-spine");
+		var speculativeGrowthK = argInt("--speculative-growth-k", 1);
+		if (speculativeGrowthK < 1) speculativeGrowthK = 1;
+		var speculativeGrowthWindows = argInt("--speculative-growth-windows", 4);
+		if (speculativeGrowthWindows < 1) speculativeGrowthWindows = 1;
+		var speculativeGrowthLambda = argFloat("--speculative-growth-lambda", 0.5);
+		var speculativeGrowthMinDelta = argFloat("--speculative-growth-min-delta", 0.0);
+		var speculativeGrowthParsimony = argFloat("--speculative-growth-parsimony", 0.01);
+		var noNmaFuseHost = argFlag("--no-nma-fuse-host");
+		var nmaFuseHostOn = argFlag("--nma-fuse-host");
+		var nmaFuseMinBars = argInt("--nma-fuse-min-bars", 8192);
+		if (nmaFuseMinBars < 0) nmaFuseMinBars = 0;
+		var execProfileName = argStr("--exec-profile", null);
+		var poetOn = argFlag("--poet");
+		var poetEnvs = argInt("--poet-envs", 0);
+		var poetEvery = argInt("--poet-every", 10);
+		if (poetOn) {
+			#if !kestrel
+			Sys.println("WARNING: --poet requires a kestrel build (-D kestrel); flag ignored");
+			#end
+		}
+		if (nmaOn) {
+			Fitness.preferNma = true;
+			Sys.println("NMA: on -- columnar Fitness.evaluate strangler (KFeature → js fallback); forces JS-fallback pop scoring");
+		}
+		if (nmaVerifyOn) {
+			Fitness.preferNma = true;
+			Fitness.nmaVerify = true;
+			Sys.println("NMA-verify: on -- every NMA ok result cross-checked vs Expand→compile (2× cost)");
+		}
+		var cachesOff = noCache;
+		var activeProfile:Null<ExecutionProfile> = null;
+		if (execProfileName != null) {
+			var profId = ExecutionProfile.parse(execProfileName);
+			if (profId == null) throw '--exec-profile: unknown profile "$execProfileName" (try single|evo|prod|mobile)';
+			activeProfile = ExecutionProfile.resolve(profId);
+			activeProfile.applyToFitness();
+			if (activeProfile.cachesOff) cachesOff = true;
+			Sys.println('exec-profile: ${activeProfile.label} (backend=${activeProfile.backend}, preferNma=${activeProfile.preferNma}, prefixAttr=${activeProfile.prefixAttribution}, cachesOff=${activeProfile.cachesOff})');
+			if (activeProfile.preferNma)
+				Sys.println("NMA: on via --exec-profile -- columnar Fitness.evaluate strangler; forces JS-fallback pop scoring");
+		}
+		if (Fitness.preferNma && !nmaPopMemoOff) {
+			Fitness.beginNmaPopMemo();
+			Sys.println("NMA pop-memo: on -- generation-scoped content-addressed column share (disable with --no-nma-pop-memo)");
+		}
+		// Opt-in after the parity audit: valid guarded hits are rare in current search runs, while
+		// live node identity adds ownership/thread constraints even when it saves no work.
+		Fitness.nmaDirtySpine = !noNmaDirtySpine && nmaDirtySpineFlag && Fitness.preferNma;
+		if (nmaDirtySpineFlag && !Fitness.preferNma)
+			Sys.println("WARNING: --nma-dirty-spine needs --nma / preferNma; ignored");
+		// JIT guide §21/§27: dirty-spine packs are LIVE mutable NMA trees, and spliceAndRegister
+		// deliberately shares sibling nodes -- and the whole NmaEvalContext -- between a parent
+		// pack and its child. A parent and its child are two distinct structural keys, so the
+		// fallback pool happily hands them to two workers at once, which then race the same
+		// `lastSeries`/`evalEpoch` fields. Every OTHER NMA global is now genuinely concurrent
+		// (epoch interning, the column caches, the credit bank), so this is the one thing standing
+		// between `--nma` and a sound worker pool -- and node ownership can't be fixed with a lock,
+		// only by not sharing. Confine it to the single-threaded case rather than leave a silent
+		// wrong-column race on by default; `--threads 1` keeps the optimization.
+		if (Fitness.nmaDirtySpine && threads > 1) {
+			Fitness.nmaDirtySpine = false;
+			Sys.println('NMA dirty-spine: DISABLED -- shares mutable node identity across packs, unsound with $threads fallback workers (use --threads 1 to keep it)');
+		}
+		if (Fitness.nmaDirtySpine) {
+			Fitness.beginNmaWorking();
+			Sys.println("NMA dirty-spine: on -- guarded live working copies survive bool splices (single-worker only)");
+		}
+		Fitness.speculativeGrowthK = speculativeGrowthK;
+		Fitness.speculativeGrowthWindows = speculativeGrowthWindows;
+		Fitness.speculativeGrowthWindowLambda = speculativeGrowthLambda;
+		Fitness.speculativeGrowthMinDelta = speculativeGrowthMinDelta;
+		Fitness.speculativeGrowthParsimonyLambda = speculativeGrowthParsimony;
+		if (speculativeGrowthK > 1) {
+			if (!Fitness.preferNma)
+				Sys.println("WARNING: --speculative-growth-k needs --nma; will fall back to single grow");
+			else
+				Sys.println('speculative-growth v2 EXPERIMENTAL: K=$speculativeGrowthK robustWindows=$speculativeGrowthWindows'
+					+ ' lambda=$speculativeGrowthLambda minDelta=$speculativeGrowthMinDelta'
+					+ ' parsimony=$speculativeGrowthParsimony');
+		}
+		// P4 is opt-in: on JVM each call crosses the polyglot boundary 3*n times, so enabling it
+		// merely because NMA is on measured as a regression. The global memory/context is also
+		// not safe for concurrent workers.
+		musescript.evo.nma.NmaFuseHost.enabled = !noNmaFuseHost && nmaFuseHostOn && Fitness.preferNma;
+		musescript.evo.nma.NmaFuseHost.minLength = nmaFuseMinBars;
+		if (nmaFuseHostOn && !Fitness.preferNma)
+			Sys.println("WARNING: --nma-fuse-host needs --nma / preferNma; ignored");
+		if (musescript.evo.nma.NmaFuseHost.enabled && threads > 1) {
+			musescript.evo.nma.NmaFuseHost.enabled = false;
+			Sys.println('NMA fuse-host: DISABLED -- process-wide WASM memory is unsafe with $threads fallback workers');
+		}
+		if (musescript.evo.nma.NmaFuseHost.enabled && Fitness.preferNma) {
+			musescript.evo.nma.NmaFuseHost.reset();
+			if (musescript.evo.nma.NmaFuseHost.ready())
+				Sys.println('NMA fuse-host: on — warm BAnd/BOr via WASM for columns >= $nmaFuseMinBars bars');
+			else
+				Sys.println("NMA fuse-host: requested but init failed — Haxe logic2 fallback");
+		}
+		// `--phase-profile`: per-generation wall-clock split across keying / evaluation / speciation
+		// / novelty / lexicase / variation, printed at end of run. The point is the SERIAL SHARE:
+		// `--threads` only shrinks the evaluation barrier, so whatever fraction the tail holds is a
+		// hard floor on ms/gen no matter how fast backtests get. Off by default -- the timing calls
+		// are a handful per generation, but a measurement flag that changes what it measures is
+		// worse than no flag.
+		var phaseProfileOn = argFlag("--phase-profile");
+		var profile = new PhaseTimer(phaseProfileOn);
+		PhaseTimer.current = phaseProfileOn ? profile : null;
+		if (phaseProfileOn) {
+			Canonical.resetKeyStats();
+			Sys.println("phase-profile: on -- per-generation wall split reported at end of run");
+		}
+		var forceFallback = equityFloor > 0 || difficultyScheduleOn || nmaOn || Fitness.preferNma;
+		Fitness.semanticRdoProb = semanticRdoProb;
+		Fitness.attrBandit = attrBanditOn;
+		Fitness.attrBankOnly = attrBankOnly;
+		if (attrBankOnly)
+			Sys.println("WARNING: --attr-bank-only is the A/B control arm -- nested workers rank sites/donors "
+				+ "from credit-bank means, which read 0.0 for unseen shapes; attributed variation degenerates "
+				+ "toward blind. Omit the flag for measured column-swap attribution.");
+		// --credit-cuts: with --nma / preferNma, ON by default (warmEnough still falls back when cold).
+		// --no-credit-cuts forces off; bare --credit-cuts forces on even without NMA.
+		Fitness.creditCuts = noCreditCuts ? false : (creditCutsOn || nmaOn || Fitness.preferNma);
+		if (semanticRdoProb > 0) Sys.println('semantic-RDO: prob=$semanticRdoProb');
+		if (attrBanditOn) Sys.println('attr-bandit: on');
+		if (Fitness.creditCuts) Sys.println('credit-cuts: on -- warm bank ⇒ zero-oracle site/donor ranking'
+			+ (noCreditCuts ? "" : (creditCutsOn ? "" : " (default with --nma; --no-credit-cuts to disable)")));
+		if (learnLibraryOn) {
+			musescript.evo.LearnedLibrary.clear();
+			Sys.println('learn-library: on (every ${libraryEvery == 0 ? "end" : Std.string(libraryEvery) + " gens"})');
+		}
 		// `--compete` (Phase 2 of the MurmurationSim x corpus-evo integration plan):
 		// "genome-in-the-loop" -- every UNIQUE genome this generation becomes an `Evolved` agent
 		// (see MurmurationEmbedding.Archetype/GenomeStepper.hx) in ONE shared MurmurationSim run,
@@ -475,7 +628,7 @@ class CorpusEvoRun {
 		}
 
 		var cacheDir = "build/graal/evo-cache";
-		if (!noCache && !sys.FileSystem.exists(cacheDir)) sys.FileSystem.createDirectory(cacheDir);
+		if (!cachesOff && !sys.FileSystem.exists(cacheDir)) sys.FileSystem.createDirectory(cacheDir);
 		// Cache filename includes costBps -- a fitness memo keyed on tape content ALONE would
 		// silently reuse stale zero-cost (or different-cost) fitness numbers the moment `--cost-bps`
 		// changes between runs on the SAME tape, which is exactly the kind of silent staleness this
@@ -500,7 +653,7 @@ class CorpusEvoRun {
 		// yardstick and others (fresh evals) on the new one within the SAME run. Simplest correct
 		// fix is the one this codebase already uses for an analogous "the memo's meaning changed"
 		// case: no disk file at all, in-memory-only for the run's own duration.
-		var cachePath = (noCache || difficultyScheduleOn || fitnessWindows > 1) ? null : '$cacheDir/${EvoCache.basketSignature(isBasket)}_cost${Std.int(costBps * 10)}$bankruptSuffix.tsv';
+		var cachePath = (cachesOff || difficultyScheduleOn || fitnessWindows > 1) ? null : '$cacheDir/${EvoCache.basketSignature(isBasket)}_cost${Std.int(costBps * 10)}$bankruptSuffix.tsv';
 		var cache = new EvoCache(cachePath);
 		if (cachePath != null) Sys.println('fitness cache: $cachePath (warm-started ${cache.size()} entries)');
 
@@ -512,7 +665,7 @@ class CorpusEvoRun {
 		if (triageBars > bars.length) triageBars = bars.length;
 		var triageOn = triageBars >= 60 && triageBars < bars.length && triageKeep < 0.999;
 		var prefixBars = triageOn ? bars.slice(0, triageBars) : null;
-		var triageCache = (triageOn && !noCache && !difficultyScheduleOn) ? new EvoCache('$cacheDir/${EvoCache.tapeSignature(prefixBars)}_cost${Std.int(costBps * 10)}.tsv') : new EvoCache(null);
+		var triageCache = (triageOn && !cachesOff && !difficultyScheduleOn) ? new EvoCache('$cacheDir/${EvoCache.tapeSignature(prefixBars)}_cost${Std.int(costBps * 10)}.tsv') : new EvoCache(null);
 		if (triageOn)
 			Sys.println('fallback triage: prefix ${triageBars} bars, keep top ${Std.int(triageKeep * 100)}% (warm-started ${triageCache.size()} prefix evals)');
 		if (equityFloor > 0 && !difficultyScheduleOn)
@@ -532,8 +685,17 @@ class CorpusEvoRun {
 		var archiveReal = new EliteArchive();
 		var archiveCompete = new EliteArchive();
 		var archive = competeOn ? archiveCompete : archiveReal;
+		var cvtDims = creditMapAxis ? 5 : 4;
+		var cvtCentroids:Array<Array<Float>> = (cvtCells > 0) ? MapElites.sobolCentroids(cvtCells, cvtDims) : [];
+		var archiveTotalCells = cvtCells > 0 ? cvtCells : 48;
 		var immigrantRng = new musescript.evo.Rand(seed + 991);
-		if (mapElitesOn) Sys.println('MAP-Elites: on (immigrant rate ${Std.int(immigrantRate * 100)}% of non-elite slots/gen)');
+		if (mapElitesOn) {
+			var cellDesc = cvtCells > 0
+				? 'CVT $cvtCells cells × ${cvtDims}D' + (creditMapAxis ? " (+credit)" : "")
+				: 'classic 48 cells';
+			Sys.println('MAP-Elites: on ($cellDesc, immigrant rate ${Std.int(immigrantRate * 100)}% of non-elite slots/gen)');
+		}
+		if (lexicaseOn) Sys.println('lexicase: on');
 
 		var tuner = new musescript.evo.GrowthWeights();
 		tuner.enabled = tunerOn;
@@ -588,10 +750,17 @@ class CorpusEvoRun {
 		// `mergerRng` +7777).
 		var mergerVariation = new Variation(seed + 8888, indicatorNames, tuner);
 
-		var engineOpts = ["engine.LastTierCompilationThreshold" => "2000000000"];
+		var lastTierOn = argFlag("--last-tier");
+		var wat2wasmPython = argFlag("--wat2wasm-python");
+		var engineOpts = lastTierOn
+			? new Map<String, String>()
+			: ["engine.LastTierCompilationThreshold" => "2000000000"];
 		var host = new GraalWasmHost(null, engineOpts);
 		host.costBps = costBps;
 		Sys.println('transaction cost: ${costBps}bps slippage on every entry+exit (--cost-bps 0 to disable)');
+		if (lastTierOn) Sys.println('Graal LastTier: on (--last-tier; default keeps LastTierCompilationThreshold=2e9)');
+		if (!wat2wasmPython) Sys.println('wat2wasm: in-process WatAssembler (pass --wat2wasm-python for legacy batch)');
+		else Sys.println('wat2wasm: Python batch (--wat2wasm-python)');
 
 		var engine = new EvolutionEngine(seed, pop, Std.int(Math.max(2, pop / 16)), 3, null, tuner);
 		var popG = seedPop;
@@ -618,15 +787,14 @@ class CorpusEvoRun {
 				var distillPickRng = new musescript.evo.Rand(seed + 13001);
 				function evalOne(g:StrategyGenome):Float {
 					var anyErr = false;
-					var perSymbol:Array<{trades:Int, sharpe:Float, finalEquity:Float}> = [];
+					var perSymbol:Array<{trades:Int, sharpe:Float, finalEquity:Float, ?bankrupt:Bool}> = [];
 					for (sym in isBasket) {
 						var fr = Fitness.evaluate(g, sym, "js", false, costBps, startCapital, equityFloor);
-						if (!fr.ok || fr.bankrupt) { anyErr = true; break; }
-						perSymbol.push({trades: fr.trades, sharpe: fr.sharpe, finalEquity: fr.finalEquity});
+						if (!fr.ok) { anyErr = true; break; }
+						perSymbol.push({trades: fr.trades, sharpe: fr.sharpe, finalEquity: fr.finalEquity, bankrupt: fr.bankrupt});
 					}
 					if (anyErr) return Fitness.NEG_INF;
-					var agg = BasketFitness.aggregateBasket(perSymbol);
-					return (agg.trades >= 1 && !Math.isNaN(agg.sharpe)) ? agg.sharpe : Fitness.NEG_INF;
+					return BasketFitness.scoreAggregate(BasketFitness.aggregateBasket(perSymbol));
 				}
 				while (distillStopQueue.pop(false) == null) {
 					// Fresh reseed each cycle (variety across cycles, cheap to build) -- a random
@@ -659,48 +827,71 @@ class CorpusEvoRun {
 		#if kestrel
 		var marketConfigs:Array<MurmurationConfig> = [];
 		var marketFeatures:Array<Array<Float>> = [];
+		var poetRng = new musescript.evo.Rand(seed + 6201);
+		var poetActive = poetOn && (competeRequested || sequentialTapeOn || competeSymbols > 1);
 		var selectorRng = new musescript.evo.Rand(seed + 6001);
 		var selectors:Array<SymbolSelector> = competeSymbols > 1 ? [for (_ in 0...popG.length) new SymbolSelector(4, selectorRng)] : null;
+		function rebuildMarketFeatures(configs:Array<MurmurationConfig>, features:Array<Array<Float>>):Void {
+			var rawFeatures:Array<Array<Float>> = [for (cfg in configs) [cfg.fundamentalVol, cfg.marketFactorVol, cfg.impact, cfg.mixMarketMaker]];
+			if (features.length != configs.length) {
+				while (features.length < configs.length) features.push([for (_ in 0...4) 0.0]);
+				while (features.length > configs.length) features.pop();
+			}
+			for (f in 0...4) {
+				var lo = rawFeatures[0][f], hi = rawFeatures[0][f];
+				for (m in 0...configs.length) { if (rawFeatures[m][f] < lo) lo = rawFeatures[m][f]; if (rawFeatures[m][f] > hi) hi = rawFeatures[m][f]; }
+				var span = hi - lo;
+				for (m in 0...configs.length) features[m][f] = span > 1e-12 ? (rawFeatures[m][f] - lo) / span : 0.5;
+			}
+		}
 		// `--sequential-tape` needs `marketConfigs`/`marketFeatures` built even when
 		// `competeSymbols == 1` (a single-market persistent sim is still "one market" to the
 		// sequential-tape machinery below) -- only the SELECTOR population above stays gated to
 		// `competeSymbols > 1` (a lone market needs no market-choice at all).
-		if (competeSymbols > 1 || sequentialTapeOn) {
-			var baseCfg = MurmurationConfigs.defaults();
-			var rawFeatures:Array<Array<Float>> = [];
-			for (m in 0...competeSymbols) {
-				var t = competeSymbols > 1 ? m / (competeSymbols - 1) : 0.0; // 0=calm/deep-liquidity .. 1=volatile/thin
-				var cfg = MurmurationConfigs.defaults();
-				cfg.fundamentalVol = baseCfg.fundamentalVol * (0.3 + t * 2.0);
-				cfg.marketFactorVol = baseCfg.marketFactorVol * (0.3 + t * 2.0);
-				cfg.impact = baseCfg.impact * (0.5 + t * 1.5);
-				cfg.mixMarketMaker = Math.max(0.02, baseCfg.mixMarketMaker * (1.0 - t * 0.7));
-				// Scale the reversion pull by this market's OWN place on the calm<->volatile axis
-				// (the same `t` used to build its impact/liquidity above) -- a flat coefficient
-				// tamed the calm market but was observed live to be far too weak against the
-				// volatile market's much higher impact + thinner liquidity (it kept climbing
-				// steadily regardless). The volatile end needs a proportionally stronger pull
-				// simply because it's built to move more per unit of trading pressure.
-				if (sequentialTapeOn) cfg.fundamentalMeanReversion = sequentialTapeMeanReversion * (1.0 + t * 4.0);
-				marketConfigs.push(cfg);
-				rawFeatures.push([cfg.fundamentalVol, cfg.marketFactorVol, cfg.impact, cfg.mixMarketMaker]);
+		if (competeSymbols > 1 || sequentialTapeOn || poetActive) {
+			if (poetActive) {
+				if (poetEnvs <= 0) poetEnvs = Std.int(Math.max(competeSymbols, 2));
+				marketConfigs = PoetEnvs.seedAxis(poetEnvs, sequentialTapeOn ? sequentialTapeMeanReversion : 0.0);
+				marketFeatures = [for (_ in 0...marketConfigs.length) [for (_ in 0...4) 0.0]];
+				rebuildMarketFeatures(marketConfigs, marketFeatures);
+				Sys.println('poet: on (envs=$poetEnvs every=$poetEvery)');
+			} else {
+				var baseCfg = MurmurationConfigs.defaults();
+				var rawFeatures:Array<Array<Float>> = [];
+				for (m in 0...competeSymbols) {
+					var t = competeSymbols > 1 ? m / (competeSymbols - 1) : 0.0; // 0=calm/deep-liquidity .. 1=volatile/thin
+					var cfg = MurmurationConfigs.defaults();
+					cfg.fundamentalVol = baseCfg.fundamentalVol * (0.3 + t * 2.0);
+					cfg.marketFactorVol = baseCfg.marketFactorVol * (0.3 + t * 2.0);
+					cfg.impact = baseCfg.impact * (0.5 + t * 1.5);
+					cfg.mixMarketMaker = Math.max(0.02, baseCfg.mixMarketMaker * (1.0 - t * 0.7));
+					// Scale the reversion pull by this market's OWN place on the calm<->volatile axis
+					// (the same `t` used to build its impact/liquidity above) -- a flat coefficient
+					// tamed the calm market but was observed live to be far too weak against the
+					// volatile market's much higher impact + thinner liquidity (it kept climbing
+					// steadily regardless). The volatile end needs a proportionally stronger pull
+					// simply because it's built to move more per unit of trading pressure.
+					if (sequentialTapeOn) cfg.fundamentalMeanReversion = sequentialTapeMeanReversion * (1.0 + t * 4.0);
+					marketConfigs.push(cfg);
+					rawFeatures.push([cfg.fundamentalVol, cfg.marketFactorVol, cfg.impact, cfg.mixMarketMaker]);
+				}
+				// Min-max normalize each feature COLUMN across the market set to [0,1] before handing
+				// it to `SymbolSelector.score` -- the 4 raw config knobs span wildly different units/
+				// magnitudes (vol ~1e-3, impact ~1e-1), so a freshly-initialized selector's random
+				// Gaussian weights would otherwise be dominated by whichever feature happens to have
+				// the largest raw magnitude, regardless of its actual weight -- not a real preference,
+				// just a unit-scale artifact. Normalizing puts every feature on equal footing so the
+				// CO-EVOLVED weights (not raw units) are what actually drives which markets look
+				// attractive.
+				marketFeatures = [for (_ in 0...competeSymbols) [for (_ in 0...4) 0.0]];
+				for (f in 0...4) {
+					var lo = rawFeatures[0][f], hi = rawFeatures[0][f];
+					for (m in 0...competeSymbols) { if (rawFeatures[m][f] < lo) lo = rawFeatures[m][f]; if (rawFeatures[m][f] > hi) hi = rawFeatures[m][f]; }
+					var span = hi - lo;
+					for (m in 0...competeSymbols) marketFeatures[m][f] = span > 1e-12 ? (rawFeatures[m][f] - lo) / span : 0.5;
+				}
 			}
-			// Min-max normalize each feature COLUMN across the market set to [0,1] before handing
-			// it to `SymbolSelector.score` -- the 4 raw config knobs span wildly different units/
-			// magnitudes (vol ~1e-3, impact ~1e-1), so a freshly-initialized selector's random
-			// Gaussian weights would otherwise be dominated by whichever feature happens to have
-			// the largest raw magnitude, regardless of its actual weight -- not a real preference,
-			// just a unit-scale artifact. Normalizing puts every feature on equal footing so the
-			// CO-EVOLVED weights (not raw units) are what actually drives which markets look
-			// attractive.
-			marketFeatures = [for (_ in 0...competeSymbols) [for (_ in 0...4) 0.0]];
-			for (f in 0...4) {
-				var lo = rawFeatures[0][f], hi = rawFeatures[0][f];
-				for (m in 0...competeSymbols) { if (rawFeatures[m][f] < lo) lo = rawFeatures[m][f]; if (rawFeatures[m][f] > hi) hi = rawFeatures[m][f]; }
-				var span = hi - lo;
-				for (m in 0...competeSymbols) marketFeatures[m][f] = span > 1e-12 ? (rawFeatures[m][f] - lo) / span : 0.5;
-			}
-			Sys.println('  markets: ' + [for (i in 0...competeSymbols) '#$i(vol=${fmt(marketConfigs[i].fundamentalVol, 4)} impact=${fmt(marketConfigs[i].impact, 2)} mm=${fmt(marketConfigs[i].mixMarketMaker, 2)} normFeatures=${marketFeatures[i]})'].join(" "));
+			Sys.println('  markets: ' + [for (i in 0...marketConfigs.length) '#$i(vol=${fmt(marketConfigs[i].fundamentalVol, 4)} impact=${fmt(marketConfigs[i].impact, 2)} mm=${fmt(marketConfigs[i].mixMarketMaker, 2)} normFeatures=${marketFeatures[i]})'].join(" "));
 		}
 		// Sequential-tape persistent state (see `competeSequentialTapeFitness`'s doc comment):
 		// one `MurmurationSim` + one resident "veteran pool" per market, built lazily on first
@@ -762,7 +953,7 @@ class CorpusEvoRun {
 		var ackQueue = new Deque<Int>();
 		for (_ in 0...threads) {
 			var sharedEngine = host.engine;
-			Thread.create(function() evalWorker(sharedEngine, isBasket, jobQueue, resultQueue, ackQueue, costBps, curriculumOn ? curriculumWeights : null));
+			Thread.create(function() evalWorker(sharedEngine, isBasket, jobQueue, resultQueue, ackQueue, costBps, curriculumOn ? curriculumWeights : null, fitnessWindows, fitnessWindowLambda));
 		}
 
 		// P3 (see PLAN_EVO_SPEED.md): the JS/interp fallback loop (genomes StrategyWasmEmitter
@@ -792,36 +983,32 @@ class CorpusEvoRun {
 						// weighting only ever reads this field from the PROMOTED/full-basket branch
 						// below).
 						fbResultQueue.add(fr.ok
-							? { key: job.key, ok: true, trades: fr.trades, sharpe: fr.sharpe, equity: fr.finalEquity, fills: fr.fills, perSymbolSharpe: [], bankrupt: fr.bankrupt }
-							: { key: job.key, ok: false, trades: 0, sharpe: Math.NaN, equity: 0, fills: null, perSymbolSharpe: [], bankrupt: false });
+							? { key: job.key, ok: true, trades: fr.trades, sharpe: fr.sharpe, equity: fr.finalEquity, fills: fr.fills, perSymbolSharpe: [], bankrupt: fr.bankrupt, lexCases: [] }
+							: { key: job.key, ok: false, trades: 0, sharpe: Math.NaN, equity: 0, fills: null, perSymbolSharpe: [], bankrupt: false, lexCases: [] });
 					} else {
 						// Promoted (survived triage): the FULL basket, aggregated -- see
 						// BasketFitness.aggregateBasket. A single-symbol run's `isBasket` is a
 						// one-element array, so this loop runs once and degenerates to exactly the
 						// old single-tape behavior for any valid result.
-						var perSymbol:Array<{trades:Int, sharpe:Float, finalEquity:Float}> = [];
+						var perSymbol:Array<{trades:Int, sharpe:Float, finalEquity:Float, ?bankrupt:Bool}> = [];
 						var firstFills = null;
+						var firstFr:FitnessResult = null;
 						var anyErr = false;
-						var anyBankrupt = false;
 						for (i in 0...isBasket.length) {
 							var fr = Fitness.evaluate(g, isBasket[i], "js", false, costBps, startCapital, equityFloor);
 							if (!fr.ok) { anyErr = true; break; }
-							if (i == 0) firstFills = fr.fills;
-							if (fr.bankrupt) anyBankrupt = true;
-							// This IS the main per-generation selection signal (feeds `CachedEval.
-							// sharpe`, which `scoreOf` applies parsimony on top of) -- the robustness
-							// window applies HERE, per-symbol, before `BasketFitness.aggregateBasket`
-							// combines symbols (aggregation is just a mean/sum regardless of what each
-							// symbol's own "sharpe" represents, so this composes correctly).
+							if (i == 0) { firstFills = fr.fills; firstFr = fr; }
 							var symSharpe = fitnessWindows > 1 ? Fitness.robustScore(fr, fitnessWindows, fitnessWindowLambda) : fr.sharpe;
-							perSymbol.push({trades: fr.trades, sharpe: symSharpe, finalEquity: fr.finalEquity});
+							perSymbol.push({trades: fr.trades, sharpe: symSharpe, finalEquity: fr.finalEquity, bankrupt: fr.bankrupt});
 						}
 						if (anyErr) {
-							fbResultQueue.add({key: job.key, ok: false, trades: 0, sharpe: Math.NaN, equity: 0, fills: null, perSymbolSharpe: [], bankrupt: false});
+							fbResultQueue.add({key: job.key, ok: false, trades: 0, sharpe: Math.NaN, equity: 0, fills: null, perSymbolSharpe: [], bankrupt: false, lexCases: []});
 						} else {
 							var agg = BasketFitness.aggregateBasket(perSymbol, curriculumOn ? curriculumWeights : null);
+							var symSharpes = [for (p in perSymbol) p.sharpe];
 							fbResultQueue.add({key: job.key, ok: true, trades: agg.trades, sharpe: agg.sharpe, equity: agg.finalEquity, fills: firstFills,
-								perSymbolSharpe: [for (p in perSymbol) p.sharpe], bankrupt: anyBankrupt});
+								perSymbolSharpe: symSharpes, bankrupt: agg.bankrupt,
+								lexCases: lexCasesFor(firstFr, fitnessWindows, symSharpes)});
 						}
 					}
 				}
@@ -833,21 +1020,19 @@ class CorpusEvoRun {
 		// selectable fitness, so the WASM path and the JS-fallback path can never drift apart the
 		// way they did before this was a shared function.
 		var scoreOf = function(e:CachedEval, nodes:Int):Float {
-			if (e == null || e.trades < 1 || Math.isNaN(e.sharpe)) return Fitness.NEG_INF;
-			if (e.bankrupt == true) return Fitness.NEG_INF; // bankruptcy crank: no sharpe survives going bust
-			var s = e.sharpe;
-			if (nodes > parsimonyThreshold) s -= parsimonyLambda * (nodes - parsimonyThreshold);
-			return s;
+			if (e == null) return Fitness.NEG_INF;
+			return Fitness.scoreFacts(e.trades, e.sharpe, e.bankrupt == true, 1, nodes, parsimonyThreshold, parsimonyLambda);
 		};
 
-		// Training target for SurrogateModel.update: an invalid eval (no trades / NaN sharpe, i.e.
-		// what scoreOf would call Fitness.NEG_INF) is clamped to a bounded "very bad" sentinel
-		// instead of feeding a literal -Infinity into the LMS update, which would blow the weights
-		// up instantly. The model only needs to learn "genomes shaped like this tend to be bad," not
-		// the exact magnitude of NEG_INF.
+		// Training target for SurrogateModel.update: an invalid eval (no trades / NaN sharpe /
+		// bankrupt — what scoreOf would call Fitness.NEG_INF) is clamped to a bounded "very bad"
+		// sentinel instead of feeding a literal -Infinity into the LMS update, which would blow
+		// the weights up instantly. The model only needs to learn "genomes shaped like this tend
+		// to be bad," not the exact magnitude of NEG_INF.
 		var SURROGATE_INVALID_SENTINEL = -3.0;
 		var surrogateTarget = function(e:CachedEval):Float {
-			if (e == null || e.trades < 1 || Math.isNaN(e.sharpe)) return SURROGATE_INVALID_SENTINEL;
+			if (e == null || e.trades < 1 || Math.isNaN(e.sharpe) || e.bankrupt == true)
+				return SURROGATE_INVALID_SENTINEL;
 			return e.sharpe;
 		};
 
@@ -915,8 +1100,10 @@ class CorpusEvoRun {
 					if (steppers[i].faulted || steppers[i].tradeCount() < 1) continue;
 					var desc = MapElites.describeFills(steppers[i].fills(), steps);
 					var tradesPerBar = steppers[i].tradeCount() / steps;
-					var ck = MapElites.cellKey(tradesPerBar, desc.avgHold, desc.longFrac);
-					archive.offer(genomesByKey[i].g, zscores[i], ck, tradesPerBar, desc.avgHold, desc.longFrac);
+					var dutyCycle = desc.dutyCycle;
+					var cc:Null<Float> = creditMapAxis ? MapElites.creditConcentration(genomesByKey[i].g) : null;
+					var ck = MapElites.assignCell(tradesPerBar, desc.avgHold, desc.longFrac, dutyCycle, cvtCentroids.length > 0 ? cvtCentroids : null, cc);
+					archive.offer(genomesByKey[i].g, zscores[i], ck, tradesPerBar, desc.avgHold, desc.longFrac, dutyCycle, creditMapAxis && cc != null ? cc : 0.0);
 				}
 			}
 			var out = new Map<String, Float>();
@@ -978,8 +1165,11 @@ class CorpusEvoRun {
 					if (mapElitesOn && !steppers[k].faulted && steppers[k].tradeCount() >= 1) {
 						var desc = MapElites.describeFills(steppers[k].fills(), steps);
 						var tradesPerBar = steppers[k].tradeCount() / steps;
-						var ck = MapElites.cellKey(tradesPerBar, desc.avgHold, desc.longFrac);
-						archive.offer(individuals[groupIdx[k]], z, ck, tradesPerBar, desc.avgHold, desc.longFrac);
+						var dutyCycle = desc.dutyCycle;
+						var gOffer = individuals[groupIdx[k]];
+						var cc:Null<Float> = creditMapAxis ? MapElites.creditConcentration(gOffer) : null;
+						var ck = MapElites.assignCell(tradesPerBar, desc.avgHold, desc.longFrac, dutyCycle, cvtCentroids.length > 0 ? cvtCentroids : null, cc);
+						archive.offer(gOffer, z, ck, tradesPerBar, desc.avgHold, desc.longFrac, dutyCycle, creditMapAxis && cc != null ? cc : 0.0);
 					}
 				}
 			}
@@ -1111,8 +1301,10 @@ class CorpusEvoRun {
 					if (steppers[k].faulted || steppers[k].tradeCount() < 1) continue;
 					var desc = MapElites.describeFills(steppers[k].fills(), steps);
 					var tradesPerBar = steppers[k].tradeCount() / steps;
-					var ck = MapElites.cellKey(tradesPerBar, desc.avgHold, desc.longFrac);
-					archive.offer(genomesByKey[k].g, zscores[k], ck, tradesPerBar, desc.avgHold, desc.longFrac);
+					var dutyCycle = desc.dutyCycle;
+					var cc:Null<Float> = creditMapAxis ? MapElites.creditConcentration(genomesByKey[k].g) : null;
+					var ck = MapElites.assignCell(tradesPerBar, desc.avgHold, desc.longFrac, dutyCycle, cvtCentroids.length > 0 ? cvtCentroids : null, cc);
+					archive.offer(genomesByKey[k].g, zscores[k], ck, tradesPerBar, desc.avgHold, desc.longFrac, dutyCycle, creditMapAxis && cc != null ? cc : 0.0);
 				}
 			}
 
@@ -1188,16 +1380,43 @@ class CorpusEvoRun {
 		}
 		#end
 
-		// P2: the oracle's tape + cache. `attrBars == 0` (or no triage prefix to reuse) means the
-		// exact old full-tape-oracle behavior; the default reuses triage's ALREADY-EXISTING short
-		// prefix and its own cache file, so a genuinely SHORTER (and separately memoized) backtest
-		// answers "which ablation/donor is better" -- a ranking question, not a precision one.
-		var attrUseFullTape = (attrBars == 0) || !triageOn;
-		var attrTape = attrUseFullTape ? bars : prefixBars;
-		var attrCache = attrUseFullTape ? cache : triageCache;
+		// P2: the oracle's tape + cache.
+		// `--attr-bars 0` = full IS tape. `--attr-bars N>0` = first N bars (dedicated ranking tape).
+		// Default `-1` = triage prefix when triage is on, else full tape.
+		var attrTape:Array<Bar>;
+		var attrCache:EvoCache;
+		var attrUseFullTape:Bool;
+		if (attrBars == 0) {
+			attrUseFullTape = true;
+			attrTape = bars;
+			attrCache = cache;
+		} else if (attrBars > 0) {
+			var n = Std.int(Math.min(attrBars, bars.length));
+			attrUseFullTape = false;
+			attrTape = bars.slice(0, n);
+			attrCache = (triageOn && n == triageBars) ? triageCache
+				: new EvoCache((cachesOff || difficultyScheduleOn) ? null
+					: '$cacheDir/attr${n}_${EvoCache.tapeSignature(attrTape)}_cost${Std.int(costBps * 10)}.tsv');
+		} else {
+			attrUseFullTape = !triageOn;
+			if (activeProfile != null && activeProfile.prefixAttribution && triageOn)
+				attrUseFullTape = false;
+			attrTape = attrUseFullTape ? bars : prefixBars;
+			attrCache = attrUseFullTape ? cache : triageCache;
+		}
 		Sys.println(attrUseFullTape
 			? 'attribution oracle: full IS tape (${bars.length} bars) -- --attr-bars 0 or triage disabled'
-			: 'attribution oracle: triage prefix (${attrTape.length} bars), same cache triage already warms');
+			: 'attribution oracle: ${attrTape.length} bars'
+				+ (attrBars > 0 ? ' (--attr-bars $attrBars)' : ' (triage prefix)'));
+
+		// Arm NMA attr tape whenever columnar strangler is on (--nma or exec-profile preferNma).
+		if (Fitness.preferNma) {
+			Fitness.nmaTape = attrTape;
+			Fitness.nmaCostBps = costBps;
+			Fitness.nmaInitialCash = startCapital;
+			Fitness.nmaEquityFloor = equityFloor;
+			Fitness.semanticRdoProb = semanticRdoProb;
+		}
 
 		// Node-ablation-guided mutation/crossover's fitness ORACLE (see Variation.
 		// attributedPointMutate/attributedSubtreeCrossover): a real "js" backtest on the SAME
@@ -1212,9 +1431,15 @@ class CorpusEvoRun {
 		// as the OOS re-score below): attribution should reflect raw performance, not be
 		// deflated by a complexity term that would conflate "this node matters" with "this
 		// genome happens to be big."
+		// Attribution oracle. The cache lock is load-bearing once AttrPool fans cold ablations
+		// across workers — EvoCache is a plain StringMap (JIT guide §27). Fitness.evaluate itself
+		// is outside the lock; only the get/put pair is guarded.
+		var attrCacheLock = new EvoLock();
 		var evalFn = function(g:StrategyGenome):Float {
 			var key = attrCache.keyFor(g);
+			attrCacheLock.acquire();
 			var e = attrCache.get(key);
+			attrCacheLock.release();
 			if (e == null) {
 				var fr = Fitness.evaluate(g, attrTape, "js", false, costBps, startCapital, equityFloor);
 				if (fr.ok) {
@@ -1231,17 +1456,36 @@ class CorpusEvoRun {
 					// attribution oracle doesn't get the robustness window by default, only the
 					// main fitness pass feeding `scoreOf` does).
 					var attrSharpe = (fitnessWindows > 1 && attrCache == cache) ? Fitness.robustScore(fr, fitnessWindows, fitnessWindowLambda) : fr.sharpe;
-					e = { trades: fr.trades, sharpe: attrSharpe, finalEquity: fr.finalEquity, avgHold: desc.avgHold, longFrac: desc.longFrac, bankrupt: fr.bankrupt };
+					e = { trades: fr.trades, sharpe: attrSharpe, finalEquity: fr.finalEquity, avgHold: desc.avgHold, longFrac: desc.longFrac, fillHash: musescript.evo.FillHash.of(fr.fills), bankrupt: fr.bankrupt };
 				} else {
 					e = { trades: 0, sharpe: Math.NaN, finalEquity: 0 };
 				}
-				attrCache.put(key, e);
+				attrCacheLock.acquire();
+				var raced = attrCache.get(key);
+				if (raced == null) attrCache.put(key, e);
+				else e = raced;
+				attrCacheLock.release();
 			}
-			return (e.trades >= 1 && !Math.isNaN(e.sharpe) && e.bankrupt != true) ? e.sharpe : Fitness.NEG_INF;
+			return Fitness.scoreFacts(e.trades, e.sharpe, e.bankrupt == true, 1);
 		};
+		// Same worker count as the fallback fitness pool: attribution ablations are independent
+		// genomes, and during `engine.step` the fb pool is idle. Dedicated threads rather than
+		// reusing fbJobQueue because that queue's job shape is keyed into popG, not an arbitrary
+		// genome list.
+		var attrPool = new AttrPool(evalFn, threads);
+		AttrPool.current = attrPool;
+		attrPool.start();
+		if (threads > 1)
+			Sys.println('attr-pool: $threads workers -- cold ablations/donors fan out during step');
 
 		for (gen in 0...gens) {
 			var tGen0 = haxe.Timer.stamp();
+			profile.beginGeneration();
+			if (Fitness.preferNma && Fitness.nmaPopMemo != null) Fitness.beginNmaPopMemo();
+			if (Fitness.nmaDirtySpine) {
+				var keepKeys = [for (g in popG) Canonical.structuralKey(g)];
+				Fitness.pruneNmaWorking(keepKeys);
+			}
 
 			// `--schedule`: this generation's fitness mode, re-derived every iteration (a no-op
 			// read when no schedule was given -- `competeOn` just stays pinned to `competeFlag`).
@@ -1317,6 +1561,7 @@ class CorpusEvoRun {
 			// whole generation (the corpus-evo runs collapse to clones of one champion by gen 3);
 			// keying the work here -- not per index -- is what lets the memo pay off within a
 			// single generation, not merely across generations.
+			var tKeys = profile.start();
 			keyToIdx = new Map<String, Array<Int>>(); // reassign the HOISTED slot -- see its declaration's doc comment
 			var order:Array<String> = [];
 			for (i in 0...popG.length) {
@@ -1324,6 +1569,7 @@ class CorpusEvoRun {
 				if (!keyToIdx.exists(key)) { keyToIdx.set(key, []); order.push(key); }
 				keyToIdx.get(key).push(i);
 			}
+			profile.stop(PhaseTimer.KEYS, tKeys);
 
 			// Hoisted so the shared post-eval tail (best-tracking, the gen-line print, selection)
 			// can read them regardless of which branch below actually populated them --
@@ -1340,10 +1586,12 @@ class CorpusEvoRun {
 			// curriculum's own loop finds nothing and silently no-ops (see this flag's "inert under
 			// --compete" doc comment above).
 			var perSymbolByKey = new Map<String, Array<Float>>();
+			var casesByKey = new Map<String, Array<Float>>();
 			// Raw eval (trades/sharpe/equity) per UNIQUE key: memo hit, native WASM, or JS fallback.
 			// Hoisted (like `perSymbolByKey` above) so the shared tail's `--gui` dashboard panel and
 			// `--novelty-weight` bonus can read it unconditionally -- both simply see an empty map
 			// and no-op under `--compete`, same "inert, not wired" treatment as curriculum/surrogate.
+			var tEval = profile.start();
 			var evalByKey = new Map<String, CachedEval>();
 			if (!competeOn) {
 			var missKeys:Array<String> = [];
@@ -1387,9 +1635,19 @@ class CorpusEvoRun {
 				wasmMiss.push(key);
 			}
 			if (pendingKeys.length > 0) {
-				var py = Sys.systemName() == "Windows" ? ".venv/Scripts/python.exe" : ".venv/bin/python";
-				var code = Sys.command(py, ["tools/wat2wasm_batch.py", watDir]);
-				if (code != 0) throw "wat2wasm batch failed";
+				if (wat2wasmPython) {
+					var py = Sys.systemName() == "Windows" ? ".venv/Scripts/python.exe" : ".venv/bin/python";
+					var code = Sys.command(py, ["tools/wat2wasm_batch.py", watDir]);
+					if (code != 0) throw "wat2wasm batch failed";
+				} else {
+					for (key in pendingKeys) {
+						var watPath = '$watDir/$key.wat';
+						var wasmPath = '$watDir/$key.wasm';
+						var wat = sys.io.File.getContent(watPath);
+						var bytes = musescript.compile.WatAssembler.assemble(wat);
+						sys.io.File.saveBytes(wasmPath, bytes);
+					}
+				}
 			}
 			for (key in pendingKeys) moduleCache.set(key, {strings: stringsPending.get(key), wasmPath: '$watDir/$key.wasm'});
 
@@ -1403,10 +1661,15 @@ class CorpusEvoRun {
 			for (_ in 0...dispatched) {
 				var r = resultQueue.pop(true);
 				var e:CachedEval = {trades: r.trades, sharpe: r.sharpe, finalEquity: r.finalEquity,
-					avgHold: r.avgHold, longFrac: r.longFrac};
+					avgHold: r.avgHold, longFrac: r.longFrac, dutyCycle: r.dutyCycle, fillHash: r.fillHash};
 				evalByKey.set(r.key, e);
 				cache.put(r.key, e);
 				if (r.perSymbolSharpe.length > 0) perSymbolByKey.set(r.key, r.perSymbolSharpe);
+				if (lexicaseOn) {
+					if (r.lexCases != null && r.lexCases.length > 0) casesByKey.set(r.key, r.lexCases);
+					else if (r.perSymbolSharpe.length > 1) casesByKey.set(r.key, r.perSymbolSharpe);
+					else casesByKey.set(r.key, [r.sharpe]);
+				}
 				if (surrogateOn) surrogate.update(Canonical.shapeFeatures(popG[keyToIdx.get(r.key)[0]]), surrogateTarget(e));
 			}
 			// JS/interp fallback -- worker-pooled (see the fbJobQueue/fbResultQueue pool set up
@@ -1436,7 +1699,7 @@ class CorpusEvoRun {
 				var prefixMiss:Array<String> = [];
 				for (key in fallbackMiss) {
 					var pc = triageCache.get(key);
-					if (pc != null) scored.push({key: key, s: (pc.trades >= 1 && !Math.isNaN(pc.sharpe) && pc.bankrupt != true) ? pc.sharpe : Fitness.NEG_INF});
+					if (pc != null) scored.push({key: key, s: Fitness.scoreFacts(pc.trades, pc.sharpe, pc.bankrupt == true, 1)});
 					else prefixMiss.push(key);
 				}
 				for (key in prefixMiss) fbJobQueue.add({key: key, useFullTape: false, stop: false});
@@ -1444,7 +1707,7 @@ class CorpusEvoRun {
 					var r = fbResultQueue.pop(true);
 					var pc:CachedEval = r.ok ? {trades: r.trades, sharpe: r.sharpe, finalEquity: r.equity, bankrupt: r.bankrupt} : {trades: 0, sharpe: Math.NaN, finalEquity: 0};
 					triageCache.put(r.key, pc);
-					scored.push({key: r.key, s: (pc.trades >= 1 && !Math.isNaN(pc.sharpe) && pc.bankrupt != true) ? pc.sharpe : Fitness.NEG_INF});
+					scored.push({key: r.key, s: Fitness.scoreFacts(pc.trades, pc.sharpe, pc.bankrupt == true, 1)});
 				}
 				scored.sort((a, b) -> a.s < b.s ? 1 : (a.s > b.s ? -1 : 0));
 				var keep = Std.int(Math.ceil(scored.length * triageKeep));
@@ -1463,13 +1726,18 @@ class CorpusEvoRun {
 				if (r.ok) {
 					var desc = MapElites.describeFills(r.fills, bars.length);
 					e = {trades: r.trades, sharpe: r.sharpe, finalEquity: r.equity,
-						avgHold: desc.avgHold, longFrac: desc.longFrac, bankrupt: r.bankrupt};
+						avgHold: desc.avgHold, longFrac: desc.longFrac, dutyCycle: desc.dutyCycle, fillHash: musescript.evo.FillHash.of(r.fills), bankrupt: r.bankrupt};
 				} else {
 					e = {trades: 0, sharpe: Math.NaN, finalEquity: 0};
 				}
 				evalByKey.set(r.key, e);
 				cache.put(r.key, e);
 				if (r.perSymbolSharpe.length > 0) perSymbolByKey.set(r.key, r.perSymbolSharpe);
+				if (lexicaseOn && r.ok) {
+					if (r.lexCases != null && r.lexCases.length > 0) casesByKey.set(r.key, r.lexCases);
+					else if (r.perSymbolSharpe.length > 1) casesByKey.set(r.key, r.perSymbolSharpe);
+					else casesByKey.set(r.key, [r.sharpe]);
+				}
 				if (surrogateOn) surrogate.update(Canonical.shapeFeatures(popG[keyToIdx.get(r.key)[0]]), surrogateTarget(e));
 			}
 
@@ -1481,18 +1749,29 @@ class CorpusEvoRun {
 				var e = evalByKey.get(key);
 				var idxs = keyToIdx.get(key);
 				for (idx in idxs) fitness[idx] = scoreOf(e, Canonical.nodeCount(popG[idx]));
+				if (lexicaseOn && !casesByKey.exists(key)) {
+					// Cache hits / triage kills: no equity curve → length-1 aggregate case only
+					// (fresh evals already set multi-window lexCases above).
+					var arr = perSymbolByKey.get(key);
+					if (arr != null && arr.length > 1) casesByKey.set(key, arr);
+					else if (e != null && Fitness.scoreFacts(e.trades, e.sharpe, e.bankrupt == true, 1) != Fitness.NEG_INF)
+						casesByKey.set(key, [e.sharpe]);
+				}
 				// MAP-Elites: offer this genome into its behavioral cell -- BEFORE parsimony, using
 				// the raw eval directly (same reasoning as the OOS re-score / attribution evalFn:
 				// niching should be driven by what the strategy actually did, not deflated by a
 				// complexity penalty that would make a legitimately larger-but-still-novel genome
 				// lose its niche slot to a smaller one that behaves identically). The
 				// parsimony-adjusted `fitness` is deliberately NOT what's compared here.
-				if (mapElitesOn && e != null && e.trades >= 1 && !Math.isNaN(e.sharpe)) {
+				if (mapElitesOn && e != null && Fitness.scoreFacts(e.trades, e.sharpe, e.bankrupt == true, 1) != Fitness.NEG_INF) {
 					var tradesPerBar = e.trades / bars.length;
 					var avgHold = e.avgHold != null ? e.avgHold : 0.0;
 					var longFrac = e.longFrac != null ? e.longFrac : 0.5;
-					var ck = MapElites.cellKey(tradesPerBar, avgHold, longFrac);
-					archive.offer(popG[idxs[0]], e.sharpe, ck, tradesPerBar, avgHold, longFrac);
+					var dutyCycle = e.dutyCycle != null ? e.dutyCycle : 0.0;
+					var gOffer = popG[idxs[0]];
+					var cc:Null<Float> = creditMapAxis ? MapElites.creditConcentration(gOffer) : null;
+					var ck = MapElites.assignCell(tradesPerBar, avgHold, longFrac, dutyCycle, cvtCentroids.length > 0 ? cvtCentroids : null, cc);
+					archive.offer(gOffer, e.sharpe, ck, tradesPerBar, avgHold, longFrac, dutyCycle, creditMapAxis && cc != null ? cc : 0.0);
 				}
 			}
 			} else {
@@ -1564,6 +1843,10 @@ class CorpusEvoRun {
 			if (competeOn) { if (genBest > bestCompete) { bestCompete = genBest; bestGenomeCompete = popG[bestIdx]; } }
 			else { if (genBest > bestReal) { bestReal = genBest; bestGenomeReal = popG[bestIdx]; } }
 			var currentBest = competeOn ? bestCompete : bestReal;
+			// Everything from the dedup barrier to here is scoring: backtests plus the archive
+			// offers and best-tracking that read their results. It is the phase `--threads`
+			// actually parallelizes, which is why the tail below is measured apart from it.
+			profile.stop(PhaseTimer.EVAL, tEval);
 			var currentBestGenome = competeOn ? bestGenomeCompete : bestGenomeReal;
 			var mean = validN > 0 ? sum / validN : 0.0;
 			var genMs = (haxe.Timer.stamp() - tGen0) * 1000;
@@ -1580,7 +1863,23 @@ class CorpusEvoRun {
 			Sys.println('gen ${pad(Std.string(gen), 2)} | popSize=${popG.length} uniq=${order.length} new=${pendingKeys.length} fallback=${fallbackMiss.length}'
 				+ (surrogateOn ? ' surrogateSkipped=$triagedOutBySurrogate' : '') + ' triaged=$triagedOut valid=$validN niches=${archive.size()}'
 				+ ' | best=${fmt(genBest, 4)} mean=${fmt(mean, 4)} champion="${currentBestGenome != null ? currentBestGenome.name : "?"}" key=$championKey'
-				+ ' | ${fmt(genMs, 0)}ms');
+				// Labelled `scoreMs`, not `ms`: this stamp is taken BEFORE speciation/novelty and
+				// before `engine.step`, so it has never been the generation's wall time. Measured
+				// at pop=1000/threads=8 it reads ~700ms against a real ~4800ms generation, because
+				// variation+attribution is the other 84% and runs after this line. Use
+				// `--phase-profile` for the whole clock.
+				+ ' | ${fmt(genMs, 0)}ms scoreMs');
+			if (mapElitesOn)
+				Sys.println('  qd=${fmt(archive.qdScore(), 3)} coverage=${fmt(archive.coverage(archiveTotalCells), 3)} discoveries=${archive.discoveryCount}');
+			Sys.println('  semUnique=${cache.uniqueSemantics} semHits=${cache.semanticHits}'
+				+ (Fitness.preferNma && Fitness.nmaPopMemo != null ? ' popMemoHits=${Fitness.nmaPopMemoHits}' : '')
+				+ (Fitness.preferNma ? ' nmaOk=${Fitness.nmaOkCount} nmaFall=${Fitness.nmaFallCount} nmaUnsup=${Fitness.nmaUnsupportedCount} nmaErr=${Fitness.nmaErrorCount} compiles=${Fitness.fnCompileCount}'
+					+ (Fitness.nmaErrorCount > 0 && Fitness.lastNmaError != null ? '\n  lastNmaErr: ${Fitness.lastNmaError}' : '') : '')
+				+ (Fitness.nmaDirtySpine ? ' workHits=${Fitness.nmaWorkingHits} workPuts=${Fitness.nmaWorkingPuts}' : '')
+				+ (musescript.evo.nma.NmaFuseHost.enabled
+					? ' fuseCalls=${musescript.evo.nma.NmaFuseHost.fuseCalls} fuseSkips=${musescript.evo.nma.NmaFuseHost.fuseSkips}'
+						+ ' fuseFb=${musescript.evo.nma.NmaFuseHost.fuseFallbacks}'
+					: ''));
 
 			if (dashboard != null) {
 				var validFitness = [for (f in fitness) if (f != Fitness.NEG_INF) f];
@@ -1588,18 +1887,19 @@ class CorpusEvoRun {
 				// Raw (pre-parsimony) Sharpe per UNIQUE genome this generation -- directly
 				// comparable to the buy-and-hold benchmark's own raw Sharpe, one point per
 				// distinct program rather than fanned out across clone slots.
-				var isPerf = [for (key in order) if (evalByKey.get(key) != null
-					&& evalByKey.get(key).trades >= 1 && !Math.isNaN(evalByKey.get(key).sharpe)) evalByKey.get(key).sharpe];
-				// OOS re-sampled only every `guiOosEvery` generations (see its doc comment) --
-				// null on the skipped generations, so the panel keeps showing the last real
-				// sample instead of a misleadingly-empty one.
+				var isPerf:Array<Float> = [];
+				for (key in order) {
+					var e = evalByKey.get(key);
+					if (e != null && Fitness.scoreFacts(e.trades, e.sharpe, e.bankrupt == true, 1) != Fitness.NEG_INF)
+						isPerf.push(e.sharpe);
+				}
 				var oosPerf:Null<Array<Float>> = null;
 				if (gen % guiOosEvery == 0 || gen == gens - 1) {
 					oosPerf = [];
 					for (key in order) {
 						var g = popG[keyToIdx.get(key)[0]];
 						var oosr = Fitness.evaluate(g, oosBars, "js", false, costBps, startCapital, equityFloor);
-						if (oosr.ok && oosr.trades >= 1 && !Math.isNaN(oosr.sharpe) && !oosr.bankrupt) oosPerf.push(oosr.sharpe);
+						if (Fitness.score(oosr, 1) != Fitness.NEG_INF) oosPerf.push(oosr.sharpe);
 					}
 				}
 				dashboard.update(gen, genBest, mean, archive.size(), currentBestGenome != null ? currentBestGenome.name : "?",
@@ -1645,6 +1945,23 @@ class CorpusEvoRun {
 					curriculumWeights[i] = expSum > 0 ? (expVals[i] / expSum) * isBasket.length : 1.0;
 				Sys.println('  curriculum weights: [${[for (w in curriculumWeights) fmt(w, 2)].join(", ")}] (mean sharpe: [${[for (m in symbolMean) fmt(m, 3)].join(", ")}])');
 			}
+			#if kestrel
+			if (poetActive && mapElitesOn && poetEvery > 0 && (gen + 1) % poetEvery == 0
+				&& marketConfigs.length > 0 && (competeOn || sequentialTapeOn || competeSymbols > 1)) {
+				var idx = poetRng.int(marketConfigs.length);
+				var candidate = PoetEnvs.mutate(marketConfigs[idx], poetRng);
+				var eliteFits = [for (e in archive.entries()) e.cell.fitness].slice(0, 8);
+				if (PoetEnvs.minimalCriterion(eliteFits)) {
+					marketConfigs[idx] = candidate;
+					rebuildMarketFeatures(marketConfigs, marketFeatures);
+					Sys.println('  poet: env $idx mutated (kept)');
+				} else {
+					Sys.println('  poet: env $idx mutated (rejected MC)');
+				}
+			}
+			if (poetActive && poetEvery > 0 && (gen + 1) % (poetEvery * 2) == 0 && archive.size() > 0)
+				Sys.println('  poet: transfer skip (use --distill-every)');
+			#end
 			if (gen < gens - 1) {
 				// Speciation (structural fitness-sharing) + novelty (behavioral archive-distance
 				// bonus) ONLY adjust SELECTION pressure -- `best`/`bestGenome`/MAP-Elites offering
@@ -1654,21 +1971,54 @@ class CorpusEvoRun {
 				var selectionFitness = fitness;
 				if (speciationOn || noveltyWeight != 0.0) {
 					selectionFitness = fitness.copy();
+					var tSpecies = profile.start();
 					if (speciationOn) {
-						var sigByKey = new Map<String, Map<String, Int>>();
-						for (key in order) sigByKey.set(key, Canonical.shapeSignature(popG[keyToIdx.get(key)[0]]));
-						var reps:Array<{sig:Map<String, Int>, keys:Array<String>}> = [];
+						// Greedy first-match clustering, kept EXACTLY as it was but stripped of its
+						// two scaling problems. (1) Distances run over `Canonical.shapeVector`
+						// (unboxed, fixed-length) instead of `Map<String,Int>`, so a comparison is
+						// a 16-step int loop rather than a union map + string hashing. (2) The scan
+						// over species is prefiltered by total node count: Manhattan distance is
+						// bounded below by the difference of the totals, so a species whose total
+						// is more than `speciationThreshold` away cannot match and never needs the
+						// comparison. Both are exact -- same species, same order, same penalties --
+						// which matters because speciation moves selection pressure and a "close
+						// enough" clustering would quietly change what evolves.
+						var sigByKey = new Map<String, haxe.ds.Vector<Int>>();
+						for (key in order) sigByKey.set(key, Canonical.shapeVector(popG[keyToIdx.get(key)[0]]));
+						var reps:Array<{sig:haxe.ds.Vector<Int>, total:Int, keys:Array<String>}> = [];
+						// Species indices bucketed by total, each list ascending in insertion order.
+						var repsByTotal = new Map<Int, Array<Int>>();
 						for (key in order) {
 							var sig = sigByKey.get(key);
-							var found = false;
-							for (sp in reps) {
-								if (Canonical.shapeDistance(sig, sp.sig) <= speciationThreshold) {
-									sp.keys.push(key);
-									found = true;
-									break;
+							var total = Canonical.shapeVectorTotal(sig);
+							// Lowest insertion index wins, so the greedy "first species within
+							// threshold" choice is identical to scanning `reps` front to back.
+							var bestRep = -1;
+							var lo = total - speciationThreshold;
+							var hi = total + speciationThreshold;
+							var t = lo;
+							while (t <= hi) {
+								var bucket = repsByTotal.get(t);
+								if (bucket != null) {
+									for (ri in bucket) {
+										if (bestRep >= 0 && ri > bestRep) break; // bucket is ascending
+										if (Canonical.shapeVectorDistance(sig, reps[ri].sig) <= speciationThreshold) {
+											bestRep = ri;
+											break;
+										}
+									}
 								}
+								t++;
 							}
-							if (!found) reps.push({sig: sig, keys: [key]});
+							if (bestRep >= 0) {
+								reps[bestRep].keys.push(key);
+							} else {
+								var idx = reps.length;
+								reps.push({sig: sig, total: total, keys: [key]});
+								var bucket = repsByTotal.get(total);
+								if (bucket == null) { bucket = []; repsByTotal.set(total, bucket); }
+								bucket.push(idx);
+							}
 						}
 						for (sp in reps) {
 							var memberCount = 0;
@@ -1681,6 +2031,8 @@ class CorpusEvoRun {
 						}
 						Sys.println('  species: ${reps.length} distinct (threshold=$speciationThreshold)');
 					}
+					profile.stop(PhaseTimer.SPECIES, tSpecies);
+					var tNovelty = profile.start();
 					if (noveltyWeight != 0.0 && mapElitesOn) {
 						for (key in order) {
 							var e = evalByKey.get(key);
@@ -1688,13 +2040,30 @@ class CorpusEvoRun {
 							var tradesPerBar = e.trades / bars.length;
 							var avgHold = e.avgHold != null ? e.avgHold : 0.0;
 							var longFrac = e.longFrac != null ? e.longFrac : 0.5;
-							var novelty = archive.noveltyDistance(tradesPerBar, avgHold, longFrac);
-							for (idx in keyToIdx.get(key))
+							var dutyCycle = e.dutyCycle != null ? e.dutyCycle : 0.0;
+							var idxsN = keyToIdx.get(key);
+							var ccN = (creditMapAxis && idxsN != null && idxsN.length > 0)
+								? MapElites.creditConcentration(popG[idxsN[0]]) : 0.0;
+							var novelty = archive.noveltyDistance(tradesPerBar, avgHold, longFrac, 3, dutyCycle, ccN);
+							for (idx in idxsN)
 								if (selectionFitness[idx] != Fitness.NEG_INF) selectionFitness[idx] += noveltyWeight * novelty;
 						}
 					}
+					profile.stop(PhaseTimer.NOVELTY, tNovelty);
 				}
-				popG = engine.step(popG, selectionFitness, evalFn, attrCrossProb, donorCap, esNudgeProb);
+				var tLex = profile.start();
+				var caseFitness:Array<Array<Float>> = null;
+				if (lexicaseOn) {
+					caseFitness = [for (i in 0...popG.length) {
+						var key = Canonical.structuralKey(popG[i]);
+						var c = casesByKey.get(key);
+						if (c != null && c.length > 0) c else [selectionFitness[i]];
+					}];
+				}
+				profile.stop(PhaseTimer.LEXICASE, tLex);
+				var tStep = profile.start();
+				popG = engine.step(popG, selectionFitness, evalFn, attrCrossProb, donorCap, esNudgeProb, caseFitness);
+				profile.stop(PhaseTimer.STEP, tStep);
 				#if kestrel
 				// Co-evolve the `selectors` population alongside `popG`, under the SAME
 				// selection-pressure array -- see `evolveSelectors`'s own doc comment for why the
@@ -1726,6 +2095,11 @@ class CorpusEvoRun {
 				}
 				if (distillEvery > 0 && (gen + 1) % distillEvery == 0)
 					popG = distillReinject(popG, [archiveReal, archiveCompete], distillK, engine.elite, isBasket, costBps, startCapital, equityFloor, distillRng);
+				if (learnLibraryOn && libraryEvery > 0 && (gen + 1) % libraryEvery == 0 && mapElitesOn) {
+					var added = musescript.evo.LearnedLibrary.mineFromArchives(
+						[archiveReal, archiveCompete], engine.tuner, 2, 2, 12, 8);
+					if (added > 0) Sys.println('  library: +$added motif(s) (total ${musescript.evo.LearnedLibrary.size()})');
+				}
 				// Splice any human-edited/-selected genomes (queued via HumanLoopWindow's "Apply
 				// Edit" button) into the tail of the FRESH population `engine.step` just produced --
 				// starting from the end so elitism's leading slots (`engine.elite`, always < popSize)
@@ -1743,9 +2117,14 @@ class CorpusEvoRun {
 					}
 				}
 			}
+			profile.endGeneration();
 		}
 		var totalS = haxe.Timer.stamp() - totalT0;
+		for (line in profile.report()) Sys.println(line);
 
+		AttrPool.current = null;
+		attrPool.stop();
+		PhaseTimer.current = null;
 		for (_ in 0...threads) jobQueue.add({key: "", wasmPath: "", strings: [], stop: true});
 		for (_ in 0...threads) ackQueue.pop(true);
 		for (_ in 0...Std.int(Math.max(1, threads))) fbJobQueue.add({key: "", useFullTape: false, stop: true});
@@ -1776,10 +2155,10 @@ class CorpusEvoRun {
 					var b = champInst.run(bars, new Map());
 					if (a.trades != b.trades || Math.abs(a.finalEquity - b.finalEquity) > 1e-9)
 						throw "champion non-deterministic";
-					var perSymbol = [{trades: a.trades, sharpe: a.sharpe, finalEquity: a.finalEquity}];
+					var perSymbol = [{trades: a.trades, sharpe: a.sharpe, finalEquity: a.finalEquity, bankrupt: false}];
 					for (i in 1...isBasket.length) {
 						var r = champInst.run(isBasket[i], new Map());
-						perSymbol.push({trades: r.trades, sharpe: r.sharpe, finalEquity: r.finalEquity});
+						perSymbol.push({trades: r.trades, sharpe: r.sharpe, finalEquity: r.finalEquity, bankrupt: false});
 					}
 					var agg = BasketFitness.aggregateBasket(perSymbol);
 					Sys.println('backend=wasm trades=${agg.trades} equity=${fmt(agg.finalEquity, 2)} sharpe=${fmt(agg.sharpe, 4)} nodeCount=${Canonical.nodeCount(bestGenome)}' + (isBasket.length > 1 ? ' (aggregated across ${isBasket.length} symbols)' : ''));
@@ -1791,13 +2170,13 @@ class CorpusEvoRun {
 					if (a.trades != b.trades || Math.abs(a.finalEquity - b.finalEquity) > 1e-9)
 						throw "champion non-deterministic";
 					if (equityFloor > 0 && a.bankrupt) Sys.println('WARNING: reported champion crossed --equity-floor $equityFloor on the IS tape');
-					var perSymbol = [{trades: a.trades, sharpe: a.sharpe, finalEquity: a.finalEquity}];
+					var perSymbol = [{trades: a.trades, sharpe: a.sharpe, finalEquity: a.finalEquity, bankrupt: a.bankrupt}];
 					for (i in 1...isBasket.length) {
 						var r = Fitness.evaluate(bestGenome, isBasket[i], "js", false, costBps, startCapital, equityFloor);
-						perSymbol.push({trades: r.trades, sharpe: r.sharpe, finalEquity: r.finalEquity});
+						perSymbol.push({trades: r.trades, sharpe: r.sharpe, finalEquity: r.finalEquity, bankrupt: r.bankrupt});
 					}
 					var agg = BasketFitness.aggregateBasket(perSymbol);
-					Sys.println('backend=js(fallback) trades=${agg.trades} equity=${fmt(agg.finalEquity, 2)} sharpe=${fmt(agg.sharpe, 4)} nodeCount=${Canonical.nodeCount(bestGenome)}' + (isBasket.length > 1 ? ' (aggregated across ${isBasket.length} symbols)' : ''));
+					Sys.println('backend=${a.backend} trades=${agg.trades} equity=${fmt(agg.finalEquity, 2)} sharpe=${fmt(agg.sharpe, 4)} nodeCount=${Canonical.nodeCount(bestGenome)}' + (isBasket.length > 1 ? ' (aggregated across ${isBasket.length} symbols)' : ''));
 				}
 				Sys.println(Expand.expand(bestGenome));
 			} else if (bestGenome != null) {
@@ -1842,6 +2221,10 @@ class CorpusEvoRun {
 		} else {
 			printChampionAndMapElites(false, bestReal, bestGenomeReal, archiveReal);
 		}
+		if (learnLibraryOn) {
+			var added = musescript.evo.LearnedLibrary.mineFromArchives([archiveReal, archiveCompete], engine.tuner, 2, 2, 12, 8);
+			Sys.println('library: final mine +$added (total ${musescript.evo.LearnedLibrary.size()})');
+		}
 		Sys.println('total wall: ${fmt(totalS, 1)}s  modules compiled: ${count(moduleCache)}');
 		if (cachePath != null)
 			Sys.println('cache: ${cache.hits} hits / ${cache.misses} misses across the run, ${cache.size()} unique programs memoized');
@@ -1883,20 +2266,15 @@ class CorpusEvoRun {
 				// BasketFitness.aggregateBasket. Degenerates to exactly the old single-symbol
 				// Fitness.score(oos, 1) behavior when oosBasket has one element.
 				var anyErr = false;
-				var anyBankrupt = false;
-				var perSymbol:Array<{trades:Int, sharpe:Float, finalEquity:Float}> = [];
+				var perSymbol:Array<{trades:Int, sharpe:Float, finalEquity:Float, ?bankrupt:Bool}> = [];
 				for (sym in oosBasket) {
 					var fr = Fitness.evaluate(r.g, sym, "js", false, costBps, startCapital, equityFloor);
 					if (!fr.ok) { anyErr = true; break; }
-					if (fr.bankrupt) anyBankrupt = true;
-					perSymbol.push({trades: fr.trades, sharpe: fr.sharpe, finalEquity: fr.finalEquity});
+					perSymbol.push({trades: fr.trades, sharpe: fr.sharpe, finalEquity: fr.finalEquity, bankrupt: fr.bankrupt});
 				}
 				checked++;
-				var agg = anyErr ? {trades: 0, sharpe: Math.NaN, finalEquity: 0.0} : BasketFitness.aggregateBasket(perSymbol);
-				// The honesty firewall applies HERE too: a genome that only stayed solvent in-sample
-				// but goes bust on the untouched OOS holdout must not read as "held" just because its
-				// raw sharpe happens to be positive.
-				var oosScore = (agg.trades >= 1 && !Math.isNaN(agg.sharpe) && !anyBankrupt) ? agg.sharpe : Fitness.NEG_INF;
+				var agg = anyErr ? {trades: 0, sharpe: Math.NaN, finalEquity: 0.0, bankrupt: false} : BasketFitness.aggregateBasket(perSymbol);
+				var oosScore = BasketFitness.scoreAggregate(agg);
 				var holdMark = oosScore > 0 ? "HELD" : "did not hold";
 				if (oosScore > 0) held++;
 				Sys.println('  ${pad(Std.string(shown), 2)}. IS=${fmt(r.isFit, 4)}  OOS=${!anyErr ? fmt(oosScore, 4) : "n/a"} (trades=${agg.trades})  [$holdMark]  ${r.g.name}');
@@ -1972,7 +2350,7 @@ class CorpusEvoRun {
 	 * `BasketFitness.aggregateBasket` on a one-element array returns that one result unchanged for
 	 * any VALID eval, so single-symbol behavior is unaffected.
 	 */
-	static function evalWorker(engine:Engine, basket:Array<Array<Bar>>, jobs:Deque<EvalJob>, results:Deque<EvalResult>, acks:Deque<Int>, costBps:Float, ?curriculumWeights:Array<Float>):Void {
+	static function evalWorker(engine:Engine, basket:Array<Array<Bar>>, jobs:Deque<EvalJob>, results:Deque<EvalResult>, acks:Deque<Int>, costBps:Float, ?curriculumWeights:Array<Float>, ?fitnessWindows:Int = 1, ?fitnessWindowLambda:Float = 0.5):Void {
 		var host = new GraalWasmHost(engine);
 		host.costBps = costBps;
 		var instances = new Map<String, StrategyInstance>();
@@ -1984,12 +2362,29 @@ class CorpusEvoRun {
 				inst = host.instantiate(host.loadModuleFile(job.wasmPath), job.strings);
 				instances.set(job.wasmPath, inst);
 			}
-			var perSymbol:Array<{trades:Int, sharpe:Float, finalEquity:Float}> = [];
+			var perSymbol:Array<{trades:Int, sharpe:Float, finalEquity:Float, ?bankrupt:Bool}> = [];
 			var firstFills = null;
+			var firstEquity:Array<Float> = null;
+			var firstRawSharpe = 0.0;
+			var firstTrades = 0;
+			var firstFinalEq = 0.0;
 			for (i in 0...basket.length) {
 				var r = inst.run(basket[i], new Map());
-				if (i == 0) firstFills = r.fills;
-				perSymbol.push({trades: r.trades, sharpe: r.sharpe, finalEquity: r.finalEquity});
+				if (i == 0) {
+					firstFills = r.fills;
+					firstEquity = r.equity;
+					firstRawSharpe = r.sharpe;
+					firstTrades = r.trades;
+					firstFinalEq = r.finalEquity;
+				}
+				// WASM path has no OrderSim.bankrupt — treat as solvent (forceFallback when floor>0).
+				var symSharpe = r.sharpe;
+				if (fitnessWindows > 1 && r.equity != null) {
+					var fr = new FitnessResult(true, r.sharpe, r.trades, r.finalEquity, "wasm");
+					fr.equity = r.equity;
+					symSharpe = Fitness.robustScore(fr, fitnessWindows, fitnessWindowLambda);
+				}
+				perSymbol.push({trades: r.trades, sharpe: symSharpe, finalEquity: r.finalEquity, bankrupt: false});
 			}
 			var agg = BasketFitness.aggregateBasket(perSymbol, curriculumWeights);
 			// Behavioral-descriptor inputs (see MapElites.hx) computed HERE, on the worker thread,
@@ -1997,9 +2392,26 @@ class CorpusEvoRun {
 			// triage/the attribution oracle already make; MAP-Elites niching is a diversity signal,
 			// not the fitness itself, so it doesn't need the full basket.
 			var desc = MapElites.describeFills(firstFills, basket[0].length);
+			var symSharpes = [for (p in perSymbol) p.sharpe];
+			var fr0 = new FitnessResult(true, firstRawSharpe, firstTrades, firstFinalEq, "wasm");
+			fr0.equity = firstEquity;
 			results.add({key: job.key, trades: agg.trades, sharpe: agg.sharpe, finalEquity: agg.finalEquity,
-				avgHold: desc.avgHold, longFrac: desc.longFrac, perSymbolSharpe: [for (p in perSymbol) p.sharpe]});
+				avgHold: desc.avgHold, longFrac: desc.longFrac, dutyCycle: desc.dutyCycle, fillHash: musescript.evo.FillHash.of(firstFills),
+				perSymbolSharpe: symSharpes, lexCases: lexCasesFor(fr0, fitnessWindows, symSharpes)});
 		}
+	}
+
+	/**
+	 * Lexicase case vector: multi-symbol basket → per-symbol Sharpes; single tape →
+	 * `Fitness.windowSharpes` (falls back to `[sharpe]` when windows≤1 / equity too short).
+	 */
+	static function lexCasesFor(fr:FitnessResult, fitnessWindows:Int, multiSymbolSharpes:Array<Float>):Array<Float> {
+		if (multiSymbolSharpes != null && multiSymbolSharpes.length > 1)
+			return multiSymbolSharpes;
+		if (fr == null) return multiSymbolSharpes != null && multiSymbolSharpes.length > 0 ? multiSymbolSharpes : [];
+		var w = Fitness.windowSharpes(fr, fitnessWindows);
+		if (w.length > 0) return w;
+		return [fr.sharpe];
 	}
 
 	/**
@@ -2062,17 +2474,13 @@ class CorpusEvoRun {
 		if (pooled.length == 0) return pop;
 		var scored = [for (g in pooled) {
 			var anyErr = false;
-			var perSymbol:Array<{trades:Int, sharpe:Float, finalEquity:Float}> = [];
+			var perSymbol:Array<{trades:Int, sharpe:Float, finalEquity:Float, ?bankrupt:Bool}> = [];
 			for (sym in isBasket) {
 				var fr = Fitness.evaluate(g, sym, "js", false, costBps, startCapital, equityFloor);
-				if (!fr.ok || fr.bankrupt) { anyErr = true; break; }
-				perSymbol.push({trades: fr.trades, sharpe: fr.sharpe, finalEquity: fr.finalEquity});
+				if (!fr.ok) { anyErr = true; break; }
+				perSymbol.push({trades: fr.trades, sharpe: fr.sharpe, finalEquity: fr.finalEquity, bankrupt: fr.bankrupt});
 			}
-			var realSharpe = Fitness.NEG_INF;
-			if (!anyErr) {
-				var agg = BasketFitness.aggregateBasket(perSymbol);
-				if (agg.trades >= 1 && !Math.isNaN(agg.sharpe)) realSharpe = agg.sharpe;
-			}
+			var realSharpe = anyErr ? Fitness.NEG_INF : BasketFitness.scoreAggregate(BasketFitness.aggregateBasket(perSymbol));
 			{g: g, realSharpe: realSharpe};
 		}];
 		scored.sort((a, b) -> a.realSharpe < b.realSharpe ? 1 : (a.realSharpe > b.realSharpe ? -1 : 0));

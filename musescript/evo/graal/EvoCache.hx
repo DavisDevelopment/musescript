@@ -23,6 +23,10 @@ typedef CachedEval = {
 	 */
 	var ?avgHold:Float;
 	var ?longFrac:Float;
+	/** Descriptor-v2 duty cycle (bars-in-position / nBars). Optional for old cache files. */
+	var ?dutyCycle:Float;
+	/** IS fill-sequence fingerprint (`FillHash.of`); optional for old cache lines. */
+	var ?fillHash:String;
 	/** Set when `--equity-floor` is active and this genome's run crossed it (see OrderSim.hx's
 	 * `bankrupt` doc comment) -- `scoreOf` in CorpusEvoRun.hx clamps a bankrupt eval to NEG_INF
 	 * regardless of its raw sharpe. Optional/defaults to `false` for a cache entry from a run that
@@ -55,10 +59,16 @@ typedef CachedEval = {
  */
 class EvoCache {
 	var mem:Map<String, CachedEval> = new Map();
+	/** fillHash -> first structural key that produced it (IS semantic dedup index). */
+	var byFill:Map<String, String> = new Map();
 	var path:Null<String>;
 	var out:Null<sys.io.FileOutput>;
 	public var hits(default, null):Int = 0;
 	public var misses(default, null):Int = 0;
+	/** Times a fresh eval's fillHash already existed (semantic duplicate of another key). */
+	public var semanticHits(default, null):Int = 0;
+	/** Distinct fill hashes observed this cache lifetime (innovation telemetry). */
+	public var uniqueSemantics(default, null):Int = 0;
 
 	public function new(?path:String) {
 		this.path = path;
@@ -88,12 +98,25 @@ class EvoCache {
 	public function put(key:String, e:CachedEval):Void {
 		if (mem.exists(key)) return;
 		mem.set(key, e);
+		if (e.fillHash != null && e.fillHash.length > 0 && e.fillHash != "empty") {
+			if (byFill.exists(e.fillHash)) semanticHits++;
+			else {
+				byFill.set(e.fillHash, key);
+				uniqueSemantics++;
+			}
+		}
 		if (out != null) {
 			var avgHold = e.avgHold != null ? e.avgHold : 0.0;
 			var longFrac = e.longFrac != null ? e.longFrac : 0.5;
-			out.writeString('$key\t${e.trades}\t${e.sharpe}\t${e.finalEquity}\t$avgHold\t$longFrac\n');
+			var dutyCycle = e.dutyCycle != null ? e.dutyCycle : 0.0;
+			out.writeString('$key\t${e.trades}\t${e.sharpe}\t${e.finalEquity}\t$avgHold\t$longFrac\t$dutyCycle\n');
 			out.flush();
 		}
+	}
+
+	/** Structural key that first owned this fill fingerprint, if any. */
+	public function keyForFillHash(fillHash:String):Null<String> {
+		return byFill.get(fillHash);
 	}
 
 	public function size():Int {
@@ -110,8 +133,11 @@ class EvoCache {
 	 * CorpusEvoRun's difficulty-schedule setup), so there's no disk file to reconcile. */
 	public function clear():Void {
 		mem = new Map();
+		byFill = new Map();
 		hits = 0;
 		misses = 0;
+		semanticHits = 0;
+		uniqueSemantics = 0;
 	}
 
 	public function close():Void {
@@ -133,9 +159,11 @@ class EvoCache {
 			// with the "unknown behavior" neutral defaults until it's freshly re-evaluated.
 			var avgHold = parts.length > 4 ? Std.parseFloat(parts[4]) : 0.0;
 			var longFrac = parts.length > 5 ? Std.parseFloat(parts[5]) : 0.5;
+			var dutyCycle = parts.length > 6 ? Std.parseFloat(parts[6]) : 0.0;
 			if (Math.isNaN(avgHold)) avgHold = 0.0;
 			if (Math.isNaN(longFrac)) longFrac = 0.5;
-			mem.set(parts[0], {trades: trades, sharpe: sharpe, finalEquity: equity, avgHold: avgHold, longFrac: longFrac});
+			if (Math.isNaN(dutyCycle)) dutyCycle = 0.0;
+			mem.set(parts[0], {trades: trades, sharpe: sharpe, finalEquity: equity, avgHold: avgHold, longFrac: longFrac, dutyCycle: dutyCycle});
 		}
 	}
 

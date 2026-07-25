@@ -30,6 +30,13 @@ class GrowthWeights {
 	 * constructing a GrowthWeights at all. */
 	public var enabled:Bool = true;
 
+	/**
+	 * Thread contract: `EvolutionEngine.step` may call `pick`/`reward` from AttrPool workers during
+	 * parallel child production. The weight tables are a plain StringMap (§27) — guard every
+	 * read-modify-write. Sections stay get/set only; never call back into Variation while held.
+	 */
+	final lock = new EvoLock();
+
 	/** `lr` is the EMA nudge rate applied on each `reward()` call; `minWeight` is a floor so no
 	 * tag's probability can be driven to zero by a run of unlucky draws -- explore pressure never
 	 * fully collapses, mirroring `attributedPointMutate`'s own 20% uniform-fallback rationale. */
@@ -61,23 +68,42 @@ class GrowthWeights {
 
 	public function hasCategory(cat:String):Bool return w.exists(cat);
 
+	/** Ensure `cat`/`tag` exist (library learning / mid-run motif promote). Idempotent. */
+	public function ensureTag(cat:String, tag:String, ?weight:Float = 0.1):Void {
+		lock.acquire();
+		var tags = w.get(cat);
+		if (tags == null) {
+			tags = new Map();
+			w.set(cat, tags);
+		}
+		if (!tags.exists(tag)) tags.set(tag, weight);
+		lock.release();
+	}
+
 	/** Roulette-wheel draw proportional to current weight. Throws on an unknown category (a
 	 * programming error, not a runtime condition to recover from -- every category is registered
 	 * up front in seedDefaults). */
 	public function pick(cat:String, rng:Rand):String {
+		lock.acquire();
 		var tags = w.get(cat);
-		if (tags == null) throw 'GrowthWeights: unknown category "$cat"';
+		if (tags == null) {
+			lock.release();
+			throw 'GrowthWeights: unknown category "$cat"';
+		}
 		var total = 0.0;
 		for (v in tags) total += v;
 		var r = rng.float() * total;
 		var acc = 0.0;
 		var last:String = null;
+		var chosen:String = null;
 		for (k => v in tags) {
 			acc += v;
 			last = k;
-			if (r <= acc) return k;
+			if (r <= acc) { chosen = k; break; }
 		}
-		return last; // floating-point rounding at the very top of the wheel
+		if (chosen == null) chosen = last;
+		lock.release();
+		return chosen;
 	}
 
 	/** `delta` is childFitness - baselineFitness from the SAME evaluation the mutation that
@@ -88,14 +114,19 @@ class GrowthWeights {
 	 * search, matching this codebase's established explore-preserving bias. */
 	public function reward(cat:String, tag:String, delta:Float):Void {
 		if (!enabled) return;
-		var tags = w.get(cat);
-		if (tags == null || !tags.exists(tag)) return;
 		if (Math.isNaN(delta) || !Math.isFinite(delta)) return;
+		lock.acquire();
+		var tags = w.get(cat);
+		if (tags == null || !tags.exists(tag)) {
+			lock.release();
+			return;
+		}
 		var signal = delta > 0 ? Math.min(1.0, delta) : -0.1;
 		var cur = tags.get(tag);
 		var next = cur + lr * signal * cur;
 		if (next < minWeight) next = minWeight;
 		tags.set(tag, next);
+		lock.release();
 	}
 
 	/** Normalized weights (sum to 1 within a category), highest first -- for end-of-run reporting. */
