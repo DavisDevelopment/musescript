@@ -1,8 +1,10 @@
 package musescript.indicators;
 
 /**
- * Unboxed bar-by-bar float series backed by `haxe.ds.Vector<Float>` on JVM (`double[]`) and
- * `Float64Array` on JS (JIT guide §3.5 — V8 prefers typed arrays over `Vector`→plain `Array`).
+ * Unboxed bar-by-bar float series backed by `haxe.ds.Vector<Float>` on JVM (`double[]`).
+ * On JS: owned series use `Float64Array` (JIT guide §3.5); `fromVector` aliases keep the
+ * shared `Vector` (plain Array) so prefix views stay zero-copy and mutations remain visible.
+ *
  * Sibling of `GrowableVec<Float>` for feeds that need either incremental `push` OR a zero-copy
  * prefix view over an already-materialized tape.
  *
@@ -12,10 +14,9 @@ package musescript.indicators;
  * TWO MODES:
  * - **Owned** (`new`, `fromArray`): the series owns its backing store; `push` grows the
  *   visible prefix and capacity-doubles via `Vector.blit` / `Float64Array.set` (native copy).
- * - **Aliased** (`fromVector`): wraps an existing `Vector<Float>` without copying on JVM; on
- *   JS copies once into a `Float64Array` (Vector is a plain Array there) so subsequent indexed
- *   reads stay on the typed-array elements kind. Only the mutable `length` (visible prefix)
- *   changes as more bars become visible — the key shape for `EngineIndicatorProvider`.
+ * - **Aliased** (`fromVector`): wraps an existing `Vector<Float>` without copying; only the
+ *   mutable `length` (visible prefix) changes as more bars become visible — the key shape for
+ *   sliding prefix views over a full tape buffer.
  *
  * `fromArray` deliberately **copies once** into owned unboxed storage: on JVM,
  * `Array<Float>` is boxed (`java.lang.Double` per element), so the copy pays one boxed read
@@ -27,7 +28,10 @@ package musescript.indicators;
  */
 class FloatSeries {
 	#if js
-	var data:js.lib.Float64Array;
+	/** Owned path — null when this is a `fromVector` alias. */
+	var f64:js.lib.Float64Array;
+	/** Alias path — null when owned. */
+	var vec:haxe.ds.Vector<Float>;
 	#else
 	var data:haxe.ds.Vector<Float>;
 	#end
@@ -38,7 +42,8 @@ class FloatSeries {
 		owned = true;
 		var cap = initialCapacity != null && initialCapacity > 0 ? initialCapacity : 8;
 		#if js
-		data = new js.lib.Float64Array(cap);
+		f64 = new js.lib.Float64Array(cap);
+		vec = null;
 		#else
 		data = new haxe.ds.Vector<Float>(cap);
 		#end
@@ -54,9 +59,9 @@ class FloatSeries {
 	function set_length(n:Int):Int {
 		if (n < 0)
 			throw 'FloatSeries.length must be >= 0 (got $n)';
-		if (n > data.length) {
+		if (n > backingLength) {
 			if (!owned)
-				throw 'FloatSeries.length $n exceeds backing store ${data.length}';
+				throw 'FloatSeries.length $n exceeds backing store $backingLength';
 			ensureCapacity(n);
 		}
 		visibleLength = n;
@@ -65,24 +70,47 @@ class FloatSeries {
 
 	/** Full backing store capacity (may exceed visible `length` on aliased prefix views). */
 	public var backingLength(get, never):Int;
-	inline function get_backingLength():Int return data.length;
 
-	/** True when this series owns `data` and may `push`; false for `fromVector` aliases. */
+	inline function get_backingLength():Int {
+		#if js
+		return owned ? f64.length : vec.length;
+		#else
+		return data.length;
+		#end
+	}
+
+	/** True when this series owns its backing store and may `push`; false for `fromVector` aliases. */
 	public var isOwned(get, never):Bool;
 	inline function get_isOwned():Bool return owned;
 
 	public function push(v:Float):Void {
 		if (!owned)
 			throw "FloatSeries.push requires an owned series (fromVector aliases are prefix views only)";
-		if (visibleLength >= data.length)
+		if (visibleLength >= backingLength)
 			grow();
+		#if js
+		f64[visibleLength] = v;
+		#else
 		data[visibleLength] = v;
+		#end
 		visibleLength++;
 	}
 
-	public inline function at(i:Int):Float return data[i];
+	public inline function at(i:Int):Float {
+		#if js
+		return owned ? f64[i] : vec[i];
+		#else
+		return data[i];
+		#end
+	}
 
-	public inline function setAt(i:Int, v:Float):Void data[i] = v;
+	public inline function setAt(i:Int, v:Float):Void {
+		#if js
+		if (owned) f64[i] = v; else vec[i] = v;
+		#else
+		data[i] = v;
+		#end
+	}
 
 	/**
 	 * Copies `src` into owned unboxed storage. On JVM, each read from `src` may
@@ -95,50 +123,44 @@ class FloatSeries {
 			throw 'FloatSeries.fromArray visible $n out of range for src.length ${src.length}';
 		var s = new FloatSeries(n > 0 ? n : 8);
 		#if js
-		var vec = new js.lib.Float64Array(n > 0 ? n : 0);
+		var arr = new js.lib.Float64Array(n > 0 ? n : 0);
 		for (i in 0...n)
-			vec[i] = src[i];
+			arr[i] = src[i];
+		s.f64 = arr;
+		s.vec = null;
 		#else
-		var vec = new haxe.ds.Vector<Float>(n > 0 ? n : 0);
+		var v = new haxe.ds.Vector<Float>(n > 0 ? n : 0);
 		for (i in 0...n)
-			vec[i] = src[i];
+			v[i] = src[i];
+		s.data = v;
 		#end
-		s.data = vec;
 		s.visibleLength = n;
 		s.owned = true;
 		return s;
 	}
 
-	/** Prefix view over an existing tape buffer; `len` is the initially visible count.
-	 * JVM: zero-copy alias of `Vector`. JS: one copy into `Float64Array` (Vector is a plain Array). */
+	/** Zero-copy prefix view over an existing tape buffer; `len` is the initially visible count. */
 	public static function fromVector(src:haxe.ds.Vector<Float>, len:Int):FloatSeries {
 		if (len < 0 || len > src.length)
 			throw 'FloatSeries.fromVector len $len out of range for src.length ${src.length}';
 		var s = new FloatSeries(0);
 		#if js
-		var arr = new js.lib.Float64Array(src.length);
-		var i = 0;
-		while (i < src.length) {
-			arr[i] = src[i];
-			i++;
-		}
-		s.data = arr;
-		s.visibleLength = len;
-		s.owned = false;
+		s.f64 = null;
+		s.vec = src;
 		#else
 		s.data = src;
+		#end
 		s.visibleLength = len;
 		s.owned = false;
-		#end
 		return s;
 	}
 
 	function grow():Void {
-		var nextCap = data.length > 0 ? data.length * 2 : 8;
+		var nextCap = backingLength > 0 ? backingLength * 2 : 8;
 		#if js
 		var next = new js.lib.Float64Array(nextCap);
-		next.set(data.subarray(0, visibleLength));
-		data = next;
+		next.set(f64.subarray(0, visibleLength));
+		f64 = next;
 		#else
 		var next = new haxe.ds.Vector<Float>(nextCap);
 		haxe.ds.Vector.blit(data, 0, next, 0, visibleLength);
@@ -147,15 +169,15 @@ class FloatSeries {
 	}
 
 	function ensureCapacity(min:Int):Void {
-		if (min <= data.length)
+		if (min <= backingLength)
 			return;
-		var cap = data.length > 0 ? data.length : 8;
+		var cap = backingLength > 0 ? backingLength : 8;
 		while (cap < min)
 			cap *= 2;
 		#if js
 		var next = new js.lib.Float64Array(cap);
-		next.set(data.subarray(0, visibleLength));
-		data = next;
+		next.set(f64.subarray(0, visibleLength));
+		f64 = next;
 		#else
 		var next = new haxe.ds.Vector<Float>(cap);
 		haxe.ds.Vector.blit(data, 0, next, 0, visibleLength);

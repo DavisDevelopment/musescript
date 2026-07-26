@@ -126,6 +126,8 @@ class TestMain {
 		runner.addCase(new TestVariableFrame());
 		runner.addCase(new TestCapstoneIndicators());
 		runner.addCase(new TestArrayBuffer());
+		runner.addCase(new TestFloatSeries());
+		runner.addCase(new TestGeomEwStack());
 		runner.addCase(new TestConstructOnce());
 		runner.addCase(new TestClassStructLowering());
 		// TestProbCloud moved to musescript-kestrel/musescript/tests/ (Kestrel package, not core).
