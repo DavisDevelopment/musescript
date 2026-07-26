@@ -1,10 +1,11 @@
 package musescript.indicators.ew;
 
 import musescript.indicators.geom.PivotPoint;
+import musescript.indicators.geom.SoftScores;
 
 /**
  * Hard impulse (1-2-3-4-5) rules — Neely/Prechter subset for v1.
- * Soft scoring / degree nesting is out of scope here.
+ * Soft Fib/length scores refine lattice ranking; degree nesting stays out of scope.
  */
 class ImpulseRules {
 	/**
@@ -60,5 +61,27 @@ class ImpulseRules {
 		if (impulseUp && p5.price <= p3.price) return false;
 		if (!impulseUp && p5.price >= p3.price) return false;
 		return true;
+	}
+
+	/** Soft Fib/length score for a hard-valid five-wave (six pivots). */
+	public static function softScoreFiveWave(pivots:haxe.ds.Vector<PivotPoint>, offset:Int = 0):Float {
+		if (offset + 5 >= pivots.length) return 0.5;
+		var p0 = pivots[offset];
+		var p1 = pivots[offset + 1];
+		var p2 = pivots[offset + 2];
+		var p3 = pivots[offset + 3];
+		var p4 = pivots[offset + 4];
+		var p5 = pivots[offset + 5];
+		var w1 = Math.abs(p1.price - p0.price);
+		var w2 = Math.abs(p2.price - p1.price);
+		var w3 = Math.abs(p3.price - p2.price);
+		var w4 = Math.abs(p4.price - p3.price);
+		var w5 = Math.abs(p5.price - p4.price);
+		if (!(w1 > 0)) return 0.5;
+		var lenSoft = SoftScores.impulseLengthSoft(w1, w3, w5);
+		var w2re = SoftScores.bestFibHit(w2 / w1);
+		var w4re = SoftScores.bestFibHit(w4 / w3 > 0 ? w4 / w3 : w4 / w1);
+		var t13 = SoftScores.timeEquality(p1.bar - p0.bar, p3.bar - p2.bar, 0.4);
+		return SoftScores.combine(lenSoft, w2re, w4re, t13);
 	}
 }

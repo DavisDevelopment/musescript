@@ -10,12 +10,13 @@ The chart / website surface for this geometry stack lives in the sibling Mederos
 | `paint.js` | Canvas2D levels / rays / zones / pivots / labels / forecast / arcs / rings / cycle / ribbon |
 | `live.js` | MuseRuntime last-bar packs → `frameFromPartial` (preferred path) |
 | `synthesize.js` | Demo / fallback frames when live packs are missing; still owns arcs/rings/cycle/ribbon extras |
-| `pack.js` | Registry ids `GEOM_FIB` … `GEOM_RISK` (gallery + Indicator Library) |
+| `pack.js` | Registry: `GEOM_FIB`…`GEOM_RISK` gallery packs **and** per-builtin overlays (`fib_fan`, `gartley`, …) |
 
 **Status coding:** Confirmed solid · Forming dashed · Projected dotted/ghost.
 
 **Website spots:** live-demo widget Geometry stack slide (`npm run demo:dev` in `mobile/`),
-Strategy Studio Indicator Library categories, Classic IndicatorPicker entries (paint on Advanced).
+Strategy Studio Indicator Library (+ **Add to chart** via `chartBridge` when Advanced is open),
+Classic IndicatorPicker entries (Advanced-only notes), Advanced `+ ind` menu (packs + builtins).
 
 ## Live wiring (sibling ↔ chart)
 
@@ -25,10 +26,12 @@ Indicators nest `levels` / `rays` / `zones` / `pivots` / `labels` / `forecast`
 1. Runs the matching MuseScript builtin over the tape (`geom/live.js`).
 2. Plots pack slots on the **last bar only**, rebuilds a frame via `frameFromPartial`.
 3. Falls back to `synthesize.js` only when packs are missing or MuseRuntime is cold.
-4. Keeps a scalar `mid` legend hook from primary level / forecast midpoint.
+4. Merges synth-only extras (`arcs` / `rings` / `cycle` / `ribbon`) onto live frames when present.
+5. Keeps a scalar `mid` legend hook from primary level / forecast midpoint.
 
 Family gallery cards map to a default live builtin (`FAMILY_LIVE_BUILTIN`); any listed
-builtin id also resolves through `tryLiveGeomFrame(bars, id)`.
+builtin id also resolves through `tryLiveGeomFrame(bars, id)` and is registered as its
+own Advanced overlay id (picker → `addIndicator` → same GeomViz paint path).
 
 ## Live emitters (indicator → GeomViz fields)
 
@@ -44,6 +47,6 @@ in their TObject output (chart drops synthesize when these packs are present):
 | GEOM_CYCLES | ssa_cycles | zones (Cycle), forecast, labels |
 | GEOM_RISK | lppl_warning | zones, forecast, labels |
 
-Still synth-only on chart: `arcs` / `rings` / `cycle` series / `ribbon` array extras
-in `emptyFrame()` until promoted into GeomViz.hx (FibArcs/So9/SSA/LPPL already paint via
-levels/zones/forecast; extras are optional polish).
+Chart-only extras (`arcs` / `rings` / `cycle` series / `ribbon`) remain synth-side and are
+merged onto live frames in `pack.js` so FibArcs / So9 / SSA / LPPL keep the dazzle paint
+without promoting free-form arrays into the Haxe GeomViz hot path.

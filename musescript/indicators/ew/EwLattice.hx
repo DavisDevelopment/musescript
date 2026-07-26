@@ -15,8 +15,9 @@ typedef EwHypothesis = {
 }
 
 /**
- * Top-K hypothesis lattice over a SwingGraph (hard rules only for v1).
- * Soft scores (volume/Hurst/CPD) can multiply `score` externally.
+ * Top-K hypothesis lattice over a SwingGraph.
+ * Hard rules gate admission; SoftScores multiply the base rank score (Fib/time/length).
+ * Soft scores (volume/Hurst/CPD) can still multiply `score` externally.
  */
 class EwLattice {
 	static inline var MAX_K = 8;
@@ -50,18 +51,24 @@ class EwLattice {
 		// Scan for zigzag (4 pivots) and five-wave (6 pivots)
 		if (take >= 4) {
 			var o = take - 4;
-			if (CorrectiveRules.isValidZigzag(pivotScratch[o], pivotScratch[o + 1], pivotScratch[o + 2], pivotScratch[o + 3])) {
+			var p0 = pivotScratch[o];
+			var p1 = pivotScratch[o + 1];
+			var p2 = pivotScratch[o + 2];
+			var p3 = pivotScratch[o + 3];
+			if (CorrectiveRules.isValidZigzag(p0, p1, p2, p3)) {
+				var soft = CorrectiveRules.softScore(p0, p1, p2, p3);
 				push({
-					rank: 0, score: 1.0, label: "zigzag",
-					startBar: pivotScratch[o].bar, endBar: pivotScratch[o + 3].bar, waveCount: 3
+					rank: 0, score: 1.0 * soft, label: "zigzag",
+					startBar: p0.bar, endBar: p3.bar, waveCount: 3
 				}, k);
 			}
 		}
 		if (take >= 6) {
 			var o = take - 6;
 			if (ImpulseRules.isValidFiveWave(pivotScratch, o)) {
+				var soft = ImpulseRules.softScoreFiveWave(pivotScratch, o);
 				push({
-					rank: 0, score: 1.2, label: "impulse5",
+					rank: 0, score: 1.2 * soft, label: "impulse5",
 					startBar: pivotScratch[o].bar, endBar: pivotScratch[o + 5].bar, waveCount: 5
 				}, k);
 			}

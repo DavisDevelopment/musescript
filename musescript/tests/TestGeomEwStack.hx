@@ -133,7 +133,10 @@ class TestGeomEwStack extends Test {
 		var fan = GannAngles.fan(100.0, 10, 1.0);
 		Assert.floatEquals(110.0, fan.ang1x1, 1e-9);
 		Assert.floatEquals(1.0, SoftScores.equality(10, 10), 1e-9);
+		Assert.isTrue(SoftScores.bestFibHit(0.618) > 0.9);
 		Assert.isTrue(ScaleValidityGate.fromHurst(0.75) > ScaleValidityGate.fromHurst(0.5));
+		Assert.isTrue(ScaleValidityGate.fromHurstScales(0.7, 0.72, 0.68)
+			> ScaleValidityGate.fromHurstScales(0.4, 0.8, 0.55));
 		Assert.isTrue(TimePriceSquare.score(10, 10, 1.0) > 0.9);
 		var so9 = SquareOfNine.priceAt(100, 1, 0, 1.0);
 		Assert.isTrue(Math.isFinite(so9));

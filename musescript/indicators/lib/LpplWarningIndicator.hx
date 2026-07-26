@@ -27,7 +27,8 @@ typedef LpplWarningOutput = {
 class LpplWarningIndicator implements MuseIndicator<Bar, LpplWarningOutput> {
 	var period:Int;
 	var closes:RingBuffer<Float>;
-	var scratch:Array<Float>;
+	var scratch:haxe.ds.Vector<Float>;
+	var scratchLen:Int;
 	var out:LpplWarningOutput;
 	var barsSeen:Int;
 
@@ -35,7 +36,8 @@ class LpplWarningIndicator implements MuseIndicator<Bar, LpplWarningOutput> {
 		if (period < 30) throw "LpplWarningIndicator: period must be >= 30";
 		this.period = period;
 		closes = new RingBuffer(period);
-		scratch = [];
+		scratch = new haxe.ds.Vector<Float>(period);
+		scratchLen = 0;
 		barsSeen = 0;
 		out = {
 			warning: Math.NaN, residual: Math.NaN, tc: Math.NaN,
@@ -47,10 +49,10 @@ class LpplWarningIndicator implements MuseIndicator<Bar, LpplWarningOutput> {
 		barsSeen++;
 		closes.push(bar.close);
 		if (closes.length < period) return null;
-		scratch = [];
-		// Oldest→newest for LpplFit
-		for (i in 0...closes.length) scratch.push(closes.at(closes.length - 1 - i));
-		var fit = LpplFit.fitWarning(scratch);
+		// Oldest→newest into fixed scratch (no Array realloc on hot path)
+		scratchLen = closes.length;
+		for (i in 0...scratchLen) scratch[i] = closes.at(scratchLen - 1 - i);
+		var fit = LpplFit.fitWarningVec(scratch, scratchLen);
 		out.warning = fit.warning ? 1.0 : 0.0;
 		out.residual = fit.residual;
 		out.tc = fit.tc;
@@ -71,6 +73,7 @@ class LpplWarningIndicator implements MuseIndicator<Bar, LpplWarningOutput> {
 	public function reset():Void {
 		closes = new RingBuffer(period);
 		barsSeen = 0;
+		scratchLen = 0;
 		out.zones.clear(); out.forecast.clear(); out.labels.clear();
 	}
 
