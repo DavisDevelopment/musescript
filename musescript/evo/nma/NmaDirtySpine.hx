@@ -61,7 +61,7 @@ class NmaDirtySpine {
 		childG:StrategyGenome
 	):Null<NmaWorkingPack> {
 		if (Fitness.nmaWorking == null) return null;
-		if (GenomeFeatures.boolHasFeature(repl)) return null;
+		if (GenomeFeatures.boolIsSimCoupled(repl)) return null;
 		if (!paramsMatchContext(childG, parent.ctx)) return null;
 		var nmaRepl = NmaBijection.boolFromEnum(repl);
 		var oldRoot = NmaSurgery.boolRoot(parent.nma, slot);

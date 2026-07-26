@@ -129,6 +129,18 @@ class NmaNode {
 	 */
 	public var paramRefsCache:Null<Array<Int>> = null;
 
+	/**
+	 * Does the subtree rooted here read SIMULATOR state (a position-state `KFeature`)? `-1`
+	 * unknown, `0` no, `1` yes. Computed lazily by `NmaPositionEval.isCoupled`.
+	 *
+	 * This is the one property that decides whether a subtree can become a column at all. A
+	 * tape-pure subtree is a pure function of the bars and is evaluated once for the whole tape; a
+	 * coupled one depends on positions that do not exist until the simulation runs, so it is
+	 * evaluated per bar inside the loop. Cached because the answer is asked once per root per
+	 * evaluation and the trees are walked constantly.
+	 */
+	public var posCoupledCache:Int = -1;
+
 	function new(kind:NmaKind) {
 		this.kind = kind;
 	}
@@ -185,5 +197,6 @@ class NmaNode {
 		// Keep `kernelWat` — op-level fuse specialization survives structural sibling edits.
 		evalHits = 0;
 		paramRefsCache = null;
+		posCoupledCache = -1;
 	}
 }

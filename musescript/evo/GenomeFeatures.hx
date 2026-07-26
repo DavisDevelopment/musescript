@@ -1,57 +1,53 @@
 package musescript.evo;
 
 /**
- * Shared probes for genomes the columnar NMA path cannot host: position-state `KFeature`s
- * (`unrealized_pnl_pct`, `bars_in_trade`). Multi-output extracts (macd/bbands/stoch) and nested
- * `SInd` are hosted on the columnar path.
+ * The tape-pure / sim-coupled distinction, over the enum genome forms.
+ *
+ * A TAPE-PURE expression is a function of the bars alone, so its value on every bar can be
+ * computed before the simulation starts — that is what makes columnar evaluation, the population
+ * column share, and column-swap attribution possible. A SIM-COUPLED expression reads state that
+ * only exists once the simulation is running: the position-state `KFeature`s
+ * `unrealized_pnl_pct` and `bars_in_trade`. Everything else in the grammar is tape-pure —
+ * multi-output extracts (macd/bbands/stoch) and nested `SInd` included — and the series grammar
+ * cannot name a feature at all, so no `SeriesNode` is ever coupled.
+ *
+ * Being coupled no longer costs a genome the fast path: `NmaPositionEval` evaluates the coupled
+ * spine per bar inside the sim loop, over columns for its pure operands. It does still mean the
+ * subtree has no standalone column, which is why column-swap attribution asks.
  */
 class GenomeFeatures {
-	/** True when NMA must refuse the genome (position-state KFeature). */
-	public static function genomeBlocksColumnar(g:StrategyGenome):Bool {
-		return boolBlocks(g.entryLong) || boolBlocks(g.entryShort)
-			|| boolBlocks(g.exitLong) || boolBlocks(g.exitShort)
-			|| scalarBlocks(g.size);
+	/** Does any root of `g` read simulator state? */
+	public static function isSimCoupled(g:StrategyGenome):Bool {
+		return boolCoupled(g.entryLong) || boolCoupled(g.entryShort)
+			|| boolCoupled(g.exitLong) || boolCoupled(g.exitShort)
+			|| scalarCoupled(g.size);
 	}
 
-	/** @deprecated Prefer `genomeBlocksColumnar`. */
-	public static inline function genomeHasKFeature(g:StrategyGenome):Bool {
-		return genomeBlocksColumnar(g);
+	public static function boolIsSimCoupled(n:BoolNode):Bool {
+		return boolCoupled(n);
 	}
 
-	public static function boolHasFeature(n:BoolNode):Bool {
-		return boolBlocks(n);
-	}
-
-	/** Position-state features need OrderSim — not hostable as signal columns. */
+	/** Position-state features read OrderSim — no standalone column exists for them. */
 	public static inline function isPositionFeature(expr:String):Bool {
 		return musescript.evo.nma.NmaFeatureHost.isPositionFeature(expr);
 	}
 
-	static function boolBlocks(n:BoolNode):Bool {
+	static function boolCoupled(n:BoolNode):Bool {
 		return switch (n) {
-			case BCross(_, a, b): seriesBlocks(a) || seriesBlocks(b);
-			case BCmp(_, a, b): scalarBlocks(a) || scalarBlocks(b);
-			case BTrend(_, s, _): seriesBlocks(s);
-			case BAnd(a, b) | BOr(a, b): boolBlocks(a) || boolBlocks(b);
-			case BNot(a) | BHole(a): boolBlocks(a);
+			// BCross/BTrend take series, and no series can be coupled — hence the constant false.
+			case BCross(_, _, _) | BTrend(_, _, _): false;
+			case BCmp(_, a, b): scalarCoupled(a) || scalarCoupled(b);
+			case BAnd(a, b) | BOr(a, b): boolCoupled(a) || boolCoupled(b);
+			case BNot(a) | BHole(a): boolCoupled(a);
 		};
 	}
 
-	static function scalarBlocks(n:ScalarNode):Bool {
+	static function scalarCoupled(n:ScalarNode):Bool {
 		return switch (n) {
 			case KFeature(expr): isPositionFeature(expr);
-			case KArith(_, a, b): scalarBlocks(a) || scalarBlocks(b);
-			case KSeries(s) | KLookback(s, _): seriesBlocks(s);
-			case KHole(inner): scalarBlocks(inner);
-			case KConst(_) | KParam(_): false;
-		};
-	}
-
-	/** Nested `SInd` is hostable — recurse only to catch a blocked child (none in series grammar). */
-	static function seriesBlocks(n:SeriesNode):Bool {
-		return switch (n) {
-			case SPrice(_): false;
-			case SInd(_, _, _, src): src != null ? seriesBlocks(src) : false;
+			case KArith(_, a, b): scalarCoupled(a) || scalarCoupled(b);
+			case KHole(inner): scalarCoupled(inner);
+			case KSeries(_) | KLookback(_, _) | KConst(_) | KParam(_): false;
 		};
 	}
 

@@ -154,8 +154,12 @@ class NmaEval {
 			case KParam:
 				out = [(cast node : NmaKParam).idx];
 			case KFeature:
-				// Position features refused at prepare; multi-output extracts are tape-pure.
-				out = NO_REFS;
+				// Multi-output extracts (macd/bbands/stoch) are tape-pure and share freely.
+				// A position-state feature is simulator-local: it has no column, and a subtree
+				// above one must never be published to the population share even if some future
+				// caller does evaluate it. `NmaPositionEval` keeps such subtrees off this path.
+				out = NmaFeatureHost.isPositionFeature((cast node : NmaKFeature).name)
+					? FEATURE_REFS : NO_REFS;
 			default:
 				var acc:Null<Array<Int>> = null;
 				var n = node.childCount();

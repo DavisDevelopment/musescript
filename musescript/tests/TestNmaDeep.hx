@@ -70,7 +70,7 @@ class TestNmaDeep extends Test {
 			params: [],
 			name: "credit_bank"
 		};
-		Assert.isTrue(NmaFitness.supportsColumnar(g));
+		Assert.isTrue(NmaFitness.columnSwappable(g));
 		var bars = tape(80);
 		var sites = new Array<musescript.evo.nma.NmaAttr.NmaAttrSite>();
 		var bc:Array<{path:musescript.evo.TreeSurgery.GPath, node:BoolNode}> = [];

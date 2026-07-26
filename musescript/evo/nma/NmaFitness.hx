@@ -92,12 +92,19 @@ class NmaFitness {
 		return fresh;
 	}
 
-	/** True when columnar NMA can evaluate `g` (no position-state `KFeature`).
+	/**
+	 * True when every root of `g` has a standalone signal column — i.e. nothing in it reads
+	 * simulator state.
+	 *
+	 * This is NOT an evaluability test: `prepare` accepts sim-coupled genomes too, and
+	 * `NmaPositionEval` walks their coupled spine per bar. It is what column-swap attribution
+	 * asks, because that technique works by replacing one boolean column in a prepared session
+	 * and rescanning — and a coupled root has no column to replace.
 	 *
 	 * «Σίβυλλα μαίνεται· θεὸς ἐν αὐτῇ λαλεῖ.»
 	 */
-	public static function supportsColumnar(g:StrategyGenome):Bool {
-		return !musescript.evo.GenomeFeatures.genomeBlocksColumnar(g);
+	public static function columnSwappable(g:StrategyGenome):Bool {
+		return !musescript.evo.GenomeFeatures.isSimCoupled(g);
 	}
 
 	public static function evaluate(g:StrategyGenome, bars:Array<Bar>,
@@ -121,13 +128,17 @@ class NmaFitness {
 	 * «ῥεῦμα μέλιτος ῥεῖ· ἀθάνατοι πίνουσιν ἐκεῖ.»
 	 */
 	public static function prepare(g:StrategyGenome, bars:Array<Bar>):Null<{nma:NmaGenome, ctx:NmaEvalContext}> {
-		if (musescript.evo.GenomeFeatures.genomeBlocksColumnar(g)) return null;
 		// Feed-cadence vs Expand short-circuit (genericIndsAlwaysFed) deliberately NOT gated:
 		// under --nma the columnar every-bar feed IS the search oracle. Refusing those genomes
 		// forced ~40% of the pop through Expand→parse→compile (measured). Bit-parity with JVM
 		// interp is parked; Node/JS already matched NMA on palette genomes.
+		//
+		// Position-state features are no longer refused either: `NmaPositionEval` evaluates the
+		// coupled spine per bar inside the sim loop over columns for everything else. Refusing
+		// them was the single largest cost in the engine -- ~10% of evaluations taking more CPU
+		// than the entire columnar path, because each one fell through to the tree-walking
+		// interpreter at 17-30 ms against ~0.24 ms.
 		var nma = NmaBijection.genomeFromEnum(g);
-		if (containsPositionFeature(nma)) return null;
 
 		var t = tapeStateFor(bars);
 		var params = [for (p in g.params) p.defaultValue];
@@ -202,15 +213,21 @@ class NmaFitness {
 			costBps:Float, initialCash:Float, equityFloor:Float, recordFills:Bool):OrderSim {
 		var n = bars.length;
 		var tCols = NmaSignalProbe.stamp();
-		var eL = NmaEval.evalBool(nma.entryLong, ctx);
-		var eS = NmaEval.evalBool(nma.entryShort, ctx);
-		var xL = NmaEval.evalBool(nma.exitLong, ctx);
-		var xS = NmaEval.evalBool(nma.exitShort, ctx);
-		var sz = NmaEval.evalScalar(nma.size, ctx);
+		// A root that reads simulator state has no column: it is walked per bar below, over
+		// columns for its tape-pure operands, which `warm` computes here so the per-bar walk is
+		// reduced to reading them. `null` is the marker for "this root is coupled".
+		var eL = column(nma.entryLong, ctx);
+		var eS = column(nma.entryShort, ctx);
+		var xL = column(nma.exitLong, ctx);
+		var xS = column(nma.exitShort, ctx);
+		var sz = NmaPositionEval.isCoupled(nma.size) ? null : NmaEval.evalScalar(nma.size, ctx);
+		if (sz == null) NmaPositionEval.warmScalar(nma.size, ctx);
 		musescript.evo.Fitness.addNmaPopMemoHits(ctx.popMemoHits);
 		ctx.popMemoHits = 0;
 		var tPack = NmaSignalProbe.stamp();
-		var sig = NmaSignalProbe.on
+		// The probe's semantic signature is defined over the signal columns, which a coupled
+		// genome does not have until it has been simulated. Those are simply not sampled.
+		var sig = NmaSignalProbe.on && eL != null && eS != null && xL != null && xS != null && sz != null
 			? NmaSignalPack.signature(NmaSignalPack.packBool(eL, n), NmaSignalPack.packBool(eS, n),
 				NmaSignalPack.packOr(xL, xS, n), sz, n)
 			: null;
@@ -232,17 +249,23 @@ class NmaFitness {
 		// while spending nothing in the case that actually runs.
 		var needsBeginBar = orders.executionMode != "same-close" || orders.book.pendingCount() > 0;
 
+		// Each condition is read at exactly the point the compiled render evaluates its `when`
+		// head, so a coupled root sees the same OrderSim state the interpreter would: the entry
+		// heads before this bar's submits, the exit head after them.
 		for (i in 0...n) {
 			var bar = bars[i];
 			if (needsBeginBar) orders.beginBar(bar.open, bar.index, bar.high, bar.low);
 			// `long`/`short`/`flat` rather than `submit`: with a Float qty, submit's whole body is
 			// a `Reflect.hasField` probe that always fails, a Dynamic unbox and a string switch
 			// that always lands here. Same execution, without the reflection.
-			if (eL.at(i) >= 0.5 && orders.positionSize() <= 0)
-				orders.long(bar.close, sz.at(i), bar.index);
-			if (eS.at(i) >= 0.5 && orders.positionSize() >= 0)
-				orders.short(bar.close, sz.at(i), bar.index);
-			if (eL_exit(xL, xS, i))
+			if ((eL != null ? eL.at(i) >= 0.5 : NmaPositionEval.boolAt(nma.entryLong, ctx, i, orders, bar))
+				&& orders.positionSize() <= 0)
+				orders.long(bar.close, sizeAt(nma, ctx, sz, i, orders, bar), bar.index);
+			if ((eS != null ? eS.at(i) >= 0.5 : NmaPositionEval.boolAt(nma.entryShort, ctx, i, orders, bar))
+				&& orders.positionSize() >= 0)
+				orders.short(bar.close, sizeAt(nma, ctx, sz, i, orders, bar), bar.index);
+			if ((xL != null ? xL.at(i) >= 0.5 : NmaPositionEval.boolAt(nma.exitLong, ctx, i, orders, bar))
+				|| (xS != null ? xS.at(i) >= 0.5 : NmaPositionEval.boolAt(nma.exitShort, ctx, i, orders, bar)))
 				orders.flat(bar.close, bar.index);
 			orders.mark(bar.close);
 		}
@@ -277,6 +300,18 @@ class NmaFitness {
 		var std = Math.sqrt(var_);
 		if (std == 0) return 0;
 		return (mean / std) * Math.sqrt(252);
+	}
+
+	/** A bool root's column, or `null` when it reads simulator state — warming its pure operands. */
+	static function column(root:NmaBool, ctx:NmaEvalContext):Null<GrowableVec<Float>> {
+		if (!NmaPositionEval.isCoupled(root)) return NmaEval.evalBool(root, ctx);
+		NmaPositionEval.warmBool(root, ctx);
+		return null;
+	}
+
+	static inline function sizeAt(nma:NmaGenome, ctx:NmaEvalContext, sz:Null<GrowableVec<Float>>,
+			i:Int, orders:OrderSim, bar:Bar):Float {
+		return sz != null ? sz.at(i) : NmaPositionEval.scalarAt(nma.size, ctx, i, orders, bar);
 	}
 
 	static inline function eL_exit(xL:GrowableVec<Float>, xS:GrowableVec<Float>, i:Int):Bool {

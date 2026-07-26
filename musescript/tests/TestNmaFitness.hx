@@ -105,6 +105,68 @@ class TestNmaFitness extends Test {
 		];
 	}
 
+	/**
+	 * Genomes that read simulator state. The first three are exactly the shapes `Variation`
+	 * grows (stop loss, take profit, time stop); the rest push the coupled spine into places
+	 * crossover can move it -- under logic, under negation, inside arithmetic, into an entry
+	 * head, and into `size`, where the value is read at submit time rather than at the `when`.
+	 */
+	static function simCoupled():Array<StrategyGenome> {
+		var sma5 = SInd("sma", "close", 5, null);
+		var enter = BCross("over", SPrice("close"), sma5);
+		var pnl = KFeature("unrealized_pnl_pct()");
+		var held = KFeature("bars_in_trade()");
+		return [
+			gen(enter, null, BCmp("<", pnl, KConst(-0.01)), null, null, null, "stop_loss"),
+			gen(enter, null, BCmp(">", pnl, KConst(0.02)), null, null, null, "take_profit"),
+			gen(enter, null, BCmp(">", held, KConst(4.0)), null, null, null, "time_stop"),
+			// stop OR time stop -- the shape a risk-managed elite actually converges to
+			gen(enter, null, BOr(BCmp("<", pnl, KConst(-0.01)), BCmp(">", held, KConst(6.0))),
+				null, null, null, "stop_or_time"),
+			// coupled AND pure, so one operand is a column and the other is walked
+			gen(enter, null, BAnd(BCmp(">", held, KConst(2.0)),
+					BCross("under", SPrice("close"), sma5)),
+				null, null, null, "time_and_cross"),
+			gen(enter, null, BNot(BCmp("<", held, KConst(3.0))), null, null, null, "not_time"),
+			// arithmetic over the feature, and a hole in the coupled spine
+			gen(enter, null, BCmp(">", KArith("*", held, KConst(2.0)), KConst(9.0)),
+				null, null, null, "arith_on_feature"),
+			gen(enter, null, BHole(BCmp("<", pnl, KConst(-0.015))), null, null, null, "hole_stop"),
+			// coupled ENTRY head: read before this bar's submits, unlike an exit
+			gen(BAnd(enter, BCmp("<", held, KConst(1.0))), null,
+				BCross("under", SPrice("close"), sma5), null, null, null, "coupled_entry"),
+			// coupled SIZE: evaluated at the submit call, after the entry head passed
+			gen(enter, null, BCross("under", SPrice("close"), sma5), null,
+				KArith("+", KConst(1.0), held), null, "coupled_size"),
+			// both exits coupled, plus a short side that also trades
+			gen(enter, BCross("under", SPrice("close"), sma5),
+				BCmp(">", held, KConst(5.0)), BCmp("<", pnl, KConst(-0.02)),
+				null, null, "both_sides_coupled"),
+		];
+	}
+
+	public function testSimCoupledGenomesMatchProductionFitness() {
+		var bars = tape(160);
+		for (g in simCoupled())
+			for (cost in [0.0, 20.0])
+				checkParity(g, bars, cost);
+	}
+
+	/** The coupled path must be reached, not silently skipped by a fallback. */
+	public function testSimCoupledGenomesRunOnTheColumnarBackend() {
+		var bars = tape(80);
+		var prev = Fitness.preferNma;
+		Fitness.preferNma = true;
+		for (g in simCoupled()) {
+			Assert.isTrue(musescript.evo.GenomeFeatures.isSimCoupled(g), '${g.name}: is sim-coupled');
+			Assert.isFalse(NmaFitness.columnSwappable(g), '${g.name}: has no swappable column');
+			var fr = Fitness.evaluate(g, bars, "js", false);
+			Assert.isTrue(fr.ok, '${g.name}: evaluates (${fr.error})');
+			Assert.equals("nma", fr.backend, '${g.name}: took the columnar backend');
+		}
+		Fitness.preferNma = prev;
+	}
+
 	function checkParity(g:StrategyGenome, bars:Array<Bar>, costBps:Float):Void {
 		var ref = Fitness.evaluate(g, bars, "js", false, costBps);
 		var nma = NmaFitness.evaluate(g, bars, costBps);
@@ -125,20 +187,18 @@ class TestNmaFitness extends Test {
 	}
 
 	public function testRandomGrownGenomesMatchProductionFitness() {
-		// `growSeries` never nests indicator sources, but `growBool` CAN mint `KFeature` via
-		// `growRiskExit` / multi-output terminals — those are outside the columnar NMA model and
-		// must be skipped explicitly (not counted against the A/B sample). Curated suite is the
-		// strict always-on gate; this fuzzes pure market-data genomes only.
+		// Nothing `growBool` can mint is skipped any more. `growRiskExit`'s position-state
+		// features used to be excluded from this A/B because NMA refused them outright; they are
+		// now evaluated per bar inside the sim loop, so the fuzzer covers them — which is the
+		// point, since they are the shapes least likely to be right by construction.
 		var bars = tape(140);
 		var matched = 0;
-		var skippedFeature = 0;
+		var coupled = 0;
 		var skippedRefFail = 0;
 		var seed = 0;
-		// ~11% of randomGenome draws are pure market-data (rest hit growRiskExit/KFeature);
-		// cap high enough that 15 eligible A/Bs is the expected case, not a coin flip.
 		while (seed < 200 && matched < 15) {
 			var g = new Variation(seed).randomGenome(2 + (seed % 4));
-			if (genomeHasFeature(g)) { skippedFeature++; seed++; continue; }
+			if (genomeHasFeature(g)) coupled++;
 			var ref = Fitness.evaluate(g, bars, "js", false, 0.0);
 			if (!ref.ok) { skippedRefFail++; seed++; continue; }
 			var nma = NmaFitness.evaluate(g, bars, 0.0);
@@ -151,8 +211,11 @@ class TestNmaFitness extends Test {
 			seed++;
 		}
 		Assert.isTrue(matched >= 15,
-			'enough pure market-data random genomes exercised the A/B (got $matched; '
-			+ 'skippedFeature=$skippedFeature skippedRefFail=$skippedRefFail seedsTried=$seed)');
+			'enough random genomes exercised the A/B (got $matched; '
+			+ 'skippedRefFail=$skippedRefFail seedsTried=$seed)');
+		// Guards the test itself: if grammar changes stopped producing risk clauses, the
+		// coverage this test is claiming would quietly vanish.
+		Assert.isTrue(coupled > 0, 'the sample included sim-coupled genomes (got $coupled)');
 	}
 
 	static function genomeHasFeature(g:StrategyGenome):Bool {
@@ -203,9 +266,9 @@ class TestNmaFitness extends Test {
 			exitShort: BCmp(">", KConst(0.0), KConst(1.0)),
 			size: KConst(1.0), params: [], name: "nested"
 		};
-		Assert.isTrue(NmaFitness.supportsColumnar(flat));
-		Assert.isTrue(NmaFitness.supportsColumnar(nested));
-		Assert.isFalse(musescript.evo.GenomeFeatures.genomeBlocksColumnar(nested));
+		Assert.isTrue(NmaFitness.columnSwappable(flat));
+		Assert.isTrue(NmaFitness.columnSwappable(nested));
+		Assert.isFalse(musescript.evo.GenomeFeatures.isSimCoupled(nested));
 		var bars = tape(40);
 		Fitness.preferNma = true;
 		var fr = Fitness.evaluate(nested, bars, "js", false);

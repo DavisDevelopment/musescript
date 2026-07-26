@@ -63,7 +63,7 @@ class TestNmaAttr extends Test {
 			params: [],
 			name: "attr_spine"
 		};
-		Assert.isTrue(NmaFitness.supportsColumnar(g));
+		Assert.isTrue(NmaFitness.columnSwappable(g));
 		var bars = tape(100);
 		var cost = 0.0;
 

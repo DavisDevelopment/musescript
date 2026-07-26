@@ -153,7 +153,7 @@ class NmaAttr {
 		?initialCash:Float = 100000,
 		?equityFloor:Float = 0.0
 	):Null<{baseline:Float, deltas:Array<Float>, keys:Array<String>}> {
-		if (!NmaFitness.supportsColumnar(g)) return null;
+		if (!NmaFitness.columnSwappable(g)) return null;
 
 		// Site keys from the ENUM genome — no prepare required. The warm credit-cuts path used
 		// to openSession (full columnar baseline) just to read keys off the NMA tree, which meant
@@ -223,7 +223,7 @@ class NmaAttr {
 		?initialCash:Float = 100000,
 		?equityFloor:Float = 0.0
 	):Null<Array<Float>> {
-		if (!NmaFitness.supportsColumnar(g)) return null;
+		if (!NmaFitness.columnSwappable(g)) return null;
 		var donorKeys = [for (d in donors) Canonical.boolStructuralKey(d)];
 
 		// A donor's bank mean is the average ABLATION DELTA of that shape wherever it has been
@@ -234,7 +234,7 @@ class NmaAttr {
 				|| (Fitness.attrBankOnly && AttrPool.isNested())) {
 			var priors = NmaCreditBank.means(donorKeys);
 			for (i in 0...donors.length)
-				if (GenomeFeatures.boolHasFeature(donors[i])) priors[i] = Fitness.NEG_INF;
+				if (GenomeFeatures.boolIsSimCoupled(donors[i])) priors[i] = Fitness.NEG_INF;
 			return priors;
 		}
 
@@ -249,10 +249,10 @@ class NmaAttr {
 		// A donor carrying a position-state feature can't be spliced onto a columnar parent at
 		// all, so it is unrankable rather than merely unmeasured -- NEG_INF regardless of bank.
 		for (i in 0...donors.length)
-			if (GenomeFeatures.boolHasFeature(donors[i])) scores[i] = Fitness.NEG_INF;
+			if (GenomeFeatures.boolIsSimCoupled(donors[i])) scores[i] = Fitness.NEG_INF;
 
 		for (i in measure) {
-			if (GenomeFeatures.boolHasFeature(donors[i])) continue;
+			if (GenomeFeatures.boolIsSimCoupled(donors[i])) continue;
 			scores[i] = swapScore(sess, site.slot, site.path, NmaBijection.boolFromEnum(donors[i]));
 		}
 		return scores;
@@ -274,7 +274,7 @@ class NmaAttr {
 		?initialCash:Float = 100000,
 		?equityFloor:Float = 0.0
 	):Null<Array<Float>> {
-		if (!NmaFitness.supportsColumnar(g)) return null;
+		if (!NmaFitness.columnSwappable(g)) return null;
 		var replKeys = [for (r in replacements) Canonical.boolStructuralKey(r)];
 		if (Fitness.creditCuts && NmaCreditBank.warmEnough(replKeys)) {
 			return [for (k in replKeys) NmaCreditBank.mean(k)];
@@ -284,7 +284,7 @@ class NmaAttr {
 		var scores = new Array<Float>();
 		var saved = NmaSurgery.boolRoot(pack.nma, site.slot);
 		for (r in replacements) {
-			if (GenomeFeatures.boolHasFeature(r)) {
+			if (GenomeFeatures.boolIsSimCoupled(r)) {
 				scores.push(Fitness.NEG_INF);
 				continue;
 			}
@@ -314,7 +314,7 @@ class NmaAttr {
 		?initialCash:Float = 100000,
 		?equityFloor:Float = 0.0
 	):Null<{baseline:Float, scores:Array<Float>}> {
-		if (!NmaFitness.supportsColumnar(g)) return null;
+		if (!NmaFitness.columnSwappable(g)) return null;
 		var pack = openSession(g, bars, costBps, initialCash, equityFloor);
 		if (pack == null) return null;
 		var parentNodes = Canonical.nodeCount(g);
@@ -325,7 +325,7 @@ class NmaAttr {
 		var oldNode = NmaSurgery.nodeAtBool(saved, site.path);
 		var oldCount = Canonical.boolNodeCount(NmaBijection.boolToEnum(oldNode));
 		for (r in replacements) {
-			if (GenomeFeatures.boolHasFeature(r)) {
+			if (GenomeFeatures.boolIsSimCoupled(r)) {
 				scores.push(Fitness.NEG_INF);
 				continue;
 			}

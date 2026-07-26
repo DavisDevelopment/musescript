@@ -36,7 +36,7 @@ class NmaSemanticRdo {
 		?candidateCap:Int = 6,
 		?horizon:Int = NmaSemantic.DEFAULT_HORIZON
 	):Null<StrategyGenome> {
-		if (!NmaFitness.supportsColumnar(g)) return null;
+		if (!NmaFitness.columnSwappable(g)) return null;
 		var bars = Fitness.nmaTape;
 		if (bars == null) return null;
 		var built = NmaFitness.prepare(g, bars);
@@ -72,7 +72,7 @@ class NmaSemanticRdo {
 		for (_ in 0...nCand) {
 			var d = rng.int(maxDepth + 1);
 			var cand = grow(d);
-			if (GenomeFeatures.boolHasFeature(cand)) continue;
+			if (GenomeFeatures.boolIsSimCoupled(cand)) continue;
 			var nmaCand = NmaBijection.boolFromEnum(cand);
 			var saved = NmaSurgery.boolRoot(built.nma, site.slot);
 			NmaSurgery.setBoolRoot(built.nma, site.slot, NmaSurgery.replaceBool(saved, site.path, nmaCand));

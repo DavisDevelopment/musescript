@@ -137,7 +137,7 @@ class TestNmaStrangler extends Test {
 			name: "strangle_pure"
 		};
 		var bars = tape(120);
-		Assert.isTrue(NmaFitness.supportsColumnar(g), "curated genome is columnar-eligible");
+		Assert.isTrue(NmaFitness.columnSwappable(g), "curated genome is columnar-eligible");
 
 		Fitness.preferNma = true;
 		var fr = Fitness.evaluate(g, bars, "js", false, 0.0);
@@ -150,22 +150,35 @@ class TestNmaStrangler extends Test {
 		Assert.floatEquals(classic.finalEquity, fr.finalEquity, "equity parity");
 	}
 
-	public function testPreferNmaFallsBackOnKFeature() {
+	/**
+	 * A position-state feature no longer costs the genome the columnar backend. It has no
+	 * standalone column -- so it is still not column-swappable, which is what attribution asks --
+	 * but `NmaPositionEval` walks the coupled spine per bar inside the sim loop, and the result
+	 * must match the compiled path it used to be handed to.
+	 */
+	public function testPreferNmaHostsPositionFeatureOnSimLoop() {
 		var g:StrategyGenome = {
-			entryLong: BCmp("<", KFeature("unrealized_pnl_pct()"), KConst(-0.02)),
+			entryLong: BCross("over", SPrice("close"), SInd("sma", "close", 5, null)),
 			entryShort: FALSE_BOOL,
-			exitLong: FALSE_BOOL,
+			exitLong: BCmp("<", KFeature("unrealized_pnl_pct()"), KConst(-0.02)),
 			exitShort: FALSE_BOOL,
 			size: KConst(1.0),
 			params: [],
 			name: "strangle_feat"
 		};
-		Assert.isFalse(NmaFitness.supportsColumnar(g), "risk-exit feature genome is not columnar");
+		var bars = tape(80);
+		Assert.isTrue(musescript.evo.GenomeFeatures.isSimCoupled(g), "risk exit reads sim state");
+		Assert.isFalse(NmaFitness.columnSwappable(g), "and so has no column to swap");
+
 		Fitness.preferNma = true;
-		var fr = Fitness.evaluate(g, tape(80), "js", false, 0.0);
-		Assert.isTrue(fr.ok, 'fallback must succeed (${fr.error})');
-		Assert.notEquals("nma", fr.backend, "KFeature must not stick on nma backend");
-		Assert.notEquals("nma-unsupported", fr.backend, "refusal must not surface as final result");
+		var fr = Fitness.evaluate(g, bars, "js", false, 0.0);
+		Assert.isTrue(fr.ok, 'coupled genome must evaluate (${fr.error})');
+		Assert.equals("nma", fr.backend, "coupled genome now stays on the columnar backend");
+
+		var classic = Fitness.evaluateCompiled(g, bars, "js", false, 0.0);
+		Assert.isTrue(classic.ok, 'classic ok (${classic.error})');
+		Assert.equals(classic.trades, fr.trades, "trades parity");
+		Assert.floatEquals(classic.finalEquity, fr.finalEquity, "equity parity");
 	}
 
 	public function testSindColumnCacheHitsAcrossAblationShapedEvals() {
