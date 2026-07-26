@@ -353,6 +353,14 @@ class CorpusEvoRun {
 		// hard floor on ms/gen no matter how fast backtests get. Off by default -- the timing calls
 		// are a handful per generation, but a measurement flag that changes what it measures is
 		// worse than no flag.
+		// `--signal-probe`: per-generation count of genomes sharing an identical bit-packed signal
+		// signature, plus the column/pack/OrderSim time split inside an evaluation. Measurement
+		// only -- it changes no decision. Answers whether pre-sim dedup is worth building, which
+		// the existing `semHits` (FillHash, computed AFTER the sim) cannot: fills are a coarser
+		// equivalence than signals, so that number is an upper bound rather than an estimate.
+		musescript.evo.nma.NmaSignalProbe.on = argFlag("--signal-probe");
+		if (musescript.evo.nma.NmaSignalProbe.on)
+			Sys.println("signal-probe: on -- per-generation signal dedup + eval split");
 		var phaseProfileOn = argFlag("--phase-profile");
 		var profile = new PhaseTimer(phaseProfileOn);
 		PhaseTimer.current = phaseProfileOn ? profile : null;
@@ -1880,6 +1888,8 @@ class CorpusEvoRun {
 					? ' fuseCalls=${musescript.evo.nma.NmaFuseHost.fuseCalls} fuseSkips=${musescript.evo.nma.NmaFuseHost.fuseSkips}'
 						+ ' fuseFb=${musescript.evo.nma.NmaFuseHost.fuseFallbacks}'
 					: ''));
+			if (musescript.evo.nma.NmaSignalProbe.on)
+				Sys.println('  ' + musescript.evo.nma.NmaSignalProbe.drain(gen));
 
 			if (dashboard != null) {
 				var validFitness = [for (f in fitness) if (f != Fitness.NEG_INF) f];

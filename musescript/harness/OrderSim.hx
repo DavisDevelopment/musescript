@@ -20,6 +20,16 @@ class OrderSim {
 	/** Chronological executed fills for the IDE trade log (additive; never read by the sim). */
 	public var fills:Array<Fill>;
 	/**
+	 * When false, `fills` is left empty and the per-fill records are never allocated. For callers
+	 * that only want the scalar outcome -- `trades`, `wins`, the equity curve, `bankrupt` -- which
+	 * are all maintained independently of this list. Attribution is the motivating case: a column
+	 * swap runs a whole simulation to read one Sharpe out of it, and at ~15 swaps per child it was
+	 * allocating a `Fill` structure per execution that nothing would ever look at.
+	 *
+	 * Default true, so every existing caller keeps the trade log it has always had.
+	 */
+	public var recordFills:Bool = true;
+	/**
 	 * `same-close` preserves the historical simulator behavior.
 	 * `next-open` queues the last order requested on bar t and fills it at bar t+1 open.
 	 */
@@ -237,7 +247,7 @@ class OrderSim {
 		position += q;
 		if (wasFlat && position != 0 && barIndex >= 0) entryBar = barIndex;
 		trades++;
-		fills.push({ kind: "long", bar: barIndex, price: px, qty: q, pnl: 0.0 });
+		if (recordFills) fills.push({ kind: "long", bar: barIndex, price: px, qty: q, pnl: 0.0 });
 	}
 
 	function executeShort(price:Float, qty:Float, barIndex:Int):Void {
@@ -257,7 +267,7 @@ class OrderSim {
 		position -= q;
 		if (wasFlat && position != 0 && barIndex >= 0) entryBar = barIndex;
 		trades++;
-		fills.push({ kind: "short", bar: barIndex, price: px, qty: q, pnl: 0.0 });
+		if (recordFills) fills.push({ kind: "short", bar: barIndex, price: px, qty: q, pnl: 0.0 });
 	}
 
 	function executeFlat(price:Float, barIndex:Int):Void {
@@ -270,7 +280,7 @@ class OrderSim {
 		position = 0;
 		entryBar = -1;
 		trades++;
-		fills.push({ kind: "flat", bar: barIndex, price: px, qty: closed, pnl: pnl });
+		if (recordFills) fills.push({ kind: "flat", bar: barIndex, price: px, qty: closed, pnl: pnl });
 	}
 
 	public function mark(price:Float):Void {

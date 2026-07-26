@@ -30,7 +30,6 @@ import musescript.evo.nma.NmaScalar;
  * «Γῆς παῖς εἰμι καὶ Οὐρανοῦ ἀστερόεντος.»
  */
 class NmaFitness {
-
 	/**
 	 * Everything `prepare` derives from the TAPE alone — the per-field price arrays, the tape
 	 * signature, and the `SInd` column share (spec §6b content-addressed leaf memo). Split out of
@@ -152,7 +151,7 @@ class NmaFitness {
 	public static function evaluatePrepared(nma:NmaGenome, ctx:NmaEvalContext, bars:Array<Bar>,
 			?costBps:Float = 0.0, ?initialCash:Float = 100000, ?equityFloor:Float = 0.0):FitnessResult {
 		try {
-			var orders = runPrepared(nma, ctx, bars, costBps, initialCash, equityFloor);
+			var orders = runPrepared(nma, ctx, bars, costBps, initialCash, equityFloor, true);
 			var eqArr = orders.equity.toArray();
 			var rets = Metrics.returnsFromEquity(eqArr);
 			var finalEq = orders.equity.length > 0 ? orders.equity[orders.equity.length - 1] : orders.cash;
@@ -186,7 +185,8 @@ class NmaFitness {
 			?costBps:Float = 0.0, ?initialCash:Float = 100000, ?equityFloor:Float = 0.0,
 			?minTrades:Int = 1):Float {
 		try {
-			var orders = runPrepared(nma, ctx, bars, costBps, initialCash, equityFloor);
+			// No fills: this path reads only trades, equity and bankruptcy.
+			var orders = runPrepared(nma, ctx, bars, costBps, initialCash, equityFloor, false);
 			return musescript.evo.Fitness.scoreFacts(
 				orders.trades, sharpeOfEquity(orders.equity), orders.bankrupt, minTrades);
 		} catch (e:Dynamic) {
@@ -199,8 +199,9 @@ class NmaFitness {
 	/** The shared body of `evaluatePrepared` / `scorePrepared`: columns, then the verbatim
 	 * `BacktestEngine.run` per-bar loop. Single-sourced so the two cannot drift apart. */
 	static function runPrepared(nma:NmaGenome, ctx:NmaEvalContext, bars:Array<Bar>,
-			costBps:Float, initialCash:Float, equityFloor:Float):OrderSim {
+			costBps:Float, initialCash:Float, equityFloor:Float, recordFills:Bool):OrderSim {
 		var n = bars.length;
+		var tCols = NmaSignalProbe.stamp();
 		var eL = NmaEval.evalBool(nma.entryLong, ctx);
 		var eS = NmaEval.evalBool(nma.entryShort, ctx);
 		var xL = NmaEval.evalBool(nma.exitLong, ctx);
@@ -208,23 +209,45 @@ class NmaFitness {
 		var sz = NmaEval.evalScalar(nma.size, ctx);
 		musescript.evo.Fitness.addNmaPopMemoHits(ctx.popMemoHits);
 		ctx.popMemoHits = 0;
+		var tPack = NmaSignalProbe.stamp();
+		var sig = NmaSignalProbe.on
+			? NmaSignalPack.signature(NmaSignalPack.packBool(eL, n), NmaSignalPack.packBool(eS, n),
+				NmaSignalPack.packOr(xL, xS, n), sz, n)
+			: null;
+		var tSim = NmaSignalProbe.stamp();
 
 		var orders = new OrderSim();
+		orders.recordFills = recordFills;
 		if (costBps != 0) orders.book.slippageBps = costBps;
 		if (initialCash != 100000) orders.reset(initialCash);
 		if (equityFloor > 0) orders.equityFloor = equityFloor;
 
+		// `beginBar` does two things and this loop can trigger neither. It replays a queued
+		// next-open order, and this sim is `same-close`; and it fills pending BOOK orders, which
+		// only arrive via `submit` with an order-spec object, which the calls below never make. So
+		// for a fresh OrderSim both guards inside it are false on every bar and the call is a
+		// no-op -- one that boxes two `java.lang.Double` for its optional `high`/`low` on the JVM,
+		// every bar of every evaluation (guide §3.1). Hoisting the condition keeps the semantics
+		// exactly (any future caller that arrives here in another mode still gets its beginBars)
+		// while spending nothing in the case that actually runs.
+		var needsBeginBar = orders.executionMode != "same-close" || orders.book.pendingCount() > 0;
+
 		for (i in 0...n) {
 			var bar = bars[i];
-			orders.beginBar(bar.open, bar.index, bar.high, bar.low);
+			if (needsBeginBar) orders.beginBar(bar.open, bar.index, bar.high, bar.low);
+			// `long`/`short`/`flat` rather than `submit`: with a Float qty, submit's whole body is
+			// a `Reflect.hasField` probe that always fails, a Dynamic unbox and a string switch
+			// that always lands here. Same execution, without the reflection.
 			if (eL.at(i) >= 0.5 && orders.positionSize() <= 0)
-				orders.submit("long", sz.at(i), bar.close, bar.index);
+				orders.long(bar.close, sz.at(i), bar.index);
 			if (eS.at(i) >= 0.5 && orders.positionSize() >= 0)
-				orders.submit("short", sz.at(i), bar.close, bar.index);
+				orders.short(bar.close, sz.at(i), bar.index);
 			if (eL_exit(xL, xS, i))
-				orders.submit("flat", Math.NaN, bar.close, bar.index);
+				orders.flat(bar.close, bar.index);
 			orders.mark(bar.close);
 		}
+		if (NmaSignalProbe.on)
+			NmaSignalProbe.observe(sig, tPack - tCols, tSim - tPack, Sys.time() - tSim);
 		return orders;
 	}
 

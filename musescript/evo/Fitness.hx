@@ -387,6 +387,7 @@ class Fitness {
 	 * «Ὀρφεὺς κατέβη· κιθάρα νεκροὺς ἔπεισε.»
 	 */
 	public static function evaluateCompiled(g:StrategyGenome, bars:Array<Bar>, ?target:String = "js", ?strict:Bool = false, ?costBps:Float = 0, ?initialCash:Float = 100000, ?equityFloor:Float = 0.0):FitnessResult {
+		var tCompiled = musescript.evo.nma.NmaSignalProbe.stamp();
 		try {
 			// NOTE: this used to branch on `#if (java || jvm)` into a checker-only fast path
 			// that never touched `bars` at all -- it returned trades=max(1,40-nodeCount),
@@ -429,6 +430,7 @@ class Fitness {
 				fnCache.set(cacheKey, { fn: fn, decls: decls, backend: backend });
 				fnCacheLock.release();
 			}
+			var tRun = musescript.evo.nma.NmaSignalProbe.stamp();
 			var harness = new HarnessContext();
 			if (costBps != 0) harness.orders.book.slippageBps = costBps;
 			// `--equity-floor`/bankruptcy crank (see OrderSim.hx's doc comment): both are no-ops at
@@ -451,8 +453,11 @@ class Fitness {
 			fr.fills = Reflect.field(result, "fills");
 			fr.bankrupt = harness.orders.bankrupt;
 			fr.equity = harness.orders.equity.toArray();
+			var tEnd = Sys.time();
+			musescript.evo.nma.NmaSignalProbe.observeCompiled(tEnd - tCompiled, tRun - tCompiled, tEnd - tRun);
 			return fr;
 		} catch (e:Dynamic) {
+			musescript.evo.nma.NmaSignalProbe.observeCompiled(Sys.time() - tCompiled, 0, 0);
 			return new FitnessResult(false, -999, 0, 0, "error", Std.string(e));
 		}
 	}
