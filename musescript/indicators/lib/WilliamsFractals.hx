@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -21,46 +22,47 @@ typedef WilliamsFractalsOutput = {
  * Williams Fractals — ported from wickra-core's `WilliamsFractals`
  * (vendor/wickra/crates/wickra-core/src/indicators/williams_fractals.rs).
  *
- * Bill Williams' five-bar swing detector. A bar is an UP fractal if its high
- * is strictly above the highs of the two bars immediately before and the two
- * bars immediately after. A bar is a DOWN fractal if its low is strictly
- * below the lows of those same four neighbours. Because confirmation
- * requires two bars to the right of the candidate, the indicator inherently
- * lags by two bars.
- *
- * The first output lands at the fifth candle and corresponds to the third
- * candle (the centre of the window). The builtin surface encodes "no
- * fractal" as NaN.
+ * Five-bar swing detector with RingBuffer windows (no Array.shift).
+ * Confirmation lags by two bars. See also geom.FractalSwingAdapter for
+ * PivotPoint / SwingGraph integration.
  */
 class WilliamsFractals implements MuseIndicator<Bar, WilliamsFractalsOutput> {
-	// Five-bar window of {high, low} pairs. The centre is at index 2.
-	var highs:Array<Float>;
-	var lows:Array<Float>;
+	var highs:RingBuffer<Float>;
+	var lows:RingBuffer<Float>;
+	var out:WilliamsFractalsOutput;
 
 	public function new() {
-		highs = [];
-		lows = [];
+		highs = new RingBuffer(5);
+		lows = new RingBuffer(5);
+		out = { up: null, down: null };
 	}
 
 	public function update(candle:Bar):Null<WilliamsFractalsOutput> {
-		if (highs.length == 5) {
-			highs.shift();
-			lows.shift();
-		}
 		highs.push(candle.high);
 		lows.push(candle.low);
 		if (highs.length < 5) return null;
 
-		var h2 = highs[2];
-		var l2 = lows[2];
-		var up:Null<Float> = (h2 > highs[0] && h2 > highs[1] && h2 > highs[3] && h2 > highs[4]) ? h2 : null;
-		var down:Null<Float> = (l2 < lows[0] && l2 < lows[1] && l2 < lows[3] && l2 < lows[4]) ? l2 : null;
-		return { up: up, down: down };
+		// RingBuffer.at(i): 0 = newest. Five-bar chronological order oldest→newest
+		// is at(4), at(3), at(2), at(1), at(0). Centre = at(2).
+		var h0 = highs.at(4);
+		var h1 = highs.at(3);
+		var h2 = highs.at(2);
+		var h3 = highs.at(1);
+		var h4 = highs.at(0);
+		var l0 = lows.at(4);
+		var l1 = lows.at(3);
+		var l2 = lows.at(2);
+		var l3 = lows.at(1);
+		var l4 = lows.at(0);
+
+		out.up = (h2 > h0 && h2 > h1 && h2 > h3 && h2 > h4) ? h2 : null;
+		out.down = (l2 < l0 && l2 < l1 && l2 < l3 && l2 < l4) ? l2 : null;
+		return out;
 	}
 
 	public function reset():Void {
-		highs = [];
-		lows = [];
+		highs = new RingBuffer(5);
+		lows = new RingBuffer(5);
 	}
 
 	public function warmupPeriod():Int return 5;
@@ -78,7 +80,6 @@ class WilliamsFractals implements MuseIndicator<Bar, WilliamsFractalsOutput> {
 					() -> new WilliamsFractals(), function(i, b) {
 						var o = (cast i : WilliamsFractals).update(b);
 						if (o == null) return null;
-						// Encode the Option fields as NaN for the flat builtin.
 						return {
 							up: o.up == null ? Math.NaN : o.up,
 							down: o.down == null ? Math.NaN : o.down

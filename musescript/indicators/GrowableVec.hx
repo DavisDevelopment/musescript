@@ -37,6 +37,15 @@ abstract GrowableVec<T>(IGrowableVec<T>) {
 	public var length(get, never):Int;
 	inline function get_length():Int return this.getLength();
 
+	/**
+	 * Drop contents; keep the backing store. Hot sims (`OrderSim.reset`) call this instead of
+	 * allocating a fresh vector so a recycled `OrderSim` does not re-grow from capacity 8 every run.
+	 */
+	public inline function clear():Void this.clear();
+
+	/** Ensure the backing store can hold at least `n` elements without growing on the next pushes. */
+	public inline function ensureCapacity(n:Int):Void this.ensureCapacity(n);
+
 	/** Materializes a real, plain `Array<T>` -- pay this ONCE at an interop/output boundary
 	 * (JSON serialization, a public result typedef locked to `Array<Float>`, a general-purpose
 	 * builtin that also accepts plain author-written arrays) rather than changing that
@@ -59,17 +68,32 @@ interface IGrowableVec<T> {
 	function push(v:T):Void;
 	function at(i:Int):T;
 	function getLength():Int;
+	function clear():Void;
+	function ensureCapacity(n:Int):Void;
 }
 
 /** Float fast path: a plain (non-generic) class, so `Float` is concrete at ITS OWN definition
  * -- `data` is backed by a genuine primitive `double[]` on the JVM target, no monomorphization
- * required (see `RingBuffer.hx`'s doc comment for the full verification of this pattern). */
+ * required (see `RingBuffer.hx`'s doc comment for the full verification of this pattern).
+ *
+ * On JS, `haxe.ds.Vector<Float>` lowers to a plain `Array` (JIT guide §3.5). V8's elements kinds
+ * specialize hard on typed arrays, so the JS emit uses `Float64Array` instead — same API,
+ * contiguous doubles, no holey Number packing on every NMA column push/at. */
 class GrowableFloatImpl implements IGrowableVec<Float> {
+	#if js
+	var data:js.lib.Float64Array;
+	#else
 	var data:haxe.ds.Vector<Float>;
+	#end
 	var length:Int = 0;
 
 	public function new(?initialCapacity:Int = 8) {
-		data = new haxe.ds.Vector<Float>(initialCapacity != null && initialCapacity > 0 ? initialCapacity : 8);
+		var cap = initialCapacity != null && initialCapacity > 0 ? initialCapacity : 8;
+		#if js
+		data = new js.lib.Float64Array(cap);
+		#else
+		data = new haxe.ds.Vector<Float>(cap);
+		#end
 	}
 
 	public function push(v:Float):Void {
@@ -79,13 +103,36 @@ class GrowableFloatImpl implements IGrowableVec<Float> {
 	}
 
 	function grow():Void {
+		#if js
+		var next = new js.lib.Float64Array(data.length * 2);
+		next.set(data);
+		data = next;
+		#else
 		var next = new haxe.ds.Vector<Float>(data.length * 2);
 		haxe.ds.Vector.blit(data, 0, next, 0, data.length);
 		data = next;
+		#end
 	}
 
 	public function at(i:Int):Float return data[i];
 	public function getLength():Int return length;
+
+	public function clear():Void {
+		length = 0;
+	}
+
+	public function ensureCapacity(n:Int):Void {
+		if (n <= data.length) return;
+		#if js
+		var next = new js.lib.Float64Array(n);
+		next.set(data.subarray(0, length));
+		data = next;
+		#else
+		var next = new haxe.ds.Vector<Float>(n);
+		haxe.ds.Vector.blit(data, 0, next, 0, length);
+		data = next;
+		#end
+	}
 }
 
 /** Generic fallback for every T that isn't Float (this codebase's `@:structInit` pair classes,
@@ -102,4 +149,16 @@ class GrowableGenericImpl<T> implements IGrowableVec<T> {
 	public function push(v:T):Void data.push(v);
 	public function at(i:Int):T return data[i];
 	public function getLength():Int return data.length;
+
+	public function clear():Void {
+		#if (js || hl || java || cpp || cs || python || lua || neko || php || eval)
+		data.resize(0);
+		#else
+		data = [];
+		#end
+	}
+
+	public function ensureCapacity(n:Int):Void {
+		// Array grows on push; nothing to reserve cheaply across targets.
+	}
 }

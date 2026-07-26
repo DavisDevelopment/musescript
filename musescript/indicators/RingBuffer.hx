@@ -89,16 +89,24 @@ interface IRingBuffer<T> {
 
 /** Float fast path: a plain (non-generic) class, so `Float` is concrete at ITS OWN definition
  * -- `data` is backed by a genuine primitive `double[]` on the JVM target, no monomorphization
- * required. */
+ * required. On JS: `Float64Array` (JIT guide §3.5) instead of `Vector`→plain `Array`. */
 class RingBufferFloatImpl implements IRingBuffer<Float> {
+	#if js
+	var data:js.lib.Float64Array;
+	#else
 	var data:haxe.ds.Vector<Float>;
+	#end
 	var head:Int = 0;
 	var length:Int = 0;
 	var capacity:Int;
 
 	public function new(capacity:Int) {
 		this.capacity = capacity;
+		#if js
+		data = new js.lib.Float64Array(capacity);
+		#else
 		data = new haxe.ds.Vector<Float>(capacity);
+		#end
 	}
 
 	public function push(v:Float):Null<Float> {

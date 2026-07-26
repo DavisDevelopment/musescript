@@ -4,159 +4,84 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.geom.SwingGraph;
+import musescript.indicators.geom.GeomViz;
+import musescript.indicators.geom.PivotStatus;
 import musescript.types.MuseType;
 
-/** Fibonacci Time Zones output: on-zone flag and bars to next zone. */
 typedef FibTimeZonesOutput = {
-	var onZone:Float;
-	var barsToNext:Float;
-}
-
-private typedef Pivot = {
-	var price:Float;
-	var direction:Float;
-	var bar:Int;
-}
-
-private typedef SwingState = {
-	var direction:Float;
-	var extreme:Float;
-	var extremeBar:Int;
-}
-
-/** Non-repainting percent-threshold swing tracker with bounded pivot history. */
-private class SwingTracker {
-	var threshold:Float;
-	var cap:Int;
-	var barsSeen:Int;
-	var state:Null<SwingState>;
-	var pivots:Array<Pivot>;
-
-	public function new(threshold:Float, cap:Int) {
-		this.threshold = threshold;
-		this.cap = cap;
-		barsSeen = 0;
-		state = null;
-		pivots = [];
-	}
-
-	public function update(bar:Bar):Bool {
-		var barIdx = barsSeen;
-		barsSeen++;
-
-		if (state == null) {
-			state = { direction: 1.0, extreme: bar.high, extremeBar: barIdx };
-			return false;
-		}
-
-		var s = state;
-		if (s.direction > 0.0) {
-			if (bar.high > s.extreme) {
-				state = { direction: 1.0, extreme: bar.high, extremeBar: barIdx };
-				return false;
-			}
-			if (bar.low <= s.extreme * (1.0 - threshold)) {
-				push({ price: s.extreme, direction: 1.0, bar: s.extremeBar });
-				state = { direction: -1.0, extreme: bar.low, extremeBar: barIdx };
-				return true;
-			}
-			return false;
-		} else {
-			if (bar.low < s.extreme) {
-				state = { direction: -1.0, extreme: bar.low, extremeBar: barIdx };
-				return false;
-			}
-			if (bar.high >= s.extreme * (1.0 + threshold)) {
-				push({ price: s.extreme, direction: -1.0, bar: s.extremeBar });
-				state = { direction: 1.0, extreme: bar.high, extremeBar: barIdx };
-				return true;
-			}
-			return false;
-		}
-	}
-
-	function push(pivot:Pivot):Void {
-		pivots.push(pivot);
-		if (pivots.length > cap) pivots.shift();
-	}
-
-	public function getPivots():Array<Pivot> return pivots;
-
-	public function reset():Void {
-		barsSeen = 0;
-		state = null;
-		pivots = [];
-	}
+	var onZone:Float; var barsToNext:Float;
+	var zones:ZoneSet; var pivots:PivotMarkSet; var labels:LabelSet;
 }
 
 /**
- * Fibonacci Time Zones — vertical markers at Fibonacci bar-distances from the
- * most recent swing pivot.
- * Ported from wickra-core's `FibTimeZones`
- * (github.com/wickra-lib/wickra/blob/main/crates/wickra-core/src/indicators/fib_time_zones.rs).
- *
- * Anchored on the most recent confirmed swing pivot, the Fibonacci sequence
- * `1, 2, 3, 5, 8, 13, …` marks bars at which trend changes are classically
- * anticipated. Reports whether the current bar is on a zone and how many bars
- * remain until the next one.
+ * Fibonacci Time Zones — demoted vs ssa_cycles; still emits TimeWindow zones for charts.
  */
 class FibTimeZones implements MuseIndicator<Bar, FibTimeZonesOutput> {
-	var swing:SwingTracker;
-	var barsSeen:Int;
+	var swing:SwingGraph;
+	var out:FibTimeZonesOutput;
 
 	public function new() {
-		swing = new SwingTracker(0.05, 2);
-		barsSeen = 0;
+		swing = new SwingGraph(0.05, 2);
+		out = {
+			onZone: Math.NaN, barsToNext: Math.NaN,
+			zones: ZoneSet.nan(), pivots: PivotMarkSet.nan(), labels: LabelSet.nan()
+		};
 	}
 
 	public function update(bar:Bar):Null<FibTimeZonesOutput> {
 		swing.update(bar);
-		barsSeen++;
-		return zones();
-	}
-
-	function zones():Null<FibTimeZonesOutput> {
-		var pivots = swing.getPivots();
-		if (pivots.length == 0) return null;
-
-		var anchor = pivots[pivots.length - 1];
-		var distance = (barsSeen - 1) - anchor.bar; // currentBar() = barsSeen - 1
-
-		// Walk the time-zone sequence 1, 2, 3, 5, 8, …
-		var lo = 1;
-		var hi = 2;
-		var onZone = false;
+		if (swing.pivotCount() == 0) return null;
+		var anchor = swing.pivotAt(swing.pivotCount() - 1);
+		var distance = swing.currentBar() - anchor.bar;
+		// Scalar contract first (same loop as pre-viz FibTimeZones).
+		var lo = 1; var hi = 2; var onZone = false;
 		while (lo <= distance) {
-			if (lo == distance) {
-				onZone = true;
-			}
-			var next = lo + hi;
-			lo = hi;
-			hi = next;
+			if (lo == distance) onZone = true;
+			var next = lo + hi; lo = hi; hi = next;
 		}
-
-		return {
-			onZone: onZone ? 1.0 : 0.0,
-			barsToNext: lo - distance
-		};
+		out.onZone = onZone ? 1.0 : 0.0;
+		out.barsToNext = lo - distance;
+		var nextZoneBar = (anchor.bar + lo) * 1.0;
+		// Chart TimeWindow markers — independent fib walk; does not touch barsToNext.
+		var zLo = 1; var zHi = 2; var zoneIdx = 0;
+		out.zones.clear();
+		var st = GeomVizFill.statusOf(PivotStatus.Projected);
+		var px = anchor.price;
+		var band = Math.abs(px) * 0.002;
+		if (!(band > 0)) band = 0.01;
+		while (zLo <= distance + 20 && zoneIdx < ZoneSet.CAP) {
+			var barAt = (anchor.bar + zLo) * 1.0;
+			out.zones.set(zoneIdx, px - band, px + band, barAt, barAt, st, (ZoneKind.TimeWindow : Int) * 1.0);
+			zoneIdx++;
+			var zNext = zLo + zHi; zLo = zHi; zHi = zNext;
+		}
+		out.zones.count = zoneIdx * 1.0;
+		GeomVizFill.pivotsFromGraph(swing, out.pivots, 2);
+		out.labels.clear();
+		out.labels.set(0, (GeomLabelCode.Projected : Int) * 1.0, px, nextZoneBar, st);
+		out.labels.count = 1;
+		return out;
 	}
 
-	public function reset():Void {
-		swing.reset();
-		barsSeen = 0;
-	}
-
+	public function reset():Void { swing.reset(); out.zones.clear(); out.pivots.clear(); out.labels.clear(); }
 	public function warmupPeriod():Int return 2;
-	public function isReady():Bool return swing.getPivots().length > 0;
+	public function isReady():Bool return swing.pivotCount() > 0;
 	public function name():String return "FIBTIMEZ";
 
 	public static function spec():IndicatorSpec {
 		return {
 			name: "fib_time_zones", args: [], ret: TObject([
-				{name: "onZone", ty: TScalar}, {name: "barsToNext", ty: TScalar}
+				{name: "onZone", ty: TScalar}, {name: "barsToNext", ty: TScalar},
+				{name: "zones", ty: GeomVizSpec.zoneObj()},
+				{name: "pivots", ty: GeomVizSpec.pivotObj()},
+				{name: "labels", ty: GeomVizSpec.labelObj()}
 			]), minArgs: 0,
 			eval: function(h, args) {
-				var nanFill = {onZone: Math.NaN, barsToNext: Math.NaN};
+				var nanFill:FibTimeZonesOutput = {
+					onZone: Math.NaN, barsToNext: Math.NaN,
+					zones: ZoneSet.nan(), pivots: PivotMarkSet.nan(), labels: LabelSet.nan()
+				};
 				return IndicatorCache.evalBar(h, "fib_time_zones", nanFill,
 					() -> new FibTimeZones(), (i, b) -> (cast i : FibTimeZones).update(b));
 			}

@@ -260,27 +260,35 @@ class TestPortBatch31 extends Test {
 		var bars:Array<Bar> = [c(200.0, 199.0, 0), c(190.0, 150.0, 1)];
 		for (i in 2...6) bars.push(c(155.0, 151.0, i));
 
-		var out:Array<Dynamic> = [];
-		for (b in bars) out.push(ind.update(b));
+		// Snapshot scalars: update reuses one FibTimeZonesOutput object.
+		var onZone:Array<Null<Float>> = [];
+		var barsToNext:Array<Null<Float>> = [];
+		for (b in bars) {
+			var o = ind.update(b);
+			if (o == null) {
+				onZone.push(null);
+				barsToNext.push(null);
+			} else {
+				onZone.push(o.onZone);
+				barsToNext.push(o.barsToNext);
+			}
+		}
 
-		Assert.isNull(out[0]); // bootstrap, no pivot yet
+		Assert.isNull(onZone[0]); // bootstrap, no pivot yet
 		Assert.isTrue(ind.isReady());
 
-		// out[i] is reported at current bar i; anchor at bar 0 → distance = i.
-		var d1 = out[1];
-		Assert.notNull(d1);
-		Assert.floatEquals(1.0, d1.onZone, 1e-9);  // distance 1 → a zone
-		Assert.floatEquals(1.0, d1.barsToNext, 1e-9); // next zone at 2
+		// Reported at current bar i; anchor at bar 0 → distance = i.
+		Assert.notNull(onZone[1]);
+		Assert.floatEquals(1.0, onZone[1], 1e-9);  // distance 1 → a zone
+		Assert.floatEquals(1.0, barsToNext[1], 1e-9); // next zone at 2
 
-		var d4 = out[4];
-		Assert.notNull(d4);
-		Assert.floatEquals(0.0, d4.onZone, 1e-9);  // distance 4 → not a zone
-		Assert.floatEquals(1.0, d4.barsToNext, 1e-9); // next zone at 5
+		Assert.notNull(onZone[4]);
+		Assert.floatEquals(0.0, onZone[4], 1e-9);  // distance 4 → not a zone
+		Assert.floatEquals(1.0, barsToNext[4], 1e-9); // next zone at 5
 
-		var d5 = out[5];
-		Assert.notNull(d5);
-		Assert.floatEquals(1.0, d5.onZone, 1e-9);  // distance 5 → a zone
-		Assert.floatEquals(3.0, d5.barsToNext, 1e-9); // next zone at 8
+		Assert.notNull(onZone[5]);
+		Assert.floatEquals(1.0, onZone[5], 1e-9);  // distance 5 → a zone
+		Assert.floatEquals(3.0, barsToNext[5], 1e-9); // next zone at 8
 	}
 
 	public function testFibTimeZonesResetClearsState() {
@@ -298,14 +306,21 @@ class TestPortBatch31 extends Test {
 	public function testFibTimeZonesBatchEqualsStreaming() {
 		var bars:Array<Bar> = [c(200.0, 199.0, 0), c(190.0, 150.0, 1)];
 		for (i in 2...6) bars.push(c(155.0, 151.0, i));
-		var a = new FibTimeZones(), b = new FibTimeZones();
-		var batched = IndicatorBatch.run(a, bars);
-		var streamed = [for (x in bars) b.update(x)];
+		function snap(ind:FibTimeZones):Array<{onZone:Null<Float>, barsToNext:Null<Float>}> {
+			return [for (x in bars) {
+				var o = ind.update(x);
+				o == null
+					? {onZone: null, barsToNext: null}
+					: {onZone: o.onZone, barsToNext: o.barsToNext};
+			}];
+		}
+		var batched = snap(new FibTimeZones());
+		var streamed = snap(new FibTimeZones());
 		Assert.equals(batched.length, streamed.length);
 		for (i in 0...batched.length) {
-			if (batched[i] == null) Assert.isNull(streamed[i]);
+			if (batched[i].onZone == null) Assert.isNull(streamed[i].onZone);
 			else {
-				Assert.notNull(streamed[i]);
+				Assert.notNull(streamed[i].onZone);
 				Assert.floatEquals(batched[i].onZone, streamed[i].onZone, 1e-9);
 				Assert.floatEquals(batched[i].barsToNext, streamed[i].barsToNext, 1e-9);
 			}

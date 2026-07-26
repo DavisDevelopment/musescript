@@ -593,6 +593,9 @@ open the JIT log.
 
 1. **Virtual `eval` / visitor on NMA hot path** — megamorphic on JVM.
 2. **`Array<Float>` as the per-bar workhorse on JVM** — boxed Doubles.
+2b. **Reading a structural typedef's numeric fields inside a bar loop** — `bar.close` on a
+    `typedef Bar = { close:Float, … }` is `haxe.jvm.Jvm.readField(Object, String)`, a string-keyed
+    dynamic lookup returning a boxed `Double`. See §34.
 3. **`for (v in ring)` in indicator updates** — boxes via `Iterator` bridge.
 4. **`Null<Float>` optional args on OrderSim-like edges** — kills escape analysis.
 5. **`Dynamic == false` / loose Dynamic compares** — hard cast explosions on JVM.
@@ -623,6 +626,7 @@ open the JIT log.
 | Pack tape once; mutate `NativeArray` args | `StrategyInstance` |
 | Arity-specialized invoke0–4 | `JsEmitter` + `JsBackend` |
 | Columnar memo by epoch | `NmaEval` + `NmaEpoch` |
+| Typedef fields hoisted to per-tape unboxed columns | `NmaBarColumns` + `NmaFitness.runPrepared` |
 | `childCount`/`childAt` walks | `NmaNode` |
 | JIT audit before claiming a win | `scripts/jit_audit_run.sh` |
 | Typed `NmaKernel` slot for future fusion | `NmaKernel.hx` |
@@ -696,8 +700,9 @@ for (g in population) {
 ## 13. Roadmap hooks (don’t pretend they’re done)
 
 - **`NmaKernel` emitters** — stage-4 fused evaluators; empty interface today.
-- **Shared hyper-opt vector type** — `SymbolSelector` TODO; should subsume hot
-  `Array<Float>` weights/features with `@:multiType` (JVM) + typed-array twin (JS).
+- **Shared hyper-opt vector type** — `FloatSeries` (`musescript/indicators/FloatSeries.hx`) is
+  wired into the NMA tape columns (`NmaBarColumns`, §34); `SymbolSelector` and the indicator
+  feeds are still owed.
 - **Object pooling** — only if measured to help; naive pools often *hurt* Graal escape
   analysis (same TODO warns). Prefer short-lived scalars the JIT can stack-allocate.
 - **Auxiliary Engine Caching / PGO** — CE vs Enterprise licensing; see `graal/README.md`.
@@ -1236,6 +1241,59 @@ up the phase in a `--phase-profile` run and write down the best case. If the bes
 
 ---
 
+## 34. A structural typedef is a dynamic-lookup box factory on the bar loop
+
+§3.1 is about how you *store* floats. This is about how you *reach* them, and it hides one level
+further down than the container choice: `musescript/harness/Bar.hx` is a `typedef`, so on the JVM
+target it lowers to an anonymous class and `bar.close` compiles to
+`haxe.jvm.Jvm.readField(Object, String)` → `Anon…._hx_getField(String)` — a string-keyed dynamic
+lookup that returns a **boxed `java.lang.Double`**. There is no `getfield`, no unboxed `double`,
+and nothing about the call site says so.
+
+Invisible at feed cadence; ruinous on the bar loop. `NmaFitness.runPrepared` read `close` three or
+four times a bar plus `open`/`high`/`low`/`index`, and `NmaPositionEval.featureAt` read `close` and
+`index` again for every coupled node. JFR `jdk.ObjectAllocationSample` at `settings=profile`, on
+`--pop 1000 --gens 20 --threads 8 --attr-bars 128` over a 320-bar tape:
+
+| Site | `java.lang.Double` before | after |
+|---|---|---|
+| `NmaFitness.runPrepared` | 86.8 MB | not in profile |
+| `NmaPositionEval.featureAt` | 21.5 MB | not in profile |
+| all `Double` | 200.2 MB | 85.1 MB |
+
+The fix is §31's cadence argument, not a `Bar` redesign — `Bar` is load-bearing across the
+interpreter, the feeds, the compiled/WASM backends and hundreds of tests, and converting it to a
+class is a separate change. Those five scalars are a pure function of the tape, so
+`NmaBarColumns` derives them ONCE per tape into `haxe.ds.Vector` (real `double[]` / `int[]`),
+`NmaFitness.tapeStateFor` builds them in the pass it already makes over `bars`, and the sim loop
+indexes columns. `NmaPositionEval.boolAt`/`scalarAt`/`featureAt` take `barClose:Float,
+barIndex:Int` instead of a `Bar` — a `Bar` parameter on a per-bar signature is the same trap one
+frame up.
+
+Two things that make it safe rather than merely fast:
+
+1. **The columns carry the `Array<Bar>` they came from.** A retained context can legitimately be
+   evaluated against a different tape with the same close-derived signature
+   (`Fitness.evaluateNma`'s dirty-spine hit), and the old code read that tape's `open`/`index`
+   directly. The reference guard re-derives instead of silently scoring tape B with tape A's bars.
+2. **`bar.index` is not the loop counter.** `OrderSim` stamps fills with it and `bars_in_trade()`
+   subtracts it, so it gets its own `Vector<Int>`, and `TestNmaBarColumns` numbers its tapes
+   `i * 2` specifically so confusing the two changes the trades.
+
+Same run, same shape, one level out: `OrderSim.equity` started at the `GrowableVec` default
+capacity of 8 and doubled its way to the tape length, which JFR attributed as **71.1 MB of
+`double[]` under `OrderSim.mark`** — six throwaway arrays and six `arraycopy`s per sim, and the
+NMA path builds a sim per evaluation *and* per attribution column swap. `reserveEquity(n)` before
+the loop; `[D` allocation for the run fell 129.7 MB → 46.4 MB.
+
+**Rule:** on a per-bar signature, prefer scalars to records, and never let a structural typedef's
+field access be the thing inside the loop. If a hot loop reads `x.field` where `x` is a typedef,
+that is an allocation site until proven otherwise.
+
+«τὸ ὄνομα βαρύ, ὁ ἀριθμὸς κοῦφος· λῦε τὸ ὄνομα.»
+
+---
+
 ## Document maintenance
 
 Update this guide when any of the following lands:
@@ -1243,7 +1301,8 @@ Update this guide when any of the following lands:
 - A concrete `NmaKernel` emitter (replace §2.4 aspirational text with the real ABI)
 - The shared hyper-opt vector type (`SymbolSelector` TODO resolved)
 - A measured LastTier / Engine-option recommendation that beats the default
-- A new verified boxing footgun (add to §10 with the decompile/audit evidence)
+- A new verified boxing footgun (add to §10 with the decompile/audit evidence). Latest: §34,
+  structural-typedef field reads on the bar loop (`scripts/jfr_alloc.ps1` reproduces the numbers)
 - A dual-rep change that alters bijection or epoch semantics
 - **§27's map/counter hazards are CLOSED** (`EvoLock` guards epoch interning, the credit bank, the
   column caches and `fnCache`); the graph-ownership hazard is documented in §32 and handled by

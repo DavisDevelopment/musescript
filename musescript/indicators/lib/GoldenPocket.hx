@@ -4,29 +4,34 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.geom.RatioEngine;
+import musescript.indicators.geom.SwingGraph;
+import musescript.indicators.geom.GeomViz;
+import musescript.indicators.geom.PivotStatus;
 import musescript.types.MuseType;
 
-/** Golden pocket output: low/mid/high band of 0.618-0.65 retracement. */
 typedef GoldenPocketOutput = {
 	var low:Float;
 	var mid:Float;
 	var high:Float;
+	var levels:LevelSet;
+	var zones:ZoneSet;
+	var pivots:PivotMarkSet;
+	var labels:LabelSet;
 }
 
-/**
- * Golden Pocket — ported from wickra-core's `GoldenPocket`
- * (github.com/wickra-lib/wickra/blob/main/crates/wickra-core/src/indicators/golden_pocket.rs).
- *
- * The 0.618-0.65 retracement band of the most recent confirmed swing leg — the
- * "optimal trade entry" zone. Returns `None` until the first leg is complete.
- *
- * Uses a 5% swing reversal threshold for non-repainting pivot detection.
- */
+/** Golden Pocket — OTE band with viz zone + pivot anchors. */
 class GoldenPocket implements MuseIndicator<Bar, GoldenPocketOutput> {
-	var swing:SwingTracker;
+	var swing:SwingGraph;
+	var out:GoldenPocketOutput;
 
-	public function new() {
-		swing = new SwingTracker(0.05, 2);
+	public function new(?threshold:Float) {
+		swing = new SwingGraph(threshold != null ? threshold : 0.05, 2);
+		out = {
+			low: Math.NaN, mid: Math.NaN, high: Math.NaN,
+			levels: LevelSet.nan(), zones: ZoneSet.nan(),
+			pivots: PivotMarkSet.nan(), labels: LabelSet.nan()
+		};
 	}
 
 	public function update(candle:Bar):Null<GoldenPocketOutput> {
@@ -35,159 +40,68 @@ class GoldenPocket implements MuseIndicator<Bar, GoldenPocketOutput> {
 	}
 
 	function zone():Null<GoldenPocketOutput> {
-		var pivots = swing.getPivots();
-		if (pivots.length < 2) return null;
+		if (swing.pivotCount() < 2) return null;
+		var start = swing.pivotAt(0).price;
+		var end = swing.pivotAt(1).price;
+		var edgeLow = RatioEngine.retrace(start, end, 0.618);
+		var edgeHigh = RatioEngine.retrace(start, end, 0.65);
+		var low = Math.min(edgeLow, edgeHigh);
+		var high = Math.max(edgeLow, edgeHigh);
+		out.low = low;
+		out.mid = (low + high) / 2.0;
+		out.high = high;
 
-		var start = pivots[0].price;
-		var end = pivots[1].price;
-		var span = start - end;
+		var st = GeomVizFill.statusOf(PivotStatus.Confirmed);
+		out.levels.clear();
+		out.levels.set(0, low, 0.618, st);
+		out.levels.set(1, out.mid, 0.634, st);
+		out.levels.set(2, high, 0.65, st);
+		out.levels.count = 3;
 
-		var edge_low = end + 0.618 * span;
-		var edge_high = end + 0.65 * span;
+		out.zones.clear();
+		out.zones.set(0, low, high,
+			swing.pivotAt(0).bar * 1.0, swing.currentBar() * 1.0,
+			st, (ZoneKind.RetraceBand : Int) * 1.0);
+		out.zones.count = 1;
 
-		var low = Math.min(edge_low, edge_high);
-		var high = Math.max(edge_low, edge_high);
+		GeomVizFill.pivotsFromGraph(swing, out.pivots, 2);
 
-		return {
-			low: low,
-			mid: (low + high) / 2.0,
-			high: high
-		};
+		out.labels.clear();
+		out.labels.set(0, (GeomLabelCode.FibLevel : Int) * 1.0, out.mid, swing.currentBar() * 1.0, st);
+		out.labels.count = 1;
+		return out;
 	}
 
 	public function reset():Void {
 		swing.reset();
+		out.levels.clear();
+		out.zones.clear();
+		out.pivots.clear();
+		out.labels.clear();
 	}
 
 	public function warmupPeriod():Int return 2;
-	public function isReady():Bool return swing.getPivots().length >= 2;
+	public function isReady():Bool return swing.pivotCount() >= 2;
 	public function name():String return "GoldenPocket";
 
 	public static function spec():IndicatorSpec {
 		return {
 			name: "golden_pocket", args: [], ret: TObject([
-				{name: "low", ty: TScalar},
-				{name: "mid", ty: TScalar},
-				{name: "high", ty: TScalar}
+				{name: "low", ty: TScalar}, {name: "mid", ty: TScalar}, {name: "high", ty: TScalar},
+				{name: "levels", ty: GeomVizSpec.levelObj()},
+				{name: "zones", ty: GeomVizSpec.zoneObj()},
+				{name: "pivots", ty: GeomVizSpec.pivotObj()},
+				{name: "labels", ty: GeomVizSpec.labelObj()}
 			]), minArgs: 0,
 			eval: function(h, args) {
-				var nanFill:GoldenPocketOutput = {low: Math.NaN, mid: Math.NaN, high: Math.NaN};
+				var nanFill:GoldenPocketOutput = {
+					low: Math.NaN, mid: Math.NaN, high: Math.NaN,
+					levels: LevelSet.nan(), zones: ZoneSet.nan(),
+					pivots: PivotMarkSet.nan(), labels: LabelSet.nan()
+				};
 				return IndicatorCache.evalBar(h, "golden_pocket", nanFill,
 					() -> new GoldenPocket(), (i, b) -> (cast i : GoldenPocket).update(b));
 			}
 		};
 	}
-}
-
-/** Internal Pivot structure: price, direction (1.0/-1.0), bar index. */
-private class Pivot {
-	public var price:Float;
-	public var direction:Float;
-	public var bar:Int;
-
-	public function new(price:Float, direction:Float, bar:Int) {
-		this.price = price;
-		this.direction = direction;
-		this.bar = bar;
-	}
-}
-
-/** Internal swing tracker: non-repainting percent-threshold swing detector. */
-private class SwingTracker {
-	var threshold:Float;
-	var cap:Int;
-	var barsSeen:Int;
-	var state:Null<SwingState>;
-	var pivots:Array<Pivot>;
-
-	public function new(threshold:Float, cap:Int) {
-		this.threshold = threshold;
-		this.cap = cap;
-		reset();
-	}
-
-	public function update(candle:Bar):Bool {
-		var bar = barsSeen;
-		barsSeen++;
-
-		if (state == null) {
-			// Bootstrap: seed an uptrend tracking the first candle's high.
-			state = {
-				direction: 1.0,
-				extreme: candle.high,
-				extremeBar: bar
-			};
-			return false;
-		}
-
-		var s = state;
-		if (s.direction > 0.0) {
-			// Tracking a high.
-			if (candle.high > s.extreme) {
-				// Extend the candidate high.
-				state = {
-					direction: 1.0,
-					extreme: candle.high,
-					extremeBar: bar
-				};
-				return false;
-			}
-			if (candle.low <= s.extreme * (1.0 - threshold)) {
-				// Confirm the swing high; flip to tracking this bar's low.
-				pushPivot(new Pivot(s.extreme, 1.0, s.extremeBar));
-				state = {
-					direction: -1.0,
-					extreme: candle.low,
-					extremeBar: bar
-				};
-				return true;
-			}
-			return false;
-		} else {
-			// Tracking a low.
-			if (candle.low < s.extreme) {
-				// Extend the candidate low.
-				state = {
-					direction: -1.0,
-					extreme: candle.low,
-					extremeBar: bar
-				};
-				return false;
-			}
-			if (candle.high >= s.extreme * (1.0 + threshold)) {
-				// Confirm the swing low; flip to tracking this bar's high.
-				pushPivot(new Pivot(s.extreme, -1.0, s.extremeBar));
-				state = {
-					direction: 1.0,
-					extreme: candle.high,
-					extremeBar: bar
-				};
-				return true;
-			}
-			return false;
-		}
-	}
-
-	public function reset():Void {
-		barsSeen = 0;
-		state = null;
-		pivots = [];
-	}
-
-	public function getPivots():Array<Pivot> {
-		return pivots;
-	}
-
-	function pushPivot(pivot:Pivot):Void {
-		pivots.push(pivot);
-		if (pivots.length > cap) {
-			pivots.shift();
-		}
-	}
-}
-
-private typedef SwingState = {
-	var direction:Float;
-	var extreme:Float;
-	var extremeBar:Int;
 }

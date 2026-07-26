@@ -9,6 +9,7 @@ import musescript.indicators.lib.Garch11;
 import musescript.indicators.lib.Gartley;
 import musescript.indicators.lib.GoldenPocket;
 import musescript.indicators.lib.GrangerCausality;
+import musescript.indicators.geom.HarmonicVizEmit;
 
 /**
  * Batch 32: 3 indicators ported from wickra-core.
@@ -441,12 +442,13 @@ class TestPortBatch32 extends Test {
 		var g = new Gartley();
 		var pivots = [150.0, 100.0, 140.0, 115.3, 127.65, 108.56];
 		var bars = candlesForPivots(pivots);
-		var results:Array<Null<Float>> = [];
+		var results:Array<Null<HarmonicVizOutput>> = [];
 		for (b in bars) {
 			results.push(g.update(b));
 		}
 		var last = results[results.length - 1];
-		Assert.floatEquals(1.0, last);
+		Assert.notNull(last);
+		Assert.floatEquals(1.0, last.signal);
 	}
 
 	public function testGartleyBearishGartleyIsMinus() {
@@ -454,12 +456,13 @@ class TestPortBatch32 extends Test {
 		var g = new Gartley();
 		var pivots = [150.0, 110.0, 134.7, 122.35, 141.44];
 		var bars = candlesForPivots(pivots);
-		var results:Array<Null<Float>> = [];
+		var results:Array<Null<HarmonicVizOutput>> = [];
 		for (b in bars) {
 			results.push(g.update(b));
 		}
 		var last = results[results.length - 1];
-		Assert.floatEquals(-1.0, last);
+		Assert.notNull(last);
+		Assert.floatEquals(-1.0, last.signal);
 	}
 
 	public function testGartleyOutOfRatioDoesNotTrigger() {
@@ -467,12 +470,13 @@ class TestPortBatch32 extends Test {
 		var g = new Gartley();
 		var pivots = [150.0, 100.0, 140.0, 110.0, 135.0, 105.0];
 		var bars = candlesForPivots(pivots);
-		var results:Array<Null<Float>> = [];
+		var results:Array<Null<HarmonicVizOutput>> = [];
 		for (b in bars) {
 			results.push(g.update(b));
 		}
 		var last = results[results.length - 1];
-		Assert.floatEquals(0.0, last);
+		Assert.notNull(last);
+		Assert.floatEquals(0.0, last.signal);
 	}
 
 	public function testGartleyResetClearsState() {
@@ -485,7 +489,7 @@ class TestPortBatch32 extends Test {
 		g.reset();
 		Assert.isTrue(!g.isReady());
 		var c = bar(99.5, 100.0, 99.5, 99.5, 1.0, 0);
-		Assert.floatEquals(0.0, g.update(c));
+		Assert.floatEquals(0.0, g.update(c).signal);
 	}
 
 	// ── GoldenPocket ─────────────────────────────────────────────────────────

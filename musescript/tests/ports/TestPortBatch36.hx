@@ -59,7 +59,27 @@ class TestPortBatch36 extends Test {
 		return out;
 	}
 
-	/** Batch equals streaming for a scalar-output bar indicator. */
+	/** Snapshot harmonic `.signal` (update reuses one out object). */
+	static function harmonicSignals(ind:Dynamic, bars:Array<Bar>):Array<Null<Float>> {
+		return [for (x in bars) {
+			var o = ind.update(x);
+			o == null ? null : o.signal;
+		}];
+	}
+
+	static function assertBatchEqualsStreamingHarmonic(a:Dynamic, b:Dynamic, bars:Array<Bar>):Void {
+		var batched = harmonicSignals(a, bars);
+		var streamed = harmonicSignals(b, bars);
+		Assert.equals(batched.length, streamed.length);
+		for (i in 0...batched.length) {
+			if (batched[i] == null) {
+				Assert.isNull(streamed[i]);
+			} else {
+				Assert.floatEquals(batched[i], streamed[i]);
+			}
+		}
+	}
+
 	static function assertBatchEqualsStreamingScalar(a:MuseIndicatorBar, b:MuseIndicatorBar, bars:Array<Bar>):Void {
 		var batched = IndicatorBatch.run(a, bars);
 		var streamed = [for (x in bars) b.update(x)];
@@ -151,8 +171,8 @@ class TestPortBatch36 extends Test {
 	}
 
 	public function testBatBullishIsPlusOne() {
-		var b = new Bat();
-		var out = [for (c in candlesForPivots([150.0, 100.0, 140.0, 122.0, 137.0, 104.56])) b.update(c)];
+		var bars = candlesForPivots([150.0, 100.0, 140.0, 122.0, 137.0, 104.56]);
+		var out = harmonicSignals(new Bat(), bars);
 		Assert.floatEquals(1.0, out[out.length - 1]);
 		for (i in 0...out.length - 1) {
 			Assert.floatEquals(0.0, out[i]);
@@ -160,14 +180,14 @@ class TestPortBatch36 extends Test {
 	}
 
 	public function testBatBearishIsMinusOne() {
-		var b = new Bat();
-		var out = [for (c in candlesForPivots([150.0, 110.0, 128.0, 113.0, 145.44])) b.update(c)];
+		var bars = candlesForPivots([150.0, 110.0, 128.0, 113.0, 145.44]);
+		var out = harmonicSignals(new Bat(), bars);
 		Assert.floatEquals(-1.0, out[out.length - 1]);
 	}
 
 	public function testBatOutOfRatioDoesNotTrigger() {
-		var b = new Bat();
-		var out = [for (c in candlesForPivots([150.0, 100.0, 140.0, 110.0, 135.0, 105.0])) b.update(c)];
+		var bars = candlesForPivots([150.0, 100.0, 140.0, 110.0, 135.0, 105.0]);
+		var out = harmonicSignals(new Bat(), bars);
 		Assert.floatEquals(0.0, out[out.length - 1]);
 	}
 
@@ -178,12 +198,12 @@ class TestPortBatch36 extends Test {
 		}
 		b.reset();
 		Assert.isTrue(!b.isReady());
-		Assert.floatEquals(0.0, b.update(bar(99.5, 100.0, 99.5, 99.5, 1.0, 0)));
+		Assert.floatEquals(0.0, b.update(bar(99.5, 100.0, 99.5, 99.5, 1.0, 0)).signal);
 	}
 
 	public function testBatBatchEqualsStreaming() {
 		var bars = candlesForPivots([150.0, 100.0, 140.0, 122.0, 137.0, 104.56]);
-		assertBatchEqualsStreamingScalar(new Bat(), new Bat(), bars);
+		assertBatchEqualsStreamingHarmonic(new Bat(), new Bat(), bars);
 	}
 
 	// ── Butterfly ────────────────────────────────────────────────────────────
@@ -196,8 +216,8 @@ class TestPortBatch36 extends Test {
 	}
 
 	public function testButterflyBullishIsPlusOne() {
-		var b = new Butterfly();
-		var out = [for (c in candlesForPivots([150.0, 100.0, 140.0, 108.6, 128.0, 79.8])) b.update(c)];
+		var bars = candlesForPivots([150.0, 100.0, 140.0, 108.6, 128.0, 79.8]);
+		var out = harmonicSignals(new Butterfly(), bars);
 		Assert.floatEquals(1.0, out[out.length - 1]);
 		for (i in 0...out.length - 1) {
 			Assert.floatEquals(0.0, out[i]);
@@ -205,14 +225,14 @@ class TestPortBatch36 extends Test {
 	}
 
 	public function testButterflyBearishIsMinusOne() {
-		var b = new Butterfly();
-		var out = [for (c in candlesForPivots([150.0, 110.0, 141.4, 121.4, 170.2])) b.update(c)];
+		var bars = candlesForPivots([150.0, 110.0, 141.4, 121.4, 170.2]);
+		var out = harmonicSignals(new Butterfly(), bars);
 		Assert.floatEquals(-1.0, out[out.length - 1]);
 	}
 
 	public function testButterflyOutOfRatioDoesNotTrigger() {
-		var b = new Butterfly();
-		var out = [for (c in candlesForPivots([150.0, 100.0, 140.0, 110.0, 135.0, 105.0])) b.update(c)];
+		var bars = candlesForPivots([150.0, 100.0, 140.0, 110.0, 135.0, 105.0]);
+		var out = harmonicSignals(new Butterfly(), bars);
 		Assert.floatEquals(0.0, out[out.length - 1]);
 	}
 
@@ -223,12 +243,12 @@ class TestPortBatch36 extends Test {
 		}
 		b.reset();
 		Assert.isTrue(!b.isReady());
-		Assert.floatEquals(0.0, b.update(bar(99.5, 100.0, 99.5, 99.5, 1.0, 0)));
+		Assert.floatEquals(0.0, b.update(bar(99.5, 100.0, 99.5, 99.5, 1.0, 0)).signal);
 	}
 
 	public function testButterflyBatchEqualsStreaming() {
 		var bars = candlesForPivots([150.0, 100.0, 140.0, 108.6, 128.0, 79.8]);
-		assertBatchEqualsStreamingScalar(new Butterfly(), new Butterfly(), bars);
+		assertBatchEqualsStreamingHarmonic(new Butterfly(), new Butterfly(), bars);
 	}
 
 	// ── Crab ─────────────────────────────────────────────────────────────────
@@ -241,8 +261,8 @@ class TestPortBatch36 extends Test {
 	}
 
 	public function testCrabBullishIsPlusOne() {
-		var c = new Crab();
-		var out = [for (x in candlesForPivots([150.0, 100.0, 140.0, 120.0, 137.5, 75.3])) c.update(x)];
+		var bars = candlesForPivots([150.0, 100.0, 140.0, 120.0, 137.5, 75.3]);
+		var out = harmonicSignals(new Crab(), bars);
 		Assert.floatEquals(1.0, out[out.length - 1]);
 		for (i in 0...out.length - 1) {
 			Assert.floatEquals(0.0, out[i]);
@@ -250,14 +270,14 @@ class TestPortBatch36 extends Test {
 	}
 
 	public function testCrabBearishIsMinusOne() {
-		var c = new Crab();
-		var out = [for (x in candlesForPivots([150.0, 110.0, 130.0, 112.5, 174.7])) c.update(x)];
+		var bars = candlesForPivots([150.0, 110.0, 130.0, 112.5, 174.7]);
+		var out = harmonicSignals(new Crab(), bars);
 		Assert.floatEquals(-1.0, out[out.length - 1]);
 	}
 
 	public function testCrabOutOfRatioDoesNotTrigger() {
-		var c = new Crab();
-		var out = [for (x in candlesForPivots([150.0, 100.0, 140.0, 110.0, 135.0, 105.0])) c.update(x)];
+		var bars = candlesForPivots([150.0, 100.0, 140.0, 110.0, 135.0, 105.0]);
+		var out = harmonicSignals(new Crab(), bars);
 		Assert.floatEquals(0.0, out[out.length - 1]);
 	}
 
@@ -268,12 +288,12 @@ class TestPortBatch36 extends Test {
 		}
 		c.reset();
 		Assert.isTrue(!c.isReady());
-		Assert.floatEquals(0.0, c.update(bar(99.5, 100.0, 99.5, 99.5, 1.0, 0)));
+		Assert.floatEquals(0.0, c.update(bar(99.5, 100.0, 99.5, 99.5, 1.0, 0)).signal);
 	}
 
 	public function testCrabBatchEqualsStreaming() {
 		var bars = candlesForPivots([150.0, 100.0, 140.0, 120.0, 137.5, 75.3]);
-		assertBatchEqualsStreamingScalar(new Crab(), new Crab(), bars);
+		assertBatchEqualsStreamingHarmonic(new Crab(), new Crab(), bars);
 	}
 
 	// ── Cypher ───────────────────────────────────────────────────────────────
@@ -286,8 +306,8 @@ class TestPortBatch36 extends Test {
 	}
 
 	public function testCypherBullishIsPlusOne() {
-		var c = new Cypher();
-		var out = [for (x in candlesForPivots([150.0, 100.0, 140.0, 120.0, 168.0, 114.55])) c.update(x)];
+		var bars = candlesForPivots([150.0, 100.0, 140.0, 120.0, 168.0, 114.55]);
+		var out = harmonicSignals(new Cypher(), bars);
 		Assert.floatEquals(1.0, out[out.length - 1]);
 		for (i in 0...out.length - 1) {
 			Assert.floatEquals(0.0, out[i]);
@@ -295,14 +315,14 @@ class TestPortBatch36 extends Test {
 	}
 
 	public function testCypherBearishIsMinusOne() {
-		var c = new Cypher();
-		var out = [for (x in candlesForPivots([150.0, 110.0, 130.0, 82.0, 135.45])) c.update(x)];
+		var bars = candlesForPivots([150.0, 110.0, 130.0, 82.0, 135.45]);
+		var out = harmonicSignals(new Cypher(), bars);
 		Assert.floatEquals(-1.0, out[out.length - 1]);
 	}
 
 	public function testCypherOutOfRatioDoesNotTrigger() {
-		var c = new Cypher();
-		var out = [for (x in candlesForPivots([150.0, 100.0, 140.0, 110.0, 135.0, 105.0])) c.update(x)];
+		var bars = candlesForPivots([150.0, 100.0, 140.0, 110.0, 135.0, 105.0]);
+		var out = harmonicSignals(new Cypher(), bars);
 		Assert.floatEquals(0.0, out[out.length - 1]);
 	}
 
@@ -313,12 +333,12 @@ class TestPortBatch36 extends Test {
 		}
 		c.reset();
 		Assert.isTrue(!c.isReady());
-		Assert.floatEquals(0.0, c.update(bar(99.5, 100.0, 99.5, 99.5, 1.0, 0)));
+		Assert.floatEquals(0.0, c.update(bar(99.5, 100.0, 99.5, 99.5, 1.0, 0)).signal);
 	}
 
 	public function testCypherBatchEqualsStreaming() {
 		var bars = candlesForPivots([150.0, 100.0, 140.0, 120.0, 168.0, 114.55]);
-		assertBatchEqualsStreamingScalar(new Cypher(), new Cypher(), bars);
+		assertBatchEqualsStreamingHarmonic(new Cypher(), new Cypher(), bars);
 	}
 
 	// ── Shark ────────────────────────────────────────────────────────────────
@@ -331,8 +351,8 @@ class TestPortBatch36 extends Test {
 	}
 
 	public function testSharkBullishIsPlusOne() {
-		var s = new Shark();
-		var out = [for (x in candlesForPivots([150.0, 100.0, 140.0, 88.0, 186.8, 100.0])) s.update(x)];
+		var bars = candlesForPivots([150.0, 100.0, 140.0, 88.0, 186.8, 100.0]);
+		var out = harmonicSignals(new Shark(), bars);
 		Assert.floatEquals(1.0, out[out.length - 1]);
 		for (i in 0...out.length - 1) {
 			Assert.floatEquals(0.0, out[i]);
@@ -340,14 +360,14 @@ class TestPortBatch36 extends Test {
 	}
 
 	public function testSharkBearishIsMinusOne() {
-		var s = new Shark();
-		var out = [for (x in candlesForPivots([150.0, 110.0, 162.0, 60.2, 150.0])) s.update(x)];
+		var bars = candlesForPivots([150.0, 110.0, 162.0, 60.2, 150.0]);
+		var out = harmonicSignals(new Shark(), bars);
 		Assert.floatEquals(-1.0, out[out.length - 1]);
 	}
 
 	public function testSharkOutOfRatioDoesNotTrigger() {
-		var s = new Shark();
-		var out = [for (x in candlesForPivots([150.0, 100.0, 140.0, 110.0, 135.0, 105.0])) s.update(x)];
+		var bars = candlesForPivots([150.0, 100.0, 140.0, 110.0, 135.0, 105.0]);
+		var out = harmonicSignals(new Shark(), bars);
 		Assert.floatEquals(0.0, out[out.length - 1]);
 	}
 
@@ -358,12 +378,12 @@ class TestPortBatch36 extends Test {
 		}
 		s.reset();
 		Assert.isTrue(!s.isReady());
-		Assert.floatEquals(0.0, s.update(bar(99.5, 100.0, 99.5, 99.5, 1.0, 0)));
+		Assert.floatEquals(0.0, s.update(bar(99.5, 100.0, 99.5, 99.5, 1.0, 0)).signal);
 	}
 
 	public function testSharkBatchEqualsStreaming() {
 		var bars = candlesForPivots([150.0, 100.0, 140.0, 88.0, 186.8, 100.0]);
-		assertBatchEqualsStreamingScalar(new Shark(), new Shark(), bars);
+		assertBatchEqualsStreamingHarmonic(new Shark(), new Shark(), bars);
 	}
 
 	// ── ThreeDrives ──────────────────────────────────────────────────────────
