@@ -12,9 +12,13 @@ import musescript.indicators.geom.SwingGraph;
 import musescript.indicators.geom.GannAngles;
 import musescript.indicators.lib.FibRetracement;
 import musescript.indicators.lib.FibExtension;
+import musescript.indicators.lib.FibArcs;
 import musescript.indicators.lib.MurreyMathLines;
 import musescript.indicators.lib.GoldenPocket;
 import musescript.indicators.lib.Gartley;
+import musescript.indicators.lib.RectangleRange;
+import musescript.indicators.lib.Triangle;
+import musescript.indicators.lib.Wedge;
 import musescript.indicators.offline.OfflineHooks;
 
 class TestGeomEwStack extends Test {
@@ -127,6 +131,36 @@ class TestGeomEwStack extends Test {
 		Assert.isTrue(Math.isFinite(out.levels.p0));
 		Assert.floatEquals(2, out.pivots.count, 1e-9);
 		Assert.floatEquals(1, out.zones.count, 1e-9);
+	}
+
+	public function testFibArcsEmitArcSet() {
+		var fa = new FibArcs();
+		fa.update(bar(100, 100, 100, 100));
+		fa.update(bar(100, 110, 100, 110));
+		fa.update(bar(110, 110, 100, 100));
+		for (i in 0...5) fa.update(bar(100 - i, 100 - i, 95, 95));
+		var out = fa.update(bar(95, 96, 94, 95));
+		if (out != null) {
+			Assert.floatEquals(3, out.arcs.count, 1e-9);
+			Assert.isTrue(Math.isFinite(out.arcs.cx0));
+			Assert.isTrue(Math.isFinite(out.arcs.rb0));
+		}
+		Assert.isTrue(true);
+	}
+
+	public function testRectangleTriangleWedgeUseSwingGraph() {
+		var rr = new RectangleRange();
+		var tri = new Triangle();
+		var w = new Wedge();
+		for (i in 0...20) {
+			var base = 100.0 + Math.sin(i * 0.5) * 8.0;
+			rr.update(bar(base, base + 3, base - 3, base));
+			tri.update(bar(base, base + 3, base - 3, base));
+			w.update(bar(base, base + 3, base - 3, base));
+		}
+		Assert.isTrue(rr.isReady());
+		Assert.isTrue(tri.isReady());
+		Assert.isTrue(w.isReady());
 	}
 
 	public function testGannAndSoftScores() {

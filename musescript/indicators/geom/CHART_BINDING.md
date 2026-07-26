@@ -40,13 +40,13 @@ in their TObject output (chart drops synthesize when these packs are present):
 
 | Family | Builtin / class | Nested packs |
 |---|---|---|
-| GEOM_FIB | fib_retracement, fib_extension, auto_fib, fib_projection, fib_fan, fib_channel, fib_arcs, fib_confluence, fib_time_zones, golden_pocket, murrey_math_lines | levels±zones±pivots±rays±forecast |
+| GEOM_FIB | fib_retracement, fib_extension, auto_fib, fib_projection, fib_fan, fib_channel, fib_arcs, fib_confluence, fib_time_zones, golden_pocket, murrey_math_lines | levels±zones±pivots±rays±forecast±arcs |
 | GEOM_HARMONIC | gartley, bat, butterfly, crab, shark, cypher | levels, zones (PRZ), pivots, labels (XABCD) + `.signal` |
 | GEOM_EW | ew_hypothesis | pivots, labels (waves), forecast, zones |
-| GEOM_GANN | gann_angles, square_of_nine | levels, rays (gann), pivots, labels |
+| GEOM_GANN | gann_angles, square_of_nine | levels, rays (gann), pivots, labels, rings (So9) |
 | GEOM_CYCLES | ssa_cycles | zones (Cycle), forecast, labels |
 | GEOM_RISK | lppl_warning | zones, forecast, labels |
 
-Chart-only extras (`arcs` / `rings` / `cycle` series / `ribbon`) remain synth-side and are
-merged onto live frames in `pack.js` so FibArcs / So9 / SSA / LPPL keep the dazzle paint
-without promoting free-form arrays into the Haxe GeomViz hot path.
+Chart-only extras that remain synth-side until promoted: `cycle` series / `ribbon`
+(SSA / LPPL full-tape overlays). `arcs` / `rings` are now first-class capped packs
+(`ArcSet` / `RingBag` in GeomViz) emitted by `fib_arcs` and `square_of_nine`.

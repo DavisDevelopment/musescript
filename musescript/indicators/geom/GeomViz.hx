@@ -12,7 +12,7 @@ import musescript.types.MuseType;
  * - Nested TObject fragments (`levels`, `rays`, `zones`, `pivots`, `labels`, `forecast`)
  *
  * Chart agent binds: `out.levels.p0`..`p7` for i in 0...count, etc.
- * Caps: LEVEL=8, RAY=6, ZONE=4, PIVOT=8, LABEL=8.
+ * Caps: LEVEL=8, RAY=6, ZONE=4, PIVOT=8, LABEL=8, ARC=4, RING_PRICE=8.
  */
 
 /** Kind codes for zones (chart styling). */
@@ -338,6 +338,100 @@ class ForecastBand {
 }
 
 /**
+ * Fib-style elliptical arcs (chart: cxBar/cyPrice/rBars/rPrice).
+ * Fixed slots — no free-form arrays on the Haxe hot path.
+ */
+@:structInit
+class ArcSet {
+	public var count:Float;
+	public var cx0:Float; public var cy0:Float; public var rb0:Float; public var rp0:Float; public var s0:Float; public var r0:Float;
+	public var cx1:Float; public var cy1:Float; public var rb1:Float; public var rp1:Float; public var s1:Float; public var r1:Float;
+	public var cx2:Float; public var cy2:Float; public var rb2:Float; public var rp2:Float; public var s2:Float; public var r2:Float;
+	public var cx3:Float; public var cy3:Float; public var rb3:Float; public var rp3:Float; public var s3:Float; public var r3:Float;
+
+	public static inline var CAP = 4;
+
+	public static function nan():ArcSet {
+		return {
+			count: 0,
+			cx0: Math.NaN, cy0: Math.NaN, rb0: Math.NaN, rp0: Math.NaN, s0: Math.NaN, r0: Math.NaN,
+			cx1: Math.NaN, cy1: Math.NaN, rb1: Math.NaN, rp1: Math.NaN, s1: Math.NaN, r1: Math.NaN,
+			cx2: Math.NaN, cy2: Math.NaN, rb2: Math.NaN, rp2: Math.NaN, s2: Math.NaN, r2: Math.NaN,
+			cx3: Math.NaN, cy3: Math.NaN, rb3: Math.NaN, rp3: Math.NaN, s3: Math.NaN, r3: Math.NaN
+		};
+	}
+
+	public function clear():Void {
+		count = 0;
+		cx0 = cy0 = rb0 = rp0 = s0 = r0 = Math.NaN;
+		cx1 = cy1 = rb1 = rp1 = s1 = r1 = Math.NaN;
+		cx2 = cy2 = rb2 = rp2 = s2 = r2 = Math.NaN;
+		cx3 = cy3 = rb3 = rp3 = s3 = r3 = Math.NaN;
+	}
+
+	public function set(i:Int, cx:Float, cy:Float, rBars:Float, rPrice:Float, status:Float, ratio:Float):Void {
+		switch (i) {
+			case 0: cx0 = cx; cy0 = cy; rb0 = rBars; rp0 = rPrice; s0 = status; r0 = ratio;
+			case 1: cx1 = cx; cy1 = cy; rb1 = rBars; rp1 = rPrice; s1 = status; r1 = ratio;
+			case 2: cx2 = cx; cy2 = cy; rb2 = rBars; rp2 = rPrice; s2 = status; r2 = ratio;
+			case 3: cx3 = cx; cy3 = cy; rb3 = rBars; rp3 = rPrice; s3 = status; r3 = ratio;
+			default:
+		}
+	}
+}
+
+/**
+ * Square-of-Nine style price rings: one center + up to RING_PRICE horizontal levels.
+ * Chart unpacks to `[{ centerPrice, prices:[...], status }]`.
+ */
+@:structInit
+class RingBag {
+	public var active:Float;
+	public var center:Float;
+	public var status:Float;
+	public var count:Float;
+	public var p0:Float; public var p1:Float; public var p2:Float; public var p3:Float;
+	public var p4:Float; public var p5:Float; public var p6:Float; public var p7:Float;
+
+	public static inline var CAP = 8;
+
+	public static function nan():RingBag {
+		return {
+			active: 0, center: Math.NaN, status: Math.NaN, count: 0,
+			p0: Math.NaN, p1: Math.NaN, p2: Math.NaN, p3: Math.NaN,
+			p4: Math.NaN, p5: Math.NaN, p6: Math.NaN, p7: Math.NaN
+		};
+	}
+
+	public function clear():Void {
+		active = 0;
+		center = status = count = Math.NaN;
+		p0 = p1 = p2 = p3 = p4 = p5 = p6 = p7 = Math.NaN;
+		count = 0;
+	}
+
+	public function setCenter(centerPrice:Float, status:Float):Void {
+		this.active = 1;
+		this.center = centerPrice;
+		this.status = status;
+	}
+
+	public function setPrice(i:Int, price:Float):Void {
+		switch (i) {
+			case 0: p0 = price;
+			case 1: p1 = price;
+			case 2: p2 = price;
+			case 3: p3 = price;
+			case 4: p4 = price;
+			case 5: p5 = price;
+			case 6: p6 = price;
+			case 7: p7 = price;
+			default:
+		}
+	}
+}
+
+/**
  * Fill helpers — mutate pre-allocated sets (stable shapes).
  */
 class GeomVizFill {
@@ -465,12 +559,32 @@ class GeomVizSpec {
 		];
 	}
 
+	public static function arcFields():Array<{name:String, ty:MuseType}> {
+		return [
+			{name: "count", ty: TScalar},
+			{name: "cx0", ty: TScalar}, {name: "cy0", ty: TScalar}, {name: "rb0", ty: TScalar}, {name: "rp0", ty: TScalar}, {name: "s0", ty: TScalar}, {name: "r0", ty: TScalar},
+			{name: "cx1", ty: TScalar}, {name: "cy1", ty: TScalar}, {name: "rb1", ty: TScalar}, {name: "rp1", ty: TScalar}, {name: "s1", ty: TScalar}, {name: "r1", ty: TScalar},
+			{name: "cx2", ty: TScalar}, {name: "cy2", ty: TScalar}, {name: "rb2", ty: TScalar}, {name: "rp2", ty: TScalar}, {name: "s2", ty: TScalar}, {name: "r2", ty: TScalar},
+			{name: "cx3", ty: TScalar}, {name: "cy3", ty: TScalar}, {name: "rb3", ty: TScalar}, {name: "rp3", ty: TScalar}, {name: "s3", ty: TScalar}, {name: "r3", ty: TScalar}
+		];
+	}
+
+	public static function ringFields():Array<{name:String, ty:MuseType}> {
+		return [
+			{name: "active", ty: TScalar}, {name: "center", ty: TScalar}, {name: "status", ty: TScalar}, {name: "count", ty: TScalar},
+			{name: "p0", ty: TScalar}, {name: "p1", ty: TScalar}, {name: "p2", ty: TScalar}, {name: "p3", ty: TScalar},
+			{name: "p4", ty: TScalar}, {name: "p5", ty: TScalar}, {name: "p6", ty: TScalar}, {name: "p7", ty: TScalar}
+		];
+	}
+
 	public static function levelObj():MuseType return TObject(levelFields());
 	public static function rayObj():MuseType return TObject(rayFields());
 	public static function zoneObj():MuseType return TObject(zoneFields());
 	public static function pivotObj():MuseType return TObject(pivotFields());
 	public static function labelObj():MuseType return TObject(labelFields());
 	public static function forecastObj():MuseType return TObject(forecastFields());
+	public static function arcObj():MuseType return TObject(arcFields());
+	public static function ringObj():MuseType return TObject(ringFields());
 }
 
 /** Module anchor — `import musescript.indicators.geom.GeomViz` pulls viz set types. */

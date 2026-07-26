@@ -34,11 +34,14 @@ no two ports ever touch the same file.
    struct), constructor params, and the `update`/`reset` bodies.
 2. **Translate line-for-line** into `lib/<PascalName>.hx` implementing
    `MuseIndicator<TIn, TOut>` (`update`/`reset`/`warmupPeriod`/`isReady`/`name`).
-   `Option<T>` → `Null<T>`; `VecDeque` → `Array` with `push`/`shift`; a
-   struct output → a typedef (see `lib/Aroon.hx`'s `AroonOutput`). Cite the
+   `Option<T>` → `Null<T>`; rolling windows → `RingBuffer` (or `FloatSeries` /
+   `GrowableVec` for absolute-index series) — **not** `Array` + `shift` / `for..in`
+   on hot paths (see `RingBuffer.hx` and `evo/nma/JIT_AUTHORING_GUIDE.md`).
+   Struct output → a typedef (see `lib/Aroon.hx`'s `AroonOutput`). Cite the
    source path in the class doc comment. If it composes a primitive
    (`Ema::new`, `Rsi::new`, ...), use the `prim/` version; port that primitive
-   first if it's missing.
+   first if it's missing. Shared swing detection → `geom.SwingGraph`, not a
+   private `SwingTracker` copy.
 3. **Add `static function spec():IndicatorSpec`** — pick the input helper
    matching `type Input`:
    - Candle → `IndicatorCache.evalBar(...)` (args typically `[TWindow]`).

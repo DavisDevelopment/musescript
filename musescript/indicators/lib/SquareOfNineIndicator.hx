@@ -12,7 +12,7 @@ import musescript.types.MuseType;
 
 /**
  * Square of Nine — math spiral levels from last Confirmed swing (GEOM_GANN family).
- * Emits `levels` + `pivots`; chart may also paint `rings` via synthesize until promoted.
+ * Emits `levels` + `pivots` + capped `rings` for live chart paint.
  */
 typedef SquareOfNineOutput = {
 	var root:Float;
@@ -20,6 +20,7 @@ typedef SquareOfNineOutput = {
 	var levels:LevelSet;
 	var pivots:PivotMarkSet;
 	var labels:LabelSet;
+	var rings:RingBag;
 }
 
 class SquareOfNineIndicator implements MuseIndicator<Bar, SquareOfNineOutput> {
@@ -32,7 +33,7 @@ class SquareOfNineIndicator implements MuseIndicator<Bar, SquareOfNineOutput> {
 		this.step = step != null && step > 0 ? step : Math.NaN;
 		out = {
 			root: Math.NaN, nearest: Math.NaN,
-			levels: LevelSet.nan(), pivots: PivotMarkSet.nan(), labels: LabelSet.nan()
+			levels: LevelSet.nan(), pivots: PivotMarkSet.nan(), labels: LabelSet.nan(), rings: RingBag.nan()
 		};
 	}
 
@@ -45,15 +46,25 @@ class SquareOfNineIndicator implements MuseIndicator<Bar, SquareOfNineOutput> {
 		var near = SquareOfNine.nearest(root, bar.close, 4, step);
 		out.nearest = near.price;
 		var st = GeomVizFill.statusOf(PivotStatus.Projected);
+		var conf = GeomVizFill.statusOf(PivotStatus.Confirmed);
 		out.levels.clear();
+		out.rings.clear();
+		out.rings.setCenter(root, conf);
 		var n = 0;
 		for (ring in 1...5) {
 			if (n >= LevelSet.CAP) break;
-			var p = SquareOfNine.priceAt(root, ring, 0, step);
-			out.levels.set(n, p, ring * 1.0, st);
+			var up = SquareOfNine.priceAt(root, ring, 0, step);
+			var dn = root - (up - root);
+			out.levels.set(n, up, ring * 1.0, st);
+			if (n < RingBag.CAP) out.rings.setPrice(n, up);
+			n++;
+			if (n >= LevelSet.CAP) break;
+			out.levels.set(n, dn, (-ring) * 1.0, st);
+			if (n < RingBag.CAP) out.rings.setPrice(n, dn);
 			n++;
 		}
 		out.levels.count = n * 1.0;
+		out.rings.count = n * 1.0;
 		GeomVizFill.pivotsFromGraph(swing, out.pivots, 2);
 		out.labels.clear();
 		out.labels.set(0, (GeomLabelCode.Projected : Int) * 1.0, near.price, swing.currentBar() * 1.0, st);
@@ -63,7 +74,7 @@ class SquareOfNineIndicator implements MuseIndicator<Bar, SquareOfNineOutput> {
 
 	public function reset():Void {
 		swing.reset();
-		out.levels.clear(); out.pivots.clear(); out.labels.clear();
+		out.levels.clear(); out.pivots.clear(); out.labels.clear(); out.rings.clear();
 	}
 
 	public function warmupPeriod():Int return 2;
@@ -76,14 +87,15 @@ class SquareOfNineIndicator implements MuseIndicator<Bar, SquareOfNineOutput> {
 				{name: "root", ty: TScalar}, {name: "nearest", ty: TScalar},
 				{name: "levels", ty: GeomVizSpec.levelObj()},
 				{name: "pivots", ty: GeomVizSpec.pivotObj()},
-				{name: "labels", ty: GeomVizSpec.labelObj()}
+				{name: "labels", ty: GeomVizSpec.labelObj()},
+				{name: "rings", ty: GeomVizSpec.ringObj()}
 			]), minArgs: 0,
 			eval: function(h, args) {
 				var thr = IndicatorCache.floatArg(args, 0, 0.05);
 				var step = IndicatorCache.floatArg(args, 1, Math.NaN);
 				var nanFill:SquareOfNineOutput = {
 					root: Math.NaN, nearest: Math.NaN,
-					levels: LevelSet.nan(), pivots: PivotMarkSet.nan(), labels: LabelSet.nan()
+					levels: LevelSet.nan(), pivots: PivotMarkSet.nan(), labels: LabelSet.nan(), rings: RingBag.nan()
 				};
 				return IndicatorCache.evalBar(h, 'square_of_nine:$thr:$step', nanFill,
 					() -> new SquareOfNineIndicator(thr, Math.isFinite(step) ? step : null),
