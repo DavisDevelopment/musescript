@@ -22,18 +22,32 @@ class SoftScores {
 	}
 
 	/**
-	 * Best soft hit among common Fib targets (0.382 / 0.5 / 0.618 / 0.786 / 1.0 / 1.272 / 1.618).
+	 * Best soft hit among φ-family targets from EwPhiParams (Ch3).
 	 * Used by EW corrective/impulse soft scoring — never gates hard rules.
 	 */
 	public static function bestFibHit(ratio:Float):Float {
+		return bestFibHitParams(ratio, null);
+	}
+
+	public static function bestFibHitParams(ratio:Float, params:Dynamic):Float {
 		if (!Math.isFinite(ratio) || ratio <= 0) return 0.0;
+		var tol = 0.1;
+		var targets:Array<Float>;
+		if (params != null) {
+			var p:musescript.indicators.ew.EwPhiParams = cast params;
+			tol = p.fibHitTol;
+			targets = [
+				p.oneMinusPhiInv, p.half, p.phiInv, p.sqrtPhiInvApprox,
+				1.0, p.phiExt1272, p.phiExt1618, 2.0, p.phiExt2618
+			];
+		} else {
+			targets = [0.382, 0.5, 0.618, 0.786, 1.0, 1.272, 1.618, 2.0, 2.618];
+		}
 		var best = 0.0;
-		inline function consider(t:Float):Void {
-			var s = fibRatio(ratio, t, 0.1);
+		for (t in targets) {
+			var s = fibRatio(ratio, t, tol);
 			if (s > best) best = s;
 		}
-		consider(0.382); consider(0.5); consider(0.618); consider(0.786);
-		consider(1.0); consider(1.272); consider(1.618); consider(2.0);
 		return best;
 	}
 

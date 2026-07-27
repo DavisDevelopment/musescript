@@ -25,5 +25,14 @@ class RatioTables {
 	public static final HARMONIC_AB_XA:Array<Float> = [0.382, 0.5, 0.618, 0.786, 0.886];
 	public static final HARMONIC_BC_AB:Array<Float> = [0.382, 0.5, 0.618, 0.786, 0.886];
 	public static final HARMONIC_CD_BC:Array<Float> = [1.13, 1.272, 1.414, 1.618, 2.0, 2.24, 2.618];
+	/** Harmonic AD/XA windows — midpoints for soft scoring elsewhere. */
 	public static final HARMONIC_AD_XA:Array<Float> = [0.618, 0.786, 0.886, 1.13, 1.272, 1.618];
+
+	/**
+	 * Elliott Wave φ-family (Ch3 Frost/Prechter) — mirrors EwPhiParams handbook defaults.
+	 * Prefer EwPhiParams.current() at runtime so finetuned packs win.
+	 */
+	public static final EW_PHI_CORE:Array<Float> = [
+		0.382, 0.5, 0.618, 0.786, 1.0, 1.272, 1.618, 2.0, 2.618, 4.236
+	];
 }

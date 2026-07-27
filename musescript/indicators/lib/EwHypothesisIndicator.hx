@@ -53,6 +53,9 @@ class EwHypothesisIndicator implements MuseIndicator<Bar, EwHypothesisOutput> {
 		return switch (label) {
 			case "zigzag": 1.0;
 			case "impulse5": 2.0;
+			case "flat": 3.0;
+			case "diagonal": 4.0;
+			case "triangle": 5.0;
 			default: 0.0;
 		};
 	}
@@ -79,9 +82,14 @@ class EwHypothesisIndicator implements MuseIndicator<Bar, EwHypothesisOutput> {
 		out.endBar = top.endBar * 1.0;
 		out.waveCount = top.waveCount * 1.0;
 
-		var waveCodes = top.label == "impulse5"
-			? [GeomLabelCode.Wave1, GeomLabelCode.Wave2, GeomLabelCode.Wave3, GeomLabelCode.Wave4, GeomLabelCode.Wave5]
-			: [GeomLabelCode.WaveA, GeomLabelCode.WaveB, GeomLabelCode.WaveC];
+		var waveCodes = switch (top.label) {
+			case "impulse5", "diagonal":
+				[GeomLabelCode.Wave1, GeomLabelCode.Wave2, GeomLabelCode.Wave3, GeomLabelCode.Wave4, GeomLabelCode.Wave5];
+			case "triangle":
+				[GeomLabelCode.WaveA, GeomLabelCode.WaveB, GeomLabelCode.WaveC, GeomLabelCode.WaveA, GeomLabelCode.WaveB];
+			default:
+				[GeomLabelCode.WaveA, GeomLabelCode.WaveB, GeomLabelCode.WaveC];
+		};
 		var take = Std.int(Math.min(waveCodes.length, out.pivots.count));
 		var pStart = Std.int(out.pivots.count) - take;
 		if (pStart < 0) pStart = 0;
@@ -101,7 +109,8 @@ class EwHypothesisIndicator implements MuseIndicator<Bar, EwHypothesisOutput> {
 		}
 		out.labels.count = take * 1.0;
 
-		var band = EwProject.fromLastLeg(swing);
+		var band = EwProject.fromHypothesis(top, lattice.scratch());
+		if (band == null) band = EwProject.fromLastLeg(swing);
 		if (band != null) {
 			out.forecast.set(band.priceLo, band.priceHi, band.barLo, band.barHi);
 			out.zones.set(0, band.priceLo, band.priceHi, band.barLo, band.barHi,

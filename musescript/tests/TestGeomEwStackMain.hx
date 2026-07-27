@@ -11,6 +11,7 @@ class TestGeomEwStackMain {
 	static function main() {
 		var runner = new Runner();
 		runner.addCase(new TestGeomEwStack());
+		runner.addCase(new TestEwHandbookCh01());
 		runner.addCase(new TestPortBatch31());
 		runner.addCase(new TestPortBatch32());
 		runner.addCase(new TestPortBatch36());
