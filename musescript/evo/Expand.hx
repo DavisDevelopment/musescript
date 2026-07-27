@@ -80,7 +80,9 @@ class Expand {
 				var baseE = scalar(KSeries(node), params);
 				if (field == "spread") return "0";
 				if (field == "prob_up")
-					throw 'Expand: prob_up is undefined for point projection "${decl.name}" (K=1)';
+					// Owed: the strategy surface has no ternary/bool→float, so prob_up needs a dedicated
+					// builtin (deliberately avoided to keep fan reductions pure arithmetic). See plan §6.
+					throw 'Expand: prob_up is not yet renderable (needs a builtin) for "${decl.name}"';
 				if (StringTools.startsWith(field, "sample_")) {
 					var i = Std.parseInt(field.substr(7));
 					if (i != 0)
@@ -111,7 +113,9 @@ class Expand {
 					case "p95": loc(McFan.quantile(zs, 0.95));
 					case "spread": '(${num(McFan.quantile(zs, 0.95) - McFan.quantile(zs, 0.05))}) * (${volE})';
 					case "prob_up":
-						throw 'Expand: prob_up rendering is owed (P1.5+) for projection "${decl.name}"';
+						// Owed: a K-term count needs ternary/bool→float, which the strategy surface lacks;
+						// this reduction wants a dedicated builtin (fan reductions stay pure arithmetic). §6.
+						throw 'Expand: prob_up is not yet renderable (needs a builtin) for "${decl.name}"';
 					default:
 						throw 'Expand: unknown projection field "$field" for projection "${decl.name}"';
 				};

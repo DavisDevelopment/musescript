@@ -237,6 +237,16 @@ class TestProjectionScaffold extends Test {
 		];
 	}
 
+	/** Choppy oscillating tape: close[t] does NOT trivially predict close[t+H]. */
+	static function zigzagBars(n:Int):Array<Bar> {
+		return [
+			for (i in 0...n) {
+				var c = 100.0 + 5.0 * Math.sin(i * 0.5);
+				({open: c, high: c + 0.5, low: c - 0.5, close: c, volume: 1.0, time: i * 1.0, index: i} : Bar);
+			}
+		];
+	}
+
 	public function testRankICPerfectAndInverse() {
 		var p = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
 		Assert.floatEquals(1.0, ProjectionScore.rankIC(p, [10.0, 20.0, 30.0, 40.0, 50.0, 60.0]));
@@ -330,5 +340,21 @@ class TestProjectionScaffold extends Test {
 		arch.offer(poor, 2.0, MapElites.assignCellWithSkill(0.05, 10, 0.5, 0.3, -0.8, cents));
 		arch.offer(good, 2.0, MapElites.assignCellWithSkill(0.05, 10, 0.5, 0.3, 0.8, cents));
 		Assert.equals(2, arch.size()); // both kept — not competed away into one basin
+	}
+
+	// ── the leakage-honesty guarantee ────────────────────────────────────────────────────────
+
+	public function testScorerRewardsForesightButPitProjectionCannotCheat() {
+		var bars = zigzagBars(60); // choppy: close[t] does NOT trivially predict close[t+3]
+		// (1) the metric CAN detect perfect foresight — a forecast equal to the realized target scores 1
+		var y = ProjectionScore.realizedTarget(bars, PLevel, 3);
+		Assert.floatEquals(1.0, ProjectionScore.rankIC(y, y));
+		// (2) but a PIT projection (= close) can NOT achieve perfect foresight on a choppy tape:
+		// its skill is strictly, meaningfully below perfect — it does not see the future.
+		var decl:ProjectionDecl = {
+			name: "proj_0", kind: PLevel, horizon: 3,
+			sampler: PSPoint(SPrice("close")), samples: 1, seed: 1
+		};
+		Assert.isTrue(ProjectionScore.skill(decl, [], bars) < 0.95);
 	}
 }
