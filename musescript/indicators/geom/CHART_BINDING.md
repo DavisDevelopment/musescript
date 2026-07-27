@@ -43,10 +43,29 @@ in their TObject output (chart drops synthesize when these packs are present):
 |---|---|---|
 | GEOM_FIB | fib_retracement, fib_extension, auto_fib, fib_projection, fib_fan, fib_channel, fib_arcs, fib_confluence, fib_time_zones, golden_pocket, murrey_math_lines | levels±zones±pivots±rays±forecast±arcs |
 | GEOM_HARMONIC | gartley, bat, butterfly, crab, shark, cypher | levels, zones (PRZ), pivots, labels (XABCD) + `.signal` |
-| GEOM_EW | ew_hypothesis | pivots, labels (waves), forecast, zones |
+| GEOM_EW | ew_hypothesis | pivots, labels (waves), forecast, zones (+ ParentDegree when nested) |
 | GEOM_GANN | gann_angles, square_of_nine | levels, rays (gann), pivots, labels, rings (So9) |
 | GEOM_CYCLES | ssa_cycles | zones (Cycle), forecast, labels, cycle (CycleSeries) |
 | GEOM_RISK | lppl_warning | zones, forecast, labels, ribbon (RibbonSeries) |
+
+### EW parent degree overlay (C11)
+
+`ew_hypothesis` scalars (also plotted live → `frame.parent`):
+
+| Scalar | Meaning |
+|---|---|
+| `degree` | 0 = fine / inner, 1 = coarse / outer |
+| `parentLabelCode` | Coarse pattern: 0 none, 1 zigzag, 2 impulse5, 3 flat*, 4 diagonal, 5 triangle, 6 double_zigzag |
+| `nestScore` | Soft nesting multiplier (1.0 = neutral) |
+| `parentStartBar` / `parentEndBar` | Coarse parent bar span |
+
+Pack convention (no Cap bump — reuses `zones[]` / `labels[]` slots):
+
+- `ZoneKind.ParentDegree` (11) — coarse price×bar box; status **Forming** (dashed / lower opacity)
+- Label with `Impulse` (50) or `Zigzag` (51) + Forming — parent pattern glyph behind fine Wave1–5 / A–C
+- `ZoneKind.Invalidation` (10) reserved for B7 count-kill bands (sibling)
+
+Chart toggle: `theme.geom.parentOverlay` (default `true`). When false, ParentDegree zones and Impulse/Zigzag Forming labels are skipped.
 
 Chart-only extras that remain synth-side until promoted: none for the
 ArcSet / RingBag / CycleSeries / RibbonSeries family — those are first-class

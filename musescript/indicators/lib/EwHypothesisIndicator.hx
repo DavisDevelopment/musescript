@@ -201,7 +201,7 @@ class EwHypothesisIndicator implements MuseIndicator<Bar, EwHypothesisOutput> {
 				var li = Std.int(out.labels.count);
 				if (li < LabelSet.CAP) {
 					var pCode = switch (Std.int(out.parentLabelCode)) {
-						case 1, 3, 5, 6: GeomLabelCode.Zigzag;
+						case 1, 3, 5, 6, 12, 13: GeomLabelCode.Zigzag;
 						default: GeomLabelCode.Impulse;
 					};
 					var midBar = (out.parentStartBar + out.parentEndBar) * 0.5;
