@@ -8,6 +8,7 @@ import musescript.indicators.ew.EwLattice;
 import musescript.indicators.ew.EwProject;
 import musescript.indicators.ew.DowTrendFilter;
 import musescript.indicators.geom.SwingGraph;
+import musescript.indicators.geom.SwingGraphStack;
 import musescript.indicators.geom.GeomViz;
 import musescript.indicators.geom.PivotStatus;
 import musescript.types.MuseType;
@@ -25,6 +26,14 @@ typedef EwHypothesisOutput = {
 	var endBar:Float;
 	var waveCount:Float;
 	var dowBias:Float;
+	/** Relative degree of top hypothesis (0=fine, 1=coarse). */
+	var degree:Float;
+	/** Parent coarse label code when nested; 0 if none. */
+	var parentLabelCode:Float;
+	/** Soft nesting score for top hypothesis (1.0 = neutral). */
+	var nestScore:Float;
+	var parentStartBar:Float;
+	var parentEndBar:Float;
 	var pivots:PivotMarkSet;
 	var labels:LabelSet;
 	var forecast:ForecastBand;
@@ -32,18 +41,21 @@ typedef EwHypothesisOutput = {
 }
 
 class EwHypothesisIndicator implements MuseIndicator<Bar, EwHypothesisOutput> {
-	var swing:SwingGraph;
+	var stack:SwingGraphStack;
 	var lattice:EwLattice;
 	var out:EwHypothesisOutput;
 	var k:Int;
 
 	public function new(?threshold:Float, k:Int = 3) {
-		swing = new SwingGraph(threshold != null ? threshold : 0.05, 12);
+		var fine = threshold != null ? threshold : 0.05;
+		stack = new SwingGraphStack(fine, null, 12);
 		lattice = new EwLattice();
 		this.k = k < 1 ? 1 : k;
 		out = {
 			labelCode: 0, topScore: Math.NaN, hypCount: 0,
 			startBar: Math.NaN, endBar: Math.NaN, waveCount: 0, dowBias: 0,
+			degree: 0, parentLabelCode: 0, nestScore: 1.0,
+			parentStartBar: Math.NaN, parentEndBar: Math.NaN,
 			pivots: PivotMarkSet.nan(), labels: LabelSet.nan(),
 			forecast: ForecastBand.nan(), zones: ZoneSet.nan()
 		};
@@ -62,17 +74,19 @@ class EwHypothesisIndicator implements MuseIndicator<Bar, EwHypothesisOutput> {
 	}
 
 	public function update(bar:Bar):Null<EwHypothesisOutput> {
-		swing.update(bar);
-		var n = lattice.rebuild(swing, k);
-		GeomVizFill.pivotsFromGraph(swing, out.pivots, 8);
+		stack.update(bar);
+		var n = lattice.rebuildStack(stack, k);
+		GeomVizFill.pivotsFromGraph(stack.fine, out.pivots, 8);
 		out.labels.clear();
 		out.zones.clear();
 		out.forecast.clear();
-		out.dowBias = (DowTrendFilter.bias(swing) : Int) * 1.0;
+		out.dowBias = (DowTrendFilter.bias(stack.fine) : Int) * 1.0;
 
 		if (n == 0) {
 			out.labelCode = 0; out.topScore = 0; out.hypCount = 0;
 			out.startBar = Math.NaN; out.endBar = Math.NaN; out.waveCount = 0;
+			out.degree = 0; out.parentLabelCode = 0; out.nestScore = 1.0;
+			out.parentStartBar = Math.NaN; out.parentEndBar = Math.NaN;
 			return out;
 		}
 		var top = lattice.at(0);
@@ -82,6 +96,15 @@ class EwHypothesisIndicator implements MuseIndicator<Bar, EwHypothesisOutput> {
 		out.startBar = top.startBar * 1.0;
 		out.endBar = top.endBar * 1.0;
 		out.waveCount = top.waveCount * 1.0;
+		out.degree = top.degree * 1.0;
+		out.nestScore = top.nestScore;
+		out.parentStartBar = top.parentStartBar >= 0 ? top.parentStartBar * 1.0 : Math.NaN;
+		out.parentEndBar = top.parentEndBar >= 0 ? top.parentEndBar * 1.0 : Math.NaN;
+		if (top.parentHypothesisId >= 0 && top.parentHypothesisId < lattice.coarseHypothesisCount()) {
+			out.parentLabelCode = labelCodeOf(lattice.coarseAt(top.parentHypothesisId).label);
+		} else {
+			out.parentLabelCode = 0;
+		}
 
 		var waveCodes = switch (top.label) {
 			case "impulse5", "diagonal":
@@ -111,7 +134,7 @@ class EwHypothesisIndicator implements MuseIndicator<Bar, EwHypothesisOutput> {
 		out.labels.count = take * 1.0;
 
 		var band = EwProject.fromHypothesis(top, lattice.scratch());
-		if (band == null) band = EwProject.fromLastLeg(swing);
+		if (band == null) band = EwProject.fromLastLeg(stack.fine);
 		if (band != null) {
 			out.forecast.set(band.priceLo, band.priceHi, band.barLo, band.barHi);
 			out.zones.set(0, band.priceLo, band.priceHi, band.barLo, band.barHi,
@@ -122,12 +145,12 @@ class EwHypothesisIndicator implements MuseIndicator<Bar, EwHypothesisOutput> {
 	}
 
 	public function reset():Void {
-		swing.reset();
+		stack.reset();
 		out.pivots.clear(); out.labels.clear(); out.forecast.clear(); out.zones.clear();
 	}
 
 	public function warmupPeriod():Int return 8;
-	public function isReady():Bool return swing.pivotCount() >= 4;
+	public function isReady():Bool return stack.fine.pivotCount() >= 4;
 	public function name():String return "EwHypothesis";
 
 	public static function spec():IndicatorSpec {
@@ -136,6 +159,8 @@ class EwHypothesisIndicator implements MuseIndicator<Bar, EwHypothesisOutput> {
 				{name: "labelCode", ty: TScalar}, {name: "topScore", ty: TScalar}, {name: "hypCount", ty: TScalar},
 				{name: "startBar", ty: TScalar}, {name: "endBar", ty: TScalar}, {name: "waveCount", ty: TScalar},
 				{name: "dowBias", ty: TScalar},
+				{name: "degree", ty: TScalar}, {name: "parentLabelCode", ty: TScalar},
+				{name: "nestScore", ty: TScalar}, {name: "parentStartBar", ty: TScalar}, {name: "parentEndBar", ty: TScalar},
 				{name: "pivots", ty: GeomVizSpec.pivotObj()},
 				{name: "labels", ty: GeomVizSpec.labelObj()},
 				{name: "forecast", ty: GeomVizSpec.forecastObj()},
@@ -146,6 +171,8 @@ class EwHypothesisIndicator implements MuseIndicator<Bar, EwHypothesisOutput> {
 				var nanFill:EwHypothesisOutput = {
 					labelCode: Math.NaN, topScore: Math.NaN, hypCount: Math.NaN,
 					startBar: Math.NaN, endBar: Math.NaN, waveCount: Math.NaN, dowBias: Math.NaN,
+					degree: Math.NaN, parentLabelCode: Math.NaN, nestScore: Math.NaN,
+					parentStartBar: Math.NaN, parentEndBar: Math.NaN,
 					pivots: PivotMarkSet.nan(), labels: LabelSet.nan(),
 					forecast: ForecastBand.nan(), zones: ZoneSet.nan()
 				};

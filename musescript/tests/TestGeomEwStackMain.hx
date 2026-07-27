@@ -12,6 +12,7 @@ class TestGeomEwStackMain {
 		var runner = new Runner();
 		runner.addCase(new TestGeomEwStack());
 		runner.addCase(new TestEwHandbookCh01());
+		runner.addCase(new TestEwDegreeNesting());
 		runner.addCase(new TestEwPhiFinetune());
 		runner.addCase(new TestPortBatch31());
 		runner.addCase(new TestPortBatch32());

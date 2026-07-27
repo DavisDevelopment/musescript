@@ -7,5 +7,6 @@
 | 3 φ Math | done | EwPhiParams identities; SoftScores.bestFibHitParams; RatioTables.EW_PHI_CORE | Soft hits parametrized |
 | 4 Ratio Analysis | done | EwRatioTargets; wave-aware EwProject; PhiParamsDump | fromLastLeg uses params |
 | deepen correctives | done | flat regular/expanded/running; real triangle a-e; double zigzag W-X-Y | lattice windows 4/6/8 |
+| degree nesting | done | SwingGraphStack (fine/coarse thresholds → degree 0/1); parentIdx linkage; EwLattice.rebuildStack + nestingSoft; EwHypothesis parent fields; indicator degree/parent scalars | single SwingGraph → two-threshold stack |
 
-Tests: `TestEwHandbookCh01` (covers Ch1–4 + deepen).
+Tests: `TestEwHandbookCh01` (Ch1–4 + deepen), `TestEwDegreeNesting` (stack + nesting).
