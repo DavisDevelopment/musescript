@@ -3,14 +3,17 @@ package musescript.evo.nma;
 import musescript.indicators.GrowableVec;
 import musescript.harness.HarnessContext;
 import musescript.builtins.TradeBuiltins;
+import musescript.indicators.lib.FibRetracement;
+import musescript.indicators.lib.FourierProjection;
 
 /**
  * Lazy materialization of multi-output `KFeature` expression strings into scalar columns.
  *
  * Variation grows `KFeature('macd("close",12,26,9).hist')` / `bbands(...).upper` / `stoch(...).k`
- * as bare-expression leaves (no new node variant). Under `--nma` those used to force every such
- * genome through Expand→parse→compile. They are pure functions of the tape — host them here with
- * the same `TradeBuiltins` the compiled path calls.
+ * / `fib_retracement(20).level618` / `fourier_projection("close",34,3,3)` as bare-expression
+ * leaves (no new node variant). Under `--nma` those used to force every such genome through
+ * Expand→parse→compile. They are pure functions of the tape — host them here with the same
+ * `TradeBuiltins` / indicator math the compiled path calls.
  *
  * Position-state features (`unrealized_pnl_pct()`, `bars_in_trade()`) stay refused at prepare —
  * they need OrderSim state interleaved with signal eval and cannot be columns.
@@ -21,12 +24,27 @@ class NmaFeatureHost {
 	static final MACD_RE = ~/^macd\("([a-z0-9_]+)",\s*(\d+),\s*(\d+),\s*(\d+)\)\.([a-z]+)$/;
 	static final BBANDS_RE = ~/^bbands\("([a-z0-9_]+)",\s*(\d+),\s*([0-9.]+)\)\.([a-z]+)$/;
 	static final STOCH_RE = ~/^stoch\((\d+),\s*(\d+),\s*(\d+)\)\.([a-z]+)$/;
+	/** CorpusSeed / growMultiOutputField spelling: `fib_retracement(window).level*` — no series arg. */
+	static final FIB_RE = ~/^fib_retracement\((\d+)\)\.(level(?:0|236|382|500|618|786|1000))$/;
+	/** CorpusSeed spelling: `fourier_projection("close", period, k, horizon[, detrend])` — scalar. */
+	static final FOURIER_RE = ~/^fourier_projection\("([a-z0-9_]+)",\s*(\d+)(?:,\s*(\d+))?(?:,\s*(\d+))?(?:,\s*(true|false))?\)$/;
 
-	/** True for features that need live position state — cannot be columnar. */
+	/** True for features that need live position state — cannot be columnar.
+	 *
+	 * `equity`/`cash`/`entry_price`/`position` are here for the same reason the first two are:
+	 * they read OrderSim, so no tape column can exist for them. They used to be absent, which
+	 * meant `CorpusSeed` (whose `RISK_EXIT_FEATURES` seeds all six from hand-written strategies)
+	 * could produce a genome that NMA classified as tape-pure, `columnFor` then failed to match
+	 * against any indicator pattern, and the caller NaN-filled -- a silently WRONG score rather
+	 * than a refusal, while the compiled path returned real values. Found via `--nma-verify`. */
 	public static function isPositionFeature(expr:String):Bool {
 		if (expr == null) return false;
 		return StringTools.startsWith(expr, "unrealized_pnl")
-			|| StringTools.startsWith(expr, "bars_in_trade");
+			|| StringTools.startsWith(expr, "bars_in_trade")
+			|| StringTools.startsWith(expr, "entry_price")
+			|| StringTools.startsWith(expr, "position")
+			|| StringTools.startsWith(expr, "equity")
+			|| StringTools.startsWith(expr, "cash");
 	}
 
 	/**
@@ -53,6 +71,16 @@ class NmaFeatureHost {
 		} else if (STOCH_RE.match(expr)) {
 			col = stochCol(ctx, Std.parseInt(STOCH_RE.matched(1)), Std.parseInt(STOCH_RE.matched(2)),
 				Std.parseInt(STOCH_RE.matched(3)), STOCH_RE.matched(4));
+		} else if (FIB_RE.match(expr)) {
+			col = fibCol(ctx, Std.parseInt(FIB_RE.matched(1)), FIB_RE.matched(2));
+		} else if (FOURIER_RE.match(expr)) {
+			var kStr = FOURIER_RE.matched(3);
+			var horStr = FOURIER_RE.matched(4);
+			var detStr = FOURIER_RE.matched(5);
+			col = fourierCol(ctx, FOURIER_RE.matched(1), Std.parseInt(FOURIER_RE.matched(2)),
+				kStr != null && kStr.length > 0 ? Std.parseInt(kStr) : 3,
+				horStr != null && horStr.length > 0 ? Std.parseInt(horStr) : 1,
+				detStr == null || detStr.length == 0 || detStr == "true");
 		}
 		if (col != null && cacheKey != null) cache.put(cacheKey, col);
 		return col;
@@ -132,6 +160,70 @@ class NmaFeatureHost {
 				case "d": (o.d : Float);
 				default: Math.NaN;
 			});
+		}
+		return col;
+	}
+
+	/**
+	 * Same math as `FibRetracement` / `IndicatorCache.evalBar` on the compiled path: trailing
+	 * window high/low ladder. Driving the indicator class directly (not via `TradeBuiltins`)
+	 * keeps parity without a growing-series harness — fib only reads `bar.high`/`bar.low`.
+	 */
+	static function fibCol(ctx:NmaEvalContext, period:Int, proj:String):GrowableVec<Float> {
+		var n = ctx.n;
+		var col = new GrowableVec<Float>(n > 0 ? n : 8);
+		if (period <= 0) {
+			for (_ in 0...n) col.push(Math.NaN);
+			return col;
+		}
+		var fH = fieldArr(ctx, "high");
+		var fL = fieldArr(ctx, "low");
+		var fr = new FibRetracement(period);
+		for (i in 0...n) {
+			var o = fr.update({
+				open: 0.0,
+				high: i < fH.length ? fH[i] : Math.NaN,
+				low: i < fL.length ? fL[i] : Math.NaN,
+				close: 0.0,
+				volume: 0.0,
+				time: (i : Float),
+				index: i
+			});
+			if (o == null) {
+				col.push(Math.NaN);
+				continue;
+			}
+			col.push(switch (proj) {
+				case "level0": o.level0;
+				case "level236": o.level236;
+				case "level382": o.level382;
+				case "level500": o.level500;
+				case "level618": o.level618;
+				case "level786": o.level786;
+				case "level1000": o.level1000;
+				default: Math.NaN;
+			});
+		}
+		return col;
+	}
+
+	/**
+	 * Same math as `FourierProjection` / `IndicatorCache.evalSeries` on the compiled path.
+	 * Defaults match the indicator spec (k=3, horizon=1, detrend=true).
+	 */
+	static function fourierCol(ctx:NmaEvalContext, field:String, period:Int, k:Int, horizon:Int,
+			detrend:Bool):GrowableVec<Float> {
+		var n = ctx.n;
+		var col = new GrowableVec<Float>(n > 0 ? n : 8);
+		if (period < 4 || k < 0 || horizon < 0) {
+			for (_ in 0...n) col.push(Math.NaN);
+			return col;
+		}
+		var full = fieldArr(ctx, field);
+		var fp = new FourierProjection(period, k, horizon, detrend);
+		for (i in 0...n) {
+			var v = fp.update(i < full.length ? full[i] : Math.NaN);
+			col.push(v == null ? Math.NaN : v);
 		}
 		return col;
 	}

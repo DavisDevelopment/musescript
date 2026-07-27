@@ -1,0 +1,2557 @@
+{
+  "generated_at": "2026-07-27T04:53:15.354620+00:00",
+  "awesome_lists": [
+    {
+      "url": "https://raw.githubusercontent.com/pAulseperformance/awesome-pinescript/master/README.md",
+      "ok": true,
+      "repos": 19,
+      "error": null
+    },
+    {
+      "url": "https://raw.githubusercontent.com/just-nilux/awesome-tradingview/master/README.md",
+      "ok": true,
+      "repos": 2,
+      "error": null
+    }
+  ],
+  "seed_repos": [
+    "everget/tradingview-pinescript-indicators",
+    "mihakralj/pinescript",
+    "pinecoders/pine-utils",
+    "TWODS-CAPITAL/Trading-View-Indicators",
+    "Alorse/pinescript-strategies",
+    "800cherries/Tradingview-Indicators",
+    "chris-c-thomas/chrd-tradingview-pine-scripts",
+    "VolodymyrFilias/feels-indicators",
+    "ArunKBhaskar/PineScript",
+    "hirawatt/pineScripts"
+  ],
+  "allowed_spdx": [
+    "0BSD",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    "ISC",
+    "MIT",
+    "MPL-2.0",
+    "Unlicense"
+  ],
+  "repos_considered": 29,
+  "repos_accepted": 6,
+  "repos_skipped": [
+    {
+      "repo": "800cherries/Tradingview-Indicators",
+      "reason": "license_gate:unknown",
+      "path": "C:\\Users\\epiki\\Documents\\Development\\kalshai\\muse-lab\\muse-script\\corpus\\pine-organic\\800cherries__Tradingview-Indicators"
+    },
+    {
+      "repo": "Alorse/pinescript-strategies",
+      "reason": "clone_failed: error: invalid path 'indicators/3 MTF EMA:SMA.pine'\nfatal: unable to checkout working tree\nwarning: Clone succeeded, but checkout failed.\nYou can inspect what was checked out with 'git status'\nand retry with 'git restore --source=HEAD :/'"
+    },
+    {
+      "repo": "CryptoMF/frostybot",
+      "reason": "clone_failed: remote: Repository not found.\nfatal: repository 'https://github.com/CryptoMF/frostybot.git/' not found"
+    },
+    {
+      "repo": "CryptoMF/frostybot-js",
+      "reason": "clone_failed: remote: Repository not found.\nfatal: repository 'https://github.com/CryptoMF/frostybot-js.git/' not found"
+    },
+    {
+      "repo": "CryptoMF/frostybot-php",
+      "reason": "clone_failed: remote: Repository not found.\nfatal: repository 'https://github.com/CryptoMF/frostybot-php.git/' not found"
+    },
+    {
+      "repo": "IAMtheIAM/autoview-tradingview-chrome-docker-bot",
+      "reason": "clone_failed: fatal: cannot create directory at 'chrome-profile/Default/Service Worker/CacheStorage/28da9c56fde4021055a681112c092453f74d8dd8/b9c1016c-60b7-4a0f-a655-ee6d41791d1c': Filename too long\nwarning: Clone succeeded, but checkout failed.\nYou can inspect what was checked out with 'git status'\nand retry with 'git restore --source=HEAD :/'"
+    },
+    {
+      "repo": "Mtemi/Bybit-Auto-Trading-Bot-Ordes-placed-via-TradingView-Webhook",
+      "reason": "license_gate:unknown",
+      "path": "C:\\Users\\epiki\\Documents\\Development\\kalshai\\muse-lab\\muse-script\\corpus\\pine-organic\\Mtemi__Bybit-Auto-Trading-Bot-Ordes-placed-via-TradingView-Webhook"
+    },
+    {
+      "repo": "Roibal/Cryptocurrency-Trading-Bots-Python-Beginner-Advance",
+      "reason": "no_pine_sources",
+      "license": "MIT"
+    },
+    {
+      "repo": "TWODS-CAPITAL/Trading-View-Indicators",
+      "reason": "clone_failed: error: invalid path 'Candle-Stick-Patterns /.DS_Store'\nfatal: unable to checkout working tree\nwarning: Clone succeeded, but checkout failed.\nYou can inspect what was checked out with 'git status'\nand retry with 'git restore --source=HEAD :/'"
+    },
+    {
+      "repo": "bingit2/TradingView-to-ThinkorSwim",
+      "reason": "license_gate:unknown",
+      "path": "C:\\Users\\epiki\\Documents\\Development\\kalshai\\muse-lab\\muse-script\\corpus\\pine-organic\\bingit2__TradingView-to-ThinkorSwim"
+    },
+    {
+      "repo": "deathlyface/python-tradingview-ta",
+      "reason": "no_pine_sources",
+      "license": "MIT"
+    },
+    {
+      "repo": "everget/tradingview-pinescript-indicators",
+      "reason": "license_gate:unknown",
+      "path": "C:\\Users\\epiki\\Documents\\Development\\kalshai\\muse-lab\\muse-script\\corpus\\pine-organic\\everget__tradingview-pinescript-indicators"
+    },
+    {
+      "repo": "fabston/TradingView-Webhook-Bot",
+      "reason": "no_pine_sources",
+      "license": "MIT"
+    },
+    {
+      "repo": "grimmolf/LemonTrading",
+      "reason": "clone_failed: remote: Repository not found.\nfatal: repository 'https://github.com/grimmolf/LemonTrading.git/' not found"
+    },
+    {
+      "repo": "kzh-dev/pine-bot-client",
+      "reason": "license_gate:unknown",
+      "path": "C:\\Users\\epiki\\Documents\\Development\\kalshai\\muse-lab\\muse-script\\corpus\\pine-organic\\kzh-dev__pine-bot-client"
+    },
+    {
+      "repo": "ottodevs/instabot-trader",
+      "reason": "no_pine_sources",
+      "license": "MIT"
+    },
+    {
+      "repo": "pAulseperformance/awesome-pinescript",
+      "reason": "no_pine_sources",
+      "license": "MIT"
+    },
+    {
+      "repo": "pine-language-tools/pine-script-visual-studio-code",
+      "reason": "clone_failed: remote: Repository not found.\nfatal: repository 'https://github.com/pine-language-tools/pine-script-visual-studio-code.git/' not found"
+    },
+    {
+      "repo": "pinecoders/pine-utils",
+      "reason": "license_gate:unknown",
+      "path": "C:\\Users\\epiki\\Documents\\Development\\kalshai\\muse-lab\\muse-script\\corpus\\pine-organic\\pinecoders__pine-utils"
+    },
+    {
+      "repo": "quantium-ai/signal",
+      "reason": "no_pine_sources",
+      "license": "MIT"
+    },
+    {
+      "repo": "shner-elmo/TradingView-Screener",
+      "reason": "no_pine_sources",
+      "license": "MIT"
+    },
+    {
+      "repo": "tacyarg/tradingview-webhooks",
+      "reason": "no_pine_sources",
+      "license": "MIT"
+    },
+    {
+      "repo": "tradingview/pine_script_docs",
+      "reason": "clone_failed: remote: Repository not found.\nfatal: repository 'https://github.com/tradingview/pine_script_docs.git/' not found"
+    }
+  ],
+  "total_pine_files": 470,
+  "version_histogram": {
+    "unknown": 5,
+    "v4": 7,
+    "v5": 21,
+    "v6": 437
+  },
+  "repos": [
+    {
+      "repo": "ArunKBhaskar/PineScript",
+      "license": "MPL-2.0",
+      "local_dir": "ArunKBhaskar__PineScript",
+      "file_count": 26,
+      "files": [
+        {
+          "path": "ICT Displacement Candles/[Indicator] ICT Displacement Candles.txt",
+          "bytes": 16015,
+          "version": 6
+        },
+        {
+          "path": "ICT Displacement Candles/[Scanner] ICT Displacement Candles.txt",
+          "bytes": 26101,
+          "version": 6
+        },
+        {
+          "path": "ICT Equal Highs and Lows/ICT Equal Highs and Lows Indicator.txt",
+          "bytes": 4767,
+          "version": 5
+        },
+        {
+          "path": "ICT Equal Highs and Lows/ICT Equal Highs and Lows with Screener.txt",
+          "bytes": 15105,
+          "version": 5
+        },
+        {
+          "path": "ICT External Range Liquidity/ICT External Range Liquidity Static Multi-timeframe (Swing High and Low).txt",
+          "bytes": 16464,
+          "version": 5
+        },
+        {
+          "path": "ICT External and Internal Range Liquidity/ICT External and Internal Range Liquidity Multi-timeframe.txt",
+          "bytes": 32037,
+          "version": 5
+        },
+        {
+          "path": "ICT Fair Value Gap (FVG) Scanner/Scanner - ICT Fair Value Gap (FVG) Scanner.txt",
+          "bytes": 44708,
+          "version": 6
+        },
+        {
+          "path": "ICT Liquidity Sweep Pattern Scanner/Scanner - ICT Liquidity Sweep Pattern Scanner.txt",
+          "bytes": 29137,
+          "version": 5
+        },
+        {
+          "path": "ICT Liquidity Void Fill/[Indicator] ICT Liquidity Void Fill.txt",
+          "bytes": 9583,
+          "version": 6
+        },
+        {
+          "path": "ICT Liquidity Void Fill/[Scanner] ICT Liquidity Void Fill Scanner.txt",
+          "bytes": 23744,
+          "version": 6
+        },
+        {
+          "path": "ICT Liquidity Void/ICT Liquidity Void Multi-timeframe.txt",
+          "bytes": 9096,
+          "version": 5
+        },
+        {
+          "path": "ICT Liquidity Void/ICT Liquidity Void Screener.txt",
+          "bytes": 18913,
+          "version": 5
+        },
+        {
+          "path": "ICT Market Structure Shift (MSS)/ICT Market Structure Shift (MSS) Screener.txt",
+          "bytes": 23640,
+          "version": 5
+        },
+        {
+          "path": "ICT Market Structure Shift (MSS)/ICT Market Structure Shift (MSS).txt",
+          "bytes": 13278,
+          "version": 5
+        },
+        {
+          "path": "ICT Mitigation Block Scanner/[Scanner] ICT Mitigation Block Scanner.txt",
+          "bytes": 35843,
+          "version": 5
+        },
+        {
+          "path": "Momentum Setup - Ankush Bajaj Momentum Investing Setup/Momentum Setup - Ankush Bajaj Momentum Investing Setup with Scanner.txt",
+          "bytes": 33061,
+          "version": 5
+        },
+        {
+          "path": "Momentum Setup - Ankush Bajaj Momentum Investing Setup/Momentum Setup - Ankush Bajaj Momentum Investing Setup.txt",
+          "bytes": 23163,
+          "version": 5
+        },
+        {
+          "path": "Momentum Setup - RSI Directional Momentum/[Indicator] Momentum Setup - RSI Directional Momentum.txt",
+          "bytes": 31355,
+          "version": 6
+        },
+        {
+          "path": "Momentum Setup - RSI Directional Momentum/[Scanner] Momentum Setup - RSI Directional Momentum.txt",
+          "bytes": 41649,
+          "version": 6
+        },
+        {
+          "path": "Momentum Setup - Vijay Thakare Option Buying Scalping Setup/Momentum Setup - Vijay Thakare Option Buying Scalping Setup with Scanner.txt",
+          "bytes": 37621,
+          "version": 5
+        },
+        {
+          "path": "Momentum Setup - Vijay Thakare Option Buying Scalping Setup/Momentum Setup - Vijay Thakare Option Buying Scalping Setup.txt",
+          "bytes": 29581,
+          "version": 5
+        },
+        {
+          "path": "Trend Following Setup - Sideways Market Skipper Scanner/Indicator - Trend Following Setup - Sideways Market Skipper.txt",
+          "bytes": 19302,
+          "version": 5
+        },
+        {
+          "path": "Trend Following Setup - Sideways Market Skipper Scanner/Scanner - Trend Following Setup - Sideways Market Skipper Scanner.txt",
+          "bytes": 29990,
+          "version": 5
+        },
+        {
+          "path": "[Indicator] Magnetic Zones - Multi Timeframe.txt",
+          "bytes": 37025,
+          "version": 5
+        },
+        {
+          "path": "[Screener] ICT Retracement to Order Block with Screener.txt",
+          "bytes": 22636,
+          "version": 5
+        },
+        {
+          "path": "[Screener] Market Profile with Screener (Based on [RS]Market Profile by RicardoSantos).txt",
+          "bytes": 19003,
+          "version": 5
+        }
+      ]
+    },
+    {
+      "repo": "VolodymyrFilias/feels-indicators",
+      "license": "MIT",
+      "local_dir": "VolodymyrFilias__feels-indicators",
+      "file_count": 5,
+      "files": [
+        {
+          "path": "indicators/air-pocket-profile.pine",
+          "bytes": 33516,
+          "version": 6
+        },
+        {
+          "path": "indicators/confluence-pivot-zones.pine",
+          "bytes": 13854,
+          "version": 6
+        },
+        {
+          "path": "indicators/liquidity-magnet.pine",
+          "bytes": 23874,
+          "version": 6
+        },
+        {
+          "path": "indicators/power-of-three.pine",
+          "bytes": 21886,
+          "version": 6
+        },
+        {
+          "path": "indicators/support-resistance-zones.pine",
+          "bytes": 26867,
+          "version": 6
+        }
+      ]
+    },
+    {
+      "repo": "chris-c-thomas/chrd-tradingview-pine-scripts",
+      "license": "MIT",
+      "local_dir": "chris-c-thomas__chrd-tradingview-pine-scripts",
+      "file_count": 14,
+      "files": [
+        {
+          "path": "scripts/bottom-level-finder/bottom-level-finder.pine",
+          "bytes": 36298,
+          "version": 6
+        },
+        {
+          "path": "scripts/intraday-analyst/equity-intraday-analyst.pine",
+          "bytes": 50417,
+          "version": 6
+        },
+        {
+          "path": "scripts/intraday-analyst/index-intraday-analyst.pine",
+          "bytes": 51313,
+          "version": 6
+        },
+        {
+          "path": "scripts/market-monitor/market-monitor-15min.pine",
+          "bytes": 17306,
+          "version": 6
+        },
+        {
+          "path": "scripts/market-monitor/market-monitor-1min.pine",
+          "bytes": 21227,
+          "version": 6
+        },
+        {
+          "path": "scripts/market-monitor/market-monitor-5min.pine",
+          "bytes": 38799,
+          "version": 6
+        },
+        {
+          "path": "scripts/pocket-scout/pocket-scout.pine",
+          "bytes": 21495,
+          "version": 6
+        },
+        {
+          "path": "scripts/spy-0dte-scalper/spy-0dte-scalper-15min.pine",
+          "bytes": 78944,
+          "version": null
+        },
+        {
+          "path": "scripts/spy-0dte-scalper/spy-0dte-scalper-1min.pine",
+          "bytes": 47862,
+          "version": 6
+        },
+        {
+          "path": "scripts/spy-0dte-scalper/spy-0dte-scalper-5min.pine",
+          "bytes": 56062,
+          "version": 6
+        },
+        {
+          "path": "scripts/trend-compass/trend-compass-15m.pine",
+          "bytes": 27832,
+          "version": 6
+        },
+        {
+          "path": "scripts/trend-compass/trend-compass-1h.pine",
+          "bytes": 47589,
+          "version": 6
+        },
+        {
+          "path": "scripts/trend-compass/trend-compass-4h.pine",
+          "bytes": 45798,
+          "version": 6
+        },
+        {
+          "path": "scripts/trend-compass/trend-compass-daily.pine",
+          "bytes": 43211,
+          "version": 6
+        }
+      ]
+    },
+    {
+      "repo": "hirawatt/pineScripts",
+      "license": "MIT",
+      "local_dir": "hirawatt__pineScripts",
+      "file_count": 11,
+      "files": [
+        {
+          "path": "indicator/5MA.pine",
+          "bytes": 2137,
+          "version": 4
+        },
+        {
+          "path": "indicator/defaultStudy.pine",
+          "bytes": 938,
+          "version": 4
+        },
+        {
+          "path": "indicator/foreignMarkets.pine",
+          "bytes": 1247,
+          "version": 4
+        },
+        {
+          "path": "indicator/highlow.pine",
+          "bytes": 724,
+          "version": null
+        },
+        {
+          "path": "indicator/iHotelIndex.pine",
+          "bytes": 1237,
+          "version": 5
+        },
+        {
+          "path": "library/pct_change.pine",
+          "bytes": 774,
+          "version": 5
+        },
+        {
+          "path": "strategy/defaultStrategy.pine",
+          "bytes": 1435,
+          "version": 4
+        },
+        {
+          "path": "strategy/dualMA.pine",
+          "bytes": 1719,
+          "version": 4
+        },
+        {
+          "path": "strategy/extras.pine",
+          "bytes": 1655,
+          "version": null
+        },
+        {
+          "path": "strategy/myStrategy.pine",
+          "bytes": 1517,
+          "version": 4
+        },
+        {
+          "path": "strategy/simpleEMAStrategy.pine",
+          "bytes": 2389,
+          "version": 4
+        }
+      ]
+    },
+    {
+      "repo": "mihakralj/pinescript",
+      "license": "MIT",
+      "local_dir": "mihakralj__pinescript",
+      "file_count": 410,
+      "files": [
+        {
+          "path": "indicators/channels/aberr.pine",
+          "bytes": 2258,
+          "version": 6
+        },
+        {
+          "path": "indicators/channels/accbands.pine",
+          "bytes": 2508,
+          "version": 6
+        },
+        {
+          "path": "indicators/channels/apchannel.pine",
+          "bytes": 2667,
+          "version": 6
+        },
+        {
+          "path": "indicators/channels/apz.pine",
+          "bytes": 2454,
+          "version": 6
+        },
+        {
+          "path": "indicators/channels/atrbands.pine",
+          "bytes": 2633,
+          "version": 6
+        },
+        {
+          "path": "indicators/channels/bbands.pine",
+          "bytes": 1945,
+          "version": 6
+        },
+        {
+          "path": "indicators/channels/dchannel.pine",
+          "bytes": 2015,
+          "version": 6
+        },
+        {
+          "path": "indicators/channels/decaychannel.pine",
+          "bytes": 3211,
+          "version": 6
+        },
+        {
+          "path": "indicators/channels/fcb.pine",
+          "bytes": 3076,
+          "version": 6
+        },
+        {
+          "path": "indicators/channels/jbands.pine",
+          "bytes": 2275,
+          "version": 6
+        },
+        {
+          "path": "indicators/channels/kchannel.pine",
+          "bytes": 2132,
+          "version": 6
+        },
+        {
+          "path": "indicators/channels/maenv.pine",
+          "bytes": 2664,
+          "version": 6
+        },
+        {
+          "path": "indicators/channels/mmchannel.pine",
+          "bytes": 2021,
+          "version": 6
+        },
+        {
+          "path": "indicators/channels/pchannel.pine",
+          "bytes": 2754,
+          "version": 6
+        },
+        {
+          "path": "indicators/channels/regchannel.pine",
+          "bytes": 2553,
+          "version": 6
+        },
+        {
+          "path": "indicators/channels/sdchannel.pine",
+          "bytes": 2653,
+          "version": 6
+        },
+        {
+          "path": "indicators/channels/starchannel.pine",
+          "bytes": 2720,
+          "version": 6
+        },
+        {
+          "path": "indicators/channels/stbands.pine",
+          "bytes": 2870,
+          "version": 6
+        },
+        {
+          "path": "indicators/channels/ubands.pine",
+          "bytes": 2267,
+          "version": 6
+        },
+        {
+          "path": "indicators/channels/uchannel.pine",
+          "bytes": 3770,
+          "version": 6
+        },
+        {
+          "path": "indicators/channels/vwapbands.pine",
+          "bytes": 4235,
+          "version": 6
+        },
+        {
+          "path": "indicators/channels/vwapsd.pine",
+          "bytes": 3360,
+          "version": 6
+        },
+        {
+          "path": "indicators/core/avgprice.pine",
+          "bytes": 290,
+          "version": 6
+        },
+        {
+          "path": "indicators/core/ha.pine",
+          "bytes": 467,
+          "version": 6
+        },
+        {
+          "path": "indicators/core/medprice.pine",
+          "bytes": 251,
+          "version": 6
+        },
+        {
+          "path": "indicators/core/midpoint.pine",
+          "bytes": 999,
+          "version": 6
+        },
+        {
+          "path": "indicators/core/midprice.pine",
+          "bytes": 378,
+          "version": 6
+        },
+        {
+          "path": "indicators/core/typprice.pine",
+          "bytes": 271,
+          "version": 6
+        },
+        {
+          "path": "indicators/core/wclprice.pine",
+          "bytes": 283,
+          "version": 6
+        },
+        {
+          "path": "indicators/cycles/ccor.pine",
+          "bytes": 4118,
+          "version": 6
+        },
+        {
+          "path": "indicators/cycles/ccyc.pine",
+          "bytes": 2678,
+          "version": 6
+        },
+        {
+          "path": "indicators/cycles/cg.pine",
+          "bytes": 1161,
+          "version": 6
+        },
+        {
+          "path": "indicators/cycles/dsp.pine",
+          "bytes": 1993,
+          "version": 6
+        },
+        {
+          "path": "indicators/cycles/eacp.pine",
+          "bytes": 5856,
+          "version": 6
+        },
+        {
+          "path": "indicators/cycles/ebsw.pine",
+          "bytes": 2006,
+          "version": 6
+        },
+        {
+          "path": "indicators/cycles/homod.pine",
+          "bytes": 3641,
+          "version": 6
+        },
+        {
+          "path": "indicators/cycles/ht_dcperiod.pine",
+          "bytes": 3009,
+          "version": 6
+        },
+        {
+          "path": "indicators/cycles/ht_dcphase.pine",
+          "bytes": 3144,
+          "version": 6
+        },
+        {
+          "path": "indicators/cycles/ht_phasor.pine",
+          "bytes": 2934,
+          "version": 6
+        },
+        {
+          "path": "indicators/cycles/ht_sine.pine",
+          "bytes": 3127,
+          "version": 6
+        },
+        {
+          "path": "indicators/cycles/lunar.pine",
+          "bytes": 3074,
+          "version": 6
+        },
+        {
+          "path": "indicators/cycles/phasor.pine",
+          "bytes": 5836,
+          "version": 6
+        },
+        {
+          "path": "indicators/cycles/sine.pine",
+          "bytes": 1986,
+          "version": 6
+        },
+        {
+          "path": "indicators/cycles/solar.pine",
+          "bytes": 2526,
+          "version": 6
+        },
+        {
+          "path": "indicators/cycles/ssfdsp.pine",
+          "bytes": 2582,
+          "version": 6
+        },
+        {
+          "path": "indicators/dynamics/adx.pine",
+          "bytes": 1867,
+          "version": 6
+        },
+        {
+          "path": "indicators/dynamics/adxr.pine",
+          "bytes": 2901,
+          "version": 6
+        },
+        {
+          "path": "indicators/dynamics/alligator.pine",
+          "bytes": 3231,
+          "version": 6
+        },
+        {
+          "path": "indicators/dynamics/amat.pine",
+          "bytes": 2032,
+          "version": 6
+        },
+        {
+          "path": "indicators/dynamics/aroon.pine",
+          "bytes": 1626,
+          "version": 6
+        },
+        {
+          "path": "indicators/dynamics/aroonosc.pine",
+          "bytes": 1848,
+          "version": 6
+        },
+        {
+          "path": "indicators/dynamics/chop.pine",
+          "bytes": 2386,
+          "version": 6
+        },
+        {
+          "path": "indicators/dynamics/dmx.pine",
+          "bytes": 4703,
+          "version": 6
+        },
+        {
+          "path": "indicators/dynamics/dx.pine",
+          "bytes": 2596,
+          "version": 6
+        },
+        {
+          "path": "indicators/dynamics/ghla.pine",
+          "bytes": 2430,
+          "version": 6
+        },
+        {
+          "path": "indicators/dynamics/ht_trendmode.pine",
+          "bytes": 3352,
+          "version": 6
+        },
+        {
+          "path": "indicators/dynamics/ichimoku.pine",
+          "bytes": 3118,
+          "version": 6
+        },
+        {
+          "path": "indicators/dynamics/pfe.pine",
+          "bytes": 3878,
+          "version": 6
+        },
+        {
+          "path": "indicators/dynamics/qstick.pine",
+          "bytes": 2219,
+          "version": 6
+        },
+        {
+          "path": "indicators/dynamics/ravi.pine",
+          "bytes": 3306,
+          "version": 6
+        },
+        {
+          "path": "indicators/dynamics/super.pine",
+          "bytes": 2959,
+          "version": 6
+        },
+        {
+          "path": "indicators/dynamics/ttm.pine",
+          "bytes": 2308,
+          "version": 6
+        },
+        {
+          "path": "indicators/dynamics/ttmtrend.pine",
+          "bytes": 2332,
+          "version": 6
+        },
+        {
+          "path": "indicators/dynamics/vhf.pine",
+          "bytes": 3991,
+          "version": 6
+        },
+        {
+          "path": "indicators/dynamics/vortex.pine",
+          "bytes": 2156,
+          "version": 6
+        },
+        {
+          "path": "indicators/errors/dirty.pine",
+          "bytes": 959,
+          "version": 6
+        },
+        {
+          "path": "indicators/errors/huber.pine",
+          "bytes": 1854,
+          "version": 6
+        },
+        {
+          "path": "indicators/errors/logcosh.pine",
+          "bytes": 1437,
+          "version": 6
+        },
+        {
+          "path": "indicators/errors/maape.pine",
+          "bytes": 1371,
+          "version": 6
+        },
+        {
+          "path": "indicators/errors/mae.pine",
+          "bytes": 1631,
+          "version": 6
+        },
+        {
+          "path": "indicators/errors/mapd.pine",
+          "bytes": 1651,
+          "version": 6
+        },
+        {
+          "path": "indicators/errors/mape.pine",
+          "bytes": 1664,
+          "version": 6
+        },
+        {
+          "path": "indicators/errors/mase.pine",
+          "bytes": 1984,
+          "version": 6
+        },
+        {
+          "path": "indicators/errors/mdae.pine",
+          "bytes": 1048,
+          "version": 6
+        },
+        {
+          "path": "indicators/errors/mdape.pine",
+          "bytes": 1286,
+          "version": 6
+        },
+        {
+          "path": "indicators/errors/me.pine",
+          "bytes": 1539,
+          "version": 6
+        },
+        {
+          "path": "indicators/errors/mpe.pine",
+          "bytes": 1632,
+          "version": 6
+        },
+        {
+          "path": "indicators/errors/mrae.pine",
+          "bytes": 1293,
+          "version": 6
+        },
+        {
+          "path": "indicators/errors/mse.pine",
+          "bytes": 1597,
+          "version": 6
+        },
+        {
+          "path": "indicators/errors/msle.pine",
+          "bytes": 1652,
+          "version": 6
+        },
+        {
+          "path": "indicators/errors/pseudohuber.pine",
+          "bytes": 1553,
+          "version": 6
+        },
+        {
+          "path": "indicators/errors/quantileloss.pine",
+          "bytes": 1419,
+          "version": 6
+        },
+        {
+          "path": "indicators/errors/rae.pine",
+          "bytes": 3551,
+          "version": 6
+        },
+        {
+          "path": "indicators/errors/rmse.pine",
+          "bytes": 1639,
+          "version": 6
+        },
+        {
+          "path": "indicators/errors/rmsle.pine",
+          "bytes": 1740,
+          "version": 6
+        },
+        {
+          "path": "indicators/errors/rse.pine",
+          "bytes": 3693,
+          "version": 6
+        },
+        {
+          "path": "indicators/errors/rsquared.pine",
+          "bytes": 3565,
+          "version": 6
+        },
+        {
+          "path": "indicators/errors/smape.pine",
+          "bytes": 1867,
+          "version": 6
+        },
+        {
+          "path": "indicators/errors/theilu.pine",
+          "bytes": 1567,
+          "version": 6
+        },
+        {
+          "path": "indicators/errors/tukeybiweight.pine",
+          "bytes": 1703,
+          "version": 6
+        },
+        {
+          "path": "indicators/errors/wmape.pine",
+          "bytes": 1375,
+          "version": 6
+        },
+        {
+          "path": "indicators/errors/wrmse.pine",
+          "bytes": 2064,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/agc.pine",
+          "bytes": 3924,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/alaguerre.pine",
+          "bytes": 3110,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/baxterking.pine",
+          "bytes": 4773,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/bessel.pine",
+          "bytes": 1229,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/bilateral.pine",
+          "bytes": 1960,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/bpf.pine",
+          "bytes": 2154,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/butter.pine",
+          "bytes": 1568,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/butter2.pine",
+          "bytes": 1585,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/butter3.pine",
+          "bytes": 1850,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/cfitz.pine",
+          "bytes": 4749,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/cheby1.pine",
+          "bytes": 2237,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/cheby2.pine",
+          "bytes": 2618,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/edcf.pine",
+          "bytes": 2514,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/elliptic.pine",
+          "bytes": 2042,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/gauss.pine",
+          "bytes": 1913,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/hann.pine",
+          "bytes": 1743,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/hp.pine",
+          "bytes": 1440,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/hpf.pine",
+          "bytes": 1383,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/kalman.pine",
+          "bytes": 1323,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/kf.pine",
+          "bytes": 1307,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/laguerre.pine",
+          "bytes": 1638,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/lms.pine",
+          "bytes": 1568,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/loess.pine",
+          "bytes": 1914,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/modf.pine",
+          "bytes": 2392,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/notch.pine",
+          "bytes": 2022,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/nw.pine",
+          "bytes": 2945,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/oneeuro.pine",
+          "bytes": 3733,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/rls.pine",
+          "bytes": 3497,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/rmed.pine",
+          "bytes": 2558,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/roofing.pine",
+          "bytes": 2782,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/sak.pine",
+          "bytes": 5167,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/sgf.pine",
+          "bytes": 2266,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/spbf.pine",
+          "bytes": 2496,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/ssf.pine",
+          "bytes": 1366,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/ssf2.pine",
+          "bytes": 1399,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/ssf3.pine",
+          "bytes": 1675,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/usf.pine",
+          "bytes": 1437,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/voss.pine",
+          "bytes": 2891,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/wavelet.pine",
+          "bytes": 4922,
+          "version": 6
+        },
+        {
+          "path": "indicators/filters/wiener.pine",
+          "bytes": 1525,
+          "version": 6
+        },
+        {
+          "path": "indicators/forecasts/afirma.pine",
+          "bytes": 4813,
+          "version": 6
+        },
+        {
+          "path": "indicators/forecasts/mlp.pine",
+          "bytes": 17845,
+          "version": 6
+        },
+        {
+          "path": "indicators/momentum/asi.pine",
+          "bytes": 2237,
+          "version": 6
+        },
+        {
+          "path": "indicators/momentum/bias.pine",
+          "bytes": 1561,
+          "version": 6
+        },
+        {
+          "path": "indicators/momentum/bop.pine",
+          "bytes": 1414,
+          "version": 6
+        },
+        {
+          "path": "indicators/momentum/cci.pine",
+          "bytes": 1450,
+          "version": 6
+        },
+        {
+          "path": "indicators/momentum/cfb.pine",
+          "bytes": 7774,
+          "version": 6
+        },
+        {
+          "path": "indicators/momentum/cmo.pine",
+          "bytes": 1479,
+          "version": 6
+        },
+        {
+          "path": "indicators/momentum/macd.pine",
+          "bytes": 3207,
+          "version": 6
+        },
+        {
+          "path": "indicators/momentum/mom.pine",
+          "bytes": 826,
+          "version": 6
+        },
+        {
+          "path": "indicators/momentum/pmo.pine",
+          "bytes": 1750,
+          "version": 6
+        },
+        {
+          "path": "indicators/momentum/ppo.pine",
+          "bytes": 3395,
+          "version": 6
+        },
+        {
+          "path": "indicators/momentum/prs.pine",
+          "bytes": 2159,
+          "version": 6
+        },
+        {
+          "path": "indicators/momentum/roc.pine",
+          "bytes": 876,
+          "version": 6
+        },
+        {
+          "path": "indicators/momentum/rocp.pine",
+          "bytes": 946,
+          "version": 6
+        },
+        {
+          "path": "indicators/momentum/rocr.pine",
+          "bytes": 882,
+          "version": 6
+        },
+        {
+          "path": "indicators/momentum/rsi.pine",
+          "bytes": 1247,
+          "version": 6
+        },
+        {
+          "path": "indicators/momentum/rsx.pine",
+          "bytes": 5342,
+          "version": 6
+        },
+        {
+          "path": "indicators/momentum/sam.pine",
+          "bytes": 3879,
+          "version": 6
+        },
+        {
+          "path": "indicators/momentum/tsi.pine",
+          "bytes": 5235,
+          "version": 6
+        },
+        {
+          "path": "indicators/momentum/vel.pine",
+          "bytes": 3421,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/accel.pine",
+          "bytes": 3495,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/atan2.pine",
+          "bytes": 1537,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/betadist.pine",
+          "bytes": 4783,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/binomdist.pine",
+          "bytes": 3736,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/change.pine",
+          "bytes": 1199,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/cwt.pine",
+          "bytes": 1804,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/dwt.pine",
+          "bytes": 2759,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/exp.pine",
+          "bytes": 748,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/expdist.pine",
+          "bytes": 1837,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/exptrans.pine",
+          "bytes": 753,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/fdist.pine",
+          "bytes": 4765,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/fft.pine",
+          "bytes": 5394,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/gammadist.pine",
+          "bytes": 4611,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/highest.pine",
+          "bytes": 1709,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/hl2.pine",
+          "bytes": 574,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/hlc3.pine",
+          "bytes": 672,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/hlcc4.pine",
+          "bytes": 670,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/ifft.pine",
+          "bytes": 2092,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/jerk.pine",
+          "bytes": 4873,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/jolt.pine",
+          "bytes": 4873,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/linear.pine",
+          "bytes": 1685,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/lineartrans.pine",
+          "bytes": 1690,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/log.pine",
+          "bytes": 873,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/lognormdist.pine",
+          "bytes": 2662,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/logtrans.pine",
+          "bytes": 878,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/lowest.pine",
+          "bytes": 1677,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/normalize.pine",
+          "bytes": 1438,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/normdist.pine",
+          "bytes": 3265,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/oc2.pine",
+          "bytes": 583,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/ohl3.pine",
+          "bytes": 655,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/ohlc4.pine",
+          "bytes": 716,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/poissondist.pine",
+          "bytes": 5301,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/relu.pine",
+          "bytes": 780,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/sigmoid.pine",
+          "bytes": 1016,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/slope.pine",
+          "bytes": 2069,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/sqrt.pine",
+          "bytes": 856,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/sqrttrans.pine",
+          "bytes": 861,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/standardize.pine",
+          "bytes": 2419,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/tanh.pine",
+          "bytes": 1411,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/tdist.pine",
+          "bytes": 5371,
+          "version": 6
+        },
+        {
+          "path": "indicators/numerics/weibulldist.pine",
+          "bytes": 3028,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/ac.pine",
+          "bytes": 2403,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/ao.pine",
+          "bytes": 1944,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/apo.pine",
+          "bytes": 1879,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/bbb.pine",
+          "bytes": 2878,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/bbi.pine",
+          "bytes": 2890,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/bbs.pine",
+          "bytes": 5855,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/brar.pine",
+          "bytes": 2307,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/cfo.pine",
+          "bytes": 2106,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/coppock.pine",
+          "bytes": 3307,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/crsi.pine",
+          "bytes": 4562,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/cti.pine",
+          "bytes": 2355,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/deco.pine",
+          "bytes": 2723,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/dem.pine",
+          "bytes": 1786,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/dosc.pine",
+          "bytes": 3254,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/dpo.pine",
+          "bytes": 1189,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/dymoi.pine",
+          "bytes": 5152,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/er.pine",
+          "bytes": 2417,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/eri.pine",
+          "bytes": 1401,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/fi.pine",
+          "bytes": 1396,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/fisher.pine",
+          "bytes": 1711,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/fisher04.pine",
+          "bytes": 939,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/gator.pine",
+          "bytes": 4001,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/imi.pine",
+          "bytes": 1440,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/inertia.pine",
+          "bytes": 1655,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/kdj.pine",
+          "bytes": 4473,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/kri.pine",
+          "bytes": 1361,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/kst.pine",
+          "bytes": 4517,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/lrsi.pine",
+          "bytes": 1305,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/marketfi.pine",
+          "bytes": 617,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/mstoch.pine",
+          "bytes": 3698,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/pgo.pine",
+          "bytes": 2427,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/psl.pine",
+          "bytes": 1993,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/qqe.pine",
+          "bytes": 5392,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/reflex.pine",
+          "bytes": 3362,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/reverseema.pine",
+          "bytes": 2965,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/rvgi.pine",
+          "bytes": 3586,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/smi.pine",
+          "bytes": 5042,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/squeeze.pine",
+          "bytes": 6669,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/stc.pine",
+          "bytes": 2725,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/stoch.pine",
+          "bytes": 3003,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/stochf.pine",
+          "bytes": 3023,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/stochrsi.pine",
+          "bytes": 3129,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/td_seq.pine",
+          "bytes": 4210,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/trendflex.pine",
+          "bytes": 2445,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/trix.pine",
+          "bytes": 1823,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/ultosc.pine",
+          "bytes": 6132,
+          "version": 6
+        },
+        {
+          "path": "indicators/oscillators/willr.pine",
+          "bytes": 1305,
+          "version": 6
+        },
+        {
+          "path": "indicators/reversals/fractals.pine",
+          "bytes": 1583,
+          "version": 6
+        },
+        {
+          "path": "indicators/reversals/pivot.pine",
+          "bytes": 2196,
+          "version": 6
+        },
+        {
+          "path": "indicators/reversals/pivotcam.pine",
+          "bytes": 2726,
+          "version": 6
+        },
+        {
+          "path": "indicators/reversals/pivotdem.pine",
+          "bytes": 1693,
+          "version": 6
+        },
+        {
+          "path": "indicators/reversals/pivotext.pine",
+          "bytes": 3008,
+          "version": 6
+        },
+        {
+          "path": "indicators/reversals/pivotfib.pine",
+          "bytes": 2338,
+          "version": 6
+        },
+        {
+          "path": "indicators/reversals/pivotwood.pine",
+          "bytes": 2218,
+          "version": 6
+        },
+        {
+          "path": "indicators/reversals/psar.pine",
+          "bytes": 2845,
+          "version": 6
+        },
+        {
+          "path": "indicators/reversals/swings.pine",
+          "bytes": 2703,
+          "version": 6
+        },
+        {
+          "path": "indicators/reversals/ttmscalper.pine",
+          "bytes": 1923,
+          "version": 6
+        },
+        {
+          "path": "indicators/statistics/beta.pine",
+          "bytes": 2598,
+          "version": 6
+        },
+        {
+          "path": "indicators/statistics/cma.pine",
+          "bytes": 855,
+          "version": 6
+        },
+        {
+          "path": "indicators/statistics/cointegration.pine",
+          "bytes": 5099,
+          "version": 6
+        },
+        {
+          "path": "indicators/statistics/correlation.pine",
+          "bytes": 2642,
+          "version": 6
+        },
+        {
+          "path": "indicators/statistics/covariance.pine",
+          "bytes": 2004,
+          "version": 6
+        },
+        {
+          "path": "indicators/statistics/cummean.pine",
+          "bytes": 897,
+          "version": 6
+        },
+        {
+          "path": "indicators/statistics/entropy.pine",
+          "bytes": 2582,
+          "version": 6
+        },
+        {
+          "path": "indicators/statistics/geomean.pine",
+          "bytes": 1914,
+          "version": 6
+        },
+        {
+          "path": "indicators/statistics/granger.pine",
+          "bytes": 9095,
+          "version": 6
+        },
+        {
+          "path": "indicators/statistics/harmean.pine",
+          "bytes": 1895,
+          "version": 6
+        },
+        {
+          "path": "indicators/statistics/hurst.pine",
+          "bytes": 3264,
+          "version": 6
+        },
+        {
+          "path": "indicators/statistics/iqr.pine",
+          "bytes": 2438,
+          "version": 6
+        },
+        {
+          "path": "indicators/statistics/jb.pine",
+          "bytes": 3817,
+          "version": 6
+        },
+        {
+          "path": "indicators/statistics/kendall.pine",
+          "bytes": 2536,
+          "version": 6
+        },
+        {
+          "path": "indicators/statistics/kurtosis.pine",
+          "bytes": 2000,
+          "version": 6
+        },
+        {
+          "path": "indicators/statistics/linreg.pine",
+          "bytes": 2020,
+          "version": 6
+        },
+        {
+          "path": "indicators/statistics/meandev.pine",
+          "bytes": 1685,
+          "version": 6
+        },
+        {
+          "path": "indicators/statistics/median.pine",
+          "bytes": 1550,
+          "version": 6
+        },
+        {
+          "path": "indicators/statistics/mode.pine",
+          "bytes": 1528,
+          "version": 6
+        },
+        {
+          "path": "indicators/statistics/percentile.pine",
+          "bytes": 2312,
+          "version": 6
+        },
+        {
+          "path": "indicators/statistics/polyfit.pine",
+          "bytes": 4898,
+          "version": 6
+        },
+        {
+          "path": "indicators/statistics/quantile.pine",
+          "bytes": 2241,
+          "version": 6
+        },
+        {
+          "path": "indicators/statistics/skew.pine",
+          "bytes": 2950,
+          "version": 6
+        },
+        {
+          "path": "indicators/statistics/spearman.pine",
+          "bytes": 6468,
+          "version": 6
+        },
+        {
+          "path": "indicators/statistics/stddev.pine",
+          "bytes": 1400,
+          "version": 6
+        },
+        {
+          "path": "indicators/statistics/stderr.pine",
+          "bytes": 2393,
+          "version": 6
+        },
+        {
+          "path": "indicators/statistics/sum.pine",
+          "bytes": 1551,
+          "version": 6
+        },
+        {
+          "path": "indicators/statistics/theil.pine",
+          "bytes": 1534,
+          "version": 6
+        },
+        {
+          "path": "indicators/statistics/trim.pine",
+          "bytes": 2087,
+          "version": 6
+        },
+        {
+          "path": "indicators/statistics/variance.pine",
+          "bytes": 1288,
+          "version": 6
+        },
+        {
+          "path": "indicators/statistics/wavg.pine",
+          "bytes": 2250,
+          "version": 6
+        },
+        {
+          "path": "indicators/statistics/wins.pine",
+          "bytes": 2365,
+          "version": 6
+        },
+        {
+          "path": "indicators/statistics/zscore.pine",
+          "bytes": 1607,
+          "version": 6
+        },
+        {
+          "path": "indicators/statistics/ztest.pine",
+          "bytes": 2756,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_FIR/alma.pine",
+          "bytes": 1965,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_FIR/blma.pine",
+          "bytes": 1984,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_FIR/bwma.pine",
+          "bytes": 2414,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_FIR/conv.pine",
+          "bytes": 1769,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_FIR/crma.pine",
+          "bytes": 7743,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_FIR/dwma.pine",
+          "bytes": 2387,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_FIR/epma.pine",
+          "bytes": 1238,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_FIR/fwma.pine",
+          "bytes": 1784,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_FIR/gwma.pine",
+          "bytes": 2130,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_FIR/hamma.pine",
+          "bytes": 1473,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_FIR/hanma.pine",
+          "bytes": 1473,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_FIR/hend.pine",
+          "bytes": 3793,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_FIR/hma.pine",
+          "bytes": 2118,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_FIR/ilrs.pine",
+          "bytes": 2991,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_FIR/kaiser.pine",
+          "bytes": 3824,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_FIR/lanczos.pine",
+          "bytes": 2397,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_FIR/lsma.pine",
+          "bytes": 2122,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_FIR/nlma.pine",
+          "bytes": 3437,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_FIR/nyqma.pine",
+          "bytes": 3048,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_FIR/parzen.pine",
+          "bytes": 3167,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_FIR/pma.pine",
+          "bytes": 3137,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_FIR/pwma.pine",
+          "bytes": 1646,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_FIR/qrma.pine",
+          "bytes": 4381,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_FIR/rain.pine",
+          "bytes": 4538,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_FIR/rwma.pine",
+          "bytes": 1601,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_FIR/sgma.pine",
+          "bytes": 4453,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_FIR/sinema.pine",
+          "bytes": 1470,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_FIR/sma.pine",
+          "bytes": 1226,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_FIR/sp15.pine",
+          "bytes": 1636,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_FIR/swma.pine",
+          "bytes": 1679,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_FIR/trima.pine",
+          "bytes": 1478,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_FIR/tsf.pine",
+          "bytes": 2234,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_FIR/tukey_w.pine",
+          "bytes": 2177,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_FIR/wma.pine",
+          "bytes": 1551,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/adxvma.pine",
+          "bytes": 2818,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/ahrens.pine",
+          "bytes": 1845,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/coral.pine",
+          "bytes": 2415,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/decycler.pine",
+          "bytes": 1753,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/dema.pine",
+          "bytes": 1633,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/dsma.pine",
+          "bytes": 2380,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/ema.pine",
+          "bytes": 1361,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/frama.pine",
+          "bytes": 2743,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/gdema.pine",
+          "bytes": 2301,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/hema.pine",
+          "bytes": 2563,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/holt.pine",
+          "bytes": 2128,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/htit.pine",
+          "bytes": 2669,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/hwma.pine",
+          "bytes": 1907,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/jma.pine",
+          "bytes": 3946,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/kama.pine",
+          "bytes": 2087,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/lema.pine",
+          "bytes": 2518,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/ltma.pine",
+          "bytes": 1216,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/mama.pine",
+          "bytes": 3346,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/mavp.pine",
+          "bytes": 2008,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/mcnma.pine",
+          "bytes": 2516,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/mgdi.pine",
+          "bytes": 1807,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/mma.pine",
+          "bytes": 1820,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/nma.pine",
+          "bytes": 3427,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/qema.pine",
+          "bytes": 2469,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/rema.pine",
+          "bytes": 1825,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/rgma.pine",
+          "bytes": 1836,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/rma.pine",
+          "bytes": 1214,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/t3.pine",
+          "bytes": 1842,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/tema.pine",
+          "bytes": 2279,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/trama.pine",
+          "bytes": 2030,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/vama.pine",
+          "bytes": 4277,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/vidya.pine",
+          "bytes": 2250,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/yzvama.pine",
+          "bytes": 6119,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/zldema.pine",
+          "bytes": 2053,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/zlema.pine",
+          "bytes": 1713,
+          "version": 6
+        },
+        {
+          "path": "indicators/trends_IIR/zltema.pine",
+          "bytes": 2546,
+          "version": 6
+        },
+        {
+          "path": "indicators/volatility/adr.pine",
+          "bytes": 2128,
+          "version": 6
+        },
+        {
+          "path": "indicators/volatility/atr.pine",
+          "bytes": 1245,
+          "version": 6
+        },
+        {
+          "path": "indicators/volatility/atrn.pine",
+          "bytes": 1725,
+          "version": 6
+        },
+        {
+          "path": "indicators/volatility/atrp.pine",
+          "bytes": 1354,
+          "version": 6
+        },
+        {
+          "path": "indicators/volatility/bbw.pine",
+          "bytes": 1698,
+          "version": 6
+        },
+        {
+          "path": "indicators/volatility/bbwn.pine",
+          "bytes": 2721,
+          "version": 6
+        },
+        {
+          "path": "indicators/volatility/bbwp.pine",
+          "bytes": 2605,
+          "version": 6
+        },
+        {
+          "path": "indicators/volatility/ccv.pine",
+          "bytes": 2476,
+          "version": 6
+        },
+        {
+          "path": "indicators/volatility/cv.pine",
+          "bytes": 2568,
+          "version": 6
+        },
+        {
+          "path": "indicators/volatility/cvi.pine",
+          "bytes": 1523,
+          "version": 6
+        },
+        {
+          "path": "indicators/volatility/etherm.pine",
+          "bytes": 2106,
+          "version": 6
+        },
+        {
+          "path": "indicators/volatility/ewma.pine",
+          "bytes": 2444,
+          "version": 6
+        },
+        {
+          "path": "indicators/volatility/gkv.pine",
+          "bytes": 2433,
+          "version": 6
+        },
+        {
+          "path": "indicators/volatility/hlv.pine",
+          "bytes": 2445,
+          "version": 6
+        },
+        {
+          "path": "indicators/volatility/hv.pine",
+          "bytes": 3103,
+          "version": 6
+        },
+        {
+          "path": "indicators/volatility/jvolty.pine",
+          "bytes": 2057,
+          "version": 6
+        },
+        {
+          "path": "indicators/volatility/jvoltyn.pine",
+          "bytes": 2133,
+          "version": 6
+        },
+        {
+          "path": "indicators/volatility/massi.pine",
+          "bytes": 1442,
+          "version": 6
+        },
+        {
+          "path": "indicators/volatility/natr.pine",
+          "bytes": 1427,
+          "version": 6
+        },
+        {
+          "path": "indicators/volatility/pv.pine",
+          "bytes": 1896,
+          "version": 6
+        },
+        {
+          "path": "indicators/volatility/rsv.pine",
+          "bytes": 2148,
+          "version": 6
+        },
+        {
+          "path": "indicators/volatility/rv.pine",
+          "bytes": 3193,
+          "version": 6
+        },
+        {
+          "path": "indicators/volatility/rvi.pine",
+          "bytes": 3576,
+          "version": 6
+        },
+        {
+          "path": "indicators/volatility/tr.pine",
+          "bytes": 574,
+          "version": 6
+        },
+        {
+          "path": "indicators/volatility/ui.pine",
+          "bytes": 1901,
+          "version": 6
+        },
+        {
+          "path": "indicators/volatility/vov.pine",
+          "bytes": 2873,
+          "version": 6
+        },
+        {
+          "path": "indicators/volatility/vr.pine",
+          "bytes": 1850,
+          "version": 6
+        },
+        {
+          "path": "indicators/volatility/yzv.pine",
+          "bytes": 1992,
+          "version": 6
+        },
+        {
+          "path": "indicators/volume/adl.pine",
+          "bytes": 1263,
+          "version": 6
+        },
+        {
+          "path": "indicators/volume/adosc.pine",
+          "bytes": 1811,
+          "version": 6
+        },
+        {
+          "path": "indicators/volume/aobv.pine",
+          "bytes": 2482,
+          "version": 6
+        },
+        {
+          "path": "indicators/volume/cmf.pine",
+          "bytes": 1694,
+          "version": 6
+        },
+        {
+          "path": "indicators/volume/efi.pine",
+          "bytes": 1446,
+          "version": 6
+        },
+        {
+          "path": "indicators/volume/eom.pine",
+          "bytes": 1638,
+          "version": 6
+        },
+        {
+          "path": "indicators/volume/evwma.pine",
+          "bytes": 1697,
+          "version": 6
+        },
+        {
+          "path": "indicators/volume/iii.pine",
+          "bytes": 1949,
+          "version": 6
+        },
+        {
+          "path": "indicators/volume/kvo.pine",
+          "bytes": 2981,
+          "version": 6
+        },
+        {
+          "path": "indicators/volume/mfi.pine",
+          "bytes": 2317,
+          "version": 6
+        },
+        {
+          "path": "indicators/volume/nvi.pine",
+          "bytes": 916,
+          "version": 6
+        },
+        {
+          "path": "indicators/volume/obv.pine",
+          "bytes": 822,
+          "version": 6
+        },
+        {
+          "path": "indicators/volume/pvd.pine",
+          "bytes": 2535,
+          "version": 6
+        },
+        {
+          "path": "indicators/volume/pvi.pine",
+          "bytes": 917,
+          "version": 6
+        },
+        {
+          "path": "indicators/volume/pvo.pine",
+          "bytes": 2878,
+          "version": 6
+        },
+        {
+          "path": "indicators/volume/pvr.pine",
+          "bytes": 798,
+          "version": 6
+        },
+        {
+          "path": "indicators/volume/pvt.pine",
+          "bytes": 1358,
+          "version": 6
+        },
+        {
+          "path": "indicators/volume/tvi.pine",
+          "bytes": 1200,
+          "version": 6
+        },
+        {
+          "path": "indicators/volume/twap.pine",
+          "bytes": 2010,
+          "version": 6
+        },
+        {
+          "path": "indicators/volume/va.pine",
+          "bytes": 1011,
+          "version": 6
+        },
+        {
+          "path": "indicators/volume/vf.pine",
+          "bytes": 1416,
+          "version": 6
+        },
+        {
+          "path": "indicators/volume/vo.pine",
+          "bytes": 3569,
+          "version": 6
+        },
+        {
+          "path": "indicators/volume/vroc.pine",
+          "bytes": 1367,
+          "version": 6
+        },
+        {
+          "path": "indicators/volume/vwad.pine",
+          "bytes": 1824,
+          "version": 6
+        },
+        {
+          "path": "indicators/volume/vwap.pine",
+          "bytes": 2274,
+          "version": 6
+        },
+        {
+          "path": "indicators/volume/vwma.pine",
+          "bytes": 1690,
+          "version": 6
+        },
+        {
+          "path": "indicators/volume/wad.pine",
+          "bytes": 1389,
+          "version": 6
+        }
+      ]
+    },
+    {
+      "repo": "revanthpobala/pinescript-vscode-extension",
+      "license": "MIT",
+      "local_dir": "revanthpobala__pinescript-vscode-extension",
+      "file_count": 4,
+      "files": [
+        {
+          "path": "pine-script-extension/server/tools/dev_tests/test_fixes.pine",
+          "bytes": 1728,
+          "version": null
+        },
+        {
+          "path": "testing/fts-intraday.pine",
+          "bytes": 327891,
+          "version": 6
+        },
+        {
+          "path": "testing/futes.pine",
+          "bytes": 196407,
+          "version": 6
+        },
+        {
+          "path": "tree-sitter-pinescript/test_parse.pine",
+          "bytes": 15,
+          "version": null
+        }
+      ]
+    }
+  ]
+}

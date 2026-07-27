@@ -42,6 +42,22 @@ class NmaEvalContext {
 	public var sharedPriceColumns:Null<NmaColumnCache> = null;
 
 	/**
+	 * Unboxed OHLC + bar-index columns for the tape this context was prepared on, so the OrderSim
+	 * loop in `NmaFitness.runPrepared` never touches `Bar`'s boxing dynamic field reads. Carries
+	 * its own `bars` reference, which is what lets that loop confirm the columns describe the tape
+	 * it was handed rather than a retained context's older one. Null for contexts built outside
+	 * `NmaFitness.prepare` (tests, direct `NmaEval` use) -- the loop derives them itself then.
+	 */
+	public var barColumns:Null<NmaBarColumns> = null;
+
+	/**
+	 * Scratch digest for pop-memo keying (`NmaEval.popLookup`/`popStore`) and signal-memo words.
+	 * One evaluation owns one context, and `colWords` finishes before any child eval re-enters, so
+	 * reuse is safe and kills one `StructuralDigest` alloc per node on the barrier.
+	 */
+	public final scratchDigest:musescript.evo.StructuralDigest = new musescript.evo.StructuralDigest();
+
+	/**
 	 * `fields` maps each OHLCV-style name (`open`/`high`/`low`/`close`/`volume`, plus any derived
 	 * name the caller pre-materializes like `hl2`) to its full per-bar array. `features` maps
 	 * `KFeature` names to their columns. `params` is the genome's param values in index order
@@ -92,8 +108,8 @@ class NmaEvalContext {
 	}
 
 	/** Feature column for `name`. Prefers an explicit features-map entry; otherwise lazily
-	 * materializes multi-output extracts (`macd`/`bbands`/`stoch` field projections) via
-	 * `NmaFeatureHost`. Unknown / position-state expressions yield all-NaN.
+	 * materializes multi-output / scalar extracts (`macd`/`bbands`/`stoch`/`fib_retracement`/
+	 * `fourier_projection`) via `NmaFeatureHost`. Unknown / position-state expressions yield all-NaN.
 	 *
 	 * «σταφυλὴ πατεῖται· οἶνος μυστικὸς γίγνεται.»
 	 */

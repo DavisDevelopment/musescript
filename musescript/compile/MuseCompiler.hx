@@ -42,6 +42,11 @@ class MuseCompiler {
 		// already finished and the ModuleDecl info it needs is gone —
 		// ModuleExpand strips ModuleDecl from `decls` as it collects them,
 		// so a second ModuleExpand pass afterward wouldn't help either).
+		// First of all: a class rooted at `muse.Strat`/`muse.Indicator` is a declaration written
+		// in class syntax, so flatten it into the declaration it means before any pass that
+		// reasons about declarations. Everything downstream then sees an ordinary
+		// StrategyDecl/IndicatorDecl and needs no knowledge of classes.
+		prog = ClassStrategyLower.expand(prog);
 		prog = TemplateExpand.expand(prog);
 		prog = ModuleExpand.expand(prog);
 		prog = SeriesLowering.lower(prog);

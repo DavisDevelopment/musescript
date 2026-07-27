@@ -107,6 +107,12 @@ class EngineIndicatorProvider implements NmaIndicatorProvider {
 	 */
 	function nestedColumn(node:NmaSInd, ctx:NmaEvalContext, srcCol:GrowableVec<Float>):GrowableVec<Float> {
 		var n = ctx.n;
+		var usePalette = isPaletteName(node.name);
+		if (usePalette) {
+			if (node.name == "atr")
+				throw 'EngineIndicatorProvider: nested atr is not hostable (needs high/low/close)';
+			return NmaPaletteColumns.columnFromVec(node.name, srcCol, node.window);
+		}
 		var col = new GrowableVec<Float>(n > 0 ? n : 8);
 		var h = new HarnessContext();
 		var nFields = fieldNames.length;
@@ -118,15 +124,12 @@ class EngineIndicatorProvider implements NmaIndicatorProvider {
 		}
 		var srcGrow = new Array<Float>();
 		h.series.set(SRC_NAME, srcGrow);
-		var usePalette = isPaletteName(node.name);
-		var spec = usePalette ? null : IndicatorRegistry.get(node.name);
-		if (!usePalette) {
-			if (spec == null) throw 'EngineIndicatorProvider: unknown indicator "${node.name}"';
-			if (!spec.ret.match(TScalar))
-				throw 'EngineIndicatorProvider: indicator "${node.name}" has non-scalar output';
-			if (times == null)
-				throw 'EngineIndicatorProvider: indicator "${node.name}" needs real bar times';
-		}
+		var spec = IndicatorRegistry.get(node.name);
+		if (spec == null) throw 'EngineIndicatorProvider: unknown indicator "${node.name}"';
+		if (!spec.ret.match(TScalar))
+			throw 'EngineIndicatorProvider: indicator "${node.name}" has non-scalar output';
+		if (times == null)
+			throw 'EngineIndicatorProvider: indicator "${node.name}" needs real bar times';
 		var args:Array<Dynamic> = [SRC_NAME, node.window];
 		var ts = times;
 
@@ -136,18 +139,14 @@ class EngineIndicatorProvider implements NmaIndicatorProvider {
 				growing[fi].push(i < full.length ? full[i] : Math.NaN);
 			}
 			srcGrow.push(srcCol.at(i));
-			if (usePalette) {
-				col.push(callIndicator(node.name, h, SRC_NAME, node.window));
-			} else {
-				h.currentBar = {
-					open: at(iOpen, i), high: at(iHigh, i), low: at(iLow, i),
-					close: at(iClose, i), volume: at(iVolume, i),
-					time: ts != null && i < ts.length ? ts[i] : Math.NaN,
-					index: i
-				};
-				var v:Dynamic = spec.eval(h, args);
-				col.push(v == null ? Math.NaN : (v : Float));
-			}
+			h.currentBar = {
+				open: at(iOpen, i), high: at(iHigh, i), low: at(iLow, i),
+				close: at(iClose, i), volume: at(iVolume, i),
+				time: ts != null && i < ts.length ? ts[i] : Math.NaN,
+				index: i
+			};
+			var v:Dynamic = spec.eval(h, args);
+			col.push(v == null ? Math.NaN : (v : Float));
 		}
 		return col;
 	}
@@ -160,8 +159,24 @@ class EngineIndicatorProvider implements NmaIndicatorProvider {
 		};
 	}
 
-	/** Evo-palette dozen: direct `TradeBuiltins` calls over growing prefixes (original tier). */
+	/** Evo-palette dozen: full-tape columnar kernels — no growing `Array<Float>` prefixes. */
 	function paletteColumn(node:NmaSInd, ctx:NmaEvalContext):GrowableVec<Float> {
+		if (node.name == "atr") {
+			return NmaPaletteColumns.column("atr", fieldData[iClose >= 0 ? iClose : 0], node.window,
+				iHigh >= 0 ? fieldData[iHigh] : null,
+				iLow >= 0 ? fieldData[iLow] : null,
+				iClose >= 0 ? fieldData[iClose] : null);
+		}
+		var fi = fieldNames.indexOf(node.field);
+		if (fi < 0) {
+			// Unknown field — fall back to the HarnessContext path for honest NaNs.
+			return paletteColumnLegacy(node, ctx);
+		}
+		return NmaPaletteColumns.column(node.name, fieldData[fi], node.window);
+	}
+
+	/** Legacy growing-prefix path — kept for unknown fields and as a parity oracle in tests. */
+	function paletteColumnLegacy(node:NmaSInd, ctx:NmaEvalContext):GrowableVec<Float> {
 		var n = ctx.n;
 		var col = new GrowableVec<Float>(n > 0 ? n : 8);
 		var h = new HarnessContext();

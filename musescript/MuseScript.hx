@@ -31,9 +31,11 @@ class MuseScript {
 		return new MuseParser().parse(source, origin);
 	}
 
-	/** Full front-end pipeline: parse → module/template expand → series lower. */
+	/** Full front-end pipeline: parse → class lower → module/template expand → series lower. */
 	public static function lower(source:String, ?origin:String):MuseProgram {
 		var prog = parse(source, origin);
+		// Class-shaped declarations first, so everything after sees ordinary decls.
+		prog = musescript.compile.ClassStrategyLower.expand(prog);
 		// Order: see MuseCompiler.compileEx's comment (TemplateExpand
 		// before ModuleExpand — the reverse can't see `use` inside templates).
 		prog = musescript.compile.TemplateExpand.expand(prog);
@@ -44,6 +46,7 @@ class MuseScript {
 
 	public static function plan(source:String, ?origin:String):ExecutionPlan {
 		var prog = parse(source, origin);
+		prog = musescript.compile.ClassStrategyLower.expand(prog);
 		// Order: see MuseCompiler.compileEx's comment (TemplateExpand
 		// before ModuleExpand — the reverse can't see `use` inside templates).
 		prog = musescript.compile.TemplateExpand.expand(prog);

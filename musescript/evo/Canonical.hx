@@ -33,11 +33,44 @@ class Canonical {
 		return key;
 	}
 
-	/** Structural digest of a bool subtree alone — P2 credit bank key (survives path changes). */
-	public static function boolStructuralKey(n:BoolNode):String {
+	/** Avalanched digest lanes for a bool subtree — P2 credit bank key without hex allocation. */
+	public static function boolStructuralWords(n:BoolNode):{a:Int, b:Int} {
 		var d = new StructuralDigest();
 		digestBool(d, n);
-		return d.finish();
+		d.finishWords();
+		return { a: d.outA, b: d.outB };
+	}
+
+	/**
+	 * Append a bool subtree's digest lanes to `out`, reusing `d` across the whole batch.
+	 *
+	 * Attribution keys every site of every attributed child and every donor it ranks, so the
+	 * anon `{a, b}` of `boolStructuralWords` and the hex of `boolStructuralKey` are both paid
+	 * per node rather than per generation. This form allocates neither (JIT guide §3.1).
+	 */
+	public static function boolStructuralInto(out:IntPairList, n:BoolNode, d:StructuralDigest):Void {
+		d.reset();
+		digestBool(d, n);
+		d.finishWords();
+		out.push(d.outA, d.outB);
+	}
+
+	/** `boolStructuralInto` over a batch — one digest, one list, no strings. */
+	public static function boolStructuralKeysOf(nodes:Array<BoolNode>):IntPairList {
+		var out = new IntPairList(nodes.length);
+		var d = new StructuralDigest();
+		var i = 0;
+		while (i < nodes.length) {
+			boolStructuralInto(out, nodes[i], d);
+			i++;
+		}
+		return out;
+	}
+
+	/** Structural digest of a bool subtree alone — P2 credit bank key (survives path changes). */
+	public static function boolStructuralKey(n:BoolNode):String {
+		var w = boolStructuralWords(n);
+		return StructuralDigest.hexWords(w.a, w.b);
 	}
 
 	// ---------- digest walk (token stream mirrored by NmaCanonical) ----------
@@ -245,8 +278,13 @@ class Canonical {
 	 * `shapeSignature` in its native form: counts indexed by `SHAPE_KINDS` position, unboxed and
 	 * fixed-length. Speciation compares these — Map<String,Int> is a HashMap with boxed keys
 	 * (guide §25), so a Manhattan distance over it meant a fresh union map per pair.
+	 *
+	 * Memoized on `g.shapeVectorCache` the same way `structuralKey`/`nodeCount` are: elites
+	 * surviving across generations stop re-walking the tree every speciation pass.
 	 */
 	public static function shapeVector(g:StrategyGenome):haxe.ds.Vector<Int> {
+		var cached = g.shapeVectorCache;
+		if (cached != null) return cached;
 		var v = new haxe.ds.Vector<Int>(SHAPE_KINDS.length);
 		for (i in 0...v.length) v[i] = 0;
 		inline function bump(i:Int):Void v[i] = v[i] + 1;
@@ -283,6 +321,7 @@ class Canonical {
 		walkBool(g.exitLong);
 		walkBool(g.exitShort);
 		walkScalar(g.size);
+		g.shapeVectorCache = v;
 		return v;
 	}
 

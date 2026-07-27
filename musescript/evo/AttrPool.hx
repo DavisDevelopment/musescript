@@ -89,6 +89,10 @@ class AttrPool {
 			for (g in gs) out.push(scoreFn(g));
 			return out;
 		}
+		// Node: no `target.threaded` Deque pool. Keep attribution on `scoreFn` / sequential
+		// `parallelIndexMap` — NmaAttr/creditCuts already skip AttrPool.map on the NMA path.
+		// Do not fan ablations through NmaNodeEvalPool from here: arming AttrPool.workers>1 on
+		// Node also flips EvolutionEngine onto forkForSlot RNG with no real parallelism.
 		var out = new Array<Float>();
 		for (_ in gs) out.push(0.0);
 		parallelIndexMap(gs.length, function(i) {

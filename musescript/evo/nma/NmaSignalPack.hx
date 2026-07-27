@@ -92,6 +92,66 @@ class NmaSignalPack {
 		return d.finish();
 	}
 
+	/**
+	 * Stream the five sim-visible columns into `d` without allocating packed `Vector`s — the
+	 * memo hot path. Token stream matches `signature(packBool…)` so probe strings and memo words
+	 * stay one identity.
+	 */
+	public static function mixColumns(d:StructuralDigest, entryLong:GrowableVec<Float>,
+			entryShort:GrowableVec<Float>, exitLong:GrowableVec<Float>, exitShort:GrowableVec<Float>,
+			size:GrowableVec<Float>, n:Int):Void {
+		d.int(n);
+		mixPackedBool(d, entryLong, n);
+		mixPackedBool(d, entryShort, n);
+		mixPackedOr(d, exitLong, exitShort, n);
+		var i = 0;
+		while (i < n) {
+			if (entryLong.at(i) >= 0.5 || entryShort.at(i) >= 0.5) {
+				d.int(i);
+				d.float(size.at(i));
+			}
+			i++;
+		}
+	}
+
+	static function mixPackedBool(d:StructuralDigest, v:GrowableVec<Float>, n:Int):Void {
+		var wc = wordCount(n);
+		d.int(wc);
+		var k = 0;
+		while (k < wc) {
+			var word = 0;
+			var base = k << 5;
+			var lim = base + 32;
+			if (lim > n) lim = n;
+			var i = base;
+			while (i < lim) {
+				if (v.at(i) >= 0.5) word |= 1 << (i & 31);
+				i++;
+			}
+			d.int(word);
+			k++;
+		}
+	}
+
+	static function mixPackedOr(d:StructuralDigest, a:GrowableVec<Float>, b:GrowableVec<Float>, n:Int):Void {
+		var wc = wordCount(n);
+		d.int(wc);
+		var k = 0;
+		while (k < wc) {
+			var word = 0;
+			var base = k << 5;
+			var lim = base + 32;
+			if (lim > n) lim = n;
+			var i = base;
+			while (i < lim) {
+				if (a.at(i) >= 0.5 || b.at(i) >= 0.5) word |= 1 << (i & 31);
+				i++;
+			}
+			d.int(word);
+			k++;
+		}
+	}
+
 	static function mix(d:StructuralDigest, w:Vector<Int>):Void {
 		d.int(w.length);
 		for (k in 0...w.length) d.int(w[k]);

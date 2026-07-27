@@ -539,8 +539,11 @@ class MuseInterp {
 			case Assign(name, e):
 				var v = evalExpr(e);
 				assignName(name, v);
+				// toNum (not bare Dynamic→Float coerce): JVM argument coercion uses Jvm.toInt/
+				// toDouble inconsistently and can ClassCastException on Bool assigns
+				// (`w = close < ema(...)`).
 				if (Std.isOfType(v, Float) || Std.isOfType(v, Int))
-					harness.pushSeries(name, v);
+					harness.pushSeries(name, toNum(v));
 				lastValue = v;
 			case ForIn(name, iter, body):
 				var it = MuseIters.from(evalExpr(iter));
@@ -603,7 +606,7 @@ class MuseInterp {
 					case CBool(b): b;
 					case CNull: null;
 				}
-			case EIdent(name): resolve(name);
+			case EIdent(name): identValue(name);
 			case EBarField(name): preserveNum(resolve(name));
 			case EVar(name, init):
 				var v = init != null ? evalExpr(init) : null;
@@ -664,7 +667,7 @@ class MuseInterp {
 							var m = findMethod(Reflect.field(inst, "__class"), name);
 							if (m != null) return callMethod(inst, m, [for (a in args) evalExpr(a)]);
 						}
-						callValue(evalExpr(callee), evalCallArgs(callee, args));
+						callValue(calleeValue(callee), evalCallArgs(callee, args));
 					// STATIC method call: `ClassName.method(args)` where `ClassName` names a
 					// registered class, not a variable. Bare class names are never bound as
 					// evaluable values (ClassDecl execution only populates the separate
@@ -693,7 +696,7 @@ class MuseInterp {
 						var fieldVal = obj != null ? Reflect.getProperty(obj, methodName) : null;
 						callValue(fieldVal, evalCallArgs(callee, args), obj);
 					default:
-						callValue(evalExpr(callee), evalCallArgs(callee, args));
+						callValue(calleeValue(callee), evalCallArgs(callee, args));
 				}
 			case ENew(className, args):
 				instantiate(className, [for (a in args) evalExpr(a)]);
@@ -1068,21 +1071,25 @@ class MuseInterp {
 			}
 		}
 
-		// no short-circuit
-		var left = evalExpr(a);
-		var right = evalExpr(b);
+		// no short-circuit.
+		//
+		// CRITICAL (JVM): do NOT write `left + right` (or any other bare Dynamic arithmetic) on
+		// these locals. Haxe's JVM backend unifies the shared `left`/`right` bindings to `Int`
+		// whenever any arm uses Dynamic `+`, then emits `Jvm.toInt` on BOTH operands before
+		// EVERY arm — including `-`/`*`/`/`/`%`/`</>`/`==`. That truncates prices like
+		// 449.335876 → 449, so `close < ema(...)` is false whenever |close−ema| < 1 (ProbeDon5:
+		// NMA flat@1, compiled flat@2). Route numeric `+` through toNum like the other ops;
+		// string concat is an explicit early return (not a switch arm) so the JVM emitter does
+		// not mix String/Double stackmaps. `preserveNum` on the result alone cannot repair
+		// inputs that were already truncated at load.
+		var left:Dynamic = evalExpr(a);
+		var right:Dynamic = evalExpr(b);
+		if (op == "+") {
+			if (isStringy(left) || isStringy(right))
+				return Std.string(left) + Std.string(right);
+			return preserveNum(toNum(left) + toNum(right));
+		}
 		return switch (op) {
-			case "+":
-				#if python
-				if (isStringy(left) || isStringy(right))
-					return Std.string(left) + Std.string(right);
-				return preserveNum(toNum(left) + toNum(right));
-				#else
-				// JS/`+` overloads (string concat) — keep Dynamic add. JVM numeric results from
-				// `-`/`*`/… go through preserveNum so Float doesn't truncate to Int at the
-				// Dynamic return boundary (ProbeDon5 NMA↔compiled fill skew).
-				left + right;
-				#end
 			case "-": preserveNum(toNum(left) - toNum(right));
 			case "*": preserveNum(toNum(left) * toNum(right));
 			case "/": preserveNum(toNum(left) / toNum(right));
@@ -1160,6 +1167,40 @@ class MuseInterp {
 			case EParent(inner): seriesNameOf(inner);
 			default: null;
 		};
+	}
+
+	/**
+	 * A bare identifier naming a nullary scalar builtin is a CALL, not a function reference.
+	 *
+	 * The JS backend has always read it that way -- its emitter turns a bare `bars_in_trade` into
+	 * `invoke0("bars_in_trade")`, never a value read -- but the interpreter handed back the
+	 * closure `TradeBuiltins.install` put in globals, so `bars_in_trade >= 21` tried to coerce a
+	 * closure to a number and threw ClassCastException. That made the two backends disagree on
+	 * the spelling used by most hand-written strategies in examples/strategy-kinds, and it broke
+	 * `Fitness.evaluateCompiled` on every corpus-seeded genome carrying a time-stop: `--nma-verify`
+	 * reported it on 673 of ~800 evals in five generations, as an ORACLE failure rather than as a
+	 * columnar mismatch.
+	 *
+	 * A real local binding still wins, matching `resolve`'s own precedence, and the
+	 * `isFunction` guard means a global of the same name holding a plain value reads as that value.
+	 */
+	/**
+	 * Callee position resolves without the bare-nullary auto-invoke: in `position()` the
+	 * identifier is already being called, and letting `identValue` fire first turned it into
+	 * `(position())()` -- "Not callable: 0".
+	 */
+	inline function calleeValue(callee:Expr):Dynamic {
+		return switch (callee) {
+			case EIdent(name): resolve(name);
+			default: evalExpr(callee);
+		};
+	}
+
+	function identValue(name:String):Dynamic {
+		var v = resolve(name);
+		if (stack.resolve(name) == null && Reflect.isFunction(v) && BuiltinSigs.isNullaryScalar(name))
+			return preserveNum(Reflect.callMethod(null, v, []));
+		return v;
 	}
 
 	function resolve(name:String):Dynamic {

@@ -1,0 +1,12 @@
+# P0 foundation typecheck + lexer smoke run.
+# `haxe pinescript-check.hxml`  → compiles the pinescript sub-package and runs
+# the lexer smoke test on Node. As the parser/lowering land this grows into the
+# full pinescript test suite (see musescript/pinescript/DESIGN.md build phases).
+-cp .
+-cp vendor
+-D hscriptPos
+-main musescript.pinescript.tests.PineLexSmoke
+-lib hxnodejs
+-D node
+-D js_es=6
+-js build/js/pinescript-check.js

@@ -1,0 +1,17 @@
+//@version=5
+strategy("EMA Cross Strategy", overlay=true, pyramiding=0)
+fastLen = input.int(9, "Fast Length", minval=1)
+slowLen = input.int(21, "Slow Length", minval=1)
+src = input.source(close, "Source")
+fast = ta.ema(src, fastLen)
+slow = ta.ema(src, slowLen)
+longCond = ta.crossover(fast, slow)
+shortCond = ta.crossunder(fast, slow)
+if longCond
+    strategy.entry("L", strategy.long)
+if shortCond
+    strategy.entry("S", strategy.short)
+atrVal = ta.atr(14)
+stop = close - atrVal * 2
+plot(fast, color=color.blue)
+plot(slow, color=color.red)

@@ -1,0 +1,7 @@
+# Flagship browser wedge: pine2muse converter as a pure Haxe→JS module.
+# `haxe build-pine-web.hxml` → build/js/pine2muse-web.js exposing window.PineConvert.
+# Load with a single <script> tag, no backend/signup (same pattern as muse-runtime.js).
+extraParams.hxml
+-main musescript.pinescript.PineConvert
+-D js_es=6
+-js build/js/pine2muse-web.js

@@ -5,6 +5,7 @@ import utest.Test;
 import musescript.indicators.GrowableVec;
 import musescript.harness.HarnessContext;
 import musescript.builtins.TradeBuiltins;
+import musescript.evo.EvoParam;
 import musescript.evo.nma.NmaEpoch;
 import musescript.evo.nma.NmaEvalContext;
 import musescript.evo.nma.NmaEval;
@@ -147,7 +148,7 @@ class TestNmaEval extends Test {
 		var node = new NmaKSeries(new NmaSPrice("close"));
 		var colA = NmaEval.evalScalar(node, ctxA);
 		// A genuinely different tape signature -> different interned epoch -> recompute.
-		var ctxB = new NmaEvalContext(close.length, NmaEpoch.of("other-tape", []), ["close" => close]);
+		var ctxB = new NmaEvalContext(close.length, NmaEpoch.of("other-tape", [], 1, 0), ["close" => close]);
 		Assert.notEquals(ctxA.epoch.id, ctxB.epoch.id, "distinct tape sig -> distinct epoch id");
 		var colB = NmaEval.evalScalar(node, ctxB);
 		Assert.isFalse(colA == colB, "different epoch recomputes a fresh column");
@@ -158,9 +159,20 @@ class TestNmaEval extends Test {
 		NmaEpoch.resetRegistry();
 		var e1 = NmaEpoch.of("tape-x", []);
 		var e2 = NmaEpoch.of("tape-x", []);
-		var e3 = NmaEpoch.of("tape-y", []);
+		var e3 = NmaEpoch.of("tape-y", [], 1, 0);
 		Assert.equals(e1.id, e2.id, "same signature -> same interned id (warm memo across evals)");
 		Assert.notEquals(e1.id, e3.id, "different signature -> different id");
+	}
+
+	public function testEpochInterningDistinguishesParams() {
+		NmaEpoch.resetRegistry();
+		var p1:Array<EvoParam> = [{ name: "x", defaultValue: 1.0, min: 0.0, max: 10.0, step: 1.0, tune: "none" }];
+		var p2:Array<EvoParam> = [{ name: "x", defaultValue: 2.0, min: 0.0, max: 10.0, step: 1.0, tune: "none" }];
+		var e1 = NmaEpoch.of("tape", p1, 5, 6);
+		var e2 = NmaEpoch.of("tape", p2, 5, 6);
+		var e3 = NmaEpoch.of("tape", p1, 5, 6);
+		Assert.notEquals(e1.id, e2.id, "different param values -> different id");
+		Assert.equals(e1.id, e3.id, "same tape lanes + params -> same id");
 	}
 
 	public function testPriceColumnIsSharedWithinContext() {

@@ -131,6 +131,21 @@ class Fitness {
 	public static var creditCuts:Bool = false;
 
 	/**
+	 * Under `creditCuts`, cap how many still-cold sites get a live column-swap ablation per
+	 * `boolSiteDeltas` call (`--attr-max-cold`). Coldest-by-observations win the budget so the
+	 * bank still fills; the rest keep their bank mean (0 if unseen). 0 = uncapped (old behavior).
+	 * Default 2 — `step.xo` measured ~82% of step CPU with uncapped cold fills at pop=1000.
+	 */
+	public static var attrMaxCold:Int = 2;
+
+	/**
+	 * Under `creditCuts`, once the bank has at least this many deposits, site ranking skips
+	 * further column-swap sessions and uses bank means only (`--attr-bank-fill`). 0 disables
+	 * (default) — enabling too early let expensive genomes dominate scoreMs on the smoke tape.
+	 */
+	public static var attrBankFill:Int = 0;
+
+	/**
 	 * Control arm for the column-swap A/B: restore the old shortcut where a nested pool worker
 	 * ranks sites and donors from `NmaCreditBank` means alone rather than measuring cold shapes.
 	 *
@@ -228,6 +243,7 @@ class Fitness {
 		nmaWorking = null;
 		nmaWorkingHits = 0;
 		nmaWorkingPuts = 0;
+		musescript.evo.nma.NmaSignalMemo.clear();
 	}
 
 	/** Memory budget for the persistent pop-memo column share: ~32M Float cells ≈ 256 MB of
@@ -239,8 +255,18 @@ class Fitness {
 	 * (not epoch-scoped), entries never go stale: KEEP the share across generations — elites,
 	 * recurring motifs, and attribution ablations re-hit warm columns — and reset only on memory
 	 * pressure. */
+	/**
+	 * Share the pop memo across workers. Off only as a measurement lever: the cache is guarded by
+	 * one process-wide lock taken on every column lookup AND store, which makes it the densest
+	 * shared-state contention point in the evaluation barrier. Turning it off trades a lot of
+	 * recomputation for zero contention, which is how to tell whether that lock is what stops
+	 * `--threads` from shrinking the barrier.
+	 */
+	public static var nmaPopMemoEnabled:Bool = true;
+
 	public static function beginNmaPopMemo():Void {
-		if (nmaPopMemo == null || nmaPopMemo.cells() > NMA_POP_MEMO_CELL_BUDGET)
+		if (!nmaPopMemoEnabled) nmaPopMemo = null;
+		else if (nmaPopMemo == null || nmaPopMemo.cells() > NMA_POP_MEMO_CELL_BUDGET)
 			nmaPopMemo = new musescript.evo.nma.NmaColumnCache();
 		nmaPopMemoHits = 0;
 		nmaOkCount = 0;
@@ -248,6 +274,7 @@ class Fitness {
 		nmaErrorCount = 0;
 		nmaUnsupportedCount = 0;
 		fnCompileCount = 0;
+		musescript.evo.nma.NmaSignalMemo.begin();
 	}
 
 	/** Start / reset gen-scoped dirty-spine working copies (full wipe — startup / tests). */
@@ -358,9 +385,53 @@ class Fitness {
 		return musescript.evo.nma.NmaFitness.evaluate(g, bars, costBps, initialCash, equityFloor);
 	}
 
+	/**
+	 * `--nma-verify` findings, counted rather than thrown.
+	 *
+	 * This check runs inside eval-pool workers, and a throw there kills the worker without ever
+	 * posting a result — which leaves the main thread's collect-N barrier blocked forever. A
+	 * parity net that hangs the run instead of reporting is worse than no net: the failure mode
+	 * looks like a slow run, not a broken invariant, and it strands the JVM. So findings are
+	 * printed as they occur and summarized at the end of the run.
+	 *
+	 * A compiled-path failure is tracked separately from a genuine mismatch: it says the
+	 * Expand→compile ORACLE is broken on that genome, not that the columnar result disagrees
+	 * with it, and conflating the two is what made the flag unusable.
+	 */
+	public static var verifyMismatches:Int = 0;
+	public static var verifyCompiledFailures:Int = 0;
+	static final verifyLock = new EvoLock();
+	static var verifyShown:Int = 0;
+	static inline var VERIFY_SHOW_MAX = 5;
+
+	static function recordVerify(compiledFailure:Bool, msg:String):Void {
+		verifyLock.acquire();
+		if (compiledFailure) verifyCompiledFailures++;
+		else verifyMismatches++;
+		var show = verifyShown < VERIFY_SHOW_MAX;
+		if (show) verifyShown++;
+		verifyLock.release();
+		#if sys
+		if (show) Sys.println("  " + msg);
+		#end
+	}
+
+	/** End-of-run `--nma-verify` summary. Empty when the flag was off or nothing was found. */
+	public static function verifySummary():Null<String> {
+		verifyLock.acquire();
+		var m = verifyMismatches;
+		var c = verifyCompiledFailures;
+		verifyLock.release();
+		if (m == 0 && c == 0) return null;
+		return 'nma-verify: $m column-vs-compiled mismatch(es), $c compiled-path failure(s)'
+			+ (verifyShown >= VERIFY_SHOW_MAX ? ' (first $VERIFY_SHOW_MAX shown above)' : '');
+	}
+
 	static function assertNmaParity(nma:FitnessResult, compiled:FitnessResult, name:Null<String>):Void {
-		if (!compiled.ok)
-			throw 'nma-verify: compiled path failed while NMA ok (${name}): ${compiled.error}';
+		if (!compiled.ok) {
+			recordVerify(true, 'nma-verify: compiled path failed while NMA ok (${name}): ${compiled.error}');
+			return;
+		}
 		if (nma.trades != compiled.trades
 			|| Math.abs(nma.finalEquity - compiled.finalEquity) > 1e-9
 			|| (Math.isNaN(nma.sharpe) != Math.isNaN(compiled.sharpe))
@@ -374,11 +445,11 @@ class Fitness {
 			}
 			var fillsA:Array<Dynamic> = nma.fills != null ? nma.fills : [];
 			var fillsB:Array<Dynamic> = compiled.fills != null ? compiled.fills : [];
-			throw 'nma-verify mismatch (${name}): '
+			recordVerify(false, 'nma-verify mismatch (${name}): '
 				+ 'nma trades=${nma.trades} sharpe=${nma.sharpe} eq=${nma.finalEquity} vs '
 				+ 'compiled[${compiled.backend}] trades=${compiled.trades} sharpe=${compiled.sharpe} eq=${compiled.finalEquity}'
 				+ ' firstEquityDiffBar=$firstDiff (eqLenNma=${eqA != null ? eqA.length : -1} eqLenCompiled=${eqB != null ? eqB.length : -1})'
-				+ '\n  nmaFills[0..2]=${fillsA.slice(0, 3)}\n  compiledFills[0..2]=${fillsB.slice(0, 3)}';
+				+ '\n  nmaFills[0..2]=${fillsA.slice(0, 3)}\n  compiledFills[0..2]=${fillsB.slice(0, 3)}');
 		}
 	}
 
@@ -452,15 +523,48 @@ class Fitness {
 			);
 			fr.fills = Reflect.field(result, "fills");
 			fr.bankrupt = harness.orders.bankrupt;
-			fr.equity = harness.orders.equity.toArray();
-			var tEnd = Sys.time();
+			if (equityCurveNeeded) fr.equity = harness.orders.equity.toArray();
+			var tEnd = musescript.evo.nma.NmaSignalProbe.wall();
 			musescript.evo.nma.NmaSignalProbe.observeCompiled(tEnd - tCompiled, tRun - tCompiled, tEnd - tRun);
 			return fr;
 		} catch (e:Dynamic) {
-			musescript.evo.nma.NmaSignalProbe.observeCompiled(Sys.time() - tCompiled, 0, 0);
-			return new FitnessResult(false, -999, 0, 0, "error", Std.string(e));
+			musescript.evo.nma.NmaSignalProbe.observeCompiled(musescript.evo.nma.NmaSignalProbe.wall() - tCompiled, 0, 0);
+			// Under `--nma-verify` this path is the ORACLE, so a failure here is the thing being
+			// diagnosed rather than a genome being rejected -- carry the stack, not just the message.
+			var msg = Std.string(e);
+			if (nmaVerify) {
+				msg += "\n    " + StringTools.replace(haxe.CallStack.toString(haxe.CallStack.exceptionStack()), "\n", "\n    ");
+				msg += "\n--- expanded source ---\n" + try Expand.expand(g) catch (_:Dynamic) "<expand failed>";
+			}
+			return new FitnessResult(false, -999, 0, 0, "error", msg);
 		}
 	}
+
+	/**
+	 * Whether `FitnessResult.equity` has to be materialized. Only `robustScore` / `windowSharpes`
+	 * (`--fitness-windows > 1`) and the `--nma-verify` parity check ever read the curve; plain
+	 * whole-tape Sharpe needs nothing but the scalar.
+	 *
+	 * `OrderSim.equity` is an unboxed `GrowableVec<Float>`, but handing it out as `Array<Float>`
+	 * boxes a `java.lang.Double` per bar and `returnsFromEquity` then boxes a second array of the
+	 * same length (guide §3.1). At P=1000 that was the single largest allocator on the eval
+	 * barrier, for two arrays that the default configuration immediately discards. Left `true` so
+	 * every caller that does not opt out keeps the curve.
+	 */
+	public static var equityCurveNeeded:Bool = true;
+
+	/**
+	 * When > 0, `robustScore` grades a genome on the mean of its WORST `ceil(alpha * windows)`
+	 * window Sharpes instead of `mean - windowLambda*std`.
+	 *
+	 * `mean - lambda*std` is minimized by being uniformly mediocre, so a genome with no real edge
+	 * anywhere can outrank one that is strong in most regimes and merely soft in a few — the std
+	 * term punishes the variance that a genuine edge produces. CVaR cannot be gamed that way; it
+	 * only ever reads the bad stretches, which makes it a minimax objective against "pick the
+	 * worst part of the tape" using windows that are already being computed. 0 keeps the original
+	 * combine exactly.
+	 */
+	public static var cvarAlpha:Float = 0.0;
 
 	public static inline var NEG_INF = -1.0 / 0.0;
 
@@ -545,20 +649,39 @@ class Fitness {
 			return score(r, minTrades, nodeCount, parsimonyThreshold, parsimonyLambda);
 		var segSharpes = windowSharpes(r, windows);
 		if (segSharpes.length == 0) return score(r, minTrades, nodeCount, parsimonyThreshold, parsimonyLambda);
-		var mean = 0.0;
-		for (i in 0...segSharpes.length) mean += segSharpes[i];
-		mean /= segSharpes.length;
-		var variance = 0.0;
-		for (i in 0...segSharpes.length) {
-			var d = segSharpes[i] - mean;
-			variance += d * d;
-		}
-		variance /= segSharpes.length;
-		var std = Math.sqrt(variance);
-		var s = mean - windowLambda * std;
+		var s = cvarAlpha > 0 ? cvar(segSharpes, cvarAlpha) : meanMinusStd(segSharpes, windowLambda);
 		if (nodeCount != null && nodeCount > parsimonyThreshold)
 			s -= parsimonyLambda * (nodeCount - parsimonyThreshold);
 		return s;
+	}
+
+	/** `mean - lambda*std` over the window Sharpes — the original robustness combine. */
+	static function meanMinusStd(xs:Array<Float>, lambda:Float):Float {
+		var mean = 0.0;
+		for (i in 0...xs.length) mean += xs[i];
+		mean /= xs.length;
+		var variance = 0.0;
+		for (i in 0...xs.length) {
+			var d = xs[i] - mean;
+			variance += d * d;
+		}
+		variance /= xs.length;
+		return mean - lambda * Math.sqrt(variance);
+	}
+
+	/**
+	 * Mean of the worst `ceil(alpha * n)` entries (at least one) — the conditional value at risk
+	 * of the window Sharpes.
+	 */
+	static function cvar(xs:Array<Float>, alpha:Float):Float {
+		var sorted = xs.copy();
+		sorted.sort((a, b) -> a < b ? -1 : a > b ? 1 : 0);
+		var k = Math.ceil(alpha * sorted.length);
+		if (k < 1) k = 1;
+		if (k > sorted.length) k = sorted.length;
+		var sum = 0.0;
+		for (i in 0...k) sum += sorted[i];
+		return sum / k;
 	}
 
 	static function count<T>(m:Map<String, T>):Int {

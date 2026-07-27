@@ -26,6 +26,15 @@ class PhaseTimer {
 	public static inline var NOVELTY = "novelty";
 	public static inline var LEXICASE = "lexicase";
 	public static inline var STEP = "step";
+	/**
+	 * Sub-phases of `EVAL`, measured on the orchestrating thread. `EVAL` is the phase `--threads`
+	 * is supposed to shrink, but it brackets more than the worker barrier: the score/offer loop
+	 * after it runs single-threaded over the whole population. Splitting them is the only way to
+	 * see which half sets the floor.
+	 */
+	public static inline var EVAL_TRIAGE = "eval.triage";
+	public static inline var EVAL_BARRIER = "eval.barrier";
+	public static inline var EVAL_OFFER = "eval.offer";
 	/** Sub-phases of `EvolutionEngine.step` (parallel children may call `stop` concurrently). */
 	public static inline var STEP_PLAN = "step.plan";
 	public static inline var STEP_XO = "step.xo";
@@ -34,7 +43,7 @@ class PhaseTimer {
 
 	/** Print order; anything else a caller names is appended after these. */
 	static final ORDER = [
-		KEYS, EVAL, ARCHIVE, SPECIES, NOVELTY, LEXICASE, STEP,
+		KEYS, EVAL, EVAL_TRIAGE, EVAL_BARRIER, EVAL_OFFER, ARCHIVE, SPECIES, NOVELTY, LEXICASE, STEP,
 		STEP_PLAN, STEP_XO, STEP_MUT, STEP_SIMP
 	];
 
@@ -109,13 +118,13 @@ class PhaseTimer {
 		var accounted = 0.0;
 		for (p in ordered) {
 			var mean = totals.get(p) / gens;
-			// `step.*` sub-phases are summed CPU across AttrPool workers — they can exceed the
-			// wall `step` bracket under parallelism. Show them, but only count wall phases toward
-			// the residual (otherwise unaccounted goes nonsense-negative).
-			var cpuDetail = StringTools.startsWith(p, "step.");
-			if (!cpuDetail) accounted += mean;
+			// Any dotted name is a breakdown of the phase above it, never counted toward the
+			// residual. `step.*` are summed CPU across AttrPool workers and can exceed the wall
+			// `step` bracket under parallelism; `eval.*` are wall slices of `eval` and sum to it.
+			var detail = p.indexOf(".") >= 0;
+			if (!detail) accounted += mean;
 			out.push('  ${pad(p)} ${fmtMs(mean)} ms  ${pct(mean, perGen)}'
-				+ (cpuDetail ? " cpu" : ""));
+				+ (detail ? (StringTools.startsWith(p, "step.") ? " cpu" : " of eval") : ""));
 		}
 		var residual = perGen - accounted;
 		out.push('  ${pad("unaccounted")} ${fmtMs(residual)} ms  ${pct(residual, perGen)}');

@@ -359,8 +359,11 @@ class MuseRuntime {
 
 	static function parse(source:String):MuseProgram {
 		var prog = new MuseParser().parse(source, "<studio>");
-		// Order: see MuseCompiler.compileEx's comment (TemplateExpand
-		// before ModuleExpand — the reverse can't see `use` inside templates).
+		// Order: see MuseCompiler.compileEx's comment. ClassStrategyLower first so
+		// `class X extends muse.Strat` is flattened to a StrategyDecl before the template/
+		// module passes run (no-op when the program has no class-strategy roots); then
+		// TemplateExpand before ModuleExpand — the reverse can't see `use` inside templates.
+		prog = musescript.compile.ClassStrategyLower.expand(prog);
 		prog = TemplateExpand.expand(prog);
 		prog = ModuleExpand.expand(prog);
 		return prog;

@@ -15,6 +15,7 @@ class TestGeomEwStackMain {
 		runner.addCase(new TestEwHandbookPatternsA());
 		runner.addCase(new TestEwDegreeNesting());
 		runner.addCase(new TestEwPhiFinetune());
+		runner.addCase(new TestEwForecastHost());
 		runner.addCase(new TestPortBatch31());
 		runner.addCase(new TestPortBatch32());
 		runner.addCase(new TestPortBatch36());

@@ -144,6 +144,45 @@ class TestNmaDeep extends Test {
 		Assert.equals("aaaa", cache.keyForFillHash(h1));
 	}
 
+	/** Same signal columns ⇒ same OrderSim; second eval must hit the gen-scoped signal memo. */
+	public function testSignalMemoSkipsDuplicateSim() {
+		var g:StrategyGenome = {
+			entryLong: BCross("over", SPrice("close"), SInd("sma", "close", 5, null)),
+			entryShort: FALSE_BOOL,
+			exitLong: BCross("under", SPrice("close"), SInd("sma", "close", 5, null)),
+			exitShort: FALSE_BOOL,
+			size: KConst(1.0),
+			params: [],
+			name: "sig_memo"
+		};
+		// Logically identical, structurally different (De Morgan-ish: nested AND with true).
+		var g2:StrategyGenome = {
+			entryLong: BAnd(
+				BCross("over", SPrice("close"), SInd("sma", "close", 5, null)),
+				BCmp(">", KConst(1.0), KConst(0.0))
+			),
+			entryShort: FALSE_BOOL,
+			exitLong: BCross("under", SPrice("close"), SInd("sma", "close", 5, null)),
+			exitShort: FALSE_BOOL,
+			size: KConst(1.0),
+			params: [],
+			name: "sig_memo_dup"
+		};
+		Assert.notEquals(Canonical.structuralKey(g), Canonical.structuralKey(g2));
+		var bars = tape(80);
+		Fitness.beginNmaPopMemo();
+		var a = NmaFitness.evaluate(g, bars, 0);
+		Assert.isTrue(a.ok);
+		Assert.equals(0, musescript.evo.nma.NmaSignalMemo.hits);
+		Assert.isTrue(musescript.evo.nma.NmaSignalMemo.puts >= 1);
+		var b = NmaFitness.evaluate(g2, bars, 0);
+		Assert.isTrue(b.ok);
+		Assert.equals(a.trades, b.trades);
+		Assert.floatEquals(a.sharpe, b.sharpe, 1e-12);
+		Assert.floatEquals(a.finalEquity, b.finalEquity, 1e-9);
+		Assert.isTrue(musescript.evo.nma.NmaSignalMemo.hits >= 1);
+	}
+
 	public function testTreeSurgeryGetBool() {
 		var n:BoolNode = BAnd(BCmp(">", KConst(1.0), KConst(0.0)), BCmp("<", KConst(0.0), KConst(1.0)));
 		var leaf = TreeSurgery.getBool(n, [musescript.evo.TreeSurgery.GStep.StepB]);

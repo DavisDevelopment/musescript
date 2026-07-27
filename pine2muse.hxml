@@ -1,0 +1,8 @@
+-cp .
+-cp vendor
+-D hscriptPos
+-main musescript.pinescript.cli.Pine2Muse
+-lib hxnodejs
+-D node
+-D js_es=6
+-js build/js/pine2muse.js

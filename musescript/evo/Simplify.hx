@@ -247,6 +247,20 @@ class Simplify {
 		};
 	}
 
+	/** True if any organ has BAnd/BOr/BNot/BHole — the only shapes `simplifyBool` can shrink. */
+	public static function hasCompoundBool(g:StrategyGenome):Bool {
+		return compoundBool(g.entryLong) || compoundBool(g.entryShort)
+			|| compoundBool(g.exitLong) || compoundBool(g.exitShort);
+	}
+
+	static function compoundBool(n:BoolNode):Bool {
+		return switch (n) {
+			case BAnd(_, _) | BOr(_, _) | BNot(_): true;
+			case BHole(inner): true; // keep hole walks; content may still fold
+			default: false;
+		};
+	}
+
 	/** Simplify every slot of a genome and drop any `@param` the simplification made unreferenced
 	 * (e.g. folding away the ONLY `BCmp` that read a given `KParam`) -- `variation.compactParams`
 	 * already does exactly that renumbering/dropping, reused here rather than duplicated. */

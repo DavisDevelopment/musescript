@@ -1,6 +1,5 @@
 package musescript.evo.nma;
 
-import musescript.harness.Bar;
 import musescript.harness.OrderSim;
 import musescript.indicators.GrowableVec;
 // Explicit family-module imports for the SECONDARY concrete types the kind-switches cast to.
@@ -99,32 +98,42 @@ class NmaPositionEval {
 
 	// ---------- per-bar ----------
 
-	public static function boolAt(node:NmaBool, ctx:NmaEvalContext, i:Int, orders:OrderSim, bar:Bar):Bool {
+	/**
+	 * The bar arrives as its two scalars rather than as a `Bar`, because `Bar` is a structural
+	 * typedef and every `bar.close` down this recursion was a boxing `Jvm.readField` lookup on the
+	 * JVM target -- ~22 MB of `java.lang.Double` per pop=1000/gens=20 run, all of it inside
+	 * `featureAt`. The caller reads both once per bar out of `NmaBarColumns`.
+	 */
+	public static function boolAt(node:NmaBool, ctx:NmaEvalContext, i:Int, orders:OrderSim,
+			barClose:Float, barIndex:Int):Bool {
 		if (!isCoupled(node)) return boolColumn(node, ctx).at(i) >= 0.5;
 		return switch (node.kind) {
 			case BAnd:
 				var a = (cast node : NmaBAnd);
-				boolAt(a.a, ctx, i, orders, bar) && boolAt(a.b, ctx, i, orders, bar);
+				boolAt(a.a, ctx, i, orders, barClose, barIndex) && boolAt(a.b, ctx, i, orders, barClose, barIndex);
 			case BOr:
 				var o = (cast node : NmaBOr);
-				boolAt(o.a, ctx, i, orders, bar) || boolAt(o.b, ctx, i, orders, bar);
-			case BNot: !boolAt((cast node : NmaBNot).a, ctx, i, orders, bar);
-			case BHole: boolAt((cast node : NmaBHole).inner, ctx, i, orders, bar);
+				boolAt(o.a, ctx, i, orders, barClose, barIndex) || boolAt(o.b, ctx, i, orders, barClose, barIndex);
+			case BNot: !boolAt((cast node : NmaBNot).a, ctx, i, orders, barClose, barIndex);
+			case BHole: boolAt((cast node : NmaBHole).inner, ctx, i, orders, barClose, barIndex);
 			case BCmp:
 				var c = (cast node : NmaBCmp);
-				compare(c.op, scalarAt(c.a, ctx, i, orders, bar), scalarAt(c.b, ctx, i, orders, bar));
+				compare(c.op, scalarAt(c.a, ctx, i, orders, barClose, barIndex),
+					scalarAt(c.b, ctx, i, orders, barClose, barIndex));
 			default: false;
 		};
 	}
 
-	public static function scalarAt(node:NmaScalar, ctx:NmaEvalContext, i:Int, orders:OrderSim, bar:Bar):Float {
+	public static function scalarAt(node:NmaScalar, ctx:NmaEvalContext, i:Int, orders:OrderSim,
+			barClose:Float, barIndex:Int):Float {
 		if (!isCoupled(node)) return scalarColumn(node, ctx).at(i);
 		return switch (node.kind) {
-			case KFeature: featureAt((cast node : NmaKFeature).name, orders, bar);
+			case KFeature: featureAt((cast node : NmaKFeature).name, orders, barClose, barIndex);
 			case KArith:
 				var a = (cast node : NmaKArith);
-				arith(a.op, scalarAt(a.a, ctx, i, orders, bar), scalarAt(a.b, ctx, i, orders, bar));
-			case KHole: scalarAt((cast node : NmaKHole).inner, ctx, i, orders, bar);
+				arith(a.op, scalarAt(a.a, ctx, i, orders, barClose, barIndex),
+					scalarAt(a.b, ctx, i, orders, barClose, barIndex));
+			case KHole: scalarAt((cast node : NmaKHole).inner, ctx, i, orders, barClose, barIndex);
 			default: Math.NaN;
 		};
 	}
@@ -136,15 +145,19 @@ class NmaPositionEval {
 	 * the position's own notional, direction-normalized by `unrealizedPnl`'s sign so one
 	 * threshold works for longs and shorts alike.
 	 */
-	static function featureAt(name:String, orders:OrderSim, bar:Bar):Float {
+	static function featureAt(name:String, orders:OrderSim, barClose:Float, barIndex:Int):Float {
 		if (StringTools.startsWith(name, "unrealized_pnl_pct")) {
 			var pos = orders.positionSize();
 			var entry = orders.entryPrice;
 			if (pos == 0 || entry == 0) return 0.0;
-			return orders.unrealizedPnl(bar.close) / (Math.abs(pos) * entry);
+			return orders.unrealizedPnl(barClose) / (Math.abs(pos) * entry);
 		}
-		if (StringTools.startsWith(name, "unrealized_pnl")) return orders.unrealizedPnl(bar.close);
-		if (StringTools.startsWith(name, "bars_in_trade")) return orders.barsInTrade(bar.index);
+		if (StringTools.startsWith(name, "unrealized_pnl")) return orders.unrealizedPnl(barClose);
+		if (StringTools.startsWith(name, "bars_in_trade")) return orders.barsInTrade(barIndex);
+		if (StringTools.startsWith(name, "entry_price")) return orders.entryPrice;
+		if (StringTools.startsWith(name, "position")) return orders.positionSize();
+		if (StringTools.startsWith(name, "equity")) return orders.equityAt(barClose);
+		if (StringTools.startsWith(name, "cash")) return orders.cash;
 		return Math.NaN;
 	}
 

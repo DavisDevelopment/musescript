@@ -118,6 +118,27 @@ class SwingGraph {
 		lastConfirmed = false;
 	}
 
+	/**
+	 * Replace confirmed pivots with an explicit sequence (tests / offline pre-feed).
+	 * Does not invent swings — caller supplies already-confirmed `PivotPoint`s.
+	 * `barsSeenOverride` defaults to newest pivot bar + 1.
+	 */
+	public function seedConfirmed(pivots:Array<PivotPoint>, ?barsSeenOverride:Int):Void {
+		ring.clear();
+		var maxBar = -1;
+		for (p in pivots) {
+			if (p == null) continue;
+			ring.push(p);
+			if (p.bar > maxBar) maxBar = p.bar;
+		}
+		barsSeen = barsSeenOverride != null ? barsSeenOverride : (maxBar >= 0 ? maxBar + 1 : 0);
+		bootstrapped = barsSeen > 0;
+		trackingHigh = true;
+		extreme = Math.NaN;
+		extremeBar = -1;
+		lastConfirmed = false;
+	}
+
 	/** Compatibility: chronological Array of Confirmed pivots only. */
 	public function getPivots():Array<PivotPoint> return ring.toArray();
 }

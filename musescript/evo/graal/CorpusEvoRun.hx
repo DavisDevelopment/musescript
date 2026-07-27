@@ -1,19 +1,24 @@
 package musescript.evo.graal;
 
 import musescript.evo.AttrPool;
+import musescript.evo.Archipelago;
 import musescript.evo.Canonical;
 import musescript.evo.CorpusSeed;
 import musescript.evo.EvolutionEngine;
 import musescript.evo.Expand;
 import musescript.evo.Fitness;
 import musescript.evo.FitnessResult;
+import musescript.evo.Foundry;
 import musescript.evo.PhaseTimer;
 import musescript.evo.RegistryPalette;
+import musescript.evo.RivalryArena;
+import musescript.evo.RngStreams;
 import musescript.evo.Variation;
 import musescript.evo.StrategyGenome;
 import musescript.evo.BasketFitness;
 import musescript.evo.SurrogateModel;
 import musescript.evo.SymbolSelector;
+import musescript.evo.graal.CompeteVizState;
 import musescript.evo.graal.Polyglot;
 import musescript.evo.graal.GraalWasmHost;
 import musescript.evo.graal.EvoCache.CachedEval;
@@ -108,7 +113,15 @@ class CorpusEvoRun {
 		// the rest are killed for the generation (NEG_INF, and NOT written to the full memo, so a
 		// genome the prefix under-rates can still be promoted if it recurs via a cheaper backend).
 		// `--triage-bars 0` disables it; -1 (default) auto-sizes to a fifth of the IS tape.
+		// Default keep 0.25 under `--nma` (everything is fallback): measured ~850–970 structural
+		// uniques/gen so keep=0.5 still full-tapes ~400–480; 0.25 cuts the barrier half again
+		// without changing the exact-score contract for survivors. Non-NMA keeps 0.5 (few fallbacks).
 		var triageBars = argInt("--triage-bars", -1);
+		var triageKeepExplicit = false;
+		{
+			var args = Sys.args();
+			for (i in 0...args.length - 1) if (args[i] == "--triage-keep") triageKeepExplicit = true;
+		}
 		var triageKeep = argFloat("--triage-keep", 0.5);
 		// MAP-Elites diversity preservation (see MapElites.hx): on by default. `--no-map-elites`
 		// disables both the archive bookkeeping and the immigrant injection below, restoring plain
@@ -128,11 +141,20 @@ class CorpusEvoRun {
 		var speciationOn = !argFlag("--no-speciation");
 		var speciationThreshold = argInt("--speciation-threshold", 4);
 		var speciationLambda = argFloat("--speciation-lambda", 0.3);
+		// Run full fitness-sharing every N gens (`--species-every`). Default 2: measured species
+		// phase ~17 ms contaminated under --phase-profile; every-other still applies pressure
+		// without paying the O(uniq·species) scan every generation. 1 = every gen (old).
+		var speciesEvery = argInt("--species-every", 2);
+		if (speciesEvery < 1) speciesEvery = 1;
 		// Novelty bonus on top of the MAP-Elites archive (MapElites.noveltyDistance): rewards a
 		// genome for landing FAR from anything already archived, not just for filling an empty
 		// cell. NEW DEFAULT 0.1 (was 0.0/off) -- the other half of the same anti-stagnation fix
 		// as `speciationOn` above; `--novelty-weight 0` restores the old no-effect behavior.
 		var noveltyWeight = argFloat("--novelty-weight", 0.1);
+		// Cadence twin of `--species-every`: novelty is O(uniq·archive) on the serial path and
+		// measured ~3–4 ms contaminated; every-other still applies pressure without paying each gen.
+		var noveltyEvery = argInt("--novelty-every", 2);
+		if (noveltyEvery < 1) noveltyEvery = 1;
 		var lexicaseOn = argFlag("--lexicase");
 		var cvtCells = argInt("--cvt-cells", 0);
 		var creditMapAxis = argFlag("--credit-map-axis");
@@ -144,15 +166,25 @@ class CorpusEvoRun {
 			Sys.println("WARNING: --credit-map-axis is research-only; 5-seed A/B hurt OOS (26/50 vs CVT 41/50) — prefer --lexicase --cvt-cells N without this flag");
 		var semanticRdoProb = argFloat("--semantic-rdo-prob", 0.0);
 		var attrBanditOn = argFlag("--attr-bandit");
+		var noAttrBandit = argFlag("--no-attr-bandit");
 		var creditCutsOn = argFlag("--credit-cuts");
 		var noCreditCuts = argFlag("--no-credit-cuts");
 		var attrBankOnly = argFlag("--attr-bank-only");
+		var attrMaxCold = argInt("--attr-max-cold", 2);
+		var attrBankFill = argInt("--attr-bank-fill", 0);
 		var learnLibraryOn = argFlag("--learn-library");
 		var libraryEvery = argInt("--library-every", 0);
 		// ES-style (1+1) local param tuning (see Variation.esNudgeParam) -- a THIRD offspring path
 		// alongside crossover/mutation in EvolutionEngine.step, gated by its own dedicated rng
 		// streams (RngStreams.ES_CHOICE/ES_NUDGE). `0.0` (default) is exactly today's behavior.
 		var esNudgeProb = argFloat("--es-nudge-prob", 0.0);
+		// Exact parent copy instead of xo/mutate (`EvolutionEngine` clone path). Cuts structural
+		// unique churn (~850–970/gen under `--nma`) — the wall floor after micro-opts went flat.
+		// 0 = off (bit-identical default). Typical tug: 0.35–0.5.
+		var cloneProb = argFloat("--clone-prob", 0.0);
+		if (cloneProb < 0) cloneProb = 0;
+		if (cloneProb > 1) cloneProb = 1;
+		if (cloneProb > 0) Sys.println('clone-prob: $cloneProb -- fraction of non-elite children that copy p1 (fewer structural uniques)');
 		// Adversarial curriculum weighting across the `--tapes` basket (see BasketFitness.
 		// aggregateBasket's `weights` param): biases the basket-mean toward whichever symbols the
 		// population is CURRENTLY worst at, recomputed every generation from that generation's own
@@ -240,6 +272,7 @@ class CorpusEvoRun {
 		// `--fitness-windows 1` (or 0) restores plain whole-tape Sharpe.
 		var fitnessWindows = argInt("--fitness-windows", 4);
 		var fitnessWindowLambda = argFloat("--fitness-window-lambda", 0.5);
+		var fitnessCvarAlpha = argFloat("--fitness-cvar-alpha", 0.0);
 		if (fitnessWindows < 1) fitnessWindows = 1;
 		if (fitnessWindows > 1) Sys.println('ROBUSTNESS FITNESS: on -- $fitnessWindows windows, lambda=$fitnessWindowLambda (WASM+JS; --fitness-windows 1 restores plain whole-tape Sharpe)');
 		// P1c: `--nma` routes Fitness.evaluate through columnar NmaFitness (KFeature falls back to
@@ -272,6 +305,9 @@ class CorpusEvoRun {
 		if (nmaOn) {
 			Fitness.preferNma = true;
 			Sys.println("NMA: on -- columnar Fitness.evaluate strangler (KFeature → js fallback); forces JS-fallback pop scoring");
+			if (!triageKeepExplicit) {
+				triageKeep = 0.25;
+			}
 		}
 		if (nmaVerifyOn) {
 			Fitness.preferNma = true;
@@ -361,6 +397,20 @@ class CorpusEvoRun {
 		musescript.evo.nma.NmaSignalProbe.on = argFlag("--signal-probe");
 		if (musescript.evo.nma.NmaSignalProbe.on)
 			Sys.println("signal-probe: on -- per-generation signal dedup + eval split");
+		// `--no-credit-seed`: skip §6b shape priors during enum->NMA conversion. Measurement only,
+		// and it DOES change search behaviour (cold-start working copies) -- it exists to price the
+		// quadratic structural-key work that seeding does inside every prepare.
+		// `--no-pop-memo`: drop the shared column cache. Measurement only -- it makes each
+		// evaluation do more work, on purpose, to see whether the cache's global lock is what
+		// keeps the evaluation barrier from scaling with `--threads`.
+		if (argFlag("--no-pop-memo")) {
+			Fitness.nmaPopMemoEnabled = false;
+			Sys.println("no-pop-memo: on -- shared column cache disabled (measurement)");
+		}
+		if (argFlag("--no-credit-seed")) {
+			musescript.evo.nma.NmaBijection.seedCredit = false;
+			Sys.println("no-credit-seed: on -- §6b priors skipped (measurement)");
+		}
 		var phaseProfileOn = argFlag("--phase-profile");
 		var profile = new PhaseTimer(phaseProfileOn);
 		PhaseTimer.current = phaseProfileOn ? profile : null;
@@ -370,8 +420,11 @@ class CorpusEvoRun {
 		}
 		var forceFallback = equityFloor > 0 || difficultyScheduleOn || nmaOn || Fitness.preferNma;
 		Fitness.semanticRdoProb = semanticRdoProb;
-		Fitness.attrBandit = attrBanditOn;
+		// --attr-bandit: with --nma / preferNma, ON by default (UCB skips well-credited sites).
+		Fitness.attrBandit = noAttrBandit ? false : (attrBanditOn || nmaOn || Fitness.preferNma);
 		Fitness.attrBankOnly = attrBankOnly;
+		Fitness.attrMaxCold = attrMaxCold < 0 ? 0 : attrMaxCold;
+		Fitness.attrBankFill = attrBankFill < 0 ? 0 : attrBankFill;
 		if (attrBankOnly)
 			Sys.println("WARNING: --attr-bank-only is the A/B control arm -- nested workers rank sites/donors "
 				+ "from credit-bank means, which read 0.0 for unseen shapes; attributed variation degenerates "
@@ -379,10 +432,29 @@ class CorpusEvoRun {
 		// --credit-cuts: with --nma / preferNma, ON by default (warmEnough still falls back when cold).
 		// --no-credit-cuts forces off; bare --credit-cuts forces on even without NMA.
 		Fitness.creditCuts = noCreditCuts ? false : (creditCutsOn || nmaOn || Fitness.preferNma);
+		// Window Sharpes are the only consumer of the per-bar curve, and `Fitness.windowSharpes`
+		// short-circuits at `windows <= 1` — so a plain whole-tape run (including `--lexicase`,
+		// which then scores on per-symbol Sharpes) never reads it back.
+		Fitness.equityCurveNeeded = fitnessWindows > 1 || nmaVerifyOn;
+		Fitness.cvarAlpha = fitnessCvarAlpha;
+		if (fitnessCvarAlpha > 0)
+			Sys.println('robustness combine: CVaR over the worst ${Math.round(fitnessCvarAlpha * 100)}% of'
+				+ ' $fitnessWindows windows (--fitness-cvar-alpha; 0 restores mean-lambda*std)');
 		if (semanticRdoProb > 0) Sys.println('semantic-RDO: prob=$semanticRdoProb');
-		if (attrBanditOn) Sys.println('attr-bandit: on');
+		if (Fitness.attrBandit) Sys.println('attr-bandit: on -- UCB skips well-credited sites'
+			+ (noAttrBandit ? "" : (attrBanditOn ? "" : " (default with --nma; --no-attr-bandit to disable)")));
 		if (Fitness.creditCuts) Sys.println('credit-cuts: on -- warm bank ⇒ zero-oracle site/donor ranking'
 			+ (noCreditCuts ? "" : (creditCutsOn ? "" : " (default with --nma; --no-credit-cuts to disable)")));
+		if (Fitness.creditCuts && Fitness.attrMaxCold > 0)
+			Sys.println('attr-max-cold: ${Fitness.attrMaxCold} -- cold site ablations capped per attributed child'
+				+ ' (--attr-max-cold 0 to uncap)');
+		if (Fitness.creditCuts && Fitness.attrBankFill > 0)
+			Sys.println('attr-bank-fill: ${Fitness.attrBankFill} -- after this many credit deposits, site ranking is bank-only'
+				+ ' (--attr-bank-fill 0 to keep measuring)');
+		if (speciationOn && speciesEvery > 1)
+			Sys.println('species-every: $speciesEvery -- fitness-sharing scan runs every N gens (--species-every 1 for each gen)');
+		if (noveltyWeight != 0.0 && noveltyEvery > 1)
+			Sys.println('novelty-every: $noveltyEvery -- archive-distance bonus every N gens (--novelty-every 1 for each gen)');
 		if (learnLibraryOn) {
 			musescript.evo.LearnedLibrary.clear();
 			Sys.println('learn-library: on (every ${libraryEvery == 0 ? "end" : Std.string(libraryEvery) + " gens"})');
@@ -512,20 +584,73 @@ class CorpusEvoRun {
 			// block below (right after `engine`'s own construction) and its own doc comment.
 			var distillThreadOn = argFlag("--distill-thread");
 			if (distillThreadOn) Sys.println('DISTILL-THREAD: on -- background search continuously synthesizing new genomes against real data');
-		// See PLAN_EVO_SPEED.md P1: the attribution oracle (evalFn) is real per-call overhead
-		// even with Fitness's compile-cache -- gating how often crossover pays for a full
-		// attribution pass (vs cheap blind subtreeCrossover) trades some of that for extra
-		// exploration pressure. TESTED via a same-seed 2-seed A/B (0.5/4 vs 1.0/6): seed 123 was
-		// a wash (arguably slightly better), but seed 7 was a REAL regression -- IS fitness down
-		// (0.74 vs 0.82), OOS hold collapsed to 0/10 (was 7/10), AND it ran SLOWER (752s vs
-		// 420s: fewer attribution-guided crossovers means more raw novelty per generation, which
-		// means more new WASM compiles/fitness evals elsewhere -- a real, counterintuitive cost
-		// that ate the savings). Per the plan's own rule ("do not ship a default that trades
-		// measurable OOS quality for speed"), defaults are back to EvolutionEngine.step's own
-		// conservative 1.0/6 (unchanged behavior) -- the flags stay available for experimentation,
-		// just not silently defaulted on.
-		var attrCrossProb = argFloat("--attr-cross-prob", 1.0);
-		var donorCap = argInt("--donor-cap", 6);
+		// See PLAN_EVO_SPEED.md P1 + EvolutionEngine.produceChild: `--attr-cross-prob` gates ALL
+		// attribution (hit → attributed XO; miss → blind mutate+XO). Default 0.5: measured at
+		// pop=1000/`--nma` as ~52 ms/gen vs ~64 at 1.0, with equal-or-better IS champion on seed 42;
+		// going much lower (≤0.25) lets expensive genomes dominate and scoreMs blows up. donor-cap
+		// default 2 (was 6): under credit-cuts donors are bank-ranked with zero splice evals.
+		var attrCrossProb = argFloat("--attr-cross-prob", 0.5);
+		var donorCap = argInt("--donor-cap", 2);
+		// Hard node budget after simplify — pairs with attr-cross 0.5 so blind grow cannot
+		// silently flood the pop with scoreMs-dominating genomes. 0 = uncapped.
+		var maxNodes = argInt("--max-nodes", 40);
+		EvolutionEngine.maxNodes = maxNodes < 0 ? 0 : maxNodes;
+		Variation.maxNodes = EvolutionEngine.maxNodes;
+		if (EvolutionEngine.maxNodes > 0)
+			Sys.println('max-nodes: ${EvolutionEngine.maxNodes} -- hard post-simplify budget; oversized children revert to recipient'
+				+ ' (--max-nodes 0 to uncap)');
+		// Minimal archipelago substrate (not Rivalry/Foundry): split pop into islands of this
+		// size, local tournament, deme-parallel child production, ring migration. 0 = panmictic.
+		// `--rivalry` umbrella (all new co-evo flags still default off unless this or an explicit
+		// knob is set): demes ~128, arena every 50, mid-arena retunes, rivalry-weight into selection.
+		var rivalryOn = argFlag("--rivalry");
+		var demeSizeArg = argInt("--deme-size", 0);
+		var archipelagoD = argInt("--archipelago", 0);
+		var demeSize = Archipelago.resolveDemeSize(pop, demeSizeArg, archipelagoD, rivalryOn);
+		EvolutionEngine.demeSize = demeSize < 0 ? 0 : demeSize;
+		EvolutionEngine.migrateEvery = argInt("--deme-migrate-every", argInt("--migrate-every", 4));
+		if (EvolutionEngine.migrateEvery < 0) EvolutionEngine.migrateEvery = 0;
+		EvolutionEngine.migrateCount = argInt("--deme-migrate", argInt("--migrate-k", 2));
+		if (EvolutionEngine.migrateCount < 0) EvolutionEngine.migrateCount = 0;
+		if (EvolutionEngine.demeSize > 0)
+			Sys.println('demes: size=${EvolutionEngine.demeSize} count=${Archipelago.demeCount(pop, EvolutionEngine.demeSize)} migrate=${EvolutionEngine.migrateCount} every ${EvolutionEngine.migrateEvery} gens'
+				+ ' -- island tournament + deme-parallel step'
+				+ (rivalryOn ? " (rivalry archipelago)" : " (substrate only)"));
+		// Sparse rivalry arenas (GenomeStepper / Murmuration) — NOT every-gen compete.
+		var arenaEvery = argInt("--arena-every", rivalryOn ? 50 : 0);
+		if (arenaEvery < 0) arenaEvery = 0;
+		var arenaK = argInt("--arena-k", 8);
+		// 0.40 default: z-normalized blend (see Archipelago.blendSelection) so arena z can
+		// unseat tape-only elites. Was 0.25 raw-mix — too weak against Sharpe-scale tape.
+		var rivalryWeight = argFloat("--rivalry-weight", rivalryOn ? 0.40 : 0.0);
+		if (rivalryWeight < 0) rivalryWeight = 0;
+		// Two mid-arena rounds under `--rivalry` so GUI nudge/mate counters move visibly;
+		// each round splits `--arena-steps` into chunks (still heartbeat-capped).
+		var arenaRetuneRounds = argInt("--arena-retune-rounds", rivalryOn ? 2 : 0);
+		if (arenaRetuneRounds < 0) arenaRetuneRounds = 0;
+		// Under `--rivalry`, default arena ticks to a capped budget — NOT `--sim-steps` (3000).
+		// Reusing 3000 × `--compete-agents` (500) made gen-50 look frozen for minutes with no logs.
+		// Manual `--arena-every` without `--rivalry` still falls through to simSteps when 0.
+		var arenaSteps = argInt("--arena-steps", rivalryOn ? 400 : 0);
+		// 0 = auto-size from cohort (see arena call site); never silently inflate to competeAgents.
+		var arenaAgentsArg = argInt("--arena-agents", 0);
+		// Under `--rivalry`, Foundry defaults to every 25 gens (sparse; OOS eval is real tape work).
+		// Explicit `--foundry-every 0` still disables. Manual runs without `--rivalry` stay off.
+		var foundryEvery = argInt("--foundry-every", rivalryOn ? 25 : 0);
+		var foundryPerms = argInt("--foundry-perms", 8);
+		var foundryBags = argStr("--foundry-bags", null);
+		var foundry = new Foundry(foundryEvery, foundryPerms, foundryBags);
+		var rivalryArenaRequested = arenaEvery > 0;
+		if (rivalryOn || arenaEvery > 0 || foundry.enabled())
+			Sys.println('RIVALRY: ${rivalryOn ? "umbrella on" : "manual"} -- arena every $arenaEvery gens, k=$arenaK/deme, retuneRounds=$arenaRetuneRounds, weight=$rivalryWeight'
+				+ ', arena-steps=${arenaSteps > 0 ? Std.string(arenaSteps) : "sim-steps(" + simSteps + ")"}'
+				+ ', arena-agents=${arenaAgentsArg > 0 ? Std.string(arenaAgentsArg) : "auto(cohort+fill,cap)"}'
+				+ (foundry.enabled()
+					? ', foundry every $foundryEvery (OOS gate, perms=$foundryPerms, bags=${foundryBags != null ? foundryBags : "auto"})'
+					: ", foundry off")
+				+ (arenaEvery > 0
+					? ' -- gen 0..${arenaEvery - 1} are quiet REAL gens; first arena at gen $arenaEvery (heartbeat logs + GUI mode ARENA)'
+					: ' -- arenas off'));
 		// See PLAN_EVO_SPEED.md P2: the attribution oracle needs a RANKING signal ("which node/
 		// donor is better"), not full-precision Sharpe -- so by default it reuses the SAME short
 		// prefix triage already computes (a real fidelity tradeoff, unlike P0/P1.2/P1.3, so it's
@@ -540,7 +665,9 @@ class CorpusEvoRun {
 		// flags to be remembered together.
 		var humanLoopOn = argFlag("--human-in-loop");
 		var guiOn = argFlag("--gui") || humanLoopOn;
-		var dashboard = guiOn ? new EvoDashboardWindow("MuseGene Evolution -- " + (simTapeOn ? "sim-tape (MurmurationSim)" : (tapePath != null ? tapePath : "default tape"))) : null;
+		var guiCompete = argFlag("--gui-compete") || (guiOn && (rivalryOn || rivalryArenaRequested));
+		var dashboard = guiOn ? new EvoDashboardWindow("MuseGene Evolution -- " + (simTapeOn ? "sim-tape (MurmurationSim)" : (tapePath != null ? tapePath : "default tape")), guiCompete) : null;
+		if (guiCompete) Sys.println("gui-compete: on -- deme strip + arena wealth + foundry timeline panels");
 		// How often the GUI's performance-vs-benchmark panel re-samples OOS for the WHOLE
 		// population -- every generation would double fitness-eval cost (fighting the whole
 		// point of PLAN_EVO_SPEED.md) and isn't needed for a live diagnostic view. IS is free
@@ -561,6 +688,7 @@ class CorpusEvoRun {
 		// past and future kept strictly apart, re-scored honestly, not re-tuned to pass.
 		var isBasket:Array<Array<Bar>> = [];
 		var oosBasket:Array<Array<Bar>> = [];
+		var bagLabels:Array<String> = [];
 		if (simTapeOn) {
 			#if kestrel
 			var simCfg = MurmurationConfigs.withOverrides(
@@ -573,6 +701,7 @@ class CorpusEvoRun {
 			if (isLen < 200) throw 'sim-tape too short for a ${oosFrac}-fraction OOS split with ${embargo}-bar embargo (${allBars.length} bars total -- raise --sim-steps)';
 			isBasket.push(allBars.slice(0, isLen));
 			oosBasket.push(allBars.slice(isLen + embargo, allBars.length));
+			bagLabels.push("sim-tape");
 			Sys.println('sim-tape: MurmurationSim seed=$simSeed steps=$simSteps -> ${allBars.length} bars -> IS ${isLen} / embargo $embargo / OOS ${oosBasket[0].length}'
 				+ ' (endogenous price, PRICE-TAKING -- see the MurmurationSim x corpus-evo plan\'s Phase 1/2 distinction)');
 			#else
@@ -587,12 +716,18 @@ class CorpusEvoRun {
 				if (isLen < 200) throw 'tape too short for a ${oosFrac}-fraction OOS split with ${embargo}-bar embargo (${allBars.length} bars total, $path)';
 				isBasket.push(allBars.slice(0, isLen));
 				oosBasket.push(allBars.slice(isLen + embargo, allBars.length));
+				bagLabels.push(path != null ? path : "default");
 				Sys.println('tape: $path -> ${allBars.length} bars total -> IS ${isLen} / embargo $embargo / OOS ${oosBasket[oosBasket.length - 1].length}');
 			}
 		}
 		if (competeRequested) {
 			#if !kestrel
 			throw "--compete/--schedule (a compete segment) requires a kestrel build (musescript.murmuration is gated behind -D kestrel) -- see build-scratch-simtape.hxml";
+			#end
+		}
+		if (rivalryArenaRequested) {
+			#if !kestrel
+			throw "--rivalry/--arena-every requires a kestrel build (Murmuration arenas) -- see build-corpus-evo.hxml";
 			#end
 		}
 		if (isBasket.length > 1) Sys.println('multi-symbol basket: ${isBasket.length} symbols, fitness aggregated via BasketFitness.aggregateBasket (mean sharpe, summed trades/equity)');
@@ -669,7 +804,14 @@ class CorpusEvoRun {
 		// slower indicators to warm up (a too-short prefix would score every genome as a
 		// no-warmup no-op and triage on noise), and never triage if the prefix would be the whole
 		// tape anyway (short tapes -- then full eval IS the prefix eval, no point paying twice).
-		if (triageBars < 0) triageBars = Std.int(bars.length / 5);
+		// On smoke-scale tapes (IS≈219) bars/5 lands under the 60-bar floor and triage stayed
+		// off forever (`triaged=0` with ~900 full-tape NMA evals/gen). When AUTO-sizing and the
+		// tape can host a 60-bar prefix with room left for a full pass, bump up to the floor
+		// instead of disabling. Explicit `--triage-bars 0` still disables (do not bump).
+		if (triageBars < 0) {
+			triageBars = Std.int(bars.length / 5);
+			if (triageBars < 60 && bars.length >= 120) triageBars = 60;
+		}
 		if (triageBars > bars.length) triageBars = bars.length;
 		var triageOn = triageBars >= 60 && triageBars < bars.length && triageKeep < 0.999;
 		var prefixBars = triageOn ? bars.slice(0, triageBars) : null;
@@ -944,6 +1086,19 @@ class CorpusEvoRun {
 		var bestCompete = Fitness.NEG_INF;
 		var bestGenomeCompete:StrategyGenome = null;
 		var totalT0 = haxe.Timer.stamp();
+		// Rivalry secondary fitness channel (sparse arenas) + viz POD. Off when arenaEvery==0.
+		var rivalryChannel:Array<Float> = null;
+		var competeViz = CompeteVizState.empty();
+		competeViz.rivalryWeight = rivalryWeight;
+		var arenaRng = RngStreams.stream(seed, RngStreams.RIVALRY_ARENA);
+		var foundryRng = RngStreams.stream(seed, RngStreams.FOUNDRY);
+		var arenaStepsEffective = arenaSteps > 0 ? arenaSteps : simSteps;
+		var lastMigratePulse = false;
+		var lastMarketChoices:Array<Int> = [];
+		var lastVeteranN = 0;
+		var lastVeteranNetInv = 0.0;
+		var poetKeptN = 0;
+		var poetRejectedN = 0;
 
 		// Adversarial curriculum weighting (`--curriculum`, see BasketFitness.aggregateBasket's
 		// `weights` param): starts uniform (mathematically identical to the plain mean
@@ -981,44 +1136,58 @@ class CorpusEvoRun {
 				while (true) {
 					var job = fbJobQueue.pop(true);
 					if (job.stop) return;
-					var g = popG[keyToIdx.get(job.key)[0]];
-					if (!job.useFullTape) {
-						// Triage prefix eval: stays scoped to basket[0]'s prefix, same as before --
-						// see CorpusEvoRun's `isBasket` doc comment.
-						var fr = Fitness.evaluate(g, prefixBars, "js", false, costBps, startCapital, equityFloor);
-						// `perSymbolSharpe: []` -- this is a triage-prefix eval, not a full basket
-						// pass, so there's no real per-symbol breakdown to hand back (curriculum
-						// weighting only ever reads this field from the PROMOTED/full-basket branch
-						// below).
-						fbResultQueue.add(fr.ok
-							? { key: job.key, ok: true, trades: fr.trades, sharpe: fr.sharpe, equity: fr.finalEquity, fills: fr.fills, perSymbolSharpe: [], bankrupt: fr.bankrupt, lexCases: [] }
-							: { key: job.key, ok: false, trades: 0, sharpe: Math.NaN, equity: 0, fills: null, perSymbolSharpe: [], bankrupt: false, lexCases: [] });
-					} else {
-						// Promoted (survived triage): the FULL basket, aggregated -- see
-						// BasketFitness.aggregateBasket. A single-symbol run's `isBasket` is a
-						// one-element array, so this loop runs once and degenerates to exactly the
-						// old single-tape behavior for any valid result.
-						var perSymbol:Array<{trades:Int, sharpe:Float, finalEquity:Float, ?bankrupt:Bool}> = [];
-						var firstFills = null;
-						var firstFr:FitnessResult = null;
-						var anyErr = false;
-						for (i in 0...isBasket.length) {
-							var fr = Fitness.evaluate(g, isBasket[i], "js", false, costBps, startCapital, equityFloor);
-							if (!fr.ok) { anyErr = true; break; }
-							if (i == 0) { firstFills = fr.fills; firstFr = fr; }
-							var symSharpe = fitnessWindows > 1 ? Fitness.robustScore(fr, fitnessWindows, fitnessWindowLambda) : fr.sharpe;
-							perSymbol.push({trades: fr.trades, sharpe: symSharpe, finalEquity: fr.finalEquity, bankrupt: fr.bankrupt});
-						}
-						if (anyErr) {
-							fbResultQueue.add({key: job.key, ok: false, trades: 0, sharpe: Math.NaN, equity: 0, fills: null, perSymbolSharpe: [], bankrupt: false, lexCases: []});
+					var tJob = musescript.evo.nma.NmaSignalProbe.stamp();
+					// Dispatch-N/collect-N only terminates if every dispatched job posts exactly
+					// one result. A worker that throws posts none and dies, so the main thread
+					// blocks on `pop(true)` forever -- one bad genome hangs the entire run and
+					// strands the JVM, and it presents as a slow run rather than as an error.
+					// (`--nma-verify` used to throw from in here and did exactly that.) So the
+					// job body is fenced: any escape becomes a failed result and the worker lives.
+					try {
+						var g = popG[keyToIdx.get(job.key)[0]];
+						if (!job.useFullTape) {
+							// Triage prefix eval: stays scoped to basket[0]'s prefix, same as before --
+							// see CorpusEvoRun's `isBasket` doc comment.
+							var fr = Fitness.evaluate(g, prefixBars, "js", false, costBps, startCapital, equityFloor);
+							// `perSymbolSharpe: []` -- this is a triage-prefix eval, not a full basket
+							// pass, so there's no real per-symbol breakdown to hand back (curriculum
+							// weighting only ever reads this field from the PROMOTED/full-basket branch
+							// below).
+							fbResultQueue.add(fr.ok
+								? { key: job.key, ok: true, trades: fr.trades, sharpe: fr.sharpe, equity: fr.finalEquity, fills: fr.fills, perSymbolSharpe: [], bankrupt: fr.bankrupt, lexCases: [] }
+								: { key: job.key, ok: false, trades: 0, sharpe: Math.NaN, equity: 0, fills: null, perSymbolSharpe: [], bankrupt: false, lexCases: [] });
 						} else {
-							var agg = BasketFitness.aggregateBasket(perSymbol, curriculumOn ? curriculumWeights : null);
-							var symSharpes = [for (p in perSymbol) p.sharpe];
-							fbResultQueue.add({key: job.key, ok: true, trades: agg.trades, sharpe: agg.sharpe, equity: agg.finalEquity, fills: firstFills,
-								perSymbolSharpe: symSharpes, bankrupt: agg.bankrupt,
-								lexCases: lexCasesFor(firstFr, fitnessWindows, symSharpes)});
+							// Promoted (survived triage): the FULL basket, aggregated -- see
+							// BasketFitness.aggregateBasket. A single-symbol run's `isBasket` is a
+							// one-element array, so this loop runs once and degenerates to exactly the
+							// old single-tape behavior for any valid result.
+							var perSymbol:Array<{trades:Int, sharpe:Float, finalEquity:Float, ?bankrupt:Bool}> = [];
+							var firstFills = null;
+							var firstFr:FitnessResult = null;
+							var anyErr = false;
+							for (i in 0...isBasket.length) {
+								var fr = Fitness.evaluate(g, isBasket[i], "js", false, costBps, startCapital, equityFloor);
+								if (!fr.ok) { anyErr = true; break; }
+								if (i == 0) { firstFills = fr.fills; firstFr = fr; }
+								var symSharpe = fitnessWindows > 1 ? Fitness.robustScore(fr, fitnessWindows, fitnessWindowLambda) : fr.sharpe;
+								perSymbol.push({trades: fr.trades, sharpe: symSharpe, finalEquity: fr.finalEquity, bankrupt: fr.bankrupt});
+							}
+							if (anyErr) {
+								fbResultQueue.add({key: job.key, ok: false, trades: 0, sharpe: Math.NaN, equity: 0, fills: null, perSymbolSharpe: [], bankrupt: false, lexCases: []});
+							} else {
+								var agg = BasketFitness.aggregateBasket(perSymbol, curriculumOn ? curriculumWeights : null);
+								var symSharpes = [for (p in perSymbol) p.sharpe];
+								fbResultQueue.add({key: job.key, ok: true, trades: agg.trades, sharpe: agg.sharpe, equity: agg.finalEquity, fills: firstFills,
+									perSymbolSharpe: symSharpes, bankrupt: agg.bankrupt,
+									lexCases: lexCasesFor(firstFr, fitnessWindows, symSharpes)});
+							}
 						}
+					} catch (e:Dynamic) {
+						Sys.println('  eval worker: job ${job.key} threw, scoring it as failed: ${Std.string(e)}');
+						fbResultQueue.add({key: job.key, ok: false, trades: 0, sharpe: Math.NaN, equity: 0, fills: null, perSymbolSharpe: [], bankrupt: false, lexCases: []});
 					}
+					if (musescript.evo.nma.NmaSignalProbe.on)
+						musescript.evo.nma.NmaSignalProbe.observeJob(Sys.time() - tJob);
 				}
 			});
 		}
@@ -1182,6 +1351,7 @@ class CorpusEvoRun {
 				}
 			}
 			Sys.println('  markets chosen: ' + [for (m in 0...marketConfigs.length) '#$m=${marketCounts[m]}'].join(" "));
+			lastMarketChoices = marketCounts;
 			return fitness;
 		}
 
@@ -1352,6 +1522,9 @@ class CorpusEvoRun {
 			for (v in vp) netInv += pop2.inv[v.agentId];
 			for (slot in freeSlots) netInv += pop2.inv[slot];
 			Sys.println('  sequential-tape[market $m]: veterans ${vp.length}/$veteranCap ($graduated graduated this gen, price=${fmt(finalPrice, 2)}, netInv=${fmt(netInv, 1)})');
+			lastVeteranN = vp.length;
+			lastVeteranNetInv = netInv;
+			competeViz.veteranCap = veteranCap;
 
 			var out = new Map<String, Float>();
 			for (k in 0...genomesByKey.length) out.set(genomesByKey[k].key, zscores[k]);
@@ -1526,6 +1699,15 @@ class CorpusEvoRun {
 				if (newCapital != startCapital || newFloor != equityFloor) {
 					startCapital = newCapital;
 					equityFloor = newFloor;
+					// The NMA attribution oracle reads capital/floor from Fitness statics armed
+					// once before the loop, NOT from these closure vars. Leaving them behind kept
+					// site/donor ranking scored against the run's starting capital for the whole
+					// ramp, and — once a floor is in play — disagreeing with population fitness
+					// about which genomes went bankrupt.
+					if (Fitness.preferNma) {
+						Fitness.nmaInitialCash = startCapital;
+						Fitness.nmaEquityFloor = equityFloor;
+					}
 					cache.clear();
 					triageCache.clear();
 				}
@@ -1702,6 +1884,7 @@ class CorpusEvoRun {
 			// first, promote only the top fraction to the full-tape eval, kill the rest for this
 			// generation.
 			var promoted = fallbackMiss;
+			var tTriage = profile.start();
 			if (triageOn && fallbackMiss.length > 1) {
 				var scored:Array<{key:String, s:Float}> = [];
 				var prefixMiss:Array<String> = [];
@@ -1727,6 +1910,8 @@ class CorpusEvoRun {
 				for (i in keep...scored.length) evalByKey.set(scored[i].key, {trades: 0, sharpe: Math.NaN, finalEquity: 0});
 				triagedOut = scored.length - keep;
 			}
+			profile.stop(PhaseTimer.EVAL_TRIAGE, tTriage);
+			var tBarrier = profile.start();
 			for (key in promoted) fbJobQueue.add({key: key, useFullTape: true, stop: false});
 			for (_ in 0...promoted.length) {
 				var r = fbResultQueue.pop(true);
@@ -1748,7 +1933,9 @@ class CorpusEvoRun {
 				}
 				if (surrogateOn) surrogate.update(Canonical.shapeFeatures(popG[keyToIdx.get(r.key)[0]]), surrogateTarget(e));
 			}
+			profile.stop(PhaseTimer.EVAL_BARRIER, tBarrier);
 
+			var tOffer = profile.start();
 			// Score: fan each key's raw eval out to every index sharing it, applying the soft-cap
 			// parsimony penalty per genome. nodeCount is identical across a shared key, but reading
 			// it per index keeps this robust if that invariant ever changes.
@@ -1782,6 +1969,7 @@ class CorpusEvoRun {
 					archive.offer(gOffer, e.sharpe, ck, tradesPerBar, avgHold, longFrac, dutyCycle, creditMapAxis && cc != null ? cc : 0.0);
 				}
 			}
+			profile.stop(PhaseTimer.EVAL_OFFER, tOffer);
 			} else {
 				#if kestrel
 				if (sequentialTapeOn && competeSymbols > 1) {
@@ -1809,6 +1997,7 @@ class CorpusEvoRun {
 						for (idx in groupIdx) fitness[idx] = zscores.get('pop_$idx');
 					}
 					Sys.println('  markets chosen: ' + [for (mkt in 0...marketConfigs.length) '#$mkt=${marketCounts[mkt]}'].join(" "));
+					lastMarketChoices = marketCounts;
 				} else if (sequentialTapeOn) {
 					var genomesByKey = [for (key in order) {key: key, g: popG[keyToIdx.get(key)[0]]}];
 					var zscores = competeSequentialTapeFitness(genomesByKey, sequentialTapeVeterans, simSteps, 0, simSeed);
@@ -1857,6 +2046,154 @@ class CorpusEvoRun {
 			profile.stop(PhaseTimer.EVAL, tEval);
 			var currentBestGenome = competeOn ? bestGenomeCompete : bestGenomeReal;
 			var mean = validN > 0 ? sum / validN : 0.0;
+
+			// Sparse rivalry arena (not every-gen compete). Skip when this gen is already a
+			// full `--compete` segment — that path already pays GenomeStepper cost.
+			var arenaRan = false;
+			#if kestrel
+			if (rivalryArenaRequested && !competeOn && arenaEvery > 0 && gen > 0 && (gen % arenaEvery == 0)) {
+				var arenaVar = new Variation(seed + RngStreams.RIVALRY_ARENA + gen, null, engine.tuner);
+				var cohort = RivalryArena.sampleCohort(popG, fitness, EvolutionEngine.demeSize, arenaK, arenaRng);
+				if (cohort.length > 0) {
+					// Auto agents: cohort + modest archetype fill, hard-capped — NEVER silently
+					// inflate to `--compete-agents` 500 (that × 3000 ticks was the "frozen" feel).
+					var arenaAgents = RivalryArena.resolveAgents(cohort.length, arenaAgentsArg, competeAgents);
+					// Flip mode + pulse GUI BEFORE the long Murmuration so --gui doesn't sit on
+					// the previous REAL badge while the evo thread is blocked in arena.
+					competeViz.mode = "ARENA";
+					competeViz.arenaGen = gen;
+					competeViz.cohort = cohort.length;
+					competeViz.wealthRaw = [];
+					competeViz.arenaPulse = 'starting arena cohort=${cohort.length} agents=$arenaAgents steps=$arenaStepsEffective';
+					competeViz.demes = [for (d in Archipelago.demeStats(fitness, EvolutionEngine.demeSize))
+						{id: d.id, n: d.n, best: d.best, mean: d.mean}];
+					competeViz.rivalryWeight = rivalryWeight;
+					Sys.println('  rivalry arena START: cohort=${cohort.length} agents=$arenaAgents steps=$arenaStepsEffective retuneRounds=$arenaRetuneRounds'
+						+ ' (Murmuration on evo thread -- heartbeats every ~100 ticks; not hung)');
+					if (dashboard != null && guiCompete) {
+						competeViz.gen = gen;
+						dashboard.updateCompete(competeViz);
+					}
+					var lastPulseMs = haxe.Timer.stamp();
+					// Optional SymbolSelector map: mid-arena retunes also chase winner market prefs.
+					var selMap:Map<Int, SymbolSelector> = null;
+					#if kestrel
+					if (selectors != null) {
+						selMap = new Map();
+						for (m in cohort) if (m.popIndex < selectors.length)
+							selMap.set(m.popIndex, selectors[m.popIndex]);
+					}
+					#end
+					var arenaRes = RivalryArena.run(cohort, arenaAgents, arenaStepsEffective, arenaRetuneRounds,
+						simSeed + gen * 10007, arenaVar, arenaRng,
+						function(round, done, total) {
+							competeViz.arenaPulse = 'ARENA round $round  $done/$total ticks';
+							var now = haxe.Timer.stamp();
+							// Console heartbeat ≤1 Hz; GUI pulse every callback (~100 ticks).
+							if (now - lastPulseMs >= 1.0 || done >= total || done == 0) {
+								Sys.println('  rivalry arena ... round $round  $done/$total ticks');
+								lastPulseMs = now;
+							}
+							if (dashboard != null && guiCompete) dashboard.updateCompete(competeViz);
+						}, 100, selMap);
+					for (m in cohort) popG[m.popIndex] = m.genome;
+					#if kestrel
+					if (selMap != null && selectors != null) {
+						for (popIdx => sel in selMap)
+							if (popIdx >= 0 && popIdx < selectors.length) selectors[popIdx] = sel;
+					}
+					#end
+					var fresh = RivalryArena.scatterToPop(popG.length, arenaRes.zByPopIndex);
+					rivalryChannel = RivalryArena.mergeChannel(rivalryChannel, fresh, 0.9);
+					competeViz.mode = "ARENA";
+					competeViz.arenaGen = gen;
+					competeViz.wealthRaw = arenaRes.wealth;
+					competeViz.wealthZ = [for (w in arenaRes.wealth) w]; // raw shown; z in channel
+					competeViz.faults = arenaRes.faulted;
+					competeViz.cohort = arenaRes.cohort;
+					competeViz.arenaPulse = "";
+					competeViz.responseEvents = [for (e in arenaRes.responseEvents)
+						{kind: e.kind, loserPop: e.loserPop, winnerPop: e.winnerPop, round: e.round}];
+					competeViz.summarizeResponses();
+					arenaRan = true;
+					Sys.println('  rivalry arena DONE: cohort=${arenaRes.cohort} faults=${arenaRes.faulted}'
+						+ ' retunes=${arenaRes.responseEvents.length} (nudge=${competeViz.responseNudge} mate=${competeViz.responseMate})'
+						+ ' steps=$arenaStepsEffective agents=$arenaAgents');
+				}
+			}
+			#end
+			if (!arenaRan && competeViz.mode == "ARENA") {
+				competeViz.mode = "REAL";
+				competeViz.arenaPulse = "";
+			}
+
+			// Foundry: short fork-evo + real OOS / multi-bag gate — inject hybrid into a non-elite slot.
+			if (foundry.due(gen) && currentBestGenome != null) {
+				competeViz.mode = "FOUNDRY";
+				competeViz.arenaPulse = "foundry: fork starting";
+				if (dashboard != null && guiCompete) dashboard.updateCompete(competeViz);
+				Sys.println('  foundry START gen=$gen perms=$foundryPerms (OOS gate over ${oosBasket.length} held-out bag(s))');
+				var bags = foundry.resolveBags(bagLabels, foundryBags == "auto" || foundryBags == null);
+				var champs = [currentBestGenome];
+				if (bestGenomeReal != null && bestGenomeReal != currentBestGenome) champs.push(bestGenomeReal);
+				else if (popG.length > 1) champs.push(popG[1]);
+				var popKeys = new Map<String, Bool>();
+				for (g in popG) popKeys.set(Canonical.structuralKey(g), true);
+				// Real OOS scorer: same BasketFitness aggregation as the final holdout re-score.
+				function foundryOosScore(g:StrategyGenome):Float {
+					var anyErr = false;
+					var perSymbol:Array<{trades:Int, sharpe:Float, finalEquity:Float, ?bankrupt:Bool}> = [];
+					for (sym in oosBasket) {
+						var fr = Fitness.evaluate(g, sym, "js", false, costBps, startCapital, equityFloor);
+						if (!fr.ok) { anyErr = true; break; }
+						perSymbol.push({trades: fr.trades, sharpe: fr.sharpe, finalEquity: fr.finalEquity, bankrupt: fr.bankrupt});
+					}
+					if (anyErr || perSymbol.length == 0) return Fitness.NEG_INF;
+					return BasketFitness.scoreAggregate(BasketFitness.aggregateBasket(perSymbol));
+				}
+				function foundryProgress(phase:String, note:String):Void {
+					competeViz.mode = "FOUNDRY";
+					competeViz.arenaPulse = 'foundry $phase — $note';
+					competeViz.foundryEvents = [for (e in foundry.events)
+						{gen: e.gen, phase: e.phase, bags: e.bags, injected: e.injected, note: e.note}];
+					if (dashboard != null && guiCompete) dashboard.updateCompete(competeViz);
+					Sys.println('  foundry [$phase]: $note');
+				}
+				var fev = foundry.maybeTick(gen, champs,
+					new Variation(seed + RngStreams.FOUNDRY, null, engine.tuner), bags, popKeys,
+					foundryOosScore, foundryProgress);
+				if (fev != null) {
+					competeViz.foundryEvents = [for (e in foundry.events)
+						{gen: e.gen, phase: e.phase, bags: e.bags, injected: e.injected, note: e.note}];
+					if (fev.injected && fev.hybrid != null && popG.length > engine.elite) {
+						var slot = engine.elite + foundryRng.int(Std.int(Math.max(1, popG.length - engine.elite)));
+						popG[slot] = fev.hybrid;
+						Sys.println('  foundry KEEP: ${fev.note} -> injected slot $slot'
+							+ (fev.oosHybrid != null ? ' OOS=${fmt(fev.oosHybrid, 4)}' : ''));
+					} else {
+						Sys.println('  foundry REJECT: ${fev.note}');
+					}
+				}
+				competeViz.arenaPulse = "";
+				competeViz.mode = "REAL";
+			}
+
+			competeViz.gen = gen;
+			competeViz.demes = [for (d in Archipelago.demeStats(fitness, EvolutionEngine.demeSize))
+				{id: d.id, n: d.n, best: d.best, mean: d.mean}];
+			competeViz.rivalryWeight = rivalryWeight;
+			competeViz.migratePulse = lastMigratePulse;
+			competeViz.immigrantMarkers = lastMigratePulse ? EvolutionEngine.migrateCount : 0;
+			competeViz.marketChoices = lastMarketChoices.copy();
+			competeViz.veteranN = lastVeteranN;
+			competeViz.veteranNetInv = lastVeteranNetInv;
+			competeViz.poetKept = poetKeptN;
+			competeViz.poetRejected = poetRejectedN;
+			lastMigratePulse = EvolutionEngine.demeSize > 0 && EvolutionEngine.migrateEvery > 0
+				&& EvolutionEngine.migrateCount > 0
+				&& ((gen + 1) % EvolutionEngine.migrateEvery == 0)
+				&& Archipelago.demeCount(pop, EvolutionEngine.demeSize) > 1;
+
 			var genMs = (haxe.Timer.stamp() - tGen0) * 1000;
 			// `champion="name"` alone is misleading over a long run: `Variation.hx`'s
 			// crossover/mutate both copy `name: g.name` from parent to child UNCONDITIONALLY, so
@@ -1881,6 +2218,7 @@ class CorpusEvoRun {
 				Sys.println('  qd=${fmt(archive.qdScore(), 3)} coverage=${fmt(archive.coverage(archiveTotalCells), 3)} discoveries=${archive.discoveryCount}');
 			Sys.println('  semUnique=${cache.uniqueSemantics} semHits=${cache.semanticHits}'
 				+ (Fitness.preferNma && Fitness.nmaPopMemo != null ? ' popMemoHits=${Fitness.nmaPopMemoHits}' : '')
+				+ (Fitness.preferNma ? ' sigMemoHits=${musescript.evo.nma.NmaSignalMemo.hits} sigMemoWaits=${musescript.evo.nma.NmaSignalMemo.waits} sigMemoPuts=${musescript.evo.nma.NmaSignalMemo.puts}' : '')
 				+ (Fitness.preferNma ? ' nmaOk=${Fitness.nmaOkCount} nmaFall=${Fitness.nmaFallCount} nmaUnsup=${Fitness.nmaUnsupportedCount} nmaErr=${Fitness.nmaErrorCount} compiles=${Fitness.fnCompileCount}'
 					+ (Fitness.nmaErrorCount > 0 && Fitness.lastNmaError != null ? '\n  lastNmaErr: ${Fitness.lastNmaError}' : '') : '')
 				+ (Fitness.nmaDirtySpine ? ' workHits=${Fitness.nmaWorkingHits} workPuts=${Fitness.nmaWorkingPuts}' : '')
@@ -1915,6 +2253,7 @@ class CorpusEvoRun {
 				dashboard.update(gen, genBest, mean, archive.size(), currentBestGenome != null ? currentBestGenome.name : "?",
 					validFitness, [for (c in nicheSummary) c.key], [for (c in nicheSummary) c.fitness],
 					isPerf, oosPerf, isBenchmark, oosBenchmark);
+				if (guiCompete) dashboard.updateCompete(competeViz);
 			}
 
 			// Pause/resume lives on the dashboard (its Pause button, always the primary window);
@@ -1964,8 +2303,10 @@ class CorpusEvoRun {
 				if (PoetEnvs.minimalCriterion(eliteFits)) {
 					marketConfigs[idx] = candidate;
 					rebuildMarketFeatures(marketConfigs, marketFeatures);
+					poetKeptN++;
 					Sys.println('  poet: env $idx mutated (kept)');
 				} else {
+					poetRejectedN++;
 					Sys.println('  poet: env $idx mutated (rejected MC)');
 				}
 			}
@@ -1979,25 +2320,41 @@ class CorpusEvoRun {
 				// (`selectionFitness == fitness`, the exact same array) -- see this session's
 				// neuroevolution-inspired-upgrades plan.
 				var selectionFitness = fitness;
+				if (rivalryWeight > 0 && rivalryChannel != null)
+					selectionFitness = Archipelago.blendSelection(fitness, rivalryChannel, rivalryWeight);
 				if (speciationOn || noveltyWeight != 0.0) {
-					selectionFitness = fitness.copy();
+					var doSpecies = speciationOn && (gen % speciesEvery == 0);
+					var doNovelty = noveltyWeight != 0.0 && mapElitesOn && (gen % noveltyEvery == 0);
+					// When both cadences miss this gen, selectionFitness == fitness — skip the
+					// pop-sized copy (measured ~1 ms and was pure tax on off-cadence gens).
+					if (doSpecies || doNovelty) {
+						if (selectionFitness == fitness) selectionFitness = fitness.copy();
+					}
 					var tSpecies = profile.start();
-					if (speciationOn) {
+					if (doSpecies) {
 						// Greedy first-match clustering, kept EXACTLY as it was but stripped of its
-						// two scaling problems. (1) Distances run over `Canonical.shapeVector`
+						// scaling problems. (1) Distances run over `Canonical.shapeVector`
 						// (unboxed, fixed-length) instead of `Map<String,Int>`, so a comparison is
 						// a 16-step int loop rather than a union map + string hashing. (2) The scan
 						// over species is prefiltered by total node count: Manhattan distance is
 						// bounded below by the difference of the totals, so a species whose total
 						// is more than `speciationThreshold` away cannot match and never needs the
-						// comparison. Both are exact -- same species, same order, same penalties --
-						// which matters because speciation moves selection pressure and a "close
-						// enough" clustering would quietly change what evolves.
+						// comparison. (3) Species indices are bucketed in a dense `Array` indexed
+						// by total — NOT `Map<Int,Array<Int>>`, which boxes every key on the JVM
+						// (guide §25). All three are exact -- same species, same order, same
+						// penalties -- which matters because speciation moves selection pressure.
 						var sigByKey = new Map<String, haxe.ds.Vector<Int>>();
-						for (key in order) sigByKey.set(key, Canonical.shapeVector(popG[keyToIdx.get(key)[0]]));
+						var maxTotal = 0;
+						for (key in order) {
+							var sig = Canonical.shapeVector(popG[keyToIdx.get(key)[0]]);
+							sigByKey.set(key, sig);
+							var tot = Canonical.shapeVectorTotal(sig);
+							if (tot > maxTotal) maxTotal = tot;
+						}
 						var reps:Array<{sig:haxe.ds.Vector<Int>, total:Int, keys:Array<String>}> = [];
-						// Species indices bucketed by total, each list ascending in insertion order.
-						var repsByTotal = new Map<Int, Array<Int>>();
+						// Dense buckets by total (guide §25): index = total, value = ascending
+						// insertion indices into `reps`. Grown to maxTotal+1 after the measure pass.
+						var repsByTotal:Array<Array<Int>> = [for (_ in 0...(maxTotal + 1)) null];
 						for (key in order) {
 							var sig = sigByKey.get(key);
 							var total = Canonical.shapeVectorTotal(sig);
@@ -2005,10 +2362,12 @@ class CorpusEvoRun {
 							// threshold" choice is identical to scanning `reps` front to back.
 							var bestRep = -1;
 							var lo = total - speciationThreshold;
+							if (lo < 0) lo = 0;
 							var hi = total + speciationThreshold;
+							if (hi > maxTotal) hi = maxTotal;
 							var t = lo;
 							while (t <= hi) {
-								var bucket = repsByTotal.get(t);
+								var bucket = repsByTotal[t];
 								if (bucket != null) {
 									for (ri in bucket) {
 										if (bestRep >= 0 && ri > bestRep) break; // bucket is ascending
@@ -2025,8 +2384,11 @@ class CorpusEvoRun {
 							} else {
 								var idx = reps.length;
 								reps.push({sig: sig, total: total, keys: [key]});
-								var bucket = repsByTotal.get(total);
-								if (bucket == null) { bucket = []; repsByTotal.set(total, bucket); }
+								var bucket = repsByTotal[total];
+								if (bucket == null) {
+									bucket = [];
+									repsByTotal[total] = bucket;
+								}
 								bucket.push(idx);
 							}
 						}
@@ -2043,7 +2405,7 @@ class CorpusEvoRun {
 					}
 					profile.stop(PhaseTimer.SPECIES, tSpecies);
 					var tNovelty = profile.start();
-					if (noveltyWeight != 0.0 && mapElitesOn) {
+					if (doNovelty) {
 						for (key in order) {
 							var e = evalByKey.get(key);
 							if (e == null || e.trades < 1 || Math.isNaN(e.sharpe)) continue;
@@ -2072,7 +2434,7 @@ class CorpusEvoRun {
 				}
 				profile.stop(PhaseTimer.LEXICASE, tLex);
 				var tStep = profile.start();
-				popG = engine.step(popG, selectionFitness, evalFn, attrCrossProb, donorCap, esNudgeProb, caseFitness);
+				popG = engine.step(popG, selectionFitness, evalFn, attrCrossProb, donorCap, esNudgeProb, caseFitness, cloneProb);
 				profile.stop(PhaseTimer.STEP, tStep);
 				#if kestrel
 				// Co-evolve the `selectors` population alongside `popG`, under the SAME
@@ -2128,6 +2490,9 @@ class CorpusEvoRun {
 				}
 			}
 			profile.endGeneration();
+			// Full-generation wall (score + species + novelty + step). Always printed so honest
+			// ms/gen does not require `--phase-profile` (whose locks contaminate the measurement).
+			Sys.println('  wallMs=${fmt((haxe.Timer.stamp() - tGen0) * 1000, 0)}');
 		}
 		var totalS = haxe.Timer.stamp() - totalT0;
 		for (line in profile.report()) Sys.println(line);
@@ -2351,6 +2716,8 @@ class CorpusEvoRun {
 		cache.close();
 		triageCache.close();
 		host.close();
+		var verify = Fitness.verifySummary();
+		if (verify != null) Sys.println("\n" + verify);
 		Sys.println("\nCORPUS_EVO_OK");
 	}
 
@@ -2367,47 +2734,58 @@ class CorpusEvoRun {
 		while (true) {
 			var job = jobs.pop(true);
 			if (job.stop) { host.close(); acks.add(1); return; }
-			var inst = instances.get(job.wasmPath);
-			if (inst == null) {
-				inst = host.instantiate(host.loadModuleFile(job.wasmPath), job.strings);
-				instances.set(job.wasmPath, inst);
-			}
-			var perSymbol:Array<{trades:Int, sharpe:Float, finalEquity:Float, ?bankrupt:Bool}> = [];
-			var firstFills = null;
-			var firstEquity:Array<Float> = null;
-			var firstRawSharpe = 0.0;
-			var firstTrades = 0;
-			var firstFinalEq = 0.0;
-			for (i in 0...basket.length) {
-				var r = inst.run(basket[i], new Map());
-				if (i == 0) {
-					firstFills = r.fills;
-					firstEquity = r.equity;
-					firstRawSharpe = r.sharpe;
-					firstTrades = r.trades;
-					firstFinalEq = r.finalEquity;
+			// Same collect-N contract as the fallback pool: this job MUST post exactly one result
+			// or the main thread blocks on `pop(true)` forever. `EvalResult` carries no `ok` flag,
+			// so a failure posts a NaN Sharpe, which `Fitness.score`/`scoreFacts` already map to
+			// NEG_INF -- the genome is scored as invalid instead of hanging the run.
+			try {
+				var inst = instances.get(job.wasmPath);
+				if (inst == null) {
+					inst = host.instantiate(host.loadModuleFile(job.wasmPath), job.strings);
+					instances.set(job.wasmPath, inst);
 				}
-				// WASM path has no OrderSim.bankrupt — treat as solvent (forceFallback when floor>0).
-				var symSharpe = r.sharpe;
-				if (fitnessWindows > 1 && r.equity != null) {
-					var fr = new FitnessResult(true, r.sharpe, r.trades, r.finalEquity, "wasm");
-					fr.equity = r.equity;
-					symSharpe = Fitness.robustScore(fr, fitnessWindows, fitnessWindowLambda);
+				var perSymbol:Array<{trades:Int, sharpe:Float, finalEquity:Float, ?bankrupt:Bool}> = [];
+				var firstFills = null;
+				var firstEquity:Array<Float> = null;
+				var firstRawSharpe = 0.0;
+				var firstTrades = 0;
+				var firstFinalEq = 0.0;
+				for (i in 0...basket.length) {
+					var r = inst.run(basket[i], new Map());
+					if (i == 0) {
+						firstFills = r.fills;
+						firstEquity = r.equity;
+						firstRawSharpe = r.sharpe;
+						firstTrades = r.trades;
+						firstFinalEq = r.finalEquity;
+					}
+					// WASM path has no OrderSim.bankrupt — treat as solvent (forceFallback when floor>0).
+					var symSharpe = r.sharpe;
+					if (fitnessWindows > 1 && r.equity != null) {
+						var fr = new FitnessResult(true, r.sharpe, r.trades, r.finalEquity, "wasm");
+						fr.equity = r.equity;
+						symSharpe = Fitness.robustScore(fr, fitnessWindows, fitnessWindowLambda);
+					}
+					perSymbol.push({trades: r.trades, sharpe: symSharpe, finalEquity: r.finalEquity, bankrupt: false});
 				}
-				perSymbol.push({trades: r.trades, sharpe: symSharpe, finalEquity: r.finalEquity, bankrupt: false});
+				var agg = BasketFitness.aggregateBasket(perSymbol, curriculumWeights);
+				// Behavioral-descriptor inputs (see MapElites.hx) computed HERE, on the worker thread,
+				// from basket[0]'s fills -- the same "stay scoped to one representative symbol" choice
+				// triage/the attribution oracle already make; MAP-Elites niching is a diversity signal,
+				// not the fitness itself, so it doesn't need the full basket.
+				var desc = MapElites.describeFills(firstFills, basket[0].length);
+				var symSharpes = [for (p in perSymbol) p.sharpe];
+				var fr0 = new FitnessResult(true, firstRawSharpe, firstTrades, firstFinalEq, "wasm");
+				fr0.equity = firstEquity;
+				results.add({key: job.key, trades: agg.trades, sharpe: agg.sharpe, finalEquity: agg.finalEquity,
+					avgHold: desc.avgHold, longFrac: desc.longFrac, dutyCycle: desc.dutyCycle, fillHash: musescript.evo.FillHash.of(firstFills),
+					perSymbolSharpe: symSharpes, lexCases: lexCasesFor(fr0, fitnessWindows, symSharpes)});
+			} catch (e:Dynamic) {
+				Sys.println('  wasm worker: job ${job.key} threw, scoring it as failed: ${Std.string(e)}');
+				results.add({key: job.key, trades: 0, sharpe: Math.NaN, finalEquity: 0,
+					avgHold: 0.0, longFrac: 0.0, dutyCycle: 0.0, fillHash: "",
+					perSymbolSharpe: [], lexCases: []});
 			}
-			var agg = BasketFitness.aggregateBasket(perSymbol, curriculumWeights);
-			// Behavioral-descriptor inputs (see MapElites.hx) computed HERE, on the worker thread,
-			// from basket[0]'s fills -- the same "stay scoped to one representative symbol" choice
-			// triage/the attribution oracle already make; MAP-Elites niching is a diversity signal,
-			// not the fitness itself, so it doesn't need the full basket.
-			var desc = MapElites.describeFills(firstFills, basket[0].length);
-			var symSharpes = [for (p in perSymbol) p.sharpe];
-			var fr0 = new FitnessResult(true, firstRawSharpe, firstTrades, firstFinalEq, "wasm");
-			fr0.equity = firstEquity;
-			results.add({key: job.key, trades: agg.trades, sharpe: agg.sharpe, finalEquity: agg.finalEquity,
-				avgHold: desc.avgHold, longFrac: desc.longFrac, dutyCycle: desc.dutyCycle, fillHash: musescript.evo.FillHash.of(firstFills),
-				perSymbolSharpe: symSharpes, lexCases: lexCasesFor(fr0, fitnessWindows, symSharpes)});
 		}
 	}
 

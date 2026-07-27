@@ -45,6 +45,14 @@ class RngStreams {
 	 * the AttrPool cannot perturb tournament order under `--seed`.
 	 */
 	public static inline var VARIATION_PARALLEL = 7001;
+	/** Archipelago migration stream (`--deme-size`). */
+	public static inline var DEME_MIGRATE = 7101;
+	/** Rivalry arena cohort sampling / mid-arena retune choice (`--rivalry` / `--arena-every`). */
+	public static inline var RIVALRY_ARENA = 7201;
+	/** Foundry fork/consensus RNG (`--foundry-every`). */
+	public static inline var FOUNDRY = 7301;
+	/** Clone-vs-vary choice (`EvolutionEngine` / `--clone-prob`); only drawn when cloneProb > 0. */
+	public static inline var CLONE_CHOICE = 7401;
 
 	public static inline function stream(seed:Int, offset:Int):Rand return new Rand(seed + offset);
 }

@@ -198,8 +198,11 @@ class MuseDebugSession {
 
 	static function parse(source:String):MuseProgram {
 		var prog = new MuseParser().parse(source, "<debug>");
-		// Order: see MuseCompiler.compileEx's comment (TemplateExpand
-		// before ModuleExpand — the reverse can't see `use` inside templates).
+		// Order: see MuseCompiler.compileEx's comment. ClassStrategyLower first so a
+		// `class X extends muse.Strat` under the debugger lowers to a StrategyDecl before the
+		// template/module passes (no-op without class-strategy roots); then TemplateExpand
+		// before ModuleExpand — the reverse can't see `use` inside templates.
+		prog = musescript.compile.ClassStrategyLower.expand(prog);
 		prog = TemplateExpand.expand(prog);
 		prog = ModuleExpand.expand(prog);
 		return prog;

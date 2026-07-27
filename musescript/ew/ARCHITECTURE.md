@@ -162,6 +162,6 @@ Constraints:
 
 See `BRAINSTORM_COEVOLVE.md` § MVP. Short version:
 
-1. Adapter: `EwLattice` + `EwProject` + `EwInvalidation` → `ForecastCloud` (`samples=1`).  
+1. Adapter: `EwLattice` + `EwProject` + `EwInvalidation` → `ForecastCloud` (`LatticeForecastHost` **done** — Claude can wire).  
 2. Claude wires policy reads of cloud reductions + optional `projScore`.  
 3. Only then: stub inner MH over **already-valid** lattice rivals (no full CFG/CYK yet).

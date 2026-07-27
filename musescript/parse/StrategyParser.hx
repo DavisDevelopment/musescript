@@ -362,20 +362,32 @@ class StrategyParser {
 	}
 
 	/**
-	 * `class Name [extends Parent] { field [: Type] [= expr]; new(args) {...} [static] function m(args) {...} ... }`
-	 * P2: `extends` is parsed (so P3 doesn't need a parser change) but `parent` is unused until then.
+	 * `class Name [extends Parent] { [param p [: Type] [= expr]] field [: Type] [= expr]; new(args) {...} [static] function m(args) {...} ... }`
+	 *
+	 * `Parent` may be a dotted path (`muse.Strat`, `muse.Indicator`). Those two roots turn the
+	 * class into a strategy or indicator declaration — see `ClassStrategyLower`, which flattens
+	 * the inheritance chain at compile time so the result reaches the backends as an ordinary
+	 * `StrategyDecl`/`IndicatorDecl`. Any other parent is an ordinary class, unchanged.
+	 *
+	 * `param` inside a class body hoists exactly as it does inside `strategy`, so the two
+	 * surfaces declare parameters the same way.
 	 */
 	function parseClassDecl():Decl {
 		expectIdent("class");
 		var name = expectIdentValue();
 		var parent:Null<String> = null;
-		if (matchIdent("extends")) parent = expectIdentValue();
+		if (matchIdent("extends")) parent = parseDottedName();
 		expect("{");
 		var fields:Array<{name:String, def:Null<Expr>}> = [];
 		var methods:Array<{name:String, args:Array<String>, body:Expr, isStatic:Bool}> = [];
 		var ctor:Null<{args:Array<String>, body:Expr}> = null;
 		skipWs();
 		while (i < len && !check("}")) {
+			if (peekIdent() == "param") {
+				hoisted.push(parseParamDecl());
+				skipWs();
+				continue;
+			}
 			var isStatic = matchIdent("static");
 			if (matchIdent("new")) {
 				expect("(");
@@ -408,6 +420,16 @@ class StrategyParser {
 		}
 		expect("}");
 		return ClassDecl(name, parent, fields, methods, ctor);
+	}
+
+	/** `Ident ("." Ident)*` — a type path such as `muse.Strat`. Bare names stay bare. */
+	function parseDottedName():String {
+		var buf = expectIdentValue();
+		while (check(".")) {
+			expect(".");
+			buf += "." + expectIdentValue();
+		}
+		return buf;
 	}
 
 	function parseValueDeclAfterKeyword():Decl {

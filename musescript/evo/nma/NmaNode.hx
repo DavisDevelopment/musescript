@@ -104,6 +104,16 @@ class NmaNode {
 	 */
 	public var structuralKey:Null<String> = null;
 
+	/**
+	 * Avalanched digest lanes for the subtree, cached alongside `structuralKey`. The population
+	 * column share keys on these ints rather than on the hex string — see `NmaColumnCache.getWords`.
+	 * Valid iff `structuralKey != null`.
+	 */
+	public var structA:Int = 0;
+	public var structB:Int = 0;
+	/** True once `structA`/`structB` have been computed. Hex `structuralKey` may still be null. */
+	public var structReady:Bool = false;
+
 	// ---- JIT slot (P4) ----
 	/** Compiled fused kernel for this subtree, or `null` while still interpreted. See `NmaKernel`.
 	 *
@@ -191,6 +201,7 @@ class NmaNode {
 	 */
 	public inline function invalidate():Void {
 		structuralKey = null;
+		structReady = false;
 		evalEpoch = -1;
 		lastSeries = null;
 		kernel = null;

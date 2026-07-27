@@ -230,7 +230,8 @@ class GeneRunner {
 		// comment: TemplateExpand can see into ModuleDecl bodies, ModuleExpand
 		// can't see into TemplateDecl bodies, so this order is required for a
 		// `use` call written inside a template to ever get expanded.
-		prog = musescript.compile.TemplateExpand.expand(prog);
+		prog = musescript.compile.ClassStrategyLower.expand(prog); // class X extends muse.Strat -> StrategyDecl (no-op otherwise)
+			prog = musescript.compile.TemplateExpand.expand(prog);
 		prog = musescript.compile.ModuleExpand.expand(prog);
 
 		if (checkOnly) {

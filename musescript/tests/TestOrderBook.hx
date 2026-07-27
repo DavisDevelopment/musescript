@@ -4,6 +4,7 @@ import utest.Assert;
 import utest.Test;
 import musescript.harness.OrderBook;
 import musescript.harness.OrderSim;
+import musescript.harness.Metrics;
 import musescript.harness.HarnessContext;
 import musescript.harness.BarFeed;
 import musescript.harness.Bar;
@@ -298,7 +299,28 @@ class TestOrderBook extends Test {
 		Assert.floatEquals(10.0, sim.position, "expected bare long() to still use ALL affordable cash (1000/100=10), not the 25% cap");
 	}
 
-	// ── OrderSim.equityFloor / .bankrupt: the sim-tape bankruptcy difficulty crank ────────────
+	/** Thin-mark return stream must match equity → returns → Sharpe bit-for-bit. */
+	public function testThinMarkSharpeMatchesCurve() {
+		var simCurve = new OrderSim(100000);
+		var simThin = new OrderSim(100000);
+		simThin.trackCurve = false;
+		simCurve.reserveEquity(40);
+		simThin.reserveEquity(40);
+		var px = 100.0;
+		for (i in 0...40) {
+			if (i == 5) simCurve.long(px, 1, i);
+			if (i == 5) simThin.long(px, 1, i);
+			if (i == 20) simCurve.flat(px, i);
+			if (i == 20) simThin.flat(px, i);
+			px += (i % 2 == 0 ? 0.5 : -0.3);
+			simCurve.mark(px);
+			simThin.mark(px);
+		}
+		var fromCurve = Metrics.sharpe(Metrics.returnsFromEquity(simCurve.equity.toArray()), 0);
+		Assert.floatEquals(fromCurve, simThin.sharpeOnline(), 1e-12);
+		Assert.floatEquals(simCurve.equity[simCurve.equity.length - 1], simThin.lastMark, 1e-12);
+	}
+
 
 	/** Default (`equityFloor = 0.0`) is disabled -- `mark()` never sets `bankrupt`, no matter how
 	 * low equity goes. Zero behavior change for every caller that doesn't opt in. */

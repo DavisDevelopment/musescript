@@ -27,6 +27,26 @@ class BuiltinSigs {
 		table.set(name, sig);
 	}
 
+	/**
+	 * True when `name` is a builtin that takes no arguments and returns a plain scalar
+	 * (`bars_in_trade`, `equity`, `position`, `cash`, ...).
+	 *
+	 * Strategies spell these bare at least as often as `name()` -- see the dozens of
+	 * `when bars_in_trade >= look: flat()` lines under examples/strategy-kinds -- so a bare
+	 * reference has to read as a CALL rather than as a reference to the installed closure.
+	 * Nullary builtins returning a series or a collection (`hl2`, `symbols`, `dict_new`) are
+	 * deliberately excluded: those ARE meaningful as values, and series-typed arguments already
+	 * resolve through `seriesNameOf` before they would ever be evaluated.
+	 */
+	public static function isNullaryScalar(name:String):Bool {
+		var sig = get(name);
+		if (sig == null || sig.args.length != 0) return false;
+		return switch (sig.ret) {
+			case TScalar: true;
+			default: false;
+		};
+	}
+
 	/** True when the named builtin expects a Series value at the given argument index. */
 	public static function wantsSeries(name:String, argIndex:Int):Bool {
 		var sig = get(name);

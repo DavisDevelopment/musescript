@@ -409,6 +409,11 @@ class JsEmitter {
 					case CBool(b): b ? "true" : "false";
 					case CNull: "null";
 				}
+			// A bare nullary scalar builtin (`bars_in_trade`, `equity`, ...) is a CALL, not a name
+			// read -- see MuseInterp.identValue. `api.get` is a plain `lookup`, so it handed back
+			// the installed closure and `bars_in_trade >= 20` compared a function to a number.
+			case EIdent(n) if (!hoisted.exists(n) && BuiltinSigs.isNullaryScalar(n)):
+				'api.invoke("${safe(n)}", [])';
 			case EIdent(n): hoisted.exists(n) ? safe(n) : 'api.get("${safe(n)}")';
 			case EBarField(n): 'api.bar("${safe(n)}")';
 			case EVar(n, init):

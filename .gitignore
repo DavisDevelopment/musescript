@@ -38,3 +38,6 @@ musescript/tests/TestMurmurationConservation.hx
 # by classpath/main-class, revealing internal structure even without shipping their code.
 build-kestrel*.hxml
 build-*murmuration*.hxml
+
+# Organic Pine harvest clones — regenerable via tools/pine_corpus_harvest.py
+corpus/pine-organic/

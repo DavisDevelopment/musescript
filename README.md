@@ -105,6 +105,68 @@ Unguarded `onBar { ... }` / `onBar() { ... }` blocks with no `when` anywhere kee
 behavior byte-for-byte: every block runs, every bar, unconditionally (concatenated, not
 alternated) — only a guarded sequence triggers the new chain semantics.
 
+## Class syntax: `class MyStrategy extends muse.Strat`
+
+A strategy or indicator can be written as a class. `muse.Strat` and `muse.Indicator` are builtin
+roots; extending one turns the class into the corresponding declaration.
+
+```muse
+class MaCross extends muse.Strat {
+  param fast: Window = 8
+  param slow: Window = 34
+
+  f = sma(close, fast)
+  s = sma(close, slow)
+
+  function onBar() {
+    when crossover(f, s): long()
+    when crossunder(f, s): flat()
+  }
+}
+```
+
+This is exactly the `strategy MaCross { ... }` above it — same params, same per-bar field
+bindings, same hooks (`onBar`, `onPosition`, `onTick`). What the class form adds is
+**inheritance**, so shared behavior can live in a base class and a subclass can replace just the
+part it disagrees with:
+
+```muse
+class RiskManaged extends muse.Strat {
+  param stopPct: Scalar = 0.05
+  function stopped() { return unrealized_pnl_pct() < -stopPct }
+  function onPosition() { when stopped(): flat() }
+}
+
+class Tight extends RiskManaged {
+  function stopped() { return super.stopped() || close < lowest(low, 5) }
+  function onBar() { when crossover(sma(close, 8), sma(close, 34)): long() }
+}
+```
+
+`template` and `module` compose by expansion, so sharing exit logic means every strategy repeats
+the call; a base class holds it once and `super.stopped()` extends rather than restates it.
+
+An indicator class implements `compute`:
+
+```muse
+class Spread extends muse.Indicator {
+  function compute(src, len) { return ema(src, len) - sma(src, len) }
+}
+```
+
+**Inheritance is resolved at compile time** by `ClassStrategyLower`, which runs before every other
+pass. Fields, params, hooks and overrides are flattened along the chain, helper methods are
+inlined at their call sites, and `super.m()` splices in the version it overrides — so the program
+reaches the backends as an ordinary `StrategyDecl`/`IndicatorDecl` and compiles to the same JS or
+WASM as the `strategy` surface. That matters: MuseScript's general class runtime is
+interpreter-only (`JsEmitter` cannot emit `this`/`super`), so a strategy doing real per-bar method
+dispatch would run interpreted, roughly 70x slower than the columnar path.
+
+Consequences of flattening, all diagnosed at compile time: no constructors (a strategy's fields
+are per-bar bindings, and the harness constructs it), no static methods, no recursive helpers. A
+class that does *not* extend a `muse.*` root is untouched and keeps the existing class runtime,
+`new` and all. See `examples/strategy-kinds/90_class_strategy_inheritance.ms`.
+
 ## `ta` toolbelt — 442+ ported technical indicators
 
 `musescript/indicators/lib/` (+ `prim/` for names that collide with existing core builtins) hosts

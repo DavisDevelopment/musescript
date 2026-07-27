@@ -1,0 +1,5 @@
+//@version=5
+indicator("HTF Trend", overlay=true)
+htfClose = request.security(syminfo.tickerid, "D", close, lookahead=barmerge.lookahead_on)
+trendUp = close > htfClose
+plot(htfClose)

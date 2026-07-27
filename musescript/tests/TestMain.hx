@@ -71,11 +71,14 @@ class TestMain {
 		runner.addCase(new TestRegistryPalette());
 		runner.addCase(new TestStrategyParserGrammarExtensions());
 		runner.addCase(new TestEvoVariation());
+		runner.addCase(new TestIntPairMap());
+		runner.addCase(new TestIntPairList());
 		runner.addCase(new TestNmaBijection());
 		runner.addCase(new TestNmaEval());
 		runner.addCase(new TestNmaEvalEngine());
 		runner.addCase(new TestNmaFitness());
 		runner.addCase(new TestNmaStrangler());
+		runner.addCase(new TestNmaBarColumns());
 		runner.addCase(new TestNmaAttr());
 		runner.addCase(new TestNmaDeep());
 		runner.addCase(new TestNmaLibraryBandit());
@@ -85,6 +88,7 @@ class TestMain {
 		runner.addCase(new TestMapElites());
 		runner.addCase(new TestLexicaseCvt());
 		runner.addCase(new TestEvoScaling());
+		runner.addCase(new TestRivalryArchipelago());
 		runner.addCase(new TestGrowthWeights());
 		runner.addCase(new TestSimplify());
 		runner.addCase(new TestCorpusSeed());
@@ -121,6 +125,7 @@ class TestMain {
 		runner.addCase(new TestLangEnums());
 		runner.addCase(new TestLangClasses());
 		runner.addCase(new TestLangInheritance());
+		runner.addCase(new TestLangClassStrategy());
 		runner.addCase(new TestConstFold());
 		runner.addCase(new TestCommonSubexprElim());
 		runner.addCase(new TestVariableFrame());

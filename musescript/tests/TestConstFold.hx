@@ -86,6 +86,21 @@ class TestConstFold extends Test {
 		#end
 	}
 
+	public function testFloatArithmeticDoesNotTruncate() {
+		// JVM Dynamic `+` used to unify ConstFold locals to Int (5.2-3.8 → 2). Must stay ~1.4.
+		var printed = new MusePrinter().printProgram(ConstFold.transform(new MuseParser().parse("5.2 - 3.8")));
+		Assert.isFalse(StringTools.contains(printed, "2"), 'expected fractional fold, got: $printed');
+		Assert.isTrue(StringTools.contains(printed, "1.4") || StringTools.contains(printed, "1.400"),
+			'expected ~1.4 fold, got: $printed');
+	}
+
+	public function testFloatComparisonFoldKeepsStrictInequality() {
+		// 449.3 < 449.4 must stay true — Int truncation would make both 449 and fold to false.
+		var printed = new MusePrinter().printProgram(
+			ConstFold.transform(new MuseParser().parse("449.335876 < 449.46488714285715")));
+		Assert.isTrue(StringTools.contains(printed, "true"), 'expected true fold, got: $printed');
+	}
+
 	// ── nested EBlock flattening (2026-07-20) ──────────────────────────────
 	// Repeated StaticInlinePass splicing accumulates one block-nesting level per inline;
 	// ConstFold flattens them back down since this language's EBlock never pushes a real

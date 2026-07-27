@@ -27,6 +27,12 @@ import musescript.evo.nma.NmaBool;
  * «Σίβυλλα μαίνεται· θεὸς ἐν αὐτῇ λαλεῖ.»
  */
 class NmaBijection {
+	/**
+	 * Seed per-node credit from `NmaCreditBank` while converting (spec §6b shape priors). Off
+	 * only to measure what that costs, since it is quadratic in bool-tree size and rides inside
+	 * every `genomeFromEnum`.
+	 */
+	public static var seedCredit:Bool = true;
 
 	// ---------- enum -> NMA ----------
 
@@ -61,7 +67,15 @@ class NmaBijection {
 			case BHole(inner): new NmaBHole(boolFromEnum(inner));
 		};
 		// §6b shape prior: seed local credit from durable bank so working copies aren't cold-start.
-		NmaCreditBank.seedNodeFromBank(out, musescript.evo.Canonical.boolStructuralKey(n));
+		//
+		// N.B. this runs at EVERY node of the recursion and structural digest is O(subtree) per node,
+		// so seeding a bool root of k nodes costs O(k^2) digest work. We cache lanes on the NMA node
+		// (`ensureWordsBool`) and look up the bank by `(structA, structB)` — no hex String on this
+		// hot path. `seedCredit` prices the digest work -- see NmaSignalProbe's prepare split.
+		if (seedCredit) {
+			NmaCanonical.ensureWordsBool(out);
+			NmaCreditBank.seedNodeFromBankWords(out, out.structA, out.structB);
+		}
 		return out;
 	}
 

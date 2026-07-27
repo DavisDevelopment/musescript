@@ -7,6 +7,7 @@ import musescript.ast.MuseProgram;
 import musescript.ast.Decl;
 import musescript.ast.OrderKind;
 import musescript.ast.ConstructOnce;
+import musescript.types.BuiltinSigs;
 import musescript.builtins.MlBuiltins;
 import musescript.builtins.StatsBuiltins;
 
@@ -992,6 +993,14 @@ class StrategyWasmEmitter {
 					var sid = seriesSid(n);
 					if (sid != null) {
 						"global.get $" + "cur_" + seriesCurName(sid);
+					} else if (BuiltinSigs.isNullaryScalar(n)) {
+						// A bare nullary scalar builtin (`bars_in_trade`, `equity`, ...) is a CALL,
+						// not a name read -- see MuseInterp.identValue. This used to fall through to
+						// `get_param`, which answers 0 for any unbound name, so `bars_in_trade >= 20`
+						// was permanently FALSE and every bare-spelled time-stop silently never fired.
+						// The interp had the mirror-image bug (it read back the installed closure), so
+						// the two backends agreed on the wrong answer and parity tests passed.
+						emitCall(EIdent(n), []);
 					} else {
 						needImport("get_param", "(param i32) (result f64)");
 						"i32.const " + strId(n) + "\n    call $get_param";

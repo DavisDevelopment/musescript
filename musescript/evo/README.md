@@ -32,6 +32,18 @@ java -jar build/jvm/evo-proof.jar
 Proof checks: seeded population, typed mutation, elitism non-regression,
 deterministic re-evaluation of the champion.
 
+## Node NMA throughput bench
+
+`CorpusEvoRun` is JVM-only. For V8 A/Bs on the same smoke tape:
+
+```powershell
+haxe build-nma-node-bench.hxml
+node build/js/nma-node-bench.js --pop 1000 --gens 6 --tape build/graal/smoke_spy_320.csv --nma-dirty-spine
+node build/js/nma-node-bench.js --pop 1000 --gens 6 --threads 4 --tape build/graal/smoke_spy_320.csv
+```
+
+Reports mean `wallMs`/`scoreMs`. `--threads N` fans the population fitness barrier across Node `worker_threads` (`NmaNodeEvalPool`); `EvolutionEngine.step` stays serial. Dirty-spine is refused when `threads > 1`.
+
 ## Corpus evo flags (innovation + NMA)
 
 Primary entry: `CorpusEvoRun` (`build-corpus-evo.hxml`). Useful strangler / search flags:
@@ -59,8 +71,30 @@ Primary entry: `CorpusEvoRun` (`build-corpus-evo.hxml`). Useful strangler / sear
 | `--learn-library` / `--library-every` | Motif library → `BHole` |
 | `--poet` / `--poet-envs` / `--poet-every` | POET envs (kestrel) |
 | `--equity-floor` / `--cost-bps` | OrderSim bankruptcy / slippage |
+| `--rivalry` | Umbrella: demes ~128, arena every 50 gens, mid-arena retunes (2), `--rivalry-weight 0.40` into selection, **Foundry every 25 gens** (OOS gate). Sparse — **not** every-gen Murmuration |
+| `--arena-every N` / `--arena-steps N` / `--arena-retune-rounds N` | Sparse arena cadence / tick budget / mid-arena response rounds |
+| `--rivalry-weight W` | Selection blend weight (default 0.40 under `--rivalry`). Scale-safe z-norm blend so arena z can unseat tape-only elites |
+| `--foundry-every N` / `--foundry-bags` / `--foundry-perms N` | Rare fork→consensus Foundry with **real OOS / multi-bag gate** (Fitness+BasketFitness over held-out `oosBasket`). Off by default; under `--rivalry` defaults to every **25** gens. Set `--foundry-every 0` to disable. Bags: `auto` + `--tapes` labels |
 
 Oracle scoring: always use `Fitness.score` / `Fitness.scoreFacts` (bankrupt → NEG_INF).
+
+Rivalry smoke (GraalVM + `graal/cp.txt`):
+
+```powershell
+haxe build-corpus-evo.hxml
+$env:JAVA_HOME = "C:\Users\epiki\graalvm\graalvm-community-25.1.3"  # or your Graal home
+$JAVA = Join-Path $env:JAVA_HOME "bin\java.exe"
+$CP = (Get-Content graal\cp.txt -Raw).Trim()
+& $JAVA --sun-misc-unsafe-memory-access=allow -cp "$CP;build\jvm\corpus-evo.jar" `
+  musescript.evo.graal.CorpusEvoRun `
+  --pop 128 --nma --rivalry --arena-every 2 --arena-steps 200 --foundry-every 2 --foundry-perms 4 --gens 4 `
+  --tape build/graal/smoke_spy_320.csv --threads 1 --fitness-windows 1 --attr-bars 128 --no-cache
+# expect: RIVALRY umbrella on (weight=0.4, retuneRounds=2, foundry every 2);
+# arena START / heartbeats / DONE with retunes>0; foundry START / [fork|trials|consensus|reject] / KEEP|REJECT
+# demes ~128 need --pop >= 256 (else panmictic cohort of --arena-k)
+```
+
+Arenas stay off the NMA daily path unless `--rivalry` / `--arena-every` is set. Foundry OOS eval is sparse (`--foundry-every`) and never on the per-gen NMA hot path.
 
 ## JIT-audited runs (standing practice)
 

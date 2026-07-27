@@ -42,12 +42,16 @@ class TestNmaStrangler extends Test {
 	function setup() {
 		Fitness.preferNma = false;
 		Fitness.nmaVerify = false;
+		Fitness.verifyMismatches = 0;
+		Fitness.verifyCompiledFailures = 0;
 		Fitness.clearFnCache();
 	}
 
 	function teardown() {
 		Fitness.preferNma = false;
 		Fitness.nmaVerify = false;
+		Fitness.verifyMismatches = 0;
+		Fitness.verifyCompiledFailures = 0;
 		Fitness.clearFnCache();
 	}
 
@@ -66,6 +70,30 @@ class TestNmaStrangler extends Test {
 		var fr = Fitness.evaluate(g, tape(100), "js", false, 0.0);
 		Assert.isTrue(fr.ok);
 		Assert.equals("nma", fr.backend);
+	}
+
+	/**
+	 * ProbeDon5-shaped exit (`close < ema`): JVM MuseInterp used to truncate binop operands to
+	 * Int, so exits only fired when |close−ema| ≥ 1 — NMA (columnar Float) exited a bar earlier.
+	 * `--nma-verify` must agree on this genome.
+	 */
+	public function testNmaVerifyCloseLtEmaParity() {
+		var g:StrategyGenome = {
+			entryLong: BCmp(">=", KSeries(SPrice("high")), KSeries(SInd("highest", "high", 5, null))),
+			entryShort: FALSE_BOOL,
+			exitLong: BCmp("<", KSeries(SPrice("close")), KSeries(SInd("ema", "close", 13, null))),
+			exitShort: BCmp("<", KSeries(SPrice("close")), KSeries(SInd("ema", "close", 13, null))),
+			size: KConst(1.0),
+			params: [],
+			name: "ProbeDon5_parity"
+		};
+		Fitness.preferNma = true;
+		Fitness.nmaVerify = true;
+		var fr = Fitness.evaluate(g, tape(120), "js", false, 20.0);
+		Assert.isTrue(fr.ok, fr.error);
+		Assert.equals("nma", fr.backend);
+		Assert.equals(0, Fitness.verifyMismatches);
+		Assert.equals(0, Fitness.verifyCompiledFailures);
 	}
 
 	public function testPopMemoHitsAcrossIdenticalSubtrees() {
@@ -156,6 +184,40 @@ class TestNmaStrangler extends Test {
 	 * but `NmaPositionEval` walks the coupled spine per bar inside the sim loop, and the result
 	 * must match the compiled path it used to be handed to.
 	 */
+	/**
+	 * CorpusSeed fib genomes use `KFeature('fib_retracement(w).level*')`. Without an NMA host
+	 * those columns NaN-filled and scored wrong while the compiled path returned real levels —
+	 * the same silent-wrong class as the old position-feature bug. Host must match FibRetracement.
+	 */
+	public function testNmaVerifyFibRetracementParity() {
+		var seeds = musescript.evo.CorpusSeed.seedFromFibRetracement([20]);
+		Assert.isTrue(seeds.length >= 1);
+		var g = seeds[0];
+		Fitness.preferNma = true;
+		Fitness.nmaVerify = true;
+		var fr = Fitness.evaluate(g, tape(120), "js", false, 0.0);
+		Assert.isTrue(fr.ok, 'fib nma ok (${fr.error})');
+		Assert.equals("nma", fr.backend);
+		Assert.equals(0, Fitness.verifyMismatches, Fitness.verifySummary());
+		Assert.equals(0, Fitness.verifyCompiledFailures, Fitness.verifySummary());
+	}
+
+	/**
+	 * Same silent-wrong class as fib: CorpusSeed `fourier_projection("close",p,k,h)` KFeatures
+	 * must host via FourierProjection, not NaN-fill.
+	 */
+	public function testNmaVerifyFourierProjectionParity() {
+		var seeds = musescript.evo.CorpusSeed.seedFromFourierProjection([{period: 34, k: 3, horizon: 3}]);
+		Assert.equals(1, seeds.length);
+		Fitness.preferNma = true;
+		Fitness.nmaVerify = true;
+		var fr = Fitness.evaluate(seeds[0], tape(120), "js", false, 0.0);
+		Assert.isTrue(fr.ok, 'fourier nma ok (${fr.error})');
+		Assert.equals("nma", fr.backend);
+		Assert.equals(0, Fitness.verifyMismatches, Fitness.verifySummary());
+		Assert.equals(0, Fitness.verifyCompiledFailures, Fitness.verifySummary());
+	}
+
 	public function testPreferNmaHostsPositionFeatureOnSimLoop() {
 		var g:StrategyGenome = {
 			entryLong: BCross("over", SPrice("close"), SInd("sma", "close", 5, null)),

@@ -32,9 +32,36 @@ class NmaSignalProbe {
 	/** Split of the fallback: rendering+parsing+compiling the genome, vs actually running it. */
 	static var secBuild:Float = 0;
 	static var secRun:Float = 0;
+	/**
+	 * The enum->NMA crossing in `NmaFitness.prepare`, split from the rest of prepare (tape state
+	 * lookup, context allocation). This is the price of keeping the population in the enum IR
+	 * while evaluating in NMA: a whole fresh tree, allocated per prepare, memos cleared. Counted
+	 * separately because it bounds what collapsing to a single representation could return.
+	 */
+	static var prepares:Int = 0;
+	static var secBijection:Float = 0;
+	static var secPrepareRest:Float = 0;
+
+	/**
+	 * Per-job wall time in the fallback evaluation pool. A barrier that will not shrink with
+	 * `--threads` is either throughput-bound (sum/N) or tail-bound (one long job everyone waits
+	 * on); `sum` against `max` is what tells those apart, and nothing else measured so far can.
+	 */
+	static var jobs:Int = 0;
+	static var secJobs:Float = 0;
+	static var secJobMax:Float = 0;
+
+	/** Wall clock (JS-safe). Prefer this over bare `Sys.time()` so muse-runtime.js builds. */
+	public static inline function wall():Float {
+		#if sys
+		return Sys.time();
+		#else
+		return Date.now().getTime() / 1000.0;
+		#end
+	}
 
 	public static inline function stamp():Float {
-		return on ? Sys.time() : 0.0;
+		return on ? wall() : 0.0;
 	}
 
 	public static function observe(sig:String, columns:Float, pack:Float, sim:Float):Void {
@@ -61,6 +88,24 @@ class NmaSignalProbe {
 		lock.release();
 	}
 
+	public static function observeJob(seconds:Float):Void {
+		if (!on) return;
+		lock.acquire();
+		jobs++;
+		secJobs += seconds;
+		if (seconds > secJobMax) secJobMax = seconds;
+		lock.release();
+	}
+
+	public static function observePrepare(bijection:Float, rest:Float):Void {
+		if (!on) return;
+		lock.acquire();
+		prepares++;
+		secBijection += bijection;
+		secPrepareRest += rest;
+		lock.release();
+	}
+
 	/** Report the generation just finished and reset. Times are summed across worker threads, so
 	 * they are CPU rather than wall -- the ratio between them is the point, not the absolute. */
 	public static function drain(gen:Int):String {
@@ -68,7 +113,9 @@ class NmaSignalProbe {
 		var line = 'signal-probe gen=$gen evals=$evals dup=$duplicates (${pct(duplicates, evals)})'
 			+ ' cpu: columns=${ms(secColumns)}ms pack=${ms(secPack)}ms sim=${ms(secSim)}ms'
 			+ ' | fallback=$compiled ${ms(secCompiled)}ms'
-			+ ' (build=${ms(secBuild)}ms run=${ms(secRun)}ms)';
+			+ ' (build=${ms(secBuild)}ms run=${ms(secRun)}ms)'
+			+ ' | prepare=$prepares bijection=${ms(secBijection)}ms rest=${ms(secPrepareRest)}ms'
+			+ ' | jobs=$jobs sum=${ms(secJobs)}ms max=${ms(secJobMax)}ms mean=${ms(jobs > 0 ? secJobs / jobs : 0)}ms';
 		seen = new Map();
 		evals = 0;
 		duplicates = 0;
@@ -79,6 +126,12 @@ class NmaSignalProbe {
 		secCompiled = 0;
 		secBuild = 0;
 		secRun = 0;
+		prepares = 0;
+		secBijection = 0;
+		secPrepareRest = 0;
+		jobs = 0;
+		secJobs = 0;
+		secJobMax = 0;
 		lock.release();
 		return line;
 	}

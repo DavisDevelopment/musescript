@@ -9,6 +9,21 @@ import musescript.indicators.GrowableVec;
 import musescript.evo.nma.NmaBool;   // secondary types for the roots
 import musescript.evo.nma.NmaScalar;
 
+/** Column bundle from `evalColumns` — null roots are sim-coupled (operands warmed). */
+private typedef SignalCols = {
+	var eL:Null<GrowableVec<Float>>;
+	var eS:Null<GrowableVec<Float>>;
+	var xL:Null<GrowableVec<Float>>;
+	var xS:Null<GrowableVec<Float>>;
+	var sz:Null<GrowableVec<Float>>;
+	var tCols:Float;
+	var tPack:Float;
+	/** Avalanched signal-memo words from the first `wordsOf` this eval — store reuses them. */
+	var memoA:Int;
+	var memoB:Int;
+	var memoReady:Bool;
+};
+
 /**
  * NMA-native fitness: evaluate a genome by (1) computing its five signal COLUMNS via the memoized
  * `NmaEval` kind-switch (entry/exit bools + size scalar) and (2) driving the REAL `OrderSim` /
@@ -47,6 +62,19 @@ class NmaFitness {
 	 * «λίκνον φέρει Δημήτηρ· Ἴακχος ὑπὸ κόλπῳ.»
 	 */
 	static var tape:Null<NmaTapeState> = null;
+	/** Second tape slot — full IS vs attribution prefix (see `tapeStateFor`). */
+	static var tapeAlt:Null<NmaTapeState> = null;
+
+	/**
+	 * Fresh `OrderSim` per sim. Thread-local recycle was measured under the corpus pool and did not
+	 * beat `new` once `reset` + `fills.copy` (required for safe reuse) were paid; revisit with a
+	 * pool-owned scratch sim if attribution volume climbs further.
+	 *
+	 * «κύλιξ μία, πολλοὶ πότοι· οὐ κενὴ πάλιν.»
+	 */
+	static inline function borrowSim():OrderSim {
+		return new OrderSim();
+	}
 
 	/** Drop shared indicator columns (tests / tape switch / `Fitness.clearFnCache`).
 	 *
@@ -54,6 +82,7 @@ class NmaFitness {
 	 */
 	public static function clearColumnCache():Void {
 		tape = null;
+		tapeAlt = null;
 	}
 
 	/**
@@ -64,32 +93,64 @@ class NmaFitness {
 	 * every ablation), so the common case costs one pointer compare instead of O(B). Content
 	 * hashing still runs when the identity check fails, which is what keeps a caller that builds
 	 * an equal-but-distinct array correct rather than merely lucky.
+	 *
+	 * Two slots: fitness uses the full IS tape; attribution uses a short prefix (`--attr-bars`).
+	 * A single static slot thrashed between them every generation and rebuilt tens of times/gen.
 	 */
 	static function tapeStateFor(bars:Array<Bar>):NmaTapeState {
 		var snap = tape;
 		if (snap != null && snap.bars == bars) return snap;
+		var alt = tapeAlt;
+		if (alt != null && alt.bars == bars) return alt;
 
 		var n = bars.length;
 		var open = new Array<Float>(), high = new Array<Float>(), low = new Array<Float>();
 		var close = new Array<Float>(), volume = new Array<Float>(), times = new Array<Float>();
-		for (b in bars) { open.push(b.open); high.push(b.high); low.push(b.low); close.push(b.close); volume.push(b.volume); times.push(b.time); }
-		var key = tapeKey(close);
+		// The same pass fills the unboxed OHLC + index columns the sim loop reads, so each bar's
+		// fields are pulled through `Jvm.readField` once here rather than once per genome per bar
+		// (see `NmaBarColumns`). Indexed, and each field read into a local first, because on the
+		// JVM target every one of these is a boxing dynamic lookup.
+		var openV = new haxe.ds.Vector<Float>(n), highV = new haxe.ds.Vector<Float>(n);
+		var lowV = new haxe.ds.Vector<Float>(n), closeV = new haxe.ds.Vector<Float>(n);
+		var indexV = new haxe.ds.Vector<Int>(n);
+		var bi = 0;
+		while (bi < n) {
+			var b = bars[bi];
+			var bo = b.open, bh = b.high, bl = b.low, bc = b.close;
+			open.push(bo); high.push(bh); low.push(bl); close.push(bc);
+			volume.push(b.volume); times.push(b.time);
+			openV[bi] = bo; highV[bi] = bh; lowV[bi] = bl; closeV[bi] = bc;
+			indexV[bi] = b.index;
+			bi++;
+		}
+		var barCols = new NmaBarColumns(bars, n, openV, highV, lowV, closeV, indexV);
+		var key = tapeDigest(close);
 
 		// A distinct array object holding an identical tape keeps its columns: the signature, not
-		// the pointer, is what a memo is valid under.
-		if (snap != null && snap.key == key && snap.n == n) {
-			var rebound = new NmaTapeState(bars, n, key,
+		// the pointer, is what a memo is valid under. Check both slots.
+		var shareFrom:Null<NmaTapeState> = null;
+		if (snap != null && snap.key == key.hex && snap.n == n) shareFrom = snap;
+		else if (alt != null && alt.key == key.hex && alt.n == n) shareFrom = alt;
+		if (shareFrom != null) {
+			var rebound = new NmaTapeState(bars, n, key.hex, key.a, key.b,
 				["open" => open, "high" => high, "low" => low, "close" => close, "volume" => volume],
-				times, snap.columns);
-			tape = rebound;
+				times, barCols, shareFrom.columns);
+			publishTape(rebound, snap);
 			return rebound;
 		}
 
-		var fresh = new NmaTapeState(bars, n, key,
+		var fresh = new NmaTapeState(bars, n, key.hex, key.a, key.b,
 			["open" => open, "high" => high, "low" => low, "close" => close, "volume" => volume],
-			times, new NmaColumnCache());
-		tape = fresh;
+			times, barCols, new NmaColumnCache());
+		publishTape(fresh, snap);
 		return fresh;
+	}
+
+	/** Install `built` as the primary slot; demote the previous primary to alt when it is a
+	 * different bars identity (so full-tape ↔ attr-prefix thrash stays warm in both slots). */
+	static function publishTape(built:NmaTapeState, prev:Null<NmaTapeState>):Void {
+		if (prev != null && prev.bars != built.bars) tapeAlt = prev;
+		tape = built;
 	}
 
 	/**
@@ -138,13 +199,18 @@ class NmaFitness {
 		// them was the single largest cost in the engine -- ~10% of evaluations taking more CPU
 		// than the entire columnar path, because each one fell through to the tree-walking
 		// interpreter at 17-30 ms against ~0.24 ms.
+		var tEnter = NmaSignalProbe.stamp();
 		var nma = NmaBijection.genomeFromEnum(g);
+		var tConverted = NmaSignalProbe.stamp();
 
 		var t = tapeStateFor(bars);
 		var params = [for (p in g.params) p.defaultValue];
-		var ctx = new NmaEvalContext(t.n, NmaEpoch.of(t.key, g.params), t.fields, null, params,
+		var ctx = new NmaEvalContext(t.n, NmaEpoch.of(t.key, g.params, t.keyA, t.keyB), t.fields, null, params,
 			new EngineIndicatorProvider(t.fields, t.columns, t.times), musescript.evo.Fitness.nmaPopMemo);
 		ctx.sharedPriceColumns = t.columns;
+		ctx.barColumns = t.barCols;
+		if (NmaSignalProbe.on)
+			NmaSignalProbe.observePrepare(tConverted - tEnter, NmaSignalProbe.wall() - tConverted);
 		return { nma: nma, ctx: ctx };
 	}
 
@@ -161,17 +227,48 @@ class NmaFitness {
 	 */
 	public static function evaluatePrepared(nma:NmaGenome, ctx:NmaEvalContext, bars:Array<Bar>,
 			?costBps:Float = 0.0, ?initialCash:Float = 100000, ?equityFloor:Float = 0.0):FitnessResult {
+		var claimedA = 0;
+		var claimedB = 0;
+		var claimed = false;
 		try {
-			var orders = runPrepared(nma, ctx, bars, costBps, initialCash, equityFloor, true);
-			var eqArr = orders.equity.toArray();
-			var rets = Metrics.returnsFromEquity(eqArr);
-			var finalEq = orders.equity.length > 0 ? orders.equity[orders.equity.length - 1] : orders.cash;
-			var fr = new FitnessResult(true, Metrics.sharpe(rets, 0), orders.trades, finalEq, "nma");
+			var cols = evalColumns(nma, ctx);
+			musescript.evo.Fitness.addNmaPopMemoHits(ctx.popMemoHits);
+			ctx.popMemoHits = 0;
+			var memoHit = signalMemoClaim(ctx, cols, costBps, initialCash, equityFloor, true,
+				musescript.evo.Fitness.equityCurveNeeded);
+			if (memoHit != null) {
+				var frHit = new FitnessResult(true, memoHit.sharpe, memoHit.trades, memoHit.finalEquity, "nma");
+				frHit.fills = memoHit.fills;
+				frHit.bankrupt = memoHit.bankrupt;
+				frHit.equity = memoHit.equity;
+				return frHit;
+			}
+			// `claim` returned null with memoReady ⇒ this thread owns the flight.
+			if (cols.memoReady) {
+				claimedA = cols.memoA;
+				claimedB = cols.memoB;
+				claimed = true;
+			}
+			var keepCurve = musescript.evo.Fitness.equityCurveNeeded;
+			var orders = simFromColumns(nma, ctx, bars, cols, costBps, initialCash, equityFloor, true,
+				keepCurve);
+			var finalEq = keepCurve
+				? (orders.equity.length > 0 ? orders.equity[orders.equity.length - 1] : orders.cash)
+				: (bars.length > 0 ? orders.lastMark : orders.cash);
+			var eqArr = keepCurve ? orders.equity.toArray() : null;
+			var sharpe = eqArr != null
+				? Metrics.sharpe(Metrics.returnsFromEquity(eqArr), 0)
+				: (keepCurve ? sharpeOfEquity(orders.equity) : orders.sharpeOnline());
+			signalMemoStore(ctx, cols, costBps, initialCash, equityFloor,
+				orders.trades, sharpe, finalEq, orders.bankrupt, orders.fills, eqArr);
+			claimed = false;
+			var fr = new FitnessResult(true, sharpe, orders.trades, finalEq, "nma");
 			fr.fills = orders.fills;
 			fr.bankrupt = orders.bankrupt;
 			fr.equity = eqArr;
 			return fr;
 		} catch (e:Dynamic) {
+			if (claimed) NmaSignalMemo.fail(claimedA, claimedB);
 			return new FitnessResult(false, -999, 0, 0, "nma-error", Std.string(e));
 		}
 	}
@@ -195,12 +292,35 @@ class NmaFitness {
 	public static function scorePrepared(nma:NmaGenome, ctx:NmaEvalContext, bars:Array<Bar>,
 			?costBps:Float = 0.0, ?initialCash:Float = 100000, ?equityFloor:Float = 0.0,
 			?minTrades:Int = 1):Float {
+		var claimedA = 0;
+		var claimedB = 0;
+		var claimed = false;
 		try {
-			// No fills: this path reads only trades, equity and bankruptcy.
-			var orders = runPrepared(nma, ctx, bars, costBps, initialCash, equityFloor, false);
+			var cols = evalColumns(nma, ctx);
+			musescript.evo.Fitness.addNmaPopMemoHits(ctx.popMemoHits);
+			ctx.popMemoHits = 0;
+			var memoHit = signalMemoClaim(ctx, cols, costBps, initialCash, equityFloor, false, false);
+			if (memoHit != null) {
+				return musescript.evo.Fitness.scoreFacts(
+					memoHit.trades, memoHit.sharpe, memoHit.bankrupt, minTrades);
+			}
+			if (cols.memoReady) {
+				claimedA = cols.memoA;
+				claimedB = cols.memoB;
+				claimed = true;
+			}
+			// No fills / no equity curve: return stream during mark → exact Metrics.sharpe.
+			var orders = simFromColumns(nma, ctx, bars, cols, costBps, initialCash, equityFloor, false,
+				false);
+			var sharpe = orders.sharpeOnline();
+			var finalEq = bars.length > 0 ? orders.lastMark : orders.cash;
+			signalMemoStore(ctx, cols, costBps, initialCash, equityFloor,
+				orders.trades, sharpe, finalEq, orders.bankrupt, null, null);
+			claimed = false;
 			return musescript.evo.Fitness.scoreFacts(
-				orders.trades, sharpeOfEquity(orders.equity), orders.bankrupt, minTrades);
+				orders.trades, sharpe, orders.bankrupt, minTrades);
 		} catch (e:Dynamic) {
+			if (claimed) NmaSignalMemo.fail(claimedA, claimedB);
 			// `evaluatePrepared` would have returned ok=false here, which `Fitness.score` maps
 			// to NEG_INF; a throwing ablation must not read as a profitable one.
 			return musescript.evo.Fitness.NEG_INF;
@@ -211,33 +331,93 @@ class NmaFitness {
 	 * `BacktestEngine.run` per-bar loop. Single-sourced so the two cannot drift apart. */
 	static function runPrepared(nma:NmaGenome, ctx:NmaEvalContext, bars:Array<Bar>,
 			costBps:Float, initialCash:Float, equityFloor:Float, recordFills:Bool):OrderSim {
-		var n = bars.length;
+		var cols = evalColumns(nma, ctx);
+		musescript.evo.Fitness.addNmaPopMemoHits(ctx.popMemoHits);
+		ctx.popMemoHits = 0;
+		return simFromColumns(nma, ctx, bars, cols, costBps, initialCash, equityFloor, recordFills,
+			true);
+	}
+
+	/** Five signal columns (null = sim-coupled root, operands already warmed). */
+	static function evalColumns(nma:NmaGenome, ctx:NmaEvalContext):SignalCols {
 		var tCols = NmaSignalProbe.stamp();
-		// A root that reads simulator state has no column: it is walked per bar below, over
-		// columns for its tape-pure operands, which `warm` computes here so the per-bar walk is
-		// reduced to reading them. `null` is the marker for "this root is coupled".
 		var eL = column(nma.entryLong, ctx);
 		var eS = column(nma.entryShort, ctx);
 		var xL = column(nma.exitLong, ctx);
 		var xS = column(nma.exitShort, ctx);
 		var sz = NmaPositionEval.isCoupled(nma.size) ? null : NmaEval.evalScalar(nma.size, ctx);
 		if (sz == null) NmaPositionEval.warmScalar(nma.size, ctx);
-		musescript.evo.Fitness.addNmaPopMemoHits(ctx.popMemoHits);
-		ctx.popMemoHits = 0;
 		var tPack = NmaSignalProbe.stamp();
+		return {
+			eL: eL, eS: eS, xL: xL, xS: xS, sz: sz, tCols: tCols, tPack: tPack,
+			memoA: 0, memoB: 0, memoReady: false
+		};
+	}
+
+	/**
+	 * Claim or await the signal memo. On `null` with `cols.memoReady`, this thread owns the flight
+	 * and must `put`/`fail`. Coupled roots leave `memoReady` false and skip the memo entirely.
+	 * `needFills` / `needEquity` must match what the subsequent sim will actually store.
+	 */
+	static function signalMemoClaim(ctx:NmaEvalContext, cols:SignalCols,
+			costBps:Float, initialCash:Float, equityFloor:Float,
+			needFills:Bool, needEquity:Bool):Null<NmaSignalMemoEntry> {
+		if (!NmaSignalMemo.enabled) return null;
+		if (cols.eL == null || cols.eS == null || cols.xL == null || cols.xS == null || cols.sz == null)
+			return null;
+		var d = ctx.scratchDigest;
+		NmaSignalMemo.wordsOf(ctx, cols.eL, cols.eS, cols.xL, cols.xS, cols.sz,
+			costBps, initialCash, equityFloor, d);
+		cols.memoA = d.outA;
+		cols.memoB = d.outB;
+		cols.memoReady = true;
+		return NmaSignalMemo.claim(d.outA, d.outB, needFills, needEquity);
+	}
+
+	static function signalMemoStore(ctx:NmaEvalContext, cols:SignalCols,
+			costBps:Float, initialCash:Float, equityFloor:Float,
+			trades:Int, sharpe:Float, finalEquity:Float, bankrupt:Bool,
+			fills:Null<Array<musescript.harness.Fill>>, equity:Null<Array<Float>>):Void {
+		if (!NmaSignalMemo.enabled) return;
+		if (cols.eL == null || cols.eS == null || cols.xL == null || cols.xS == null || cols.sz == null)
+			return;
+		var a:Int, b:Int;
+		if (cols.memoReady) {
+			a = cols.memoA;
+			b = cols.memoB;
+		} else {
+			var d = ctx.scratchDigest;
+			NmaSignalMemo.wordsOf(ctx, cols.eL, cols.eS, cols.xL, cols.xS, cols.sz,
+				costBps, initialCash, equityFloor, d);
+			a = d.outA;
+			b = d.outB;
+		}
+		NmaSignalMemo.put(a, b,
+			NmaSignalMemo.entryOf(trades, sharpe, finalEquity, bankrupt, fills, equity));
+	}
+
+	static function simFromColumns(nma:NmaGenome, ctx:NmaEvalContext, bars:Array<Bar>, cols:SignalCols,
+			costBps:Float, initialCash:Float, equityFloor:Float, recordFills:Bool,
+			keepCurve:Bool):OrderSim {
+		var n = bars.length;
+		var eL = cols.eL, eS = cols.eS, xL = cols.xL, xS = cols.xS, sz = cols.sz;
 		// The probe's semantic signature is defined over the signal columns, which a coupled
 		// genome does not have until it has been simulated. Those are simply not sampled.
+		var tSim = NmaSignalProbe.stamp();
 		var sig = NmaSignalProbe.on && eL != null && eS != null && xL != null && xS != null && sz != null
 			? NmaSignalPack.signature(NmaSignalPack.packBool(eL, n), NmaSignalPack.packBool(eS, n),
 				NmaSignalPack.packOr(xL, xS, n), sz, n)
 			: null;
-		var tSim = NmaSignalProbe.stamp();
 
-		var orders = new OrderSim();
+		var orders = borrowSim();
 		orders.recordFills = recordFills;
+		orders.trackCurve = keepCurve;
 		if (costBps != 0) orders.book.slippageBps = costBps;
-		if (initialCash != 100000) orders.reset(initialCash);
+		if (initialCash != 100000) {
+			orders.cash = initialCash;
+		}
 		if (equityFloor > 0) orders.equityFloor = equityFloor;
+		orders.reserveEquity(n);
 
 		// `beginBar` does two things and this loop can trigger neither. It replays a queued
 		// next-open order, and this sim is `same-close`; and it fills pending BOOK orders, which
@@ -249,28 +429,61 @@ class NmaFitness {
 		// while spending nothing in the case that actually runs.
 		var needsBeginBar = orders.executionMode != "same-close" || orders.book.pendingCount() > 0;
 
-		// Each condition is read at exactly the point the compiled render evaluates its `when`
-		// head, so a coupled root sees the same OrderSim state the interpreter would: the entry
-		// heads before this bar's submits, the exit head after them.
-		for (i in 0...n) {
-			var bar = bars[i];
-			if (needsBeginBar) orders.beginBar(bar.open, bar.index, bar.high, bar.low);
-			// `long`/`short`/`flat` rather than `submit`: with a Float qty, submit's whole body is
-			// a `Reflect.hasField` probe that always fails, a Dynamic unbox and a string switch
-			// that always lands here. Same execution, without the reflection.
-			if ((eL != null ? eL.at(i) >= 0.5 : NmaPositionEval.boolAt(nma.entryLong, ctx, i, orders, bar))
-				&& orders.positionSize() <= 0)
-				orders.long(bar.close, sizeAt(nma, ctx, sz, i, orders, bar), bar.index);
-			if ((eS != null ? eS.at(i) >= 0.5 : NmaPositionEval.boolAt(nma.entryShort, ctx, i, orders, bar))
-				&& orders.positionSize() >= 0)
-				orders.short(bar.close, sizeAt(nma, ctx, sz, i, orders, bar), bar.index);
-			if ((xL != null ? xL.at(i) >= 0.5 : NmaPositionEval.boolAt(nma.exitLong, ctx, i, orders, bar))
-				|| (xS != null ? xS.at(i) >= 0.5 : NmaPositionEval.boolAt(nma.exitShort, ctx, i, orders, bar)))
-				orders.flat(bar.close, bar.index);
-			orders.mark(bar.close);
+		// Unboxed OHLC + index for this tape. `Bar` is a structural typedef, so on the JVM every
+		// `bar.close` here was a `Jvm.readField` string lookup minting a `java.lang.Double`, four
+		// or five times a bar, for every genome and every attribution column swap. The columns
+		// are per-TAPE state (guide §31): `prepare` hands over the ones `tapeStateFor` already
+		// built, and the reference guard only re-derives for a caller that reuses a context
+		// against a different `Array<Bar>` -- which is also the only case where reading the
+		// context's copy would have been wrong.
+		var barCols = ctx.barColumns;
+		if (barCols == null || barCols.bars != bars) {
+			barCols = NmaBarColumns.of(bars);
+			ctx.barColumns = barCols;
+		}
+		var opens = barCols.open, highs = barCols.high, lows = barCols.low, closes = barCols.close;
+		var barIdx = barCols.index;
+
+		// Columnar fast path: all five roots are pure columns — no null checks / coupled
+		// position-feature eval per bar. Attribution and most NMA genomes land here.
+		if (eL != null && eS != null && xL != null && xS != null && sz != null && !needsBeginBar) {
+			var i = 0;
+			while (i < n) {
+				var close = closes.at(i);
+				var idx = barIdx[i];
+				if (eL.at(i) >= 0.5 && orders.position <= 0)
+					orders.long(close, sz.at(i), idx);
+				if (eS.at(i) >= 0.5 && orders.position >= 0)
+					orders.short(close, sz.at(i), idx);
+				if (xL.at(i) >= 0.5 || xS.at(i) >= 0.5)
+					orders.flat(close, idx);
+				orders.mark(close);
+				i++;
+			}
+		} else {
+			// Coupled roots: each condition is read at exactly the point the compiled render
+			// evaluates its `when` head, so a coupled root sees the same OrderSim state the
+			// interpreter would: the entry heads before this bar's submits, the exit head after.
+			var i = 0;
+			while (i < n) {
+				var close = closes.at(i);
+				var idx = barIdx[i];
+				if (needsBeginBar) orders.beginBar(opens.at(i), idx, highs.at(i), lows.at(i));
+				if ((eL != null ? eL.at(i) >= 0.5 : NmaPositionEval.boolAt(nma.entryLong, ctx, i, orders, close, idx))
+					&& orders.position <= 0)
+					orders.long(close, sizeAt(nma, ctx, sz, i, orders, close, idx), idx);
+				if ((eS != null ? eS.at(i) >= 0.5 : NmaPositionEval.boolAt(nma.entryShort, ctx, i, orders, close, idx))
+					&& orders.position >= 0)
+					orders.short(close, sizeAt(nma, ctx, sz, i, orders, close, idx), idx);
+				if ((xL != null ? xL.at(i) >= 0.5 : NmaPositionEval.boolAt(nma.exitLong, ctx, i, orders, close, idx))
+					|| (xS != null ? xS.at(i) >= 0.5 : NmaPositionEval.boolAt(nma.exitShort, ctx, i, orders, close, idx)))
+					orders.flat(close, idx);
+				orders.mark(close);
+				i++;
+			}
 		}
 		if (NmaSignalProbe.on)
-			NmaSignalProbe.observe(sig, tPack - tCols, tSim - tPack, Sys.time() - tSim);
+			NmaSignalProbe.observe(sig, cols.tPack - cols.tCols, tSim - cols.tPack, NmaSignalProbe.wall() - tSim);
 		return orders;
 	}
 
@@ -310,8 +523,8 @@ class NmaFitness {
 	}
 
 	static inline function sizeAt(nma:NmaGenome, ctx:NmaEvalContext, sz:Null<GrowableVec<Float>>,
-			i:Int, orders:OrderSim, bar:Bar):Float {
-		return sz != null ? sz.at(i) : NmaPositionEval.scalarAt(nma.size, ctx, i, orders, bar);
+			i:Int, orders:OrderSim, barClose:Float, barIndex:Int):Float {
+		return sz != null ? sz.at(i) : NmaPositionEval.scalarAt(nma.size, ctx, i, orders, barClose, barIndex);
 	}
 
 	static inline function eL_exit(xL:GrowableVec<Float>, xS:GrowableVec<Float>, i:Int):Bool {
@@ -342,22 +555,23 @@ class NmaFitness {
 	}
 
 	/** Stable content signature of the tape (all signal columns derive from OHLCV; close carries the
-	 * shape). Cheap FNV-1a over the close values so the SAME tape interns one epoch across genomes
-	 * (future cross-genome memo sharing), different tapes never collide. Indexed scan — `for..in`
-	 * over `Array<Float>` boxes on the JVM target (JIT_AUTHORING_GUIDE.md §3.3).
+	 * shape). Two avalanched FNV lanes so the pop-memo can key without a String; the hex form is
+	 * kept for epoch interning and dirty-spine tape guards. Indexed scan — `for..in` over
+	 * `Array<Float>` boxes on the JVM target (JIT_AUTHORING_GUIDE.md §3.3).
 	 *
 	 * «ἄναξ ταυρόκερως, εὐαστήρ, πυρίσπορε.»
 	 */
-	static function tapeKey(close:Array<Float>):String {
-		var h:Int = 0x811c9dc5;
+	static function tapeDigest(close:Array<Float>):{hex:String, a:Int, b:Int} {
+		var d = new musescript.evo.StructuralDigest();
+		d.tag("T".code);
+		d.int(close.length);
 		var i = 0;
 		while (i < close.length) {
-			var bits = haxe.io.FPHelper.doubleToI64(close[i]);
-			h = (h ^ bits.low) * 0x01000193;
-			h = (h ^ bits.high) * 0x01000193;
+			d.float(close[i]);
 			i++;
 		}
-		return "nmafit:" + close.length + ":" + h;
+		d.finishWords();
+		return { hex: musescript.evo.StructuralDigest.hexWords(d.outA, d.outB), a: d.outA, b: d.outB };
 	}
 }
 
@@ -371,19 +585,28 @@ private class NmaTapeState {
 	public final bars:Array<Bar>;
 	public final n:Int;
 	public final key:String;
+	public final keyA:Int;
+	public final keyB:Int;
 	public final fields:Map<String, Array<Float>>;
 	/** Real bar timestamps — the generic indicator tier needs them (session/time-of-day
 	 * indicators read `bar.time`; synthetic times would be a silent parity break). */
 	public final times:Array<Float>;
+	/** Unboxed OHLC + index for the sim loop; `fields` above stays `Array<Float>` because the
+	 * indicator tier's public surface is typed that way. */
+	public final barCols:NmaBarColumns;
 	public final columns:NmaColumnCache;
 
-	public function new(bars:Array<Bar>, n:Int, key:String, fields:Map<String, Array<Float>>,
-			times:Array<Float>, columns:NmaColumnCache) {
+	public function new(bars:Array<Bar>, n:Int, key:String, keyA:Int, keyB:Int,
+			fields:Map<String, Array<Float>>, times:Array<Float>, barCols:NmaBarColumns,
+			columns:NmaColumnCache) {
 		this.bars = bars;
 		this.n = n;
 		this.key = key;
+		this.keyA = keyA;
+		this.keyB = keyB;
 		this.fields = fields;
 		this.times = times;
+		this.barCols = barCols;
 		this.columns = columns;
 	}
 }

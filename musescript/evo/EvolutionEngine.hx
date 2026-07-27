@@ -6,6 +6,26 @@ package musescript.evo;
  * while keeping Variation + Fitness in Haxe.
  */
 class EvolutionEngine {
+	/**
+	 * Hard node budget after simplify (`--max-nodes`). Oversized children (blind grow under a
+	 * thinned `--attr-cross-prob`) are discarded in favour of the recipient parent — stops the
+	 * scoreMs 20→80 silent regressor when attribution no longer prunes bloat every child.
+	 * 0 = uncapped. Default 40 (2× soft parsimony threshold).
+	 */
+	public static var maxNodes:Int = 40;
+	/**
+	 * Island size for the minimal archipelago substrate (`--deme-size`). 0 = single panmictic
+	 * population (exact prior). When `> 0` and the pop is at least 2 demes, each island runs its
+	 * own tournament + child production with an independent Variation memo — AttrPool fans out
+	 * across demes (children stay serial inside a deme because workers are nested). Cuts shared
+	 * `memoLock` traffic that limited `step.xo` parallel efficiency at pop=1000.
+	 */
+	public static var demeSize:Int = 0;
+	/** Swap this many non-elite slots between adjacent demes every `migrateEvery` steps. */
+	public static var migrateCount:Int = 2;
+	/** Generations between ring-migration pulses. 0 = never migrate. */
+	public static var migrateEvery:Int = 4;
+
 	public var popSize:Int;
 	public var elite:Int;
 	public var tournament:Int;
@@ -29,6 +49,10 @@ class EvolutionEngine {
 	var esRng:Rand;
 	/** ε-lexicase case-order stream (`--lexicase`); unused when `caseFitness` is null. */
 	var lexicaseRng:Rand;
+	var migrateRng:Rand;
+	/** Clone-vs-vary (`--clone-prob`); only drawn when cloneProb > 0. */
+	var cloneChoiceRng:Rand;
+	var demeSteps:Int = 0;
 
 	/**
 	 * Stagnation tracking for adaptive mutation pressure (see step()'s mutateProb ramp below).
@@ -72,6 +96,8 @@ class EvolutionEngine {
 		this.esChoiceRng = RngStreams.stream(seed, RngStreams.ES_CHOICE);
 		this.esRng = RngStreams.stream(seed, RngStreams.ES_NUDGE);
 		this.lexicaseRng = RngStreams.stream(seed, RngStreams.LEXICASE);
+		this.migrateRng = RngStreams.stream(seed, RngStreams.DEME_MIGRATE);
+		this.cloneChoiceRng = RngStreams.stream(seed, RngStreams.CLONE_CHOICE);
 	}
 
 	public function seedPopulation(depth:Int = 3):Array<StrategyGenome> {
@@ -85,19 +111,16 @@ class EvolutionEngine {
 	 * (uniform-random mutation site, no extra evaluations) -- every existing caller is
 	 * unaffected unless it opts in.
 	 *
-	 * `attrCrossProb` (default 1.0 -- exact prior behavior: attributed crossover EVERY time
-	 * `evalFn` is given) gates HOW OFTEN a child uses attribution-guided crossover vs blind
-	 * `subtreeCrossover`. `attributedSubtreeCrossover`'s own doc comment already documents that
-	 * a full attribution pass costs O(bool sites + donorSampleCap) oracle calls PER CHILD; even
-	 * with `Fitness`'s structural-key compile-cache (see PLAN_EVO_SPEED.md) that's still real
-	 * per-call overhead (fresh harness/interp/backtest) on every non-elite child, every
-	 * generation. Lowering this below 1.0 trades some of that for cheap blind crossover -- which
-	 * doubles as EXTRA exploration pressure (attribution concentrates search around what already
-	 * looks good; blind crossover doesn't), the same "some randomness kept on purpose" reasoning
-	 * `attributedPointMutate`'s own 20% uniform-fallback already relies on.
+	 * `attrCrossProb` (default 1.0 -- attributed operators EVERY time `evalFn` is given) gates
+	 * HOW OFTEN a child pays for attribution at all. On a hit: attributed crossover (± blind
+	 * point-mutate). On a miss: blind mutate + blind crossover — never `attributedPointMutate`,
+	 * or the flag would only relocate the oracle tax (see `produceChild`). Lowering below 1.0
+	 * is a real throughput lever and also adds exploration pressure (attribution concentrates
+	 * search around what already looks good).
 	 *
-	 * `donorCap` (default 6, matching `attributedSubtreeCrossover`'s own default) threads through
-	 * to bound how many donor candidates get oracle-scored per attributed crossover call.
+	 * `donorCap` (default 2) threads through to bound how many donor candidates get considered
+	 * per attributed crossover call. Under `--credit-cuts` (default with `--nma`) donors are
+	 * bank-ranked with zero splice evals, so the cap mainly bounds Fisher–Yates work.
 	 *
 	 * `esNudgeProb` (default `0.0` -- exact prior behavior, this path never taken) gates a THIRD
 	 * offspring-production path alongside crossover+mutation: `Variation.esNudgeParam`, a (1+1)-ES
@@ -107,6 +130,11 @@ class EvolutionEngine {
 	 * otherwise, so an empty-params genome silently falls through to ordinary crossover+mutation
 	 * instead of wasting a turn). `p2`/`tournamentSelect` are still drawn UNCONDITIONALLY either
 	 * way -- see `selectionRng`'s doc comment for why that matters.
+	 *
+	 * `cloneProb` (default 0): with this probability a non-elite child is an exact copy of
+	 * tournament-picked `p1` (no crossover/mutate). Cuts structural-unique churn — the measured
+	 * ~850–970 uniques/gen floor under `--nma` — without changing fitness scoring. Dedicated
+	 * `CLONE_CHOICE` stream; rolls only when `cloneProb > 0` so default stays bit-identical.
 	 *
 	 * `caseFitness`, when non-null and aligned with `pop` (same length; each row a per-case score
 	 * vector), replaces tournament parent picks with **ε-lexicase** (`--lexicase`). Aggregate
@@ -118,9 +146,26 @@ class EvolutionEngine {
 		fitness:Array<Float>,
 		?evalFn:StrategyGenome->Float,
 		?attrCrossProb:Float = 1.0,
-		?donorCap:Int = 6,
+		?donorCap:Int = 2,
 		?esNudgeProb:Float = 0.0,
-		?caseFitness:Array<Array<Float>> = null
+		?caseFitness:Array<Array<Float>> = null,
+		?cloneProb:Float = 0.0
+	):Array<StrategyGenome> {
+		var ds = demeSize;
+		if (ds > 0 && pop.length >= ds * 2)
+			return stepDemes(pop, fitness, evalFn, attrCrossProb, donorCap, esNudgeProb, caseFitness, ds, cloneProb);
+		return stepOne(pop, fitness, evalFn, attrCrossProb, donorCap, esNudgeProb, caseFitness, cloneProb);
+	}
+
+	function stepOne(
+		pop:Array<StrategyGenome>,
+		fitness:Array<Float>,
+		evalFn:Null<StrategyGenome->Float>,
+		attrCrossProb:Float,
+		donorCap:Int,
+		esNudgeProb:Float,
+		caseFitness:Null<Array<Array<Float>>>,
+		cloneProb:Float
 	):Array<StrategyGenome> {
 		// Parsimony tiebreak (smaller node count wins a fitness tie) — matches musegene/
 		// evolve.py's `scored.sort(key=lambda t: (t[0], -node_count(t[1])), reverse=True)`
@@ -164,12 +209,14 @@ class EvolutionEngine {
 		while (next.length + plans.length + esPlans.length < popSize) {
 			var p1 = useLex ? lexicaseSelect(ranked, caseFitness) : tournamentSelect(ranked);
 			var p2 = useLex ? lexicaseSelect(ranked, caseFitness) : tournamentSelect(ranked);
-			if (evalFn != null && esNudgeProb > 0 && p1.params.length > 0 && esChoiceRng.float() < esNudgeProb) {
-				esPlans.push({p1: p1, p2: p2, esNudge: true, attrCross: false, doMutate: false, slot: esPlans.length + plans.length});
+			if (cloneProb > 0 && cloneChoiceRng.float() < cloneProb) {
+				plans.push({p1: p1, p2: p2, esNudge: false, attrCross: false, doMutate: false, clone: true, slot: esPlans.length + plans.length});
+			} else if (evalFn != null && esNudgeProb > 0 && p1.params.length > 0 && esChoiceRng.float() < esNudgeProb) {
+				esPlans.push({p1: p1, p2: p2, esNudge: true, attrCross: false, doMutate: false, clone: false, slot: esPlans.length + plans.length});
 			} else {
 				var attrCross = evalFn != null && crossoverChoiceRng.float() < attrCrossProb;
 				var doMutate = mutateChoiceRng.float() < mutateProb;
-				plans.push({p1: p1, p2: p2, esNudge: false, attrCross: attrCross, doMutate: doMutate, slot: esPlans.length + plans.length});
+				plans.push({p1: p1, p2: p2, esNudge: false, attrCross: attrCross, doMutate: doMutate, clone: false, slot: esPlans.length + plans.length});
 			}
 		}
 		if (timer != null) timer.stop(PhaseTimer.STEP_PLAN, tPlan);
@@ -193,13 +240,147 @@ class EvolutionEngine {
 	}
 
 	/**
+	 * Minimal archipelago: contiguous index islands of `ds`, local tournament, deme-parallel
+	 * child production with independent Variation memos, ring migration every `migrateEvery`.
+	 * Not Rivalry/Foundry — just the substrate that shrinks serial memo contention.
+	 */
+	function stepDemes(
+		pop:Array<StrategyGenome>,
+		fitness:Array<Float>,
+		evalFn:Null<StrategyGenome->Float>,
+		attrCrossProb:Float,
+		donorCap:Int,
+		esNudgeProb:Float,
+		caseFitness:Null<Array<Array<Float>>>,
+		ds:Int,
+		cloneProb:Float
+	):Array<StrategyGenome> {
+		var n = pop.length;
+		var nDemes = Std.int(Math.ceil(n / ds));
+		var globalBest = Fitness.NEG_INF;
+		for (f in fitness) if (f > globalBest) globalBest = f;
+		if (globalBest > lastBest + 1e-9) { lastBest = globalBest; stagnantGens = 0; }
+		else stagnantGens++;
+		var mutateProb = currentMutateProb();
+		variation.beginGeneration();
+
+		var timer = PhaseTimer.current;
+		var tPlan = timer != null ? timer.start() : 0.0;
+		var demeElites:Array<Array<StrategyGenome>> = [];
+		var demePlans:Array<Array<ChildPlan>> = [];
+		var demeEs:Array<Array<ChildPlan>> = [];
+		var demeLens:Array<Int> = [];
+		var slotBase = 0;
+		for (d in 0...nDemes) {
+			var lo = d * ds;
+			var hi = Std.int(Math.min(n, lo + ds));
+			var len = hi - lo;
+			demeLens.push(len);
+			var useLex = caseFitness != null && caseFitness.length == pop.length;
+			var ranked = [for (i in lo...hi) {
+				g: pop[i], f: fitness[i], n: Canonical.nodeCount(pop[i]), i: i
+			}];
+			ranked.sort(function(a, b) {
+				if (a.f != b.f) return a.f < b.f ? 1 : -1;
+				return a.n < b.n ? -1 : a.n > b.n ? 1 : 0;
+			});
+			var localElite = Std.int(Math.max(1, Math.round(elite * len / popSize)));
+			if (localElite > ranked.length) localElite = ranked.length;
+			var elites = [for (i in 0...localElite) ranked[i].g];
+			demeElites.push(elites);
+			var plans:Array<ChildPlan> = [];
+			var esPlans:Array<ChildPlan> = [];
+			while (elites.length + plans.length + esPlans.length < len) {
+				var p1 = useLex ? lexicaseSelect(ranked, caseFitness) : tournamentSelect(ranked);
+				var p2 = useLex ? lexicaseSelect(ranked, caseFitness) : tournamentSelect(ranked);
+				if (cloneProb > 0 && cloneChoiceRng.float() < cloneProb) {
+					plans.push({p1: p1, p2: p2, esNudge: false, attrCross: false, doMutate: false, clone: true, slot: slotBase + esPlans.length + plans.length});
+				} else if (evalFn != null && esNudgeProb > 0 && p1.params.length > 0 && esChoiceRng.float() < esNudgeProb) {
+					esPlans.push({p1: p1, p2: p2, esNudge: true, attrCross: false, doMutate: false, clone: false, slot: slotBase + esPlans.length + plans.length});
+				} else {
+					var attrCross = evalFn != null && crossoverChoiceRng.float() < attrCrossProb;
+					var doMutate = mutateChoiceRng.float() < mutateProb;
+					plans.push({p1: p1, p2: p2, esNudge: false, attrCross: attrCross, doMutate: doMutate, clone: false, slot: slotBase + esPlans.length + plans.length});
+				}
+			}
+			demePlans.push(plans);
+			demeEs.push(esPlans);
+			slotBase += len;
+		}
+		if (timer != null) timer.stop(PhaseTimer.STEP_PLAN, tPlan);
+
+		var pool = AttrPool.current;
+		var demeNext:Array<Array<StrategyGenome>>;
+		if (pool != null && pool.workers > 1 && nDemes > 1) {
+			demeNext = pool.parallelIndexMap(nDemes, function(d:Int):Array<StrategyGenome> {
+				return finishDeme(d, demeElites[d], demeEs[d], demePlans[d], variation.forkDeme(d), evalFn, donorCap);
+			});
+		} else {
+			demeNext = [for (d in 0...nDemes)
+				finishDeme(d, demeElites[d], demeEs[d], demePlans[d], variation, evalFn, donorCap)];
+		}
+
+		var next:Array<StrategyGenome> = [];
+		for (chunk in demeNext) for (g in chunk) next.push(g);
+		while (next.length < popSize && pop.length > 0) next.push(pop[next.length % pop.length]);
+		if (next.length > popSize) next = next.slice(0, popSize);
+
+		demeSteps++;
+		if (migrateEvery > 0 && migrateCount > 0 && demeSteps % migrateEvery == 0 && nDemes > 1)
+			ringMigrate(next, demeLens, migrateCount);
+		return next;
+	}
+
+	function finishDeme(
+		_d:Int,
+		elites:Array<StrategyGenome>,
+		esPlans:Array<ChildPlan>,
+		plans:Array<ChildPlan>,
+		v:Variation,
+		evalFn:Null<StrategyGenome->Float>,
+		donorCap:Int
+	):Array<StrategyGenome> {
+		var next = elites.copy();
+		for (p in esPlans) next.push(produceChild(p, v, evalFn, donorCap));
+		for (p in plans) next.push(produceChild(p, v, evalFn, donorCap));
+		return next;
+	}
+
+	/** Ring-swap `count` random non-elite individuals between adjacent demes. */
+	function ringMigrate(pop:Array<StrategyGenome>, demeLens:Array<Int>, count:Int):Void {
+		var offsets = new Array<Int>();
+		var acc = 0;
+		for (len in demeLens) { offsets.push(acc); acc += len; }
+		for (d in 0...demeLens.length) {
+			var len = demeLens[d];
+			var lo = offsets[d];
+			var localElite = Std.int(Math.max(1, Math.round(elite * len / popSize)));
+			if (localElite >= len) continue;
+			var nd = (d + 1) % demeLens.length;
+			var len2 = demeLens[nd];
+			var lo2 = offsets[nd];
+			var localElite2 = Std.int(Math.max(1, Math.round(elite * len2 / popSize)));
+			if (localElite2 >= len2) continue;
+			var swaps = Std.int(Math.min(count, Math.min(len - localElite, len2 - localElite2)));
+			for (_ in 0...swaps) {
+				var i = lo + localElite + migrateRng.int(len - localElite);
+				var j = lo2 + localElite2 + migrateRng.int(len2 - localElite2);
+				var tmp = pop[i];
+				pop[i] = pop[j];
+				pop[j] = tmp;
+			}
+		}
+	}
+
+	/**
 	 * Produce one child from a Phase-A plan.
 	 *
-	 * Organ order (measured at pop=1000): attribution is the expensive gut. Paying it twice —
-	 * attributed XO on a warm elite, then attributed mutate on the cold child — dominated
-	 * `step.mut`. Rearrangement:
-	 *  - attributed XO ± blind pointMutate when `attrCross` (XO already ranked sites/donors)
-	 *  - attributed mutate on `p1` then blind XO when mutate-only (elites share site-delta memo)
+	 * Attribution is gated solely by `plan.attrCross` (`--attr-cross-prob`). Organ order when it
+	 * fires: attributed XO, then optional blind `pointMutate` (XO already ranked sites/donors —
+	 * a second attributed mutate on the cold child was pure tax). When the coin misses, both
+	 * crossover and mutate are blind: the previous shape called `attributedPointMutate` on the
+	 * miss path, so lowering `--attr-cross-prob` only relocated the oracle into `step.mut`
+	 * (measured at pop=1000/`--nma`: prob 0 was slower than 1.0).
 	 *
 	 * «σπλάγχνα τάξον· δρόμος ἕπεται.»
 	 */
@@ -209,6 +390,7 @@ class EvolutionEngine {
 		evalFn:Null<StrategyGenome->Float>,
 		donorCap:Int
 	):StrategyGenome {
+		if (plan.clone) return plan.p1;
 		var timer = PhaseTimer.current;
 		var child:StrategyGenome;
 		if (plan.esNudge) {
@@ -224,11 +406,10 @@ class EvolutionEngine {
 				if (timer != null) timer.stop(PhaseTimer.STEP_MUT, tMut);
 			}
 		} else if (plan.doMutate) {
-			// Mutate the tournament parent first — site-delta memo hits across re-picks — then
-			// blind-cross with p2. Attributed mutate-after-XO on a fresh child was pure cold tax.
+			// Blind mutate + blind XO: `--attr-cross-prob` is the only attribution gate.
 			var p1 = plan.p1;
 			var tMut = timer != null ? timer.start() : 0.0;
-			p1 = evalFn != null ? v.attributedPointMutate(p1, evalFn) : v.mutate(p1);
+			p1 = v.mutate(p1);
 			if (timer != null) timer.stop(PhaseTimer.STEP_MUT, tMut);
 			var tXo = timer != null ? timer.start() : 0.0;
 			child = v.crossover(p1, plan.p2);
@@ -238,9 +419,17 @@ class EvolutionEngine {
 			child = v.crossover(plan.p1, plan.p2);
 			if (timer != null) timer.stop(PhaseTimer.STEP_XO, tXo);
 		}
+		var maxN = maxNodes;
+		// Hopeless bloat: skip simplify (step.simp) and keep the recipient — measured wall when
+		// blind variation exploded under attr-cross 0.5 was dominated by scoring fat genomes.
+		if (maxN > 0 && Canonical.nodeCount(child) > maxN * 2) return plan.p1;
 		var tSimp = timer != null ? timer.start() : 0.0;
-		var out = Simplify.simplifyGenome(child, v);
+		// Compound-free genomes: simplifyBool is a pure walk — skip when every slot is terminal.
+		var out = Simplify.hasCompoundBool(child)
+			? Simplify.simplifyGenome(child, v)
+			: child;
 		if (timer != null) timer.stop(PhaseTimer.STEP_SIMP, tSimp);
+		if (maxN > 0 && Canonical.nodeCount(out) > maxN) return plan.p1;
 		return out;
 	}
 
@@ -311,5 +500,6 @@ class ChildPlan {
 	public var esNudge:Bool;
 	public var attrCross:Bool;
 	public var doMutate:Bool;
+	public var clone:Bool;
 	public var slot:Int;
 }

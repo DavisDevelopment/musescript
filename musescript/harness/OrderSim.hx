@@ -53,6 +53,18 @@ class OrderSim {
 	 */
 	public var equityFloor:Float = 0.0;
 	public var bankrupt:Bool = false;
+	/**
+	 * When false, `mark` does not push the equity curve — it streams bar-to-bar returns into
+	 * `markReturns` instead. Score-only NMA paths (`scorePrepared`, default evo with
+	 * `equityCurveNeeded=false`) never read the curve, and JFR previously put GrowableVec growth
+	 * / push traffic under `mark` on the hot profile. Default true so every existing caller keeps
+	 * the curve it has always had.
+	 */
+	public var trackCurve:Bool = true;
+	/** Equity after the most recent `mark` (also the curve's last point when `trackCurve`). */
+	public var lastMark:Float = 0.0;
+	/** Return stream for `!trackCurve` — same values `Metrics.returnsFromEquity` would emit. Lazy. */
+	public var markReturns:Null<GrowableVec<Float>> = null;
 	var pendingKind:String;
 	/** `NaN` means "no explicit qty, auto-size on fill" -- see `long`/`short`'s own doc comment
 	 * on why the omitted-qty sentinel is NaN (a genuine unboxed Float value) rather than null
@@ -60,6 +72,8 @@ class OrderSim {
 	 * qty as `java.lang.Double`, defeating escape analysis on this exact per-bar hot path -- see
 	 * PLAN_EVO_SPEED.md / the JIT audit that found this). */
 	var pendingQty:Float;
+	var markPrev:Float = 0.0;
+	var markHavePrev:Bool = false;
 
 	public function new(?initialCash:Float = 100000) {
 		position = 0;
@@ -283,27 +297,96 @@ class OrderSim {
 		if (recordFills) fills.push({ kind: "flat", bar: barIndex, price: px, qty: closed, pnl: pnl });
 	}
 
+	/**
+	 * Pre-size the equity curve (or the thin-mark return stream) for a run of known length.
+	 * `equity` otherwise starts at the `GrowableVec` default of 8 and capacity-doubles its way
+	 * up, so a 320-bar sim allocates six throwaway `double[]` (1008 slots) and six `arraycopy`s
+	 * to reach one 512-slot array — per sim, and the NMA path builds one per evaluation AND one
+	 * per attribution column swap. JFR put every byte of `GrowableFloatImpl.grow` on this
+	 * codebase's hot profile under `mark`.
+	 *
+	 * Capacity only: contents, length and every reader are unchanged. Callable only before the
+	 * first `mark`. After `clear()` a recycled sim reuses its backing store via `ensureCapacity`.
+	 */
+	public function reserveEquity(bars:Int):Void {
+		if (bars <= 0) return;
+		if (trackCurve) {
+			if (equity.length == 0) equity.ensureCapacity(bars);
+		} else {
+			if (markReturns == null) markReturns = new GrowableVec<Float>(bars > 1 ? bars - 1 : 8);
+			else if (markReturns.length == 0 && bars > 1) markReturns.ensureCapacity(bars - 1);
+		}
+	}
+
 	public function mark(price:Float):Void {
 		var e = cash + position * price;
-		equity.push(e);
+		lastMark = e;
+		if (trackCurve) {
+			equity.push(e);
+		} else {
+			var rets = markReturns;
+			if (rets == null) {
+				rets = new GrowableVec<Float>();
+				markReturns = rets;
+			}
+			if (markHavePrev) {
+				rets.push(markPrev > 0 ? (e - markPrev) / markPrev : 0.0);
+			} else {
+				markHavePrev = true;
+			}
+			markPrev = e;
+		}
 		if (equityFloor > 0 && e <= equityFloor) bankrupt = true;
+	}
+
+	/**
+	 * Sample Sharpe of `markReturns` — identical algorithm to `Metrics.sharpe(_, 0)`, so
+	 * `!trackCurve` stays bit-exact with the equity → returns → sharpe path.
+	 */
+	public function sharpeOnline():Float {
+		var rets = markReturns;
+		if (rets == null) return 0;
+		var n = rets.length;
+		if (n < 2) return 0;
+		var mean = 0.0;
+		var i = 0;
+		while (i < n) {
+			mean += rets.at(i);
+			i++;
+		}
+		mean /= n;
+		var var_ = 0.0;
+		i = 0;
+		while (i < n) {
+			var d = rets.at(i) - mean;
+			var_ += d * d;
+			i++;
+		}
+		var_ /= n - 1;
+		var std = Math.sqrt(var_);
+		if (std == 0) return 0;
+		return (mean / std) * Math.sqrt(252);
 	}
 
 	public function reset(?initialCash:Float = 100000):Void {
 		position = 0;
 		cash = initialCash;
-		equity = new GrowableVec<Float>();
+		equity.clear();
+		if (markReturns != null) markReturns.clear();
 		trades = 0;
 		wins = 0;
 		entryPrice = 0;
 		entryBar = -1;
-		fills = [];
+		fills.resize(0);
 		book.reset();
 		pendingKind = "";
 		pendingQty = Math.NaN;
 		bankrupt = false;
-		// equityFloor is deliberately NOT reset here -- it's a caller-configured limit (set once
-		// after construction/reset by whoever wants the kill-switch active), not per-run state.
+		lastMark = 0.0;
+		markPrev = 0.0;
+		markHavePrev = false;
+		// equityFloor / trackCurve / recordFills / executionMode / book.slippageBps are
+		// deliberately NOT reset — caller-configured for the run, not per-bar state.
 	}
 
 	public function positionSize():Float return position;

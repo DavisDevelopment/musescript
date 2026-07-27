@@ -41,27 +41,53 @@ class NmaCanonical {
 
 	/** Content-addressed key for a bool subtree (pop-memo / credit). Lazily cached on the node. */
 	public static function boolStructuralKey(n:NmaBool):String {
-		if (n.structuralKey != null) return n.structuralKey;
-		var d = new StructuralDigest();
-		digestBool(d, n);
-		n.structuralKey = d.finish();
+		ensureWordsBool(n);
+		if (n.structuralKey == null)
+			n.structuralKey = StructuralDigest.hexWords(n.structA, n.structB);
 		return n.structuralKey;
 	}
 
 	public static function scalarStructuralKey(n:NmaScalar):String {
-		if (n.structuralKey != null) return n.structuralKey;
-		var d = new StructuralDigest();
-		digestScalar(d, n);
-		n.structuralKey = d.finish();
+		ensureWordsScalar(n);
+		if (n.structuralKey == null)
+			n.structuralKey = StructuralDigest.hexWords(n.structA, n.structB);
 		return n.structuralKey;
 	}
 
 	public static function seriesStructuralKey(n:NmaSeries):String {
-		if (n.structuralKey != null) return n.structuralKey;
+		ensureWordsSeries(n);
+		if (n.structuralKey == null)
+			n.structuralKey = StructuralDigest.hexWords(n.structA, n.structB);
+		return n.structuralKey;
+	}
+
+	/** Populate `structA`/`structB` without building the hex string. */
+	public static inline function ensureWordsBool(n:NmaBool):Void {
+		if (n.structReady) return;
+		var d = new StructuralDigest();
+		digestBool(d, n);
+		cacheWords(n, d);
+	}
+
+	public static inline function ensureWordsScalar(n:NmaScalar):Void {
+		if (n.structReady) return;
+		var d = new StructuralDigest();
+		digestScalar(d, n);
+		cacheWords(n, d);
+	}
+
+	public static inline function ensureWordsSeries(n:NmaSeries):Void {
+		if (n.structReady) return;
 		var d = new StructuralDigest();
 		digestSeries(d, n);
-		n.structuralKey = d.finish();
-		return n.structuralKey;
+		cacheWords(n, d);
+	}
+
+	static function cacheWords(n:NmaNode, d:StructuralDigest):Void {
+		d.finishWords();
+		n.structA = d.outA;
+		n.structB = d.outB;
+		n.structReady = true;
 	}
 
 	// ---------- digest walk (token-for-token mirror of Canonical's) ----------

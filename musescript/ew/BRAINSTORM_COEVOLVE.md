@@ -52,7 +52,7 @@ TradeLogic never calls `ImpulseRules` directly; it only sees cloud features (`sp
 | `ForecastCloud` | Serializable / column-friendly projection UQ surface |
 | `EwForecastHost` | Causal producer of clouds + top-K masses |
 | `EwForecastHostStub` | Compile/wiring placeholder |
-| *(planned)* `LatticeForecastHost` | Wrap today’s lattice + `EwProject` + invalidation |
+| `LatticeForecastHost` | **DONE** — wrap today’s lattice + `EwProject` + invalidation |
 | *(planned)* `McmcForecastHost` | Hierarchical MH; same interface |
 
 ### Fan reductions TradeLogic should see
@@ -152,9 +152,10 @@ Avoid double-counting: if `EwLattice` soft scores already used θ to pick the pr
 
 ### Slice 1 — LatticeForecastHost adapter (ew package; small)
 
-- Implement `LatticeForecastHost implements EwForecastHost` wrapping `EwLattice` / `EwProject` / `EwInvalidation` (still importing from `indicators.ew` until promote).
-- Unit test: synthetic impulse → non-NaN band + invalidate price.
-- **No** EvolutionEngine changes.
+- [x] Implement `LatticeForecastHost implements EwForecastHost` wrapping `EwLattice` / `EwProject` / `EwInvalidation` (still importing from `indicators.ew` until promote).
+- [x] Unit test: synthetic impulse → non-NaN band + invalidate price.
+- [x] **No** EvolutionEngine changes.
+- **LatticeForecastHost done — Claude can wire** at boundary X.
 
 ### Slice 2 — Claude evo boundary
 

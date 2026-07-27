@@ -1,0 +1,8 @@
+-cp .
+-cp vendor
+-D hscriptPos
+-main musescript.pinescript.tests.PineParityHarness
+-lib hxnodejs
+-D node
+-D js_es=6
+-js build/js/pinescript-parity.js

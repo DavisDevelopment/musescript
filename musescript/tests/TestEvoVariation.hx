@@ -939,4 +939,87 @@ class TestEvoVariation extends Test {
 	public function testSymbolSelectorLoadReturnsNullForMissingFile() {
 		Assert.isNull(SymbolSelector.load("build/js/.symbolselector-definitely-does-not-exist.tsv"));
 	}
+
+	// ── Rand: SERIAL independence, not just marginal balance ─────────────────────────────────
+	// These exist because `bool()` used to be `int(2)` == the LCG's low bit, which alternates
+	// deterministically (101010...). Every marginal test passed perfectly -- it was exactly
+	// 50/50 -- so the old bug was invisible to distribution checks by construction. Assert the
+	// property that actually failed: consecutive draws must be independent.
+
+	public function testRandBoolProducesConsecutiveRepeats() {
+		// A fair coin over 2000 draws yields ~1000 consecutive-equal pairs; strict alternation
+		// yields exactly 0. Wide bounds -- this is a serial-structure assertion, not a
+		// tight distributional one.
+		for (seed in [1, 7, 42, 1337, -5]) {
+			var r = new Rand(seed);
+			var prev = r.bool();
+			var same = 0;
+			for (_ in 0...2000) {
+				var v = r.bool();
+				if (v == prev) same++;
+				prev = v;
+			}
+			Assert.isTrue(same > 800 && same < 1200,
+				'seed $seed: expected ~1000 consecutive-equal bool() pairs, got $same '
+				+ '(0 means the low-bit alternation regressed)');
+		}
+	}
+
+	public function testRandBoolHasRunsLongerThanOne() {
+		// Strict alternation can never produce a run of 3+. A fair coin does so constantly.
+		var r = new Rand(7);
+		var longest = 1, cur = 1;
+		var prev = r.bool();
+		for (_ in 0...2000) {
+			var v = r.bool();
+			if (v == prev) { cur++; if (cur > longest) longest = cur; } else cur = 1;
+			prev = v;
+		}
+		Assert.isTrue(longest >= 3, 'expected a run of at least 3 equal bool() draws, longest was $longest');
+	}
+
+	public function testRandBoolStaysRoughlyBalanced() {
+		// The property the OLD implementation did satisfy -- keep asserting it so a fix for
+		// serial correlation can't quietly cost us marginal fairness.
+		var r = new Rand(99);
+		var t = 0;
+		for (_ in 0...4000) if (r.bool()) t++;
+		Assert.isTrue(t > 1800 && t < 2200, 'expected roughly balanced bool(), got $t/4000 true');
+	}
+
+	public function testRandBoolIsStillDeterministicPerSeed() {
+		var a = new Rand(2026), b = new Rand(2026);
+		for (_ in 0...100) Assert.equals(a.bool(), b.bool());
+	}
+
+	public function testRandSmallIntDrawsAreNotACycle() {
+		// `int(4)` used to emit 0,1,2,3,0,1,2,3,... -- perfectly uniform per bucket, and
+		// perfectly predictable. Assert at least one immediate repeat, which a cycle forbids.
+		var r = new Rand(7);
+		var prev = r.int(4);
+		var repeats = 0;
+		for (_ in 0...2000) {
+			var v = r.int(4);
+			if (v == prev) repeats++;
+			prev = v;
+		}
+		Assert.isTrue(repeats > 0, "int(4) never repeats a value -- low-bit cycle regressed");
+	}
+
+	public function testSymbolSelectorCrossoverExploresMoreThanOneMask() {
+		// The real-world consequence of the old bug: uniform crossover collapsed to the single
+		// fixed mask a[0],b[1],a[2],b[3],... Distinct seeds must yield distinct masks.
+		var a = new SymbolSelector(8, new Rand(1));
+		a.weights = [for (_ in 0...8) 1.0];
+		var b = new SymbolSelector(8, new Rand(2));
+		b.weights = [for (_ in 0...8) 2.0];
+		var masks = new Map<String, Bool>();
+		for (seed in 0...40) {
+			var child = SymbolSelector.crossover(a, b, new Rand(seed));
+			masks.set([for (w in child.weights) w == 1.0 ? "a" : "b"].join(""), true);
+		}
+		var n = 0;
+		for (_ in masks.keys()) n++;
+		Assert.isTrue(n > 4, 'expected many distinct crossover masks across seeds, got $n');
+	}
 }

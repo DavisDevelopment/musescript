@@ -80,7 +80,9 @@ class NmaFuseHost {
 			readyFlag = true;
 		} catch (e:Dynamic) {
 			readyFlag = false;
+			#if sys
 			Sys.println('NmaFuseHost: init failed, Haxe logic2 fallback — $e');
+			#end
 		}
 	}
 

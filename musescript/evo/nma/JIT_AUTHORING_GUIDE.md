@@ -1294,6 +1294,244 @@ that is an allocation site until proven otherwise.
 
 ---
 
+## 35. The V8 tier ladder — what "warm" actually means on Node/Electron
+
+§6 said "shapes and ICs are everything" and §1.3 said warmup is part of the contract. This section
+makes the V8 side of that as concrete as the JVM side, because the V8 pipeline gained a mid-tier
+(**Maglev**) that changes what a microbench is measuring. The `--nma` stack now has a real V8 twin —
+`NmaNodeBench` (`musescript/evo/NmaNodeBench.hx`, built by `build-nma-node-bench.hxml`, `-D node
+-D js_es=6 -lib hxnodejs`) — so these are testable claims on this repo, not folklore.
+
+### 35.1 Four tiers, four different things a stopwatch can catch
+
+```
+Ignition (bytecode interpreter)   ← cold; collects type feedback into feedback vectors
+   ↓  ~8 calls / a loop backedge
+Sparkplug (baseline non-optimizing compiler)  ← near-linear machine code, no speculation
+   ↓  warmer
+Maglev (mid-tier optimizing SSA JIT)  ← cheap speculation, fast to produce; newer, on by default in modern V8
+   ↓  hot
+TurboFan (top-tier optimizing JIT)  ← full escape analysis, inlining, the steady state you claim to measure
+```
+
+Consequences for every V8 bench in this codebase:
+
+1. **A short loop times Sparkplug/Maglev, not TurboFan.** `NmaNodeBench`'s `--warm` pass (default 1
+   full-population eval before the timed gens) is the minimum, not the target. For a steady-state
+   claim, warm the *same call shapes* for enough iterations that `%GetOptimizationStatus` (see §38)
+   reports TurboFan on `NmaEval.evalBool`/`evalScalar` and `OrderSim` methods. One warm gen over
+   pop=256 is ~a few thousand node evals — enough for Maglev, borderline for TurboFan on the rarer
+   arms.
+2. **A deopt drops you back down the ladder, silently.** A single unexpected shape at a hot IC can
+   kick a TurboFan function back to Sparkplug and re-collect feedback. The wall-clock symptom is a
+   bench that is fast then slow then fast; the tool is `--trace-deopt` (§38), the fix is §6.1 shape
+   stability.
+3. **The tiers have different inlining budgets.** Code that "got faster" after a refactor may just
+   have dropped under Maglev's smaller inlining threshold; confirm the win survives to TurboFan.
+
+### 35.2 Node ≠ Electron ≠ your dev V8 — pin the version you reason about
+
+Node bundles one V8; Electron bundles *its own*, tied to the Chromium it ships, which is usually a
+**different** V8 than the Node you build with. Flag names (`--max-semi-space-size`), `%`-natives, and
+even which tiers exist drift across versions. Rules:
+
+- State the Node/Electron version next to any V8 measurement, the same way §5.2 pins the GraalVM
+  version for polyglot. "Fast on Node 22" is not "fast in the shipped Electron app."
+- The desktop app's evo/eval runs on **Electron's** V8. Bench there too (a `utilityProcess` or
+  `worker_threads` entry running `NmaNodeBench`'s hot stack) before claiming a desktop number;
+  `build-nma-node-bench.hxml` targets plain Node and is the *floor*, not the shipped ceiling.
+- `-D js_es=6` (the bench's setting) fixes the emit level; it does not fix the runtime V8. Keep them
+  named separately in any report.
+
+«κισσὸς μὲν εἷς, ἀμπέλων δὲ πολλαί· γίγνωσκε τὴν σὴν κληματίδα.»
+
+---
+
+## 36. Smi vs HeapNumber, and PACKED vs HOLEY — the V8 twin of §3's boxing war
+
+§3 fought `java.lang.Double` boxing on the JVM. V8 has the exact same war with two different fronts,
+and the containers already picked the right side (`RingBuffer`/`GrowableVec`/`FloatSeries` all use
+`js.lib.Float64Array` under `#if js`). Author new hot JS-target code to keep both fronts clean.
+
+### 36.1 Smi vs HeapNumber
+
+V8 tags a small integer (**Smi** — 31-bit on 64-bit builds) directly inside the pointer word: no heap
+cell, no allocation. Any number that is fractional, or outside Smi range, becomes a **HeapNumber** —
+a boxed `double` on the heap, the V8 analogue of `java.lang.Double`.
+
+| Value on a hot JS path | V8 representation | Cost |
+|---|---|---|
+| `bar.index`, loop counters, param **indices** (`KParam.idx`), child counts | Smi | free, in-pointer |
+| prices, columns, sharpe, `0.0`/`1.0` bool cells | HeapNumber (unless in a typed array) | heap cell per value |
+
+This is why the `0.0`/`1.0` bool columns and every price/indicator column live in `Float64Array`,
+not `Array<Float>`: a `Float64Array` slot **is** a raw IEEE-754 double in a backing store, so reading
+and writing it never mints a HeapNumber. A plain `Array` of the same doubles is a `PACKED_DOUBLE`
+array at best (see below) and boxes on the way out to any non-array-typed consumer.
+
+Corollary: keep genuinely-integer hot fields as `Int` in Haxe (they stay Smi), and don't accidentally
+turn a Smi into a HeapNumber by doing float math on it (`idx * 1.0`, `idx / 1`) before an index use.
+
+### 36.2 Elements kinds — don't put a hole in a fast array
+
+Even a plain `Array` has a V8 *elements kind* lattice, and it only ever transitions **downhill**:
+
+```
+PACKED_SMI_ELEMENTS  →  PACKED_DOUBLE_ELEMENTS  →  PACKED_ELEMENTS (tagged/boxed)
+        ↓                        ↓                          ↓
+HOLEY_SMI_ELEMENTS   →  HOLEY_DOUBLE_ELEMENTS   →  HOLEY_ELEMENTS
+```
+
+You cannot go back up. One hole (`a[5]=x` when length is 3; `new Array(n)` then sparse fill; `delete`)
+or one boxed element (a `null`, an object) permanently demotes the whole array's fast path. Rules that
+matter for the NMA/evo JS emit:
+
+1. **Pre-size and fill densely, front to back.** `NmaNodeBench`'s `fitness.resize(popG.length)` then
+   `fitness[i] = …` in order is the correct shape — no holes, stays PACKED.
+2. **Never `arr[i] = null` as a placeholder** on a numeric hot array (that is exactly what
+   `GrowableGenericImpl.setAt` does with its `push(null)` fill — fine there because it is the *generic*
+   fallback for non-Float T, never the Float column; do not copy that pattern into a Float path).
+3. **Don't mix kinds in one array.** A column is all doubles or it is not a column.
+4. For anything that also touches WASM memory or is read every bar, **use the typed-array view**
+   (already the container default) and skip the elements-kind lattice entirely.
+
+«μῆλα χρυσᾶ μὴ κλέπτε ἐκ τῆς σειρᾶς· ἓν κενὸν πάντα λύει.»
+
+---
+
+## 37. Node/Electron process & concurrency model — the V8 answer to §27/§32
+
+§21/§27/§32 are about the JVM worker pool sharing mutable NMA graphs and process-global statics. The
+V8 side of parallel evo has a **different** hazard profile, and mostly a safer one — but only if you
+use the right primitive.
+
+### 37.1 Workers don't share the heap — which removes §27's whole class of bug
+
+`worker_threads` (Node) / `utilityProcess` (Electron) each get their **own V8 isolate and heap**.
+There is no shared mutable `static var` across JS workers by construction: the `Fitness.nmaPopMemo` /
+`NmaEpoch.registry` / `NmaCreditBank` statics that §27 had to lock on the JVM are simply **not
+shared** between JS workers. The silent-wrong-numbers race (`nextId++` handing two tapes one epoch id)
+**cannot happen across JS workers**, because each worker has its own `nextId`.
+
+**Landed for the score barrier:** `NmaNodeEvalPool` (`--threads N` on `NmaNodeBench`) spins persistent
+workers, ships the tape once via `workerData`, and keeps a **resident genome store** keyed by dense
+int ids (sticky `id % workers` ownership). JSON wire runs only for first-seen structural keys and
+rides inline on the score message (no separate put RTT); score jobs send id lists through a
+`SharedArrayBuffer` `Int32Array`. Haxe enums still cannot structured-clone. Structural-key dedup
+mirrors CorpusEvoRun's clone collapse. `EvolutionEngine.step` child production stays serial on the
+main isolate (§33) — do **not** arm `AttrPool` with `workers>1` on Node or Phase B silently switches
+onto `forkForSlot` / `VARIATION_PARALLEL` streams with no real parallelism (champion drift).
+Dirty-spine is refused when `threads > 1`. `popMemoHits` is partition-dependent across isolates —
+not bit-stable under `--threads`. Champions / `nmaOk` bit-match across thread counts when AttrPool
+stays at `workers=1`.
+
+Measured (pop=1000 / smoke_spy_320 / warm=1 / gens=6, after resident-id wire):
+
+| threads | cloneProb | mean wallMs | mean scoreMs | mean stepMs | gen/s |
+|---|---|---|---|---|---|
+| 1 | 0 | ~393 | ~106 | ~288 | ~2.5 |
+| 4 | 0 | ~386 | ~83 | ~304 | ~2.6 |
+| 8 | 0 | ~401 | ~93 | ~308 | ~2.5 |
+| 4 | 0.4 | ~293 | ~72 | ~221 | ~3.4 |
+| 4 | 0.5 + attrCross 0.25 | ~205 | ~71 | ~135 | ~4.9 |
+
+JVM floor remains ~48 ms/gen at 4 threads. Without `--clone-prob`, wall is still Amdahl-bound by
+serial `step` (~75–80%); killing the ~30 ms full-pop JSON floor buys scoreMs headroom on cache-hot
+gens (`put n=0`) but not a ≥1.3× wall win alone. `--clone-prob` is the measured step lever on Node.
+
+The cost moved, it did not vanish:
+
+- **Crossing a worker boundary is a copy.** `postMessage` structured-clones its payload (deep copy);
+  an `Array<Bar>` tape or a genome tree sent per job is a per-job serialization tax — the V8 analogue
+  of §4.4's "materialize once at the seam." Send the tape **once** at worker spinup; resident ids
+  make re-scores of elites/clones free; fresh children still pay JSON once per structural key.
+- **Per-worker warmup is per-isolate.** Each worker climbs the §35 tier ladder independently. A pool
+  of 8 short-lived workers each pays cold Ignition; a pool of 8 **persistent** workers (the JS twin of
+  §5.1 "reuse the StrategyInstance") amortizes it. Spin the pool up once per run, feed it jobs.
+
+### 37.2 When you *do* want shared numeric state: SharedArrayBuffer + Atomics
+
+The one case where JS workers share memory is a `SharedArrayBuffer` (backing a `Float64Array` /
+`Int32Array` view) coordinated with `Atomics`. This is the V8 mechanism for a genuine shared column
+cache or a shared credit bank — and it re-imports §27/§32's discipline exactly:
+
+- `Atomics.add`/`compareExchange` for a shared counter (the `nextId++` fix, done right);
+- an `Atomics`-guarded publish for a completed immutable column (the mutex-as-publication-barrier of
+  §32); a *live mutable* graph still has no owner and still does not belong in shared memory.
+- Note Electron requires the cross-origin isolation headers (`COOP`/`COEP`) for `SharedArrayBuffer`
+  in a renderer; a `utilityProcess`/`worker_threads` context is the cleaner home for it.
+
+Standing rule, mirroring §27's: **a `SharedArrayBuffer` view is a concurrency decision, not a buffer
+convenience.** Document its access contract at the allocation site. Default evo parallelism on V8
+should be message-passed persistent workers (37.1); reach for shared memory only when the copy tax is
+measured to dominate.
+
+### 37.3 Electron-specific: keep evo off the UI threads
+
+- **Never run a fitness pass on the renderer's main thread or the browser process main thread** — it
+  blocks paint and IPC. Evo/eval belongs in `worker_threads` or a `utilityProcess`. Strategy Studio's
+  interactive eval is the exception (one-shot, user-initiated, small tape) and even that should yield.
+- **Packaging changes `fs`.** `NmaNodeBench.loadBars` reads a CSV off disk; inside an `asar` archive
+  the path resolution differs, and a shipped app should hand the tape to the worker as data (37.1),
+  not assume a readable file path. Don't let a bench's `sys.io.File.getContent` shape leak into the
+  packaged eval path.
+- **GC pressure is the app's frame budget.** Columnar eval mints short-lived `Float64Array` columns by
+  the thousand; on the JVM that is escape-analysis territory (§20), on V8 it is nursery (young-gen)
+  churn. If a `--cpu-prof` shows scavenge GC hot, `--max-semi-space-size` (a larger nursery) is the
+  first knob — but §9.4 applies: profile the whale before turning knobs, and the whale on the JS side
+  is likely the same serial `EvolutionEngine.step` share as §33, not GC.
+
+«τρεῖς θύραι· μία τῷ χορῷ, οὐχ ἡ τοῦ θεάτρου.»
+
+---
+
+## 38. V8 measurement & deopt tooling — the `jit_audit_run.sh` we still owe the JS side
+
+§9 gives the JVM a real auditor (`scripts/jit_audit_run.sh` → deopt/inline summary). The JS side has
+`NmaNodeBench`'s counters (`nmaOk`/`nmaFall`/`popMemoHits`, `scoreMs` vs `wallMs`) but **no deopt
+audit script yet** — that is an owed tool, not an existing one (§ Document maintenance).
+
+### 38.1 Node flags that make V8 tiering observable
+
+| Flag | Shows | Use when |
+|---|---|---|
+| `--trace-opt` | which functions TurboFan/Maglev optimized | confirm your hot fn actually tiered up |
+| `--trace-deopt` | deopt site + bailout reason | the "fast then slow then fast" bench; shape bugs |
+| `--trace-ic` | IC state transitions (mono→poly→mega) per site | chasing a megamorphic property/call site (§6.1) |
+| `--allow-natives-syntax` | enables `%`-intrinsics below | targeted A/B in a throwaway harness |
+| `--prof` / `--cpu-prof` | sampling profiler / `.cpuprofile` for DevTools | find the JS whale (§9.4) |
+
+With `--allow-natives-syntax`, a throwaway probe can assert tiering the way §9's audit asserts inlines:
+
+```js
+// probe only — never ship %-syntax in the emit
+%PrepareFunctionForOptimization(f);
+f(warmArgs); f(warmArgs);
+%OptimizeFunctionOnNextCall(f);
+f(warmArgs);
+// 1 = optimized (TurboFan/Maglev). See V8's OptimizationStatus bitmask.
+print(%GetOptimizationStatus(f));
+```
+
+### 38.2 Standing V8 measurement rules (mirror of §9.2/§30)
+
+1. **Warm deliberately, then time** — §35.1. State the warm count. `NmaNodeBench --warm` is that knob.
+2. **Same-seed A/B, bit-identical gen lines** for any zero-behavior-change phase (§22). The bench
+   already prints per-gen `best`/`nmaOk`/`nmaFall`/`popMemoHits`; a shape/container refactor must not
+   move `nmaOk`/`nmaFall`.
+3. **Report `scoreMs` and `wallMs` separately** — the bench does; `scoreMs` is the fitness barrier,
+   `wallMs` includes serial `step` (§33's ceiling is a V8 fact too, single-threaded here by design).
+4. **Name the V8 version** (§35.2). A deopt reason is version-specific.
+
+**Owed tool (do not pretend it exists):** a `scripts/v8_deopt_run` analogous to `jit_audit_run.sh` —
+run `NmaNodeBench` under `--trace-deopt --trace-opt`, parse the log into a summary of top deopt
+sites/reasons and any hot `musescript.*` function that never reached TurboFan. Until it lands, a manual
+`node --trace-deopt build/js/nma-node-bench.js … 2>&1 | grep -i musescript` is the interim audit.
+
+«ὁ μὲν αὐλὸς λέγει ταχύς, ὁ δὲ ῥυθμὸς κρίνει· μέτρει, μὴ πίστευε.»
+
+---
+
 ## Document maintenance
 
 Update this guide when any of the following lands:
@@ -1310,6 +1548,14 @@ Update this guide when any of the following lands:
   (N genomes × M threads × K reps, identical to serial) before calling the pool proven
 - A parallel or cheaper `EvolutionEngine.step` — §33's numbers are the current ceiling and should be
   re-measured, not edited, when that lands
+- **§35–§38 (V8 / Node / Electron):** `NmaNodeEvalPool` / `--threads` score fan-out + **resident
+  genome ids** (sticky ownership, inline JSON put on score) landed on `NmaNodeBench` (§37.1).
+  `--clone-prob` is wired on the Node bench as the measured step lever. Still owed: (a) a
+  `scripts/v8_deopt_run` twin of `jit_audit_run.sh` (§38.2); (b) a first
+  `%GetOptimizationStatus`-verified TurboFan-warm number on `NmaEval`/`OrderSim` under Node;
+  (c) the same measured on the shipped **Electron** V8, not just plain Node (§35.2); (d) a
+  binary/SAB genome codec to replace remaining JSON puts for high-churn children (resident ids
+  already zero the re-score tax). Replace aspirational framing with measured numbers as they land.
 
 PR description should cite the section number you changed.
 

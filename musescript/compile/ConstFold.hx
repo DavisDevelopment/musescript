@@ -232,10 +232,17 @@ class ConstFold {
 		return null;
 	}
 
+	/** Same unbox rules as MuseInterp.toNum — never `cast v` (JVM Dynamic Float→Int truncate). */
 	static function toNum(v:Dynamic):Float {
 		if (v == null) return 0;
-		if (Std.isOfType(v, Float) || Std.isOfType(v, Int)) return cast v;
-		return Std.parseFloat(Std.string(v));
+		if (Std.isOfType(v, Int)) return (v : Int) * 1.0;
+		if (Std.isOfType(v, Float)) return (v : Float);
+		var n = Std.parseFloat(Std.string(v));
+		return Math.isNaN(n) ? 0.0 : n;
+	}
+
+	static function isStringy(v:Dynamic):Bool {
+		return Std.isOfType(v, String);
 	}
 
 	/** Mirrors MuseInterp.truthy exactly. */
@@ -247,12 +254,27 @@ class ConstFold {
 		return true;
 	}
 
-	/** Mirrors MuseInterp.binop's non-python branch exactly (same ops, same Dynamic values). */
+	/**
+	 * Mirrors MuseInterp.binop. Numeric `+` goes through toNum (not Dynamic `left + right`) so
+	 * the JVM backend cannot unify fold locals to Int and truncate float literals — same trap
+	 * that broke MuseInterp's shared `left`/`right` bindings (see binop's doc comment).
+	 *
+	 * String concat is handled BEFORE the numeric switch: a single `switch` arm that returns
+	 * either String or Double makes the Haxe JVM emitter emit inconsistent stackmap frames
+	 * (VerifyError on class load).
+	 */
 	static function foldBinop(op:String, a:Const, b:Const):Null<Const> {
-		var left = litValue(a);
-		var right = litValue(b);
+		var left:Dynamic = litValue(a);
+		var right:Dynamic = litValue(b);
+		if (op == "+") {
+			var sum:Dynamic;
+			if (isStringy(left) || isStringy(right))
+				sum = Std.string(left) + Std.string(right);
+			else
+				sum = toNum(left) + toNum(right);
+			return asConst(sum);
+		}
 		var result:Dynamic = switch (op) {
-			case "+": left + right;
 			case "-": toNum(left) - toNum(right);
 			case "*": toNum(left) * toNum(right);
 			case "/": toNum(left) / toNum(right);

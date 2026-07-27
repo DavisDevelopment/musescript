@@ -152,56 +152,78 @@ class NmaAttr {
 		?costBps:Float = 0.0,
 		?initialCash:Float = 100000,
 		?equityFloor:Float = 0.0
-	):Null<{baseline:Float, deltas:Array<Float>, keys:Array<String>}> {
+	):Null<{baseline:Float, deltas:Array<Float>, keys:musescript.evo.IntPairList}> {
 		if (!NmaFitness.columnSwappable(g)) return null;
 
 		// Site keys from the ENUM genome — no prepare required. The warm credit-cuts path used
 		// to openSession (full columnar baseline) just to read keys off the NMA tree, which meant
 		// every attributed mutate on a fresh child paid a serial backtest even when every ablation
 		// was about to be skipped. Keys are shape-identical across the bijection.
-		var siteKeys = new Array<String>();
+		var siteKeys = new musescript.evo.IntPairList(sites.length);
+		var digest = new musescript.evo.StructuralDigest();
 		var bestUcb = Math.NEGATIVE_INFINITY;
 		for (e in sites) {
 			var root = enumBoolRoot(g, e.slot);
 			var node = musescript.evo.TreeSurgery.getBool(root, e.path);
-			var key = Canonical.boolStructuralKey(node);
-			siteKeys.push(key);
-			var u = NmaCreditBank.ucb(key);
+			Canonical.boolStructuralInto(siteKeys, node, digest);
+			var u = NmaCreditBank.ucbWords(digest.outA, digest.outB);
 			if (u > bestUcb) bestUcb = u;
 		}
 		if (bestUcb == Math.NEGATIVE_INFINITY) bestUcb = 0.0;
 
-		// §6b credit-cuts: a bank warm on EVERY site is observed data and worth the whole
-		// session. A bank that is merely non-empty is not, so anything else falls through to
-		// measurement below.
-		if (Fitness.creditCuts && NmaCreditBank.warmEnough(siteKeys))
-			return { baseline: Math.NaN, deltas: NmaCreditBank.means(siteKeys), keys: siteKeys };
+		// §6b credit-cuts: a bank warm on a solid fraction of sites is observed data and worth
+		// skipping the session. minFrac 0.35 (was 0.5): at pop=1000 most parents still have a
+		// cold tail, so the old 50% bar almost never fired; 35% still requires real coverage
+		// while letting tournament elites skip column-swap once a third of their sites are warm.
+		if (Fitness.creditCuts && NmaCreditBank.warmEnoughPairs(siteKeys, 2, 0.35))
+			return { baseline: Math.NaN, deltas: NmaCreditBank.meansPairs(siteKeys), keys: siteKeys };
 		if (Fitness.attrBankOnly && AttrPool.isNested())
-			return { baseline: Math.NaN, deltas: NmaCreditBank.means(siteKeys), keys: siteKeys };
+			return { baseline: Math.NaN, deltas: NmaCreditBank.meansPairs(siteKeys), keys: siteKeys };
+		// Global fill gate: after enough deposits the bank is informative enough to rank without
+		// opening a session per child. Novel keys stay at mean 0 (uniform among unseen).
+		if (Fitness.creditCuts && Fitness.attrBankFill > 0
+				&& NmaCreditBank.totalObservations() >= Fitness.attrBankFill)
+			return { baseline: Math.NaN, deltas: NmaCreditBank.meansPairs(siteKeys), keys: siteKeys };
+
+		// Warm keys keep their bank mean; cold keys get measured. With creditCuts off, every
+		// site is cold by definition and all of them are measured.
+		var deltas = Fitness.creditCuts
+			? NmaCreditBank.meansPairs(siteKeys)
+			: [for (_ in sites) 0.0];
+		var measure = Fitness.creditCuts
+			? NmaCreditBank.coldIndicesPairs(siteKeys)
+			: [for (i in 0...sites.length) i];
+		// Cap cold fills under credit-cuts: measuring every unseen site per child was the
+		// step.xo wall at pop=1000. Keep the least-observed indices so the bank still fills.
+		if (Fitness.creditCuts && Fitness.attrMaxCold > 0 && measure.length > Fitness.attrMaxCold)
+			measure = coldestIndices(siteKeys, measure, Fitness.attrMaxCold);
+		// Bandit may refuse every remaining cold site — don't open a column-swap session just
+		// to discover that. Filter first; empty ⇒ bank means already in `deltas`.
+		if (Fitness.attrBandit && measure.length > 0) {
+			var live = new Array<Int>();
+			for (i in measure) {
+				if (NmaCreditBank.shouldAblateWords(siteKeys.a(i), siteKeys.b(i), bestUcb))
+					live.push(i);
+				else
+					deltas[i] = NmaCreditBank.meanWords(siteKeys.a(i), siteKeys.b(i));
+			}
+			measure = live;
+		}
+		if (measure.length == 0)
+			return { baseline: Math.NaN, deltas: deltas, keys: siteKeys };
 
 		var sess = sessionFor(g, bars, costBps, initialCash, equityFloor);
 		if (sess == null) return null;
 		var baseline = sess.baseline;
-		// Warm keys keep their bank mean; cold keys get measured. With creditCuts off, every
-		// site is cold by definition and all of them are measured.
-		var deltas = Fitness.creditCuts
-			? NmaCreditBank.means(siteKeys)
-			: [for (_ in sites) 0.0];
-		var measure = Fitness.creditCuts
-			? NmaCreditBank.coldIndices(siteKeys)
-			: [for (i in 0...sites.length) i];
 		var always = alwaysTrueNma();
 
 		for (i in measure) {
-			var key = siteKeys[i];
-			if (Fitness.attrBandit && !NmaCreditBank.shouldAblate(key, bestUcb)) {
-				deltas[i] = NmaCreditBank.mean(key);
-				continue;
-			}
+			var ka = siteKeys.a(i);
+			var kb = siteKeys.b(i);
 			var e = sites[i];
 			var delta = baseline - swapScore(sess, e.slot, e.path, always);
 			deltas[i] = delta;
-			creditAt(NmaSurgery.boolRoot(sess.nma, e.slot), e.path, key, delta);
+			creditAt(NmaSurgery.boolRoot(sess.nma, e.slot), e.path, ka, kb, delta);
 		}
 		return { baseline: baseline, deltas: deltas, keys: siteKeys };
 	}
@@ -210,7 +232,10 @@ class NmaAttr {
 	 * Oracle scores for splicing each `donor` enum bool into `site` on `g` (attribution crossover
 	 * donor ranking). Returns null when NMA cannot host `g`.
 	 *
-	 * With `Fitness.creditCuts` + warm donors: rank by bank mean of donor shape (zero splice evals).
+	 * With `Fitness.creditCuts`: rank by bank mean of donor shape (zero splice evals). A donor's
+	 * bank mean is an ablation-Δ prior on the *shape*, not a graft score — still a usable rank
+	 * signal, and measuring every cold donor was a dominant `step.xo` cost at pop=1000 once
+	 * sites were already capped. Without credit-cuts, each donor is column-swapped as before.
 	 *
 	 * «Μαινάδες ῥηγνῦσιν ὄρη· εὐοῖ διὰ νύκτα.»
 	 */
@@ -224,15 +249,10 @@ class NmaAttr {
 		?equityFloor:Float = 0.0
 	):Null<Array<Float>> {
 		if (!NmaFitness.columnSwappable(g)) return null;
-		var donorKeys = [for (d in donors) Canonical.boolStructuralKey(d)];
+		var donorKeys = Canonical.boolStructuralKeysOf(donors);
 
-		// A donor's bank mean is the average ABLATION DELTA of that shape wherever it has been
-		// cut before -- a prior on the shape, not on the graft. Warm-bank ranking is therefore
-		// only ever a stand-in for the splice score, which is why it needs the whole set warm
-		// before it is allowed to stand in for measurement.
-		if ((Fitness.creditCuts && NmaCreditBank.warmEnough(donorKeys))
-				|| (Fitness.attrBankOnly && AttrPool.isNested())) {
-			var priors = NmaCreditBank.means(donorKeys);
+		if (Fitness.creditCuts || (Fitness.attrBankOnly && AttrPool.isNested())) {
+			var priors = NmaCreditBank.meansPairs(donorKeys);
 			for (i in 0...donors.length)
 				if (GenomeFeatures.boolIsSimCoupled(donors[i])) priors[i] = Fitness.NEG_INF;
 			return priors;
@@ -240,18 +260,13 @@ class NmaAttr {
 
 		var sess = sessionFor(g, bars, costBps, initialCash, equityFloor);
 		if (sess == null) return null;
-		var scores = Fitness.creditCuts
-			? NmaCreditBank.means(donorKeys)
-			: [for (_ in donors) Fitness.NEG_INF];
-		var measure = Fitness.creditCuts
-			? NmaCreditBank.coldIndices(donorKeys)
-			: [for (i in 0...donors.length) i];
+		var scores = [for (_ in donors) Fitness.NEG_INF];
 		// A donor carrying a position-state feature can't be spliced onto a columnar parent at
 		// all, so it is unrankable rather than merely unmeasured -- NEG_INF regardless of bank.
 		for (i in 0...donors.length)
 			if (GenomeFeatures.boolIsSimCoupled(donors[i])) scores[i] = Fitness.NEG_INF;
 
-		for (i in measure) {
+		for (i in 0...donors.length) {
 			if (GenomeFeatures.boolIsSimCoupled(donors[i])) continue;
 			scores[i] = swapScore(sess, site.slot, site.path, NmaBijection.boolFromEnum(donors[i]));
 		}
@@ -275,10 +290,9 @@ class NmaAttr {
 		?equityFloor:Float = 0.0
 	):Null<Array<Float>> {
 		if (!NmaFitness.columnSwappable(g)) return null;
-		var replKeys = [for (r in replacements) Canonical.boolStructuralKey(r)];
-		if (Fitness.creditCuts && NmaCreditBank.warmEnough(replKeys)) {
-			return [for (k in replKeys) NmaCreditBank.mean(k)];
-		}
+		var replKeys = Canonical.boolStructuralKeysOf(replacements);
+		if (Fitness.creditCuts && NmaCreditBank.warmEnoughPairs(replKeys))
+			return NmaCreditBank.meansPairs(replKeys);
 		var pack = openSession(g, bars, costBps, initialCash, equityFloor);
 		if (pack == null) return null;
 		var scores = new Array<Float>();
@@ -358,20 +372,38 @@ class NmaAttr {
 		};
 	}
 
+	/**
+	 * Keep the `cap` least-observed indices from `candidates` (stable on ties — lower index wins).
+	 * Used to budget cold ablation fills under credit-cuts without starving the bank of new keys.
+	 */
+	static function coldestIndices(keys:musescript.evo.IntPairList, candidates:Array<Int>, cap:Int):Array<Int> {
+		if (candidates.length <= cap) return candidates;
+		var scored = new Array<{i:Int, n:Int}>();
+		for (idx in candidates)
+			scored.push({ i: idx, n: NmaCreditBank.observationsWords(keys.a(idx), keys.b(idx)) });
+		scored.sort(function(a, b) {
+			if (a.n != b.n) return a.n < b.n ? -1 : 1;
+			return a.i < b.i ? -1 : a.i > b.i ? 1 : 0;
+		});
+		var out = new Array<Int>();
+		for (k in 0...cap) out.push(scored[k].i);
+		return out;
+	}
+
 	/** P2: accumulate ablation Δ onto the site node (`creditSum`/`creditN`) and the bank.
 	 *
-	 * `key` is passed in rather than re-derived: the caller already hashed this site's shape to
-	 * consult the bank, and rebuilding it here meant a `boolToEnum` plus a SHA1 per site purely
-	 * to arrive at the same string.
+	 * Lanes are passed in rather than re-derived: the caller already hashed this site's shape to
+	 * consult the bank, and rebuilding it here meant a `boolToEnum` plus a digest per site purely
+	 * to arrive at the same key.
 	 *
 	 * «χρυσὸν δῶρον· τίμημα ψυχῆς.»
 	 */
-	static function creditAt(root:NmaBool, path:GPath, key:String, delta:Float):Void {
+	static function creditAt(root:NmaBool, path:GPath, keyA:Int, keyB:Int, delta:Float):Void {
 		if (delta == Fitness.NEG_INF || Math.isNaN(delta)) return;
 		var n:NmaBool = NmaSurgery.nodeAtBool(root, path);
 		(n : NmaNode).creditSum += delta;
 		(n : NmaNode).creditN += 1;
-		NmaCreditBank.deposit(key, delta);
+		NmaCreditBank.depositWords(keyA, keyB, delta);
 	}
 }
 

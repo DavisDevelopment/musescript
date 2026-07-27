@@ -53,6 +53,19 @@ class StructuralDigest {
 		h2 = OFFSET2;
 	}
 
+	/**
+	 * Restore both lanes and the output words to their post-`new()` values, so one accumulator
+	 * can key many subtrees in a row instead of one allocation per key. Hashing is untouched: a
+	 * reset instance is indistinguishable from a fresh one.
+	 */
+	public inline function reset():StructuralDigest {
+		h1 = OFFSET1;
+		h2 = OFFSET2;
+		outA = 0;
+		outB = 0;
+		return this;
+	}
+
 	/** Mix one 32-bit token into both lanes. */
 	public inline function word(v:Int):StructuralDigest {
 		h1 = mul32(h1 ^ v, PRIME1);
@@ -85,9 +98,63 @@ class StructuralDigest {
 		return word(bits.high);
 	}
 
+	/** Avalanche both lanes into the digest's `outA`/`outB` fields — no String, no anon. */
+	public var outA:Int = 0;
+	public var outB:Int = 0;
+
 	/** 16 lowercase hex characters: both lanes, avalanched. */
 	public function finish():String {
-		return hex8(fmix32(h1)) + hex8(fmix32(h2));
+		finishWords();
+		return hex8(outA) + hex8(outB);
+	}
+
+	/** Same avalanche as `finish`, written into `outA`/`outB` instead of hex. */
+	public inline function finishWords():StructuralDigest {
+		outA = fmix32(h1);
+		outB = fmix32(h2);
+		return this;
+	}
+
+	/** Hex form of an already-finished word pair (keeps `Canonical`/`NmaCanonical` string keys). */
+	public static inline function hexWords(a:Int, b:Int):String {
+		return hex8(a) + hex8(b);
+	}
+
+	/** True when `s` is exactly 16 lowercase hex digits (a finished structural key). */
+	public static function isHexKey(s:String):Bool {
+		if (s == null || s.length != 16) return false;
+		for (i in 0...16) {
+			var c = StringTools.fastCodeAt(s, i);
+			if (!((c >= 48 && c <= 57) || (c >= 97 && c <= 102))) return false;
+		}
+		return true;
+	}
+
+	/** Parse a 16-char hex structural key into avalanched digest lanes. */
+	public static function wordsFromHexKey(key:String):{a:Int, b:Int} {
+		return {
+			a: parseHex8(key, 0),
+			b: parseHex8(key, 8)
+		};
+	}
+
+	/**
+	 * Parse 8 hex digits as a raw 32-bit word. Must NOT use `Std.parseInt("0x...")`: values with
+	 * the high bit set (e.g. `8df7a2e1`) exceed signed Int32 range and throw on the JVM target.
+	 */
+	static function parseHex8(s:String, off:Int):Int {
+		var v = 0;
+		var i = 0;
+		while (i < 8) {
+			var c = StringTools.fastCodeAt(s, off + i);
+			var d = if (c >= 48 && c <= 57) c - 48
+				else if (c >= 97 && c <= 102) c - 87
+				else if (c >= 65 && c <= 70) c - 55
+				else 0;
+			v = (v << 4) | d;
+			i++;
+		}
+		return v;
 	}
 
 	/** murmur3 finalizer — without it the low bits of an FNV lane are poorly mixed. */

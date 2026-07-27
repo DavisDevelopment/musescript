@@ -107,7 +107,9 @@ class PlanRunner {
 				case ExecProfileStep(id, profile):
 					plan.profile = ExecutionProfile.resolve(profile);
 					plan.profile.applyToFitness();
+					#if sys
 					Sys.println('exec-profile: ${plan.profile.label} backend=${plan.profile.backend} (step $id)');
+					#end
 					// Rebind compiled strategy to the profile backend when we already have a program.
 					if (prog != null && feed != null) {
 						var be = plan.profile.backend;

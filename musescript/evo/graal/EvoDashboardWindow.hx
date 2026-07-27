@@ -50,9 +50,10 @@ class EvoDashboardWindow {
 	 * deliberate, at-will human action, never a standing mode. */
 	var paused:Bool = false;
 
-	public function new(title:String) {
+	public function new(title:String, ?competePanels:Bool = false) {
 		panel = new EvoChartPanel();
-		panel.setPreferredSize(new Dimension(1160, 900));
+		panel.competeEnabled = competePanels;
+		panel.setPreferredSize(new Dimension(1160, competePanels ? 1400 : 900));
 
 		pauseBtn = new JButton("Pause");
 		pauseBtn.addActionListener(new ActionFn(togglePause));
@@ -69,7 +70,7 @@ class EvoDashboardWindow {
 		frame = new JFrame(title);
 		frame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
 		frame.add(root);
-		frame.setSize(1180, 980);
+		frame.setSize(1180, competePanels ? 1480 : 980);
 		frame.setLocationRelativeTo(null);
 		frame.setVisible(true);
 	}
@@ -107,6 +108,13 @@ class EvoDashboardWindow {
 		panel.repaint();
 	}
 
+	/** Rivalry / Foundry / deme strip — gen-boundary only; no-op when compete panels are off. */
+	public function updateCompete(state:CompeteVizState):Void {
+		if (!panel.competeEnabled) return;
+		panel.pushCompete(state);
+		panel.repaint();
+	}
+
 	public function close():Void frame.dispose();
 }
 
@@ -128,6 +136,8 @@ private class EvoChartPanel extends JPanel {
 	var oosSampledAtGen:Int = -1;
 	var isBenchmark:Float = 0;
 	var oosBenchmark:Float = 0;
+	public var competeEnabled:Bool = false;
+	var compete:CompeteVizState = CompeteVizState.empty();
 
 	static inline var TOTAL_CELLS = 48; // 4 (tradeFreq) x 4 (hold) x 3 (bias) -- see MapElites.hx
 	static var TRADEFREQ_LABELS = ["rare", "occasional", "frequent", "scalper"];
@@ -143,6 +153,7 @@ private class EvoChartPanel extends JPanel {
 	static var COL_NICHE = new Color(27, 175, 122);  // slot 3 aqua
 	static var COL_POP = new Color(74, 58, 167);     // slot 7 violet
 	static var COL_OOS = new Color(233, 196, 106);   // slot 4-ish yellow/gold, distinct from IS blue
+	static var COL_ARENA = new Color(180, 60, 60);
 
 	public function new() {
 		super();
@@ -162,6 +173,10 @@ private class EvoChartPanel extends JPanel {
 		nichesHist.push(n);
 	}
 
+	public function pushCompete(state:CompeteVizState):Void {
+		compete = state;
+	}
+
 	override public function paintComponent(g:Graphics):Void {
 		super.paintComponent(g);
 		var g2:Graphics2D = cast g;
@@ -172,12 +187,15 @@ private class EvoChartPanel extends JPanel {
 		g2.drawString("MuseGene Evolution -- Live", 16, 26);
 		g2.setFont(new Font("SansSerif", Font.PLAIN, 12));
 		g2.setColor(COL_MUTED);
-		g2.drawString('generation $gen  |  best fitness ${fmt(best)}  |  mean fitness ${fmt(mean)}  |  niches $niches / $TOTAL_CELLS  |  champion "$champion"', 16, 47);
+		var modeBadge = competeEnabled ? '  |  mode ${compete.mode}' : "";
+		var pulseBadge = (competeEnabled && compete.arenaPulse != null && compete.arenaPulse.length > 0)
+			? '  |  ${compete.arenaPulse}' : "";
+		g2.drawString('generation $gen  |  best fitness ${fmt(best)}  |  mean fitness ${fmt(mean)}  |  niches $niches / $TOTAL_CELLS  |  champion "$champion"$modeBadge$pulseBadge', 16, 47);
 
 		// Row 1: three equal columns (fitness | niches | perf-vs-benchmark), all "beside" each
 		// other rather than stacked. Row 2: two wider columns (pop distribution | niche grid)
 		// spanning the SAME total width as row 1's three columns combined, so both rows line up.
-		var rowH = 380;
+		var rowH = competeEnabled ? 300 : 380;
 		var colW3 = 360, gap = 16;
 		var x1 = 16, x2 = x1 + colW3 + gap, x3 = x2 + colW3 + gap;
 		var totalW = colW3 * 3 + gap * 2;
@@ -193,6 +211,163 @@ private class EvoChartPanel extends JPanel {
 		perfVsBenchmark(g2, x3, y1, colW3, rowH);
 		popDistribution(g2, x1, y2, colW2, rowH);
 		nicheGrid(g2, x1 + colW2 + gap, y2, colW2, rowH);
+
+		if (competeEnabled) {
+			var y3 = y2 + rowH + 24;
+			var rowH3 = 200;
+			competeDemeStrip(g2, x1, y3, colW2, rowH3);
+			competeArenaPanel(g2, x1 + colW2 + gap, y3, colW2, rowH3);
+			var y4 = y3 + rowH3 + 24;
+			var rowH4 = 180;
+			competeMarketPanel(g2, x1, y4, colW2, rowH4);
+			competeMetaPanel(g2, x1 + colW2 + gap, y4, colW2, rowH4);
+		}
+	}
+
+	function competeDemeStrip(g2:Graphics2D, x:Int, y:Int, w:Int, h:Int):Void {
+		panelTitle(g2, x, y + 2, 'Archipelago demes (n=${compete.demes.length})');
+		legend(g2, x, y + 20, [
+			{color: COL_BEST, label: "deme best"},
+			{color: COL_MEAN, label: "deme mean"},
+		]);
+		var padL = 36, padR = 10, padT = 40, padB = 28;
+		var plotX = x + padL, plotY = y + padT;
+		var plotW = w - padL - padR, plotH = h - padT - padB;
+		if (compete.demes.length == 0) {
+			g2.setColor(COL_MUTED);
+			g2.setFont(new Font("SansSerif", Font.PLAIN, 12));
+			g2.drawString("no deme stats yet", plotX + 8, plotY + Std.int(plotH / 2));
+			return;
+		}
+		var vals = [for (d in compete.demes) d.best];
+		for (d in compete.demes) vals.push(d.mean);
+		var yMin = vals[0], yMax = vals[0];
+		for (v in vals) { if (v < yMin) yMin = v; if (v > yMax) yMax = v; }
+		if (yMax == yMin) { yMin -= 1; yMax += 1; }
+		var n = compete.demes.length;
+		var barW = Math.max(4, (plotW / n) * 0.35);
+		for (i in 0...n) {
+			var d = compete.demes[i];
+			var cx = plotX + Std.int((i + 0.5) / n * plotW);
+			var by = plotY + plotH - Std.int(((d.best - yMin) / (yMax - yMin)) * plotH);
+			var my = plotY + plotH - Std.int(((d.mean - yMin) / (yMax - yMin)) * plotH);
+			g2.setColor(COL_BEST);
+			g2.fillRect(cx - Std.int(barW), by, Std.int(barW), plotY + plotH - by);
+			g2.setColor(COL_MEAN);
+			g2.fillRect(cx + 1, my, Std.int(barW), plotY + plotH - my);
+			g2.setColor(COL_MUTED);
+			g2.setFont(new Font("SansSerif", Font.PLAIN, 9));
+			g2.drawString('d${d.id}', cx - 6, y + h - 6);
+		}
+		if (compete.migratePulse || compete.immigrantMarkers > 0) {
+			g2.setColor(COL_ARENA);
+			g2.setFont(new Font("SansSerif", Font.PLAIN, 11));
+			var mark = compete.immigrantMarkers > 0
+				? 'immigrant markers ×${compete.immigrantMarkers}'
+				: "migrate pulse";
+			g2.drawString(mark, plotX + 4, plotY + 14);
+		}
+	}
+
+	function competeArenaPanel(g2:Graphics2D, x:Int, y:Int, w:Int, h:Int):Void {
+		panelTitle(g2, x, y + 2, "Rivalry arena / Foundry");
+		g2.setFont(new Font("SansSerif", Font.PLAIN, 11));
+		g2.setColor(COL_MUTED);
+		var line1 = 'arena gen ${compete.arenaGen}  |  cohort ${compete.cohort}  |  faults ${compete.faults}'
+			+ '  |  responses nudge=${compete.responseNudge} mate=${compete.responseMate}'
+			+ '  |  rivalry-w ${fmt2(compete.rivalryWeight)}';
+		g2.drawString(line1, x, y + 22);
+		var padL = 36, padR = 10, padT = 48, padB = 40;
+		var plotX = x + padL, plotY = y + padT;
+		var plotW = w - padL - padR, plotH = h - padT - padB - 36;
+		if (compete.mode == "ARENA" && compete.arenaPulse != null && compete.arenaPulse.length > 0
+				&& compete.wealthRaw.length == 0) {
+			g2.setColor(COL_ARENA);
+			g2.setFont(new Font("SansSerif", Font.BOLD, 13));
+			g2.drawString(compete.arenaPulse, plotX + 8, plotY + Std.int(plotH / 2));
+		} else if (compete.wealthRaw.length == 0) {
+			g2.setColor(COL_MUTED);
+			g2.drawString("waiting for arena (every --arena-every gens)...", plotX + 8, plotY + Std.int(plotH / 2));
+		} else {
+			var sorted = compete.wealthRaw.copy();
+			sorted.sort((a, b) -> a < b ? -1 : (a > b ? 1 : 0));
+			var yMin = sorted[0], yMax = sorted[sorted.length - 1];
+			if (yMax == yMin) { yMin -= 1; yMax += 1; }
+			var n = sorted.length;
+			var barW = Math.max(1, plotW / n);
+			g2.setColor(COL_ARENA);
+			for (i in 0...n) {
+				var v = sorted[i];
+				var bx = plotX + Std.int(i * barW);
+				var by = plotY + plotH - Std.int(((v - yMin) / (yMax - yMin)) * plotH);
+				g2.fillRect(bx, by, Std.int(Math.max(1, barW)), plotY + plotH - by);
+			}
+			g2.setColor(COL_MUTED);
+			g2.setFont(new Font("SansSerif", Font.PLAIN, 10));
+			g2.drawString("arena MTM wealth (sorted)", plotX, y + h - 40);
+		}
+		g2.setColor(COL_MUTED);
+		g2.setFont(new Font("SansSerif", Font.PLAIN, 10));
+		var fe = compete.foundryEvents;
+		var fnote = fe.length == 0 ? "foundry: (idle)" :
+			'foundry: ${fe[fe.length - 1].phase} @gen ${fe[fe.length - 1].gen} — ${fe[fe.length - 1].note}';
+		g2.drawString(fnote.length > 90 ? fnote.substr(0, 87) + "..." : fnote, x, y + h - 18);
+	}
+
+	/** Market-choice bars when `--compete-symbols` / SymbolSelector routed individuals this gen. */
+	function competeMarketPanel(g2:Graphics2D, x:Int, y:Int, w:Int, h:Int):Void {
+		panelTitle(g2, x, y + 2, "Market choices (--compete-symbols)");
+		var padL = 36, padR = 10, padT = 36, padB = 28;
+		var plotX = x + padL, plotY = y + padT;
+		var plotW = w - padL - padR, plotH = h - padT - padB;
+		var counts = compete.marketChoices;
+		if (counts == null || counts.length == 0) {
+			g2.setColor(COL_MUTED);
+			g2.setFont(new Font("SansSerif", Font.PLAIN, 12));
+			g2.drawString("no SymbolSelector routing this run", plotX + 8, plotY + Std.int(plotH / 2));
+			return;
+		}
+		var yMax = 1.0;
+		for (c in counts) if (c > yMax) yMax = c;
+		var n = counts.length;
+		var barW = Math.max(8, (plotW / n) * 0.55);
+		for (i in 0...n) {
+			var c = counts[i];
+			var cx = plotX + Std.int((i + 0.5) / n * plotW);
+			var bh = Std.int((c / yMax) * plotH);
+			var by = plotY + plotH - bh;
+			g2.setColor(COL_NICHE);
+			g2.fillRect(cx - Std.int(barW / 2), by, Std.int(barW), bh);
+			g2.setColor(COL_MUTED);
+			g2.setFont(new Font("SansSerif", Font.PLAIN, 10));
+			g2.drawString('m$i=$c', cx - 14, y + h - 8);
+		}
+	}
+
+	/** Veteran pool / POET keep-reject / immigrant markers — gen-boundary POD only. */
+	function competeMetaPanel(g2:Graphics2D, x:Int, y:Int, w:Int, h:Int):Void {
+		panelTitle(g2, x, y + 2, "Veterans / Poet / Immigrants");
+		g2.setFont(new Font("SansSerif", Font.PLAIN, 12));
+		g2.setColor(COL_TEXT);
+		var lines = [
+			compete.veteranCap > 0 || compete.veteranN > 0
+				? 'veterans ${compete.veteranN}/${compete.veteranCap}  netInv ${fmt2(compete.veteranNetInv)}'
+				: "veterans: (sequential-tape off)",
+			'poet kept=${compete.poetKept}  rejected=${compete.poetRejected}',
+			compete.immigrantMarkers > 0 || compete.migratePulse
+				? 'immigrants: ${compete.immigrantMarkers} swapped (deme migrate)'
+				: "immigrants: (no deme migrate this gen)"
+		];
+		var ly = y + 40;
+		for (line in lines) {
+			g2.drawString(line, x + 12, ly);
+			ly += 28;
+		}
+		if (compete.mode == "FOUNDRY" && compete.arenaPulse != null && compete.arenaPulse.length > 0) {
+			g2.setColor(COL_ARENA);
+			g2.setFont(new Font("SansSerif", Font.BOLD, 12));
+			g2.drawString(compete.arenaPulse, x + 12, ly + 8);
+		}
 	}
 
 	/** Every evaluated genome's raw Sharpe this generation, in- and out-of-sample, against the

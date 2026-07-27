@@ -67,7 +67,11 @@ class MuseChecker {
 			default:
 		}
 		for (d in prog.decls) switch (d) {
-			case ClassDecl(name, parent, _, _, _) if (parent != null && !classNames.exists(parent)):
+			// `muse.Strat`/`muse.Indicator` are builtin roots, not user classes — a class
+			// extending one is a declaration written in class syntax (see ClassStrategyLower).
+			case ClassDecl(name, parent, _, _, _) if (parent != null
+				&& !musescript.compile.ClassStrategyLower.isBuiltinRoot(parent)
+				&& !classNames.exists(parent)):
 				warn('class $name extends unknown class $parent');
 			default:
 		}

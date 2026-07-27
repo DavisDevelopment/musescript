@@ -13,6 +13,7 @@ reads cloud features.
 | Co-evolution brainstorm + MVP | [`BRAINSTORM_COEVOLVE.md`](BRAINSTORM_COEVOLVE.md) |
 | Package move plan | [`PROMOTE_PLAN.md`](PROMOTE_PLAN.md) |
 | Stub surfaces | `ForecastCloud.hx`, `EwForecastHost.hx` |
+| Lattice adapter | `LatticeForecastHost.hx` (**done — Claude can wire**) |
 | **Implementation still under** | `musescript/indicators/ew/*` (temporary) |
 
 Hard EW grammar stays non-learnable. Soft φ / guideline weights (`EwPhiParams`) are

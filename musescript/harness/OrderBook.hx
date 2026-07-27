@@ -64,7 +64,7 @@ class OrderBook {
 	}
 
 	public function reset():Void {
-		pending = [];
+		pending.resize(0);
 		nextId = 1;
 	}
 
