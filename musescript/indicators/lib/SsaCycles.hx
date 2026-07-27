@@ -16,9 +16,10 @@ typedef SsaCyclesOutput = {
 	var zones:ZoneSet;
 	var labels:LabelSet;
 	var forecast:ForecastBand;
+	var cycle:CycleSeries;
 }
 
-/** SSA-lite cycle estimator with TimeWindow zones for chart binding. */
+/** SSA-lite cycle estimator with TimeWindow zones + capped CycleSeries for chart binding. */
 class SsaCycles implements MuseIndicator<Bar, SsaCyclesOutput> {
 	var period:Int;
 	var minLag:Int;
@@ -38,7 +39,8 @@ class SsaCycles implements MuseIndicator<Bar, SsaCyclesOutput> {
 		barsSeen = 0;
 		out = {
 			cycleBars: Math.NaN, phase: Math.NaN, strength: Math.NaN,
-			zones: ZoneSet.nan(), labels: LabelSet.nan(), forecast: ForecastBand.nan()
+			zones: ZoneSet.nan(), labels: LabelSet.nan(), forecast: ForecastBand.nan(),
+			cycle: CycleSeries.nan()
 		};
 	}
 
@@ -74,6 +76,7 @@ class SsaCycles implements MuseIndicator<Bar, SsaCyclesOutput> {
 		out.strength = bestAbs;
 
 		var st = GeomVizFill.statusOf(PivotStatus.Projected);
+		var formSt = GeomVizFill.statusOf(PivotStatus.Forming);
 		var now = (barsSeen - 1) * 1.0;
 		var band = Math.abs(bar.close) * 0.002;
 		if (!(band > 0)) band = 0.01;
@@ -87,13 +90,33 @@ class SsaCycles implements MuseIndicator<Bar, SsaCyclesOutput> {
 		out.labels.set(0, (GeomLabelCode.Projected : Int) * 1.0, bar.close, now + bestLag, st);
 		out.labels.count = 1;
 		out.forecast.set(bar.close * 0.99, bar.close * 1.01, now, now + bestLag);
+
+		// Capped reconstructed cycle polyline over one dominant period ending at `now`.
+		var amp = 0.0;
+		for (i in 0...window.length) {
+			var d = window.at(i) - mean;
+			amp += d * d;
+		}
+		amp = Math.sqrt(amp / window.length) * (0.5 + bestAbs);
+		if (!(amp > 0)) amp = band * 4;
+		out.cycle.clear();
+		out.cycle.status = formSt;
+		out.cycle.cycleBars = bestLag * 1.0;
+		var span = bestLag > 1 ? bestLag * 1.0 : 1.0;
+		for (i in 0...CycleSeries.CAP) {
+			var t = CycleSeries.CAP <= 1 ? 0.0 : i / (CycleSeries.CAP - 1);
+			var barIdx = now - span * (1.0 - t);
+			var ang = out.phase + (2.0 * Math.PI * t);
+			out.cycle.set(i, barIdx, mean + amp * Math.sin(ang));
+		}
+		out.cycle.count = CycleSeries.CAP * 1.0;
 		return out;
 	}
 
 	public function reset():Void {
 		window = new RingBuffer(period);
 		barsSeen = 0;
-		out.zones.clear(); out.labels.clear(); out.forecast.clear();
+		out.zones.clear(); out.labels.clear(); out.forecast.clear(); out.cycle.clear();
 	}
 
 	public function warmupPeriod():Int return period;
@@ -106,7 +129,8 @@ class SsaCycles implements MuseIndicator<Bar, SsaCyclesOutput> {
 				{name: "cycleBars", ty: TScalar}, {name: "phase", ty: TScalar}, {name: "strength", ty: TScalar},
 				{name: "zones", ty: GeomVizSpec.zoneObj()},
 				{name: "labels", ty: GeomVizSpec.labelObj()},
-				{name: "forecast", ty: GeomVizSpec.forecastObj()}
+				{name: "forecast", ty: GeomVizSpec.forecastObj()},
+				{name: "cycle", ty: GeomVizSpec.cycleObj()}
 			]), minArgs: 0,
 			eval: function(h, args) {
 				var p = IndicatorCache.intArg(args, 0, 64);
@@ -114,7 +138,8 @@ class SsaCycles implements MuseIndicator<Bar, SsaCyclesOutput> {
 				var hi = IndicatorCache.intArg(args, 2, Std.int(Math.min(32, p - 1)));
 				var nanFill:SsaCyclesOutput = {
 					cycleBars: Math.NaN, phase: Math.NaN, strength: Math.NaN,
-					zones: ZoneSet.nan(), labels: LabelSet.nan(), forecast: ForecastBand.nan()
+					zones: ZoneSet.nan(), labels: LabelSet.nan(), forecast: ForecastBand.nan(),
+					cycle: CycleSeries.nan()
 				};
 				return IndicatorCache.evalBar(h, 'ssa_cycles:$p:$lo:$hi', nanFill,
 					() -> new SsaCycles(p, lo, hi), (i, b) -> (cast i : SsaCycles).update(b));

@@ -26,7 +26,8 @@ Indicators nest `levels` / `rays` / `zones` / `pivots` / `labels` / `forecast`
 1. Runs the matching MuseScript builtin over the tape (`geom/live.js`).
 2. Plots pack slots on the **last bar only**, rebuilds a frame via `frameFromPartial`.
 3. Falls back to `synthesize.js` only when packs are missing or MuseRuntime is cold.
-4. Merges synth-only extras (`arcs` / `rings` / `cycle` / `ribbon`) onto live frames when present.
+4. Merges synth extras onto live frames only when the live pack omit that slot
+   (`arcs` / `rings` / `cycle` / `ribbon`).
 5. Keeps a scalar `mid` legend hook from primary level / forecast midpoint.
 
 Family gallery cards map to a default live builtin (`FAMILY_LIVE_BUILTIN`); any listed
@@ -44,9 +45,10 @@ in their TObject output (chart drops synthesize when these packs are present):
 | GEOM_HARMONIC | gartley, bat, butterfly, crab, shark, cypher | levels, zones (PRZ), pivots, labels (XABCD) + `.signal` |
 | GEOM_EW | ew_hypothesis | pivots, labels (waves), forecast, zones |
 | GEOM_GANN | gann_angles, square_of_nine | levels, rays (gann), pivots, labels, rings (So9) |
-| GEOM_CYCLES | ssa_cycles | zones (Cycle), forecast, labels |
-| GEOM_RISK | lppl_warning | zones, forecast, labels |
+| GEOM_CYCLES | ssa_cycles | zones (Cycle), forecast, labels, cycle (CycleSeries) |
+| GEOM_RISK | lppl_warning | zones, forecast, labels, ribbon (RibbonSeries) |
 
-Chart-only extras that remain synth-side until promoted: `cycle` series / `ribbon`
-(SSA / LPPL full-tape overlays). `arcs` / `rings` are now first-class capped packs
-(`ArcSet` / `RingBag` in GeomViz) emitted by `fib_arcs` and `square_of_nine`.
+Chart-only extras that remain synth-side until promoted: none for the
+ArcSet / RingBag / CycleSeries / RibbonSeries family — those are first-class
+capped packs emitted by `fib_arcs`, `square_of_nine`, `ssa_cycles`, and
+`lppl_warning`. Full-tape `values[]` arrays stay optional synth fallbacks only.

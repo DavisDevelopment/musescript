@@ -432,6 +432,109 @@ class RingBag {
 }
 
 /**
+ * Capped SSA / Fourier cycle overlay polyline (bar, price samples).
+ * Avoids full-tape `values[]` on the Haxe / JIT hot path — chart unpacks to paint.
+ */
+@:structInit
+class CycleSeries {
+	public var count:Float;
+	public var status:Float;
+	public var cycleBars:Float;
+	public var b0:Float; public var p0:Float;
+	public var b1:Float; public var p1:Float;
+	public var b2:Float; public var p2:Float;
+	public var b3:Float; public var p3:Float;
+	public var b4:Float; public var p4:Float;
+	public var b5:Float; public var p5:Float;
+	public var b6:Float; public var p6:Float;
+	public var b7:Float; public var p7:Float;
+
+	public static inline var CAP = 8;
+
+	public static function nan():CycleSeries {
+		return {
+			count: 0, status: Math.NaN, cycleBars: Math.NaN,
+			b0: Math.NaN, p0: Math.NaN, b1: Math.NaN, p1: Math.NaN,
+			b2: Math.NaN, p2: Math.NaN, b3: Math.NaN, p3: Math.NaN,
+			b4: Math.NaN, p4: Math.NaN, b5: Math.NaN, p5: Math.NaN,
+			b6: Math.NaN, p6: Math.NaN, b7: Math.NaN, p7: Math.NaN
+		};
+	}
+
+	public function clear():Void {
+		count = 0;
+		status = cycleBars = Math.NaN;
+		b0 = p0 = b1 = p1 = b2 = p2 = b3 = p3 = Math.NaN;
+		b4 = p4 = b5 = p5 = b6 = p6 = b7 = p7 = Math.NaN;
+	}
+
+	public function set(i:Int, bar:Float, price:Float):Void {
+		switch (i) {
+			case 0: b0 = bar; p0 = price;
+			case 1: b1 = bar; p1 = price;
+			case 2: b2 = bar; p2 = price;
+			case 3: b3 = bar; p3 = price;
+			case 4: b4 = bar; p4 = price;
+			case 5: b5 = bar; p5 = price;
+			case 6: b6 = bar; p6 = price;
+			case 7: b7 = bar; p7 = price;
+			default:
+		}
+	}
+}
+
+/**
+ * Capped LPPL risk-ribbon polyline (bar, ceiling-price samples).
+ * Same shape cost rationale as CycleSeries / ArcSet / RingBag.
+ */
+@:structInit
+class RibbonSeries {
+	public var count:Float;
+	public var status:Float;
+	public var b0:Float; public var p0:Float;
+	public var b1:Float; public var p1:Float;
+	public var b2:Float; public var p2:Float;
+	public var b3:Float; public var p3:Float;
+	public var b4:Float; public var p4:Float;
+	public var b5:Float; public var p5:Float;
+	public var b6:Float; public var p6:Float;
+	public var b7:Float; public var p7:Float;
+
+	public static inline var CAP = 8;
+
+	public static function nan():RibbonSeries {
+		return {
+			count: 0, status: Math.NaN,
+			b0: Math.NaN, p0: Math.NaN, b1: Math.NaN, p1: Math.NaN,
+			b2: Math.NaN, p2: Math.NaN, b3: Math.NaN, p3: Math.NaN,
+			b4: Math.NaN, p4: Math.NaN, b5: Math.NaN, p5: Math.NaN,
+			b6: Math.NaN, p6: Math.NaN, b7: Math.NaN, p7: Math.NaN
+		};
+	}
+
+	public function clear():Void {
+		count = 0;
+		status = Math.NaN;
+		b0 = p0 = b1 = p1 = b2 = p2 = b3 = p3 = Math.NaN;
+		b4 = p4 = b5 = p5 = b6 = p6 = b7 = p7 = Math.NaN;
+	}
+
+	public function set(i:Int, bar:Float, price:Float):Void {
+		switch (i) {
+			case 0: b0 = bar; p0 = price;
+			case 1: b1 = bar; p1 = price;
+			case 2: b2 = bar; p2 = price;
+			case 3: b3 = bar; p3 = price;
+			case 4: b4 = bar; p4 = price;
+			case 5: b5 = bar; p5 = price;
+			case 6: b6 = bar; p6 = price;
+			case 7: b7 = bar; p7 = price;
+			default:
+		}
+	}
+}
+
+/**
  * Fill helpers — mutate pre-allocated sets (stable shapes).
  */
 class GeomVizFill {
@@ -577,6 +680,34 @@ class GeomVizSpec {
 		];
 	}
 
+	public static function cycleFields():Array<{name:String, ty:MuseType}> {
+		return [
+			{name: "count", ty: TScalar}, {name: "status", ty: TScalar}, {name: "cycleBars", ty: TScalar},
+			{name: "b0", ty: TScalar}, {name: "p0", ty: TScalar},
+			{name: "b1", ty: TScalar}, {name: "p1", ty: TScalar},
+			{name: "b2", ty: TScalar}, {name: "p2", ty: TScalar},
+			{name: "b3", ty: TScalar}, {name: "p3", ty: TScalar},
+			{name: "b4", ty: TScalar}, {name: "p4", ty: TScalar},
+			{name: "b5", ty: TScalar}, {name: "p5", ty: TScalar},
+			{name: "b6", ty: TScalar}, {name: "p6", ty: TScalar},
+			{name: "b7", ty: TScalar}, {name: "p7", ty: TScalar}
+		];
+	}
+
+	public static function ribbonFields():Array<{name:String, ty:MuseType}> {
+		return [
+			{name: "count", ty: TScalar}, {name: "status", ty: TScalar},
+			{name: "b0", ty: TScalar}, {name: "p0", ty: TScalar},
+			{name: "b1", ty: TScalar}, {name: "p1", ty: TScalar},
+			{name: "b2", ty: TScalar}, {name: "p2", ty: TScalar},
+			{name: "b3", ty: TScalar}, {name: "p3", ty: TScalar},
+			{name: "b4", ty: TScalar}, {name: "p4", ty: TScalar},
+			{name: "b5", ty: TScalar}, {name: "p5", ty: TScalar},
+			{name: "b6", ty: TScalar}, {name: "p6", ty: TScalar},
+			{name: "b7", ty: TScalar}, {name: "p7", ty: TScalar}
+		];
+	}
+
 	public static function levelObj():MuseType return TObject(levelFields());
 	public static function rayObj():MuseType return TObject(rayFields());
 	public static function zoneObj():MuseType return TObject(zoneFields());
@@ -585,6 +716,8 @@ class GeomVizSpec {
 	public static function forecastObj():MuseType return TObject(forecastFields());
 	public static function arcObj():MuseType return TObject(arcFields());
 	public static function ringObj():MuseType return TObject(ringFields());
+	public static function cycleObj():MuseType return TObject(cycleFields());
+	public static function ribbonObj():MuseType return TObject(ribbonFields());
 }
 
 /** Module anchor — `import musescript.indicators.geom.GeomViz` pulls viz set types. */
