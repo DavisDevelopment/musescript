@@ -17,11 +17,8 @@ package musescript.indicators;
  * incrementally-extended series read by absolute bar-relative index (`col.a[i - 1]`, range scans
  * like `for (i in (m - len)...m) sum += col.a[i]`), never by recency.
  *
- * `push`-only (no indexed writes) -- matches every real usage site (`IndicatorColumns`'s own doc
- * comment: "extended only by new bars"). `RingBuffer`'s "capacity fixed forever" design doesn't
- * fit here at all; this grows via capacity-doubling over `haxe.ds.Vector<Float>` instead
- * (`Vector.blit`, i.e. `System.arraycopy` on the jvm target -- a native array-handle copy, not
- * per-element boxing, confirmed via `std/haxe/ds/Vector.hx`'s `#elseif java` branch).
+ * Indexed writes via `setAt` + `commitLength` are for known-length column fills (NMA kernels)
+ * that would otherwise pay a bounds check on every `push`. `push` remains the incremental API.
  */
 @:multiType(@:followWithAbstracts T)
 abstract GrowableVec<T>(IGrowableVec<T>) {
@@ -33,6 +30,12 @@ abstract GrowableVec<T>(IGrowableVec<T>) {
 	/** Absolute index from the start (0 = first pushed), matching plain `Array<T>` indexing. */
 	@:arrayAccess
 	public inline function at(i:Int):T return this.at(i);
+
+	/** Write at absolute index without changing `length` — pair with `commitLength` after a fill. */
+	public inline function setAt(i:Int, v:T):Void this.setAt(i, v);
+
+	/** Publish visible length after a bulk `setAt` fill (must be ≤ capacity). */
+	public inline function commitLength(n:Int):Void this.commitLength(n);
 
 	public var length(get, never):Int;
 	inline function get_length():Int return this.getLength();
@@ -67,6 +70,8 @@ abstract GrowableVec<T>(IGrowableVec<T>) {
 interface IGrowableVec<T> {
 	function push(v:T):Void;
 	function at(i:Int):T;
+	function setAt(i:Int, v:T):Void;
+	function commitLength(n:Int):Void;
 	function getLength():Int;
 	function clear():Void;
 	function ensureCapacity(n:Int):Void;
@@ -115,6 +120,13 @@ class GrowableFloatImpl implements IGrowableVec<Float> {
 	}
 
 	public function at(i:Int):Float return data[i];
+
+	public function setAt(i:Int, v:Float):Void data[i] = v;
+
+	public function commitLength(n:Int):Void {
+		length = n;
+	}
+
 	public function getLength():Int return length;
 
 	public function clear():Void {
@@ -148,6 +160,21 @@ class GrowableGenericImpl<T> implements IGrowableVec<T> {
 
 	public function push(v:T):Void data.push(v);
 	public function at(i:Int):T return data[i];
+
+	public function setAt(i:Int, v:T):Void {
+		while (data.length <= i) data.push(null);
+		data[i] = v;
+	}
+
+	public function commitLength(n:Int):Void {
+		#if (js || hl || java || cpp || cs || python || lua || neko || php || eval)
+		data.resize(n);
+		#else
+		while (data.length > n) data.pop();
+		while (data.length < n) data.push(null);
+		#end
+	}
+
 	public function getLength():Int return data.length;
 
 	public function clear():Void {
