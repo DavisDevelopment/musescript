@@ -5,6 +5,7 @@ import utest.Test;
 import musescript.indicators.geom.PivotPoint;
 import musescript.indicators.ew.ImpulseRules;
 import musescript.indicators.ew.CorrectiveRules;
+import musescript.indicators.ew.EwHypothesis;
 import musescript.indicators.ew.EwLattice;
 import musescript.indicators.ew.EwPhiParams;
 import musescript.indicators.ew.EwGuidelines;
@@ -148,9 +149,10 @@ class TestEwHandbookCh01 extends Test {
 		v[1] = piv(80, -1, 10);
 		v[2] = piv(88, 1, 20);
 		v[3] = piv(70, -1, 30);
-		var h = {
+		var h:EwHypothesis = {
 			rank: 0, score: 1.0, label: "zigzag",
-			startBar: 0, endBar: 30, waveCount: 3, degree: 0, offset: 0
+			startBar: 0, endBar: 30, waveCount: 3, degree: 0, offset: 0,
+			parentHypothesisId: -1, parentStartBar: -1, parentEndBar: -1, nestScore: 1.0
 		};
 		var band = EwProject.fromHypothesis(h, v);
 		Assert.notNull(band);

@@ -11,6 +11,17 @@ class EwLattice {
 	static inline var MAX_K = 8;
 	static inline var SCRATCH = 32;
 
+	static function makeHyp(
+		label:String, score:Float, startBar:Int, endBar:Int,
+		waveCount:Int, degree:Int, offset:Int
+	):EwHypothesis {
+		return {
+			rank: 0, score: score, label: label,
+			startBar: startBar, endBar: endBar, waveCount: waveCount, degree: degree, offset: offset,
+			parentHypothesisId: -1, parentStartBar: -1, parentEndBar: -1, nestScore: 1.0
+		};
+	}
+
 	var hypotheses:haxe.ds.Vector<EwHypothesis>;
 	var count:Int;
 	var pivotScratch:haxe.ds.Vector<PivotPoint>;
@@ -22,10 +33,8 @@ class EwLattice {
 		this.useGuidelines = useGuidelines;
 		hypotheses = new haxe.ds.Vector<EwHypothesis>(MAX_K);
 		for (i in 0...MAX_K) {
-			hypotheses[i] = {
-				rank: i, score: 0.0, label: "unknown",
-				startBar: -1, endBar: -1, waveCount: 0, degree: 0, offset: 0
-			};
+			hypotheses[i] = makeHyp("unknown", 0.0, -1, -1, 0, 0, 0);
+			hypotheses[i].rank = i;
 		}
 		pivotScratch = new haxe.ds.Vector<PivotPoint>(SCRATCH);
 		count = 0;
@@ -64,18 +73,12 @@ class EwLattice {
 			if (CorrectiveRules.isValidZigzag(a, b, c, d, params)) {
 				var soft = CorrectiveRules.softScore(a, b, c, d, params);
 				var depth = EwGuidelines.depthSoft(Math.abs(c.price - b.price) / Math.max(1e-12, Math.abs(b.price - a.price)), params);
-				push({
-					rank: 0, score: soft * depth, label: "zigzag",
-					startBar: a.bar, endBar: d.bar, waveCount: 3, degree: degree, offset: o
-				}, limK);
+				push(makeHyp("zigzag", soft * depth, a.bar, d.bar, 3, degree, o), limK);
 			}
 			var fk = CorrectiveRules.flatKind(a, b, c, d, params);
 			if (fk != 0) {
 				var softF = CorrectiveRules.softScore(a, b, c, d, params) * (fk == 2 ? 1.0 : 0.95);
-				push({
-					rank: 0, score: softF, label: CorrectiveRules.flatLabel(fk),
-					startBar: a.bar, endBar: d.bar, waveCount: 3, degree: degree, offset: o
-				}, limK);
+				push(makeHyp(CorrectiveRules.flatLabel(fk), softF, a.bar, d.bar, 3, degree, o), limK);
 			}
 		}
 
@@ -86,26 +89,14 @@ class EwLattice {
 				if (ImpulseRules.isValidFiveWave(pivotScratch, o)) {
 					var soft = ImpulseRules.softScoreFiveWave(pivotScratch, o, params);
 					if (useGuidelines) soft *= EwGuidelines.scoreImpulse(pivotScratch, o, params);
-					push({
-						rank: 0, score: 1.2 * soft, label: "impulse5",
-						startBar: pivotScratch[o].bar, endBar: pivotScratch[o + 5].bar,
-						waveCount: 5, degree: degree, offset: o
-					}, limK);
+					push(makeHyp("impulse5", 1.2 * soft, pivotScratch[o].bar, pivotScratch[o + 5].bar, 5, degree, o), limK);
 				} else if (ImpulseRules.isValidDiagonal(pivotScratch, o)) {
 					var softD = ImpulseRules.softScoreFiveWave(pivotScratch, o, params) * 0.9;
-					push({
-						rank: 0, score: softD, label: "diagonal",
-						startBar: pivotScratch[o].bar, endBar: pivotScratch[o + 5].bar,
-						waveCount: 5, degree: degree, offset: o
-					}, limK);
+					push(makeHyp("diagonal", softD, pivotScratch[o].bar, pivotScratch[o + 5].bar, 5, degree, o), limK);
 				}
 				if (CorrectiveRules.isValidTriangle(pivotScratch, o, params)) {
 					var softT = CorrectiveRules.softScoreTriangle(pivotScratch, o, params);
-					push({
-						rank: 0, score: 0.7 * softT, label: "triangle",
-						startBar: pivotScratch[o].bar, endBar: pivotScratch[o + 5].bar,
-						waveCount: 5, degree: degree, offset: o
-					}, limK);
+					push(makeHyp("triangle", 0.7 * softT, pivotScratch[o].bar, pivotScratch[o + 5].bar, 5, degree, o), limK);
 				}
 			}
 		}
@@ -116,11 +107,7 @@ class EwLattice {
 			for (o in 0...maxO8 + 1) {
 				if (CorrectiveRules.isValidDoubleZigzag(pivotScratch, o, params)) {
 					var softW = CorrectiveRules.softScoreDoubleZigzag(pivotScratch, o, params);
-					push({
-						rank: 0, score: 0.85 * softW, label: "double_zigzag",
-						startBar: pivotScratch[o].bar, endBar: pivotScratch[o + 7].bar,
-						waveCount: 7, degree: degree, offset: o
-					}, limK);
+					push(makeHyp("double_zigzag", 0.85 * softW, pivotScratch[o].bar, pivotScratch[o + 7].bar, 7, degree, o), limK);
 				}
 			}
 		}

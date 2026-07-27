@@ -178,4 +178,17 @@ class EwPhiParams {
 	public static function setCurrent(p:EwPhiParams):Void {
 		GLOBAL = p != null ? p : new EwPhiParams();
 	}
+
+	/** Build params from a flat float map (offline finetune load). */
+	public static function loadFromMap(m:Map<String, Float>):EwPhiParams {
+		return musescript.indicators.offline.PhiParamsDump.applyMap(m, new EwPhiParams());
+	}
+
+	#if (sys || node)
+	/** Load finetuned pack from JSON file (sys / Node CLI only). */
+	public static function loadFromJsonFile(path:String):EwPhiParams {
+		var m = musescript.indicators.offline.PhiParamsDump.loadMapFromJsonFile(path);
+		return loadFromMap(m);
+	}
+	#end
 }
