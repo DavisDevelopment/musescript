@@ -16,12 +16,21 @@ class EwLattice {
 
 	static function makeHyp(
 		label:String, score:Float, startBar:Int, endBar:Int,
-		waveCount:Int, degree:Int, offset:Int
+		waveCount:Int, degree:Int, offset:Int,
+		?pivots:haxe.ds.Vector<PivotPoint>
 	):EwHypothesis {
+		var invPrice = Math.NaN;
+		var invBar = Math.NaN;
+		if (pivots != null) {
+			var inv = EwInvalidation.forLabel(label, pivots, offset);
+			invPrice = inv.price;
+			invBar = inv.bar;
+		}
 		return {
 			rank: 0, score: score, label: label,
 			startBar: startBar, endBar: endBar, waveCount: waveCount, degree: degree, offset: offset,
-			parentHypothesisId: -1, parentStartBar: -1, parentEndBar: -1, nestScore: 1.0
+			parentHypothesisId: -1, parentStartBar: -1, parentEndBar: -1, nestScore: 1.0,
+			invalidatePrice: invPrice, invalidateBar: invBar
 		};
 	}
 
@@ -128,12 +137,12 @@ class EwLattice {
 			if (CorrectiveRules.isValidZigzag(a, b, c, d, params)) {
 				var soft = CorrectiveRules.softScore(a, b, c, d, params);
 				var depth = EwGuidelines.depthSoft(Math.abs(c.price - b.price) / Math.max(1e-12, Math.abs(b.price - a.price)), params);
-				cnt = pushInto(out, makeHyp("zigzag", soft * depth, a.bar, d.bar, 3, degree, o), cnt, limK);
+				cnt = pushInto(out, makeHyp("zigzag", soft * depth, a.bar, d.bar, 3, degree, o, buf), cnt, limK);
 			}
 			var fk = CorrectiveRules.flatKind(a, b, c, d, params);
 			if (fk != 0) {
-				var softF = CorrectiveRules.softScore(a, b, c, d, params) * (fk == 2 ? 1.0 : 0.95);
-				cnt = pushInto(out, makeHyp(CorrectiveRules.flatLabel(fk), softF, a.bar, d.bar, 3, degree, o), cnt, limK);
+				var softF = CorrectiveRules.softScoreFlat(a, b, c, d, fk, params);
+				cnt = pushInto(out, makeHyp(CorrectiveRules.flatLabel(fk), softF, a.bar, d.bar, 3, degree, o, buf), cnt, limK);
 			}
 		}
 
@@ -143,14 +152,20 @@ class EwLattice {
 				if (ImpulseRules.isValidFiveWave(buf, o)) {
 					var soft = ImpulseRules.softScoreFiveWave(buf, o, params);
 					if (useGuidelines) soft *= EwGuidelines.scoreImpulse(buf, o, params);
-					cnt = pushInto(out, makeHyp("impulse5", 1.2 * soft, buf[o].bar, buf[o + 5].bar, 5, degree, o), cnt, limK);
-				} else if (ImpulseRules.isValidDiagonal(buf, o)) {
-					var softD = ImpulseRules.softScoreFiveWave(buf, o, params) * 0.9;
-					cnt = pushInto(out, makeHyp("diagonal", softD, buf[o].bar, buf[o + 5].bar, 5, degree, o), cnt, limK);
+					var lab = ImpulseRules.impulseLabel(buf, o, params);
+					var boost = lab == "impulse5_trunc" ? 1.05 : 1.2;
+					cnt = pushInto(out, makeHyp(lab, boost * soft, buf[o].bar, buf[o + 5].bar, 5, degree, o, buf), cnt, limK);
+				} else {
+					var dk = ImpulseRules.diagonalKind(buf, o);
+					if (dk != 0) {
+						var softD = ImpulseRules.softScoreDiagonal(buf, o, params);
+						cnt = pushInto(out, makeHyp(ImpulseRules.diagonalLabel(dk), softD, buf[o].bar, buf[o + 5].bar, 5, degree, o, buf), cnt, limK);
+					}
 				}
-				if (CorrectiveRules.isValidTriangle(buf, o, params)) {
+				var tk = CorrectiveRules.triangleKind(buf, o, degree, params);
+				if (tk != 0) {
 					var softT = CorrectiveRules.softScoreTriangle(buf, o, params);
-					cnt = pushInto(out, makeHyp("triangle", 0.7 * softT, buf[o].bar, buf[o + 5].bar, 5, degree, o), cnt, limK);
+					cnt = pushInto(out, makeHyp(CorrectiveRules.triangleLabel(tk), 0.7 * softT, buf[o].bar, buf[o + 5].bar, 5, degree, o, buf), cnt, limK);
 				}
 			}
 		}
@@ -160,7 +175,10 @@ class EwLattice {
 			for (o in 0...maxO8 + 1) {
 				if (CorrectiveRules.isValidDoubleZigzag(buf, o, params)) {
 					var softW = CorrectiveRules.softScoreDoubleZigzag(buf, o, params);
-					cnt = pushInto(out, makeHyp("double_zigzag", 0.85 * softW, buf[o].bar, buf[o + 7].bar, 7, degree, o), cnt, limK);
+					cnt = pushInto(out, makeHyp("double_zigzag", 0.85 * softW, buf[o].bar, buf[o + 7].bar, 7, degree, o, buf), cnt, limK);
+				} else if (CorrectiveRules.isValidDoubleThree(buf, o, params)) {
+					var softZ = CorrectiveRules.softScoreDoubleThree(buf, o, params);
+					cnt = pushInto(out, makeHyp("double_three", 0.8 * softZ, buf[o].bar, buf[o + 7].bar, 7, degree, o, buf), cnt, limK);
 				}
 			}
 		}
@@ -202,11 +220,16 @@ class EwLattice {
 			return Math.min(1.0, Math.max(0.35, barContain * p.depthIntoPriorFourth));
 
 		var w4Score = 0.55;
-		if (parent.label == "impulse5" || parent.label == "diagonal") {
+		if (ImpulseRules.isImpulseFamily(parent.label) || ImpulseRules.isDiagonalFamily(parent.label)) {
 			var o = parent.offset;
 			if (o + 4 < coarseScratch.length) {
 				var p3 = coarseScratch[o + 3].price;
 				var p4 = coarseScratch[o + 4].price;
+				// Extended-3: W4 territory bias shallower (closer to W3 tip)
+				if (parent.label == "impulse5_ext3") {
+					var midW4 = (p3 + p4) * 0.5;
+					p4 = midW4 + (p4 - midW4) * 0.65;
+				}
 				var lo = Math.min(p3, p4);
 				var hi = Math.max(p3, p4);
 				var childLo = fineScratch[child.offset].price;
@@ -228,7 +251,8 @@ class EwLattice {
 					w4Score = Math.max(0.4, 1.0 - dist / span);
 				}
 			}
-		} else if (parent.label == "zigzag" || parent.label == "flat" || parent.label == "flat_expanded" || parent.label == "flat_running") {
+		} else if (parent.label == "zigzag" || parent.label == "flat" || parent.label == "flat_expanded" || parent.label == "flat_running"
+			|| parent.label == "double_zigzag" || parent.label == "double_three") {
 			var po = parent.offset;
 			if (po + 2 < coarseScratch.length) {
 				var a = coarseScratch[po].price;

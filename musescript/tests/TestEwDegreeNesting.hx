@@ -57,7 +57,8 @@ class TestEwDegreeNesting extends Test {
 		return {
 			rank: 0, score: 1.0, label: "impulse5",
 			startBar: startBar, endBar: endBar, waveCount: 5, degree: 0, offset: offset,
-			parentHypothesisId: -1, parentStartBar: -1, parentEndBar: -1, nestScore: 1.0
+			parentHypothesisId: -1, parentStartBar: -1, parentEndBar: -1, nestScore: 1.0,
+			invalidatePrice: Math.NaN, invalidateBar: Math.NaN
 		};
 	}
 
@@ -65,7 +66,8 @@ class TestEwDegreeNesting extends Test {
 		return {
 			rank: 0, score: 1.0, label: "impulse5",
 			startBar: 0, endBar: 100, waveCount: 5, degree: 1, offset: offset,
-			parentHypothesisId: -1, parentStartBar: -1, parentEndBar: -1, nestScore: 1.0
+			parentHypothesisId: -1, parentStartBar: -1, parentEndBar: -1, nestScore: 1.0,
+			invalidatePrice: Math.NaN, invalidateBar: Math.NaN
 		};
 	}
 
@@ -170,5 +172,9 @@ class TestEwDegreeNesting extends Test {
 		Assert.isTrue(Math.isFinite(last.degree));
 		Assert.isTrue(Math.isFinite(last.nestScore));
 		Assert.isTrue(last.nestScore >= 0.35 && last.nestScore <= 1.0);
+		// When nested, indicator may emit ParentDegree zone (kind=11) without bumping Cap
+		if (last.parentLabelCode > 0 && Math.isFinite(last.parentStartBar)) {
+			Assert.isTrue(last.zones.count >= 1);
+		}
 	}
 }

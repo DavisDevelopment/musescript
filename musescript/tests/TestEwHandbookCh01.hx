@@ -7,6 +7,7 @@ import musescript.indicators.ew.ImpulseRules;
 import musescript.indicators.ew.CorrectiveRules;
 import musescript.indicators.ew.EwHypothesis;
 import musescript.indicators.ew.EwLattice;
+import musescript.indicators.ew.EwInvalidation;
 import musescript.indicators.ew.EwPhiParams;
 import musescript.indicators.ew.EwGuidelines;
 import musescript.indicators.ew.EwRatioTargets;
@@ -152,7 +153,8 @@ class TestEwHandbookCh01 extends Test {
 		var h:EwHypothesis = {
 			rank: 0, score: 1.0, label: "zigzag",
 			startBar: 0, endBar: 30, waveCount: 3, degree: 0, offset: 0,
-			parentHypothesisId: -1, parentStartBar: -1, parentEndBar: -1, nestScore: 1.0
+			parentHypothesisId: -1, parentStartBar: -1, parentEndBar: -1, nestScore: 1.0,
+			invalidatePrice: Math.NaN, invalidateBar: Math.NaN
 		};
 		var band = EwProject.fromHypothesis(h, v);
 		Assert.notNull(band);
@@ -219,5 +221,67 @@ class TestEwHandbookCh01 extends Test {
 		v[6] = piv(68, 1, 60);
 		v[7] = piv(50, -1, 70);
 		Assert.isTrue(CorrectiveRules.isValidDoubleZigzag(v, 0));
+	}
+
+	public function testImpulseInvalidationBullBelowW1Start() {
+		var v = bullImpulse();
+		var inv = EwInvalidation.forLabel("impulse5", v, 0);
+		Assert.floatEquals(100.0, inv.price, 1e-9);
+		Assert.floatEquals(0.0, inv.bar, 1e-9);
+		// Soft next (completed 5) watches W4 tip
+		var soft = EwInvalidation.softNextW4(v, 0);
+		Assert.floatEquals(112.0, soft.price, 1e-9);
+	}
+
+	public function testImpulseInvalidationBearAboveW1Start() {
+		// Bear impulse: 100-90-95-80-88-75
+		var v = new haxe.ds.Vector<PivotPoint>(6);
+		v[0] = piv(100, 1, 0);
+		v[1] = piv(90, -1, 10);
+		v[2] = piv(95, 1, 20);
+		v[3] = piv(80, -1, 30);
+		v[4] = piv(88, 1, 40);
+		v[5] = piv(75, -1, 50);
+		Assert.isTrue(ImpulseRules.isValidFiveWave(v, 0));
+		var inv = EwInvalidation.forLabel("impulse5", v, 0);
+		Assert.floatEquals(100.0, inv.price, 1e-9);
+		Assert.floatEquals(0.0, inv.bar, 1e-9);
+	}
+
+	public function testZigzagInvalidationAtStartOfA() {
+		var v = new haxe.ds.Vector<PivotPoint>(4);
+		v[0] = piv(100, 1, 0);
+		v[1] = piv(80, -1, 10);
+		v[2] = piv(88, 1, 20);
+		v[3] = piv(70, -1, 30);
+		Assert.isTrue(CorrectiveRules.isValidZigzag(v[0], v[1], v[2], v[3]));
+		var inv = EwInvalidation.forLabel("zigzag", v, 0);
+		Assert.floatEquals(100.0, inv.price, 1e-9);
+		Assert.floatEquals(0.0, inv.bar, 1e-9);
+	}
+
+	public function testFlatInvalidationAtCTip() {
+		var v = new haxe.ds.Vector<PivotPoint>(4);
+		v[0] = piv(100, 1, 0);
+		v[1] = piv(90, -1, 10);
+		v[2] = piv(102, 1, 20);
+		v[3] = piv(85, -1, 30);
+		Assert.equals(2, CorrectiveRules.flatKind(v[0], v[1], v[2], v[3]));
+		var inv = EwInvalidation.forLabel("flat_expanded", v, 0);
+		Assert.floatEquals(85.0, inv.price, 1e-9);
+		Assert.floatEquals(30.0, inv.bar, 1e-9);
+	}
+
+	public function testLatticeFillsInvalidationOnImpulse() {
+		var v = bullImpulse();
+		var h:EwHypothesis = {
+			rank: 0, score: 1.0, label: "impulse5",
+			startBar: 0, endBar: 50, waveCount: 5, degree: 0, offset: 0,
+			parentHypothesisId: -1, parentStartBar: -1, parentEndBar: -1, nestScore: 1.0,
+			invalidatePrice: Math.NaN, invalidateBar: Math.NaN
+		};
+		EwInvalidation.apply(h, v, 0);
+		Assert.floatEquals(100.0, h.invalidatePrice, 1e-9);
+		Assert.floatEquals(0.0, h.invalidateBar, 1e-9);
 	}
 }

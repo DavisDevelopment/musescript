@@ -18,4 +18,8 @@ typedef EwHypothesis = {
 	var parentEndBar:Int;
 	/** Soft nesting score applied (1.0 = neutral / no parent). */
 	var nestScore:Float;
+	/** Price that kills this preferred count (NaN if N/A). See EwInvalidation. */
+	var invalidatePrice:Float;
+	/** Bar index of invalidatePrice pivot (NaN if N/A). */
+	var invalidateBar:Float;
 }

@@ -34,6 +34,10 @@ typedef EwHypothesisOutput = {
 	var nestScore:Float;
 	var parentStartBar:Float;
 	var parentEndBar:Float;
+	/** Count-kill price for top hypothesis (NaN if N/A). */
+	var invalidatePrice:Float;
+	/** Bar of invalidatePrice pivot (NaN if N/A). */
+	var invalidateBar:Float;
 	var pivots:PivotMarkSet;
 	var labels:LabelSet;
 	var forecast:ForecastBand;
@@ -56,6 +60,7 @@ class EwHypothesisIndicator implements MuseIndicator<Bar, EwHypothesisOutput> {
 			startBar: Math.NaN, endBar: Math.NaN, waveCount: 0, dowBias: 0,
 			degree: 0, parentLabelCode: 0, nestScore: 1.0,
 			parentStartBar: Math.NaN, parentEndBar: Math.NaN,
+			invalidatePrice: Math.NaN, invalidateBar: Math.NaN,
 			pivots: PivotMarkSet.nan(), labels: LabelSet.nan(),
 			forecast: ForecastBand.nan(), zones: ZoneSet.nan()
 		};
@@ -66,9 +71,16 @@ class EwHypothesisIndicator implements MuseIndicator<Bar, EwHypothesisOutput> {
 			case "zigzag": 1.0;
 			case "impulse5": 2.0;
 			case "flat", "flat_expanded", "flat_running": 3.0;
-			case "diagonal": 4.0;
+			case "diagonal", "diagonal_ending": 4.0;
 			case "triangle": 5.0;
 			case "double_zigzag": 6.0;
+			case "diagonal_leading": 7.0;
+			case "impulse5_trunc": 8.0;
+			case "impulse5_ext1": 9.0;
+			case "impulse5_ext3": 10.0;
+			case "impulse5_ext5": 11.0;
+			case "double_three": 12.0;
+			case "triangle_expanding": 13.0;
 			default: 0.0;
 		};
 	}
@@ -87,6 +99,7 @@ class EwHypothesisIndicator implements MuseIndicator<Bar, EwHypothesisOutput> {
 			out.startBar = Math.NaN; out.endBar = Math.NaN; out.waveCount = 0;
 			out.degree = 0; out.parentLabelCode = 0; out.nestScore = 1.0;
 			out.parentStartBar = Math.NaN; out.parentEndBar = Math.NaN;
+			out.invalidatePrice = Math.NaN; out.invalidateBar = Math.NaN;
 			return out;
 		}
 		var top = lattice.at(0);
@@ -100,6 +113,8 @@ class EwHypothesisIndicator implements MuseIndicator<Bar, EwHypothesisOutput> {
 		out.nestScore = top.nestScore;
 		out.parentStartBar = top.parentStartBar >= 0 ? top.parentStartBar * 1.0 : Math.NaN;
 		out.parentEndBar = top.parentEndBar >= 0 ? top.parentEndBar * 1.0 : Math.NaN;
+		out.invalidatePrice = top.invalidatePrice;
+		out.invalidateBar = top.invalidateBar;
 		if (top.parentHypothesisId >= 0 && top.parentHypothesisId < lattice.coarseHypothesisCount()) {
 			out.parentLabelCode = labelCodeOf(lattice.coarseAt(top.parentHypothesisId).label);
 		} else {
@@ -107,10 +122,14 @@ class EwHypothesisIndicator implements MuseIndicator<Bar, EwHypothesisOutput> {
 		}
 
 		var waveCodes = switch (top.label) {
-			case "impulse5", "diagonal":
+			case "impulse5", "impulse5_trunc", "impulse5_ext1", "impulse5_ext3", "impulse5_ext5",
+				"diagonal", "diagonal_ending", "diagonal_leading":
 				[GeomLabelCode.Wave1, GeomLabelCode.Wave2, GeomLabelCode.Wave3, GeomLabelCode.Wave4, GeomLabelCode.Wave5];
-			case "triangle":
+			case "triangle", "triangle_expanding":
 				[GeomLabelCode.WaveA, GeomLabelCode.WaveB, GeomLabelCode.WaveC, GeomLabelCode.WaveA, GeomLabelCode.WaveB];
+			case "double_zigzag", "double_three":
+				[GeomLabelCode.WaveA, GeomLabelCode.WaveB, GeomLabelCode.WaveC, GeomLabelCode.X,
+					GeomLabelCode.WaveA, GeomLabelCode.WaveB, GeomLabelCode.WaveC];
 			default:
 				[GeomLabelCode.WaveA, GeomLabelCode.WaveB, GeomLabelCode.WaveC];
 		};
@@ -141,6 +160,58 @@ class EwHypothesisIndicator implements MuseIndicator<Bar, EwHypothesisOutput> {
 				GeomVizFill.statusOf(PivotStatus.Projected), (ZoneKind.Forecast : Int) * 1.0);
 			out.zones.count = 1;
 		}
+
+		// Thin projected invalidation level (trailing zone slot; shape-stable).
+		if (Math.isFinite(top.invalidatePrice)) {
+			var ziInv = Std.int(out.zones.count);
+			if (ziInv < ZoneSet.CAP) {
+				var inv = top.invalidatePrice;
+				var pad = Math.max(1e-9, Math.abs(inv) * 1e-6);
+				var bar0 = Math.isFinite(top.invalidateBar) ? top.invalidateBar : top.endBar * 1.0;
+				var bar1 = top.endBar * 1.0;
+				if (!(bar1 >= bar0)) bar1 = bar0 + 1;
+				out.zones.set(ziInv, inv - pad, inv + pad, bar0, bar1,
+					GeomVizFill.statusOf(PivotStatus.Projected), (ZoneKind.Invalidation : Int) * 1.0);
+				out.zones.count = (ziInv + 1) * 1.0;
+			}
+		}
+
+		// Parent degree overlay: coarse span zone + pattern glyph (Forming = dashed/muted).
+		// Convention: ZoneKind.ParentDegree; Impulse/Zigzag label codes mark the parent (not fine waves).
+		if (top.parentHypothesisId >= 0
+			&& Math.isFinite(out.parentStartBar) && Math.isFinite(out.parentEndBar)) {
+			var parent = lattice.coarseAt(top.parentHypothesisId);
+			var cs = lattice.coarseScratchVec();
+			var o = parent.offset;
+			var plo = Math.POSITIVE_INFINITY;
+			var phi = Math.NEGATIVE_INFINITY;
+			for (i in 0...parent.waveCount) {
+				if (o + i >= cs.length) break;
+				var pr = cs[o + i].price;
+				if (pr < plo) plo = pr;
+				if (pr > phi) phi = pr;
+			}
+			if (plo < Math.POSITIVE_INFINITY && phi > Math.NEGATIVE_INFINITY) {
+				var zi = Std.int(out.zones.count);
+				if (zi < ZoneSet.CAP) {
+					out.zones.set(zi, plo, phi, out.parentStartBar, out.parentEndBar,
+						GeomVizFill.statusOf(PivotStatus.Forming), (ZoneKind.ParentDegree : Int) * 1.0);
+					out.zones.count = (zi + 1) * 1.0;
+				}
+				var li = Std.int(out.labels.count);
+				if (li < LabelSet.CAP) {
+					var pCode = switch (Std.int(out.parentLabelCode)) {
+						case 1, 3, 5, 6: GeomLabelCode.Zigzag;
+						default: GeomLabelCode.Impulse;
+					};
+					var midBar = (out.parentStartBar + out.parentEndBar) * 0.5;
+					var midPrice = (plo + phi) * 0.5;
+					out.labels.set(li, (pCode : Int) * 1.0, midPrice, midBar,
+						GeomVizFill.statusOf(PivotStatus.Forming));
+					out.labels.count = (li + 1) * 1.0;
+				}
+			}
+		}
 		return out;
 	}
 
@@ -161,6 +232,7 @@ class EwHypothesisIndicator implements MuseIndicator<Bar, EwHypothesisOutput> {
 				{name: "dowBias", ty: TScalar},
 				{name: "degree", ty: TScalar}, {name: "parentLabelCode", ty: TScalar},
 				{name: "nestScore", ty: TScalar}, {name: "parentStartBar", ty: TScalar}, {name: "parentEndBar", ty: TScalar},
+				{name: "invalidatePrice", ty: TScalar}, {name: "invalidateBar", ty: TScalar},
 				{name: "pivots", ty: GeomVizSpec.pivotObj()},
 				{name: "labels", ty: GeomVizSpec.labelObj()},
 				{name: "forecast", ty: GeomVizSpec.forecastObj()},
@@ -173,6 +245,7 @@ class EwHypothesisIndicator implements MuseIndicator<Bar, EwHypothesisOutput> {
 					startBar: Math.NaN, endBar: Math.NaN, waveCount: Math.NaN, dowBias: Math.NaN,
 					degree: Math.NaN, parentLabelCode: Math.NaN, nestScore: Math.NaN,
 					parentStartBar: Math.NaN, parentEndBar: Math.NaN,
+					invalidatePrice: Math.NaN, invalidateBar: Math.NaN,
 					pivots: PivotMarkSet.nan(), labels: LabelSet.nan(),
 					forecast: ForecastBand.nan(), zones: ZoneSet.nan()
 				};

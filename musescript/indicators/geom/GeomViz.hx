@@ -26,6 +26,10 @@ enum abstract ZoneKind(Int) from Int to Int {
 	var MurreyOctave = 7;
 	var GannFan = 8;
 	var Cycle = 9;
+	/** EW count-kill level (thin projected band). */
+	var Invalidation = 10;
+	/** Coarse parent degree span (EW nesting overlay). */
+	var ParentDegree = 11;
 }
 
 /** Label codes (avoid free-form strings on hot path). */
