@@ -51,11 +51,18 @@ class EwProject {
 			var times = EwRatioTargets.timeBars(scratch[o + 4].bar, scratch[o + 1].bar - scratch[o].bar, p);
 			return bandFromTargets(targets, times, "impulseW5");
 		}
-		if (h.label == "zigzag" || h.label == "flat") {
+		if (h.label == "zigzag" || h.label == "flat" || h.label == "flat_expanded" || h.label == "flat_running") {
 			if (o + 3 >= scratch.length) return null;
 			var targets = EwRatioTargets.zigzagCTargets(scratch[o], scratch[o + 1], scratch[o + 2], p);
 			var times = EwRatioTargets.timeBars(scratch[o + 2].bar, scratch[o + 1].bar - scratch[o].bar, p);
-			return bandFromTargets(targets, times, h.label == "flat" ? "flatC" : "zigzagC");
+			var kind = h.label == "zigzag" ? "zigzagC" : "flatC";
+			return bandFromTargets(targets, times, kind);
+		}
+		if (h.label == "double_zigzag") {
+			if (o + 7 >= scratch.length) return null;
+			var targets = EwRatioTargets.zigzagCTargets(scratch[o + 4], scratch[o + 5], scratch[o + 6], p);
+			var times = EwRatioTargets.timeBars(scratch[o + 6].bar, scratch[o + 5].bar - scratch[o + 4].bar, p);
+			return bandFromTargets(targets, times, "doubleZigY");
 		}
 		return null;
 	}

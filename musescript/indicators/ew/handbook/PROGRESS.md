@@ -6,5 +6,6 @@
 | 2 Guidelines | done | EwGuidelines.hx; lattice multiplies guideline scores | Confirmed Ch1 did not hard-gate guidelines |
 | 3 φ Math | done | EwPhiParams identities; SoftScores.bestFibHitParams; RatioTables.EW_PHI_CORE | Soft hits parametrized |
 | 4 Ratio Analysis | done | EwRatioTargets; wave-aware EwProject; PhiParamsDump | fromLastLeg uses params |
+| deepen correctives | done | flat regular/expanded/running; real triangle a-e; double zigzag W-X-Y | lattice windows 4/6/8 |
 
-Tests: `TestEwHandbookCh01` (covers Ch1–4 assertions).
+Tests: `TestEwHandbookCh01` (covers Ch1–4 + deepen).

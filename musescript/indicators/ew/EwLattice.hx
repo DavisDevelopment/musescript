@@ -54,7 +54,7 @@ class EwLattice {
 
 		var limK = k < 1 ? 1 : (k > MAX_K ? MAX_K : k);
 
-		// Sliding windows of 4 → zigzag / flat
+		// Sliding windows of 4 → zigzag / flat variants
 		var maxO4 = take - 4;
 		for (o in 0...maxO4 + 1) {
 			var a = pivotScratch[o];
@@ -69,16 +69,17 @@ class EwLattice {
 					startBar: a.bar, endBar: d.bar, waveCount: 3, degree: degree, offset: o
 				}, limK);
 			}
-			if (CorrectiveRules.isValidFlat(a, b, c, d, params)) {
-				var softF = CorrectiveRules.softScore(a, b, c, d, params) * 0.95;
+			var fk = CorrectiveRules.flatKind(a, b, c, d, params);
+			if (fk != 0) {
+				var softF = CorrectiveRules.softScore(a, b, c, d, params) * (fk == 2 ? 1.0 : 0.95);
 				push({
-					rank: 0, score: softF, label: "flat",
+					rank: 0, score: softF, label: CorrectiveRules.flatLabel(fk),
 					startBar: a.bar, endBar: d.bar, waveCount: 3, degree: degree, offset: o
 				}, limK);
 			}
 		}
 
-		// Sliding windows of 6 → impulse / diagonal / triangle stub
+		// Sliding windows of 6 → impulse / diagonal / triangle
 		if (take >= 6) {
 			var maxO6 = take - 6;
 			for (o in 0...maxO6 + 1) {
@@ -98,11 +99,27 @@ class EwLattice {
 						waveCount: 5, degree: degree, offset: o
 					}, limK);
 				}
-				if (CorrectiveRules.isValidTriangleStub(pivotScratch, o)) {
+				if (CorrectiveRules.isValidTriangle(pivotScratch, o, params)) {
+					var softT = CorrectiveRules.softScoreTriangle(pivotScratch, o, params);
 					push({
-						rank: 0, score: 0.55, label: "triangle",
+						rank: 0, score: 0.7 * softT, label: "triangle",
 						startBar: pivotScratch[o].bar, endBar: pivotScratch[o + 5].bar,
 						waveCount: 5, degree: degree, offset: o
+					}, limK);
+				}
+			}
+		}
+
+		// Sliding windows of 8 → double zigzag W-X-Y
+		if (take >= 8) {
+			var maxO8 = take - 8;
+			for (o in 0...maxO8 + 1) {
+				if (CorrectiveRules.isValidDoubleZigzag(pivotScratch, o, params)) {
+					var softW = CorrectiveRules.softScoreDoubleZigzag(pivotScratch, o, params);
+					push({
+						rank: 0, score: 0.85 * softW, label: "double_zigzag",
+						startBar: pivotScratch[o].bar, endBar: pivotScratch[o + 7].bar,
+						waveCount: 7, degree: degree, offset: o
 					}, limK);
 				}
 			}

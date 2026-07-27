@@ -173,4 +173,49 @@ class TestEwHandbookCh01 extends Test {
 		var hit = p.bestHit(0.42, p.w2RetraceTargets, 1);
 		Assert.isTrue(hit > 0.9);
 	}
+
+	public function testExpandedFlatKind() {
+		// A down 100→90, B beyond start to 102, C beyond A end to 85
+		var a = piv(100, 1, 0);
+		var b = piv(90, -1, 10);
+		var c = piv(102, 1, 20);
+		var d = piv(85, -1, 30);
+		Assert.equals(2, CorrectiveRules.flatKind(a, b, c, d));
+		Assert.equals("flat_expanded", CorrectiveRules.flatLabel(2));
+	}
+
+	public function testRunningFlatKind() {
+		// A down 100→90, B beyond to 103, C fails to reach 90 (stops at 95)
+		var a = piv(100, 1, 0);
+		var b = piv(90, -1, 10);
+		var c = piv(103, 1, 20);
+		var d = piv(95, -1, 30);
+		Assert.equals(3, CorrectiveRules.flatKind(a, b, c, d));
+	}
+
+	public function testContractingTriangle() {
+		var v = new haxe.ds.Vector<PivotPoint>(6);
+		v[0] = piv(100, 1, 0);
+		v[1] = piv(80, -1, 10);  // a=20
+		v[2] = piv(95, 1, 20);   // b=15
+		v[3] = piv(83, -1, 30);  // c=12 ≈0.618*a
+		v[4] = piv(92, 1, 40);   // d=9
+		v[5] = piv(85, -1, 50);  // e=7 ≈0.618*c
+		Assert.isTrue(CorrectiveRules.isValidTriangle(v, 0));
+	}
+
+	public function testDoubleZigzagWXY() {
+		var v = new haxe.ds.Vector<PivotPoint>(8);
+		// W zigzag
+		v[0] = piv(100, 1, 0);
+		v[1] = piv(80, -1, 10);
+		v[2] = piv(88, 1, 20);
+		v[3] = piv(70, -1, 30);
+		// X connector + Y zigzag
+		v[4] = piv(78, 1, 40);
+		v[5] = piv(60, -1, 50);
+		v[6] = piv(68, 1, 60);
+		v[7] = piv(50, -1, 70);
+		Assert.isTrue(CorrectiveRules.isValidDoubleZigzag(v, 0));
+	}
 }

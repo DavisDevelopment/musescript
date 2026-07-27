@@ -53,9 +53,10 @@ class EwHypothesisIndicator implements MuseIndicator<Bar, EwHypothesisOutput> {
 		return switch (label) {
 			case "zigzag": 1.0;
 			case "impulse5": 2.0;
-			case "flat": 3.0;
+			case "flat", "flat_expanded", "flat_running": 3.0;
 			case "diagonal": 4.0;
 			case "triangle": 5.0;
+			case "double_zigzag": 6.0;
 			default: 0.0;
 		};
 	}
