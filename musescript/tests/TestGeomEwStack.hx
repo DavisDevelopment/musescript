@@ -163,6 +163,54 @@ class TestGeomEwStack extends Test {
 		Assert.isTrue(w.isReady());
 	}
 
+	public function testPatternDetectorsUseSwingGraph() {
+		var flag = new musescript.indicators.lib.FlagPennant();
+		var hs = new musescript.indicators.lib.HeadAndShoulders();
+		var cup = new musescript.indicators.lib.CupAndHandle();
+		var dbl = new musescript.indicators.lib.DoubleTopBottom();
+		var tri = new musescript.indicators.lib.TripleTopBottom();
+		var abcd = new musescript.indicators.lib.Abcd();
+		var drives = new musescript.indicators.lib.ThreeDrives();
+		for (i in 0...30) {
+			var base = 100.0 + Math.sin(i * 0.45) * 10.0;
+			var b = bar(base, base + 4, base - 4, base);
+			flag.update(b); hs.update(b); cup.update(b);
+			dbl.update(b); tri.update(b); abcd.update(b); drives.update(b);
+		}
+		Assert.isTrue(flag.isReady());
+		Assert.isTrue(hs.isReady());
+		Assert.isTrue(cup.isReady());
+		Assert.isTrue(dbl.isReady());
+		Assert.isTrue(tri.isReady());
+		Assert.isTrue(abcd.isReady());
+		Assert.isTrue(drives.isReady());
+	}
+
+	public function testSsaCyclesEmitsCycleSeries() {
+		var ssa = new musescript.indicators.lib.SsaCycles(16, 2, 8);
+		var last:Null<Dynamic> = null;
+		for (i in 0...24) {
+			var base = 100.0 + Math.sin(i * Math.PI / 6) * 5.0;
+			last = ssa.update(bar(base, base + 1, base - 1, base));
+		}
+		Assert.notNull(last);
+		Assert.isTrue(last.cycle.count >= 1);
+		Assert.isTrue(Math.isFinite(last.cycle.p0));
+		Assert.isTrue(Math.isFinite(last.cycle.b0));
+	}
+
+	public function testLpplWarningEmitsRibbonSeries() {
+		var lp = new musescript.indicators.lib.LpplWarningIndicator(30);
+		var last:Null<Dynamic> = null;
+		for (i in 0...40) {
+			var c = 100.0 + i * i * 0.02;
+			last = lp.update(bar(c, c + 1, c - 1, c));
+		}
+		Assert.notNull(last);
+		Assert.isTrue(last.ribbon.count >= 1);
+		Assert.isTrue(Math.isFinite(last.ribbon.p0));
+	}
+
 	public function testGannAndSoftScores() {
 		var fan = GannAngles.fan(100.0, 10, 1.0);
 		Assert.floatEquals(110.0, fan.ang1x1, 1e-9);

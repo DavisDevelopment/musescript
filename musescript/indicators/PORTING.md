@@ -41,7 +41,7 @@ no two ports ever touch the same file.
    source path in the class doc comment. If it composes a primitive
    (`Ema::new`, `Rsi::new`, ...), use the `prim/` version; port that primitive
    first if it's missing. Shared swing detection → `geom.SwingGraph`, not a
-   private `SwingTracker` copy.
+   shared `SwingGraph` (no private `SwingTracker` / `Array.shift`).
 3. **Add `static function spec():IndicatorSpec`** — pick the input helper
    matching `type Input`:
    - Candle → `IndicatorCache.evalBar(...)` (args typically `[TWindow]`).

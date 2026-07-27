@@ -4,84 +4,8 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.geom.SwingGraph;
 import musescript.types.MuseType;
-
-private typedef Pivot = {
-	var price:Float;
-	var direction:Float;
-	var bar:Int;
-}
-
-private typedef SwingState = {
-	var direction:Float;
-	var extreme:Float;
-	var extremeBar:Int;
-}
-
-/** Non-repainting percent-threshold swing tracker with bounded pivot history. */
-private class SwingTracker {
-	var threshold:Float;
-	var cap:Int;
-	var barsSeen:Int;
-	var state:Null<SwingState>;
-	var pivots:Array<Pivot>;
-
-	public function new(threshold:Float, cap:Int) {
-		this.threshold = threshold;
-		this.cap = cap;
-		barsSeen = 0;
-		state = null;
-		pivots = [];
-	}
-
-	public function update(bar:Bar):Bool {
-		var barIdx = barsSeen;
-		barsSeen++;
-
-		if (state == null) {
-			state = { direction: 1.0, extreme: bar.high, extremeBar: barIdx };
-			return false;
-		}
-
-		var s = state;
-		if (s.direction > 0.0) {
-			if (bar.high > s.extreme) {
-				state = { direction: 1.0, extreme: bar.high, extremeBar: barIdx };
-				return false;
-			}
-			if (bar.low <= s.extreme * (1.0 - threshold)) {
-				push({ price: s.extreme, direction: 1.0, bar: s.extremeBar });
-				state = { direction: -1.0, extreme: bar.low, extremeBar: barIdx };
-				return true;
-			}
-			return false;
-		} else {
-			if (bar.low < s.extreme) {
-				state = { direction: -1.0, extreme: bar.low, extremeBar: barIdx };
-				return false;
-			}
-			if (bar.high >= s.extreme * (1.0 + threshold)) {
-				push({ price: s.extreme, direction: -1.0, bar: s.extremeBar });
-				state = { direction: 1.0, extreme: bar.high, extremeBar: barIdx };
-				return true;
-			}
-			return false;
-		}
-	}
-
-	function push(pivot:Pivot):Void {
-		pivots.push(pivot);
-		if (pivots.length > cap) pivots.shift();
-	}
-
-	public function getPivots():Array<Pivot> return pivots;
-
-	public function reset():Void {
-		barsSeen = 0;
-		state = null;
-		pivots = [];
-	}
-}
 
 /**
  * Flag / Pennant continuation chart pattern.
@@ -100,34 +24,32 @@ private class SwingTracker {
  *
  * The detector fires on the bar that confirms the consolidation pivot (the flag
  * is complete; the breakout is expected to follow). Output is always a Float
- * (+1.0 / -1.0 / 0.0); never null.
+ * (+1.0 / -1.0 / 0.0); never null. Swings via shared `SwingGraph`.
  */
 class FlagPennant implements MuseIndicator<Bar, Float> {
-	var swing:SwingTracker;
+	var swing:SwingGraph;
 	var hasEmitted:Bool;
 	static inline var MAX_RETRACE_FRACTION = 0.5;
 
 	public function new() {
-		swing = new SwingTracker(0.05, 3);
+		swing = new SwingGraph(0.05, 3);
 		hasEmitted = false;
 	}
 
 	public function update(bar:Bar):Null<Float> {
 		hasEmitted = true;
-		var pivotConfirmed = swing.update(bar);
-		if (!pivotConfirmed) {
+		if (!swing.update(bar)) {
 			return 0.0;
 		}
 
-		var pivots = swing.getPivots();
-		if (pivots.length < 3) {
+		var n = swing.pivotCount();
+		if (n < 3) {
 			return 0.0;
 		}
 
-		var n = pivots.length;
-		var poleStart = pivots[n - 3];
-		var poleEnd = pivots[n - 2];
-		var consolidation = pivots[n - 1];
+		var poleStart = swing.pivotAt(n - 3);
+		var poleEnd = swing.pivotAt(n - 2);
+		var consolidation = swing.pivotAt(n - 1);
 
 		var pole = Math.abs(poleEnd.price - poleStart.price);
 		var pullback = Math.abs(consolidation.price - poleEnd.price);
