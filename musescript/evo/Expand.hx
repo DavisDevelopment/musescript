@@ -23,7 +23,19 @@ class Expand {
 		var paramList = g.params.length == 0 ? "" :
 			"(" + [for (p in g.params) '${p.name} = ${num(p.defaultValue)}'].join(", ") + ")";
 		var size = scalar(g.size, g.params);
-		var lines = ['strategy ${g.name}$paramList {', "  onBar {"];
+		var lines = ['strategy ${g.name}$paramList {'];
+		// Projection fields sit at strategy-body level (re-evaluated each bar, in scope for the onBar
+		// guards — the same shape corpus strategies use for `maFast = sma(close, 5)`). Emitted ONLY
+		// for projections the policy actually references, so a declared-but-unread projection stays
+		// byte-inert (the P0.a parity contract). PROJECTION_COEVOLUTION_PLAN.md §4.
+		if (g.projections != null && g.projections.length > 0) {
+			for (r in collectProjRefs(g)) {
+				var decl = findProj(g, r.name);
+				if (decl == null) throw 'Expand: policy references undeclared projection "${r.name}"';
+				lines.push('  ${projRef(r.name, r.field)} = ${projReductionExpr(decl, r.field, g.params)}');
+			}
+		}
+		lines.push("  onBar {");
 		// Guarded on `position()` so a STICKY entry condition (BCmp/BTrend-based, e.g. `rsi(...) <
 		// 55` staying true for many consecutive bars -- unlike a transient crossover, which only
 		// fires once) doesn't re-fire `long`/`short` every single bar it holds and pyramid an
@@ -47,12 +59,112 @@ class Expand {
 		return Std.string(x);
 	}
 
+	/** A projection fan-reduction (`SProj`) renders as the bare `let` identifier it binds to in the
+	 * onBar prelude (`proj_0__p50`), NOT a quoted field like `SPrice` — it is a variable, not a
+	 * price-field name. See PROJECTION_COEVOLUTION_PLAN.md §3-§4. */
+	public static inline function projRef(name:String, field:String):String return '${name}__${field}';
+
+	static function findProj(g:StrategyGenome, name:String):Null<ProjectionDecl> {
+		if (g.projections == null) return null;
+		for (p in g.projections) if (p.name == name) return p;
+		return null;
+	}
+
+	/** Render one fan-reduction of a projection as a series expression for its prelude field.
+	 * `PSPoint` (K=1): every reduction (`p50`/`mean`/`sample_0`/…) IS the single series, so reuse the
+	 * scalar-context series renderer. `PSNoise` fans need the MC builtin (P1.5) — not renderable yet. */
+	static function projReductionExpr(decl:ProjectionDecl, field:String, params:Array<EvoParam>):String {
+		switch (decl.sampler) {
+			case PSPoint(node):
+				// K=1: every location reduction is the single series; spread is 0; only sample_0 exists.
+				var baseE = scalar(KSeries(node), params);
+				if (field == "spread") return "0";
+				if (field == "prob_up")
+					throw 'Expand: prob_up is undefined for point projection "${decl.name}" (K=1)';
+				if (StringTools.startsWith(field, "sample_")) {
+					var i = Std.parseInt(field.substr(7));
+					if (i != 0)
+						throw 'Expand: $field out of range for point projection "${decl.name}" (K=1)';
+				}
+				return baseE;
+			case PSNoise(base, vol, model):
+				// Location-scale fan: reductions are closed-form `base + coef*vol` with the coefficient
+				// a seed-fixed shock statistic (McFan). Exact, deterministic, pure arithmetic.
+				var K = decl.samples < 1 ? 1 : decl.samples;
+				var z = McFan.shocks(decl.seed, K, model); // throws for NBlockBootstrap (owed)
+				var zs = McFan.sortedCopy(z);
+				var baseE = scalar(KSeries(base), params);
+				var volE = scalar(vol, params);
+				function loc(coef:Float):String return '(${baseE}) + (${num(coef)}) * (${volE})';
+				if (StringTools.startsWith(field, "sample_")) {
+					var i = Std.parseInt(field.substr(7));
+					if (i == null || i < 0 || i >= K)
+						throw 'Expand: $field out of range for projection "${decl.name}" (K=$K)';
+					return loc(z[i]);
+				}
+				return switch (field) {
+					case "mean": loc(McFan.mean(z));
+					case "p05": loc(McFan.quantile(zs, 0.05));
+					case "p25": loc(McFan.quantile(zs, 0.25));
+					case "p50": loc(McFan.quantile(zs, 0.50));
+					case "p75": loc(McFan.quantile(zs, 0.75));
+					case "p95": loc(McFan.quantile(zs, 0.95));
+					case "spread": '(${num(McFan.quantile(zs, 0.95) - McFan.quantile(zs, 0.05))}) * (${volE})';
+					case "prob_up":
+						throw 'Expand: prob_up rendering is owed (P1.5+) for projection "${decl.name}"';
+					default:
+						throw 'Expand: unknown projection field "$field" for projection "${decl.name}"';
+				};
+		}
+	}
+
+	/** Referenced (projection name, fan field) pairs across the policy trees, in first-appearance
+	 * order, de-duplicated. Only these get a prelude field; unread projections stay inert. Walks the
+	 * policy roots only (P0.b samplers reference market data, not other projections — cross-projection
+	 * DAG refs are a later concern). */
+	static function collectProjRefs(g:StrategyGenome):Array<{name:String, field:String}> {
+		var out:Array<{name:String, field:String}> = [];
+		var seen = new Map<String, Bool>();
+		function addSeries(s:SeriesNode):Void {
+			switch (s) {
+				case SPrice(_):
+				case SInd(_, _, _, src): if (src != null) addSeries(src);
+				case SProj(n, f):
+					var k = n + "\t" + f;
+					if (!seen.exists(k)) { seen.set(k, true); out.push({ name: n, field: f }); }
+			}
+		}
+		function addScalar(sc:ScalarNode):Void {
+			switch (sc) {
+				case KConst(_) | KParam(_) | KFeature(_):
+				case KSeries(s): addSeries(s);
+				case KLookback(s, _): addSeries(s);
+				case KArith(_, a, b): addScalar(a); addScalar(b);
+				case KHole(inner): addScalar(inner);
+			}
+		}
+		function addBool(b:BoolNode):Void {
+			switch (b) {
+				case BCross(_, a, bb): addSeries(a); addSeries(bb);
+				case BCmp(_, a, bb): addScalar(a); addScalar(bb);
+				case BTrend(_, s, _): addSeries(s);
+				case BAnd(a, bb) | BOr(a, bb): addBool(a); addBool(bb);
+				case BNot(a): addBool(a);
+				case BHole(inner): addBool(inner);
+			}
+		}
+		addBool(g.entryLong); addBool(g.entryShort); addBool(g.exitLong); addBool(g.exitShort);
+		addScalar(g.size);
+		return out;
+	}
+
 	public static function series(n:SeriesNode):String {
 		return switch (n) {
 			case SPrice(f): '"' + f + '"';
 			case SInd(name, field, window, src):
 				if (src != null) '${name}(${series(src)}, $window)';
 				else '${name}("$field", $window)';
+			case SProj(pn, pf): projRef(pn, pf);
 		};
 	}
 
@@ -65,6 +177,7 @@ class Expand {
 					case SPrice(f): f;
 					case SInd(name, field, window, src):
 						src != null ? '${name}(${series(src)}, $window)' : '${name}("$field", $window)';
+					case SProj(pn, pf): projRef(pn, pf);
 				}
 			case KLookback(s, k):
 				switch (s) {

@@ -71,6 +71,7 @@ class Simplify {
 	static function seriesHasIndicator(s:SeriesNode):Bool {
 		return switch (s) {
 			case SPrice(_): false;
+			case SProj(_, _): false; // a projection reference is a variable, not an indicator
 			case SInd(_, _, _, _): true;
 		};
 	}

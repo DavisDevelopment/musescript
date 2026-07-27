@@ -125,6 +125,7 @@ class LearnedLibrary {
 	static function cloneSeries(n:SeriesNode):SeriesNode {
 		return switch (n) {
 			case SPrice(f): SPrice(f);
+			case SProj(n, f): SProj(n, f);
 			case SInd(name, field, window, src):
 				SInd(name, field, window, src != null ? cloneSeries(src) : null);
 		};

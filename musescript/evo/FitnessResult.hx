@@ -21,6 +21,12 @@ class FitnessResult {
 	 * case fitness on single-tape runs. Every existing caller that only ever reads `.sharpe` is
 	 * completely unaffected. */
 	public var equity:Null<Array<Float>>;
+	/** Leakage-free forecast skill of the genome's REFERENCED projections (see `ProjectionScore`);
+	 * `NaN` when the genome has none. `projScores` is the per-projection breakdown. Opt-in — only
+	 * populated by a caller that asks for it (e.g. the MAP-Elites descriptor pass), never computed on
+	 * the plain fitness hot path, so every existing caller is unaffected. */
+	public var projScore:Float = Math.NaN;
+	public var projScores:Null<Array<Float>> = null;
 
 	public function new(ok:Bool, sharpe:Float, trades:Int, finalEquity:Float, backend:String, ?error:String) {
 		this.ok = ok;

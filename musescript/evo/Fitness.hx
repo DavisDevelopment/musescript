@@ -346,8 +346,32 @@ class Fitness {
 		return evaluateCompiled(g, bars, target, strict, costBps, initialCash, equityFloor);
 	}
 
+	/**
+	 * Leakage-free aggregate forecast skill of the genome's REFERENCED projections (`ProjectionScore`).
+	 * `NaN` if the genome declares none. This is the forecast-quality SIGNAL; it feeds selection as a
+	 * MAP-Elites descriptor axis (plan §7), computed off the fitness hot path by callers that want it.
+	 */
+	public static function projectionScore(g:StrategyGenome, bars:Array<Bar>):Float {
+		return ProjectionScore.score(g, bars).agg;
+	}
+
+	/** Populate `fr.projScore`/`fr.projScores` from `g`'s projections vs `bars`. No-op when none. */
+	public static function attachProjectionScore(fr:FitnessResult, g:StrategyGenome, bars:Array<Bar>):Void {
+		if (g.projections == null || g.projections.length == 0)
+			return;
+		var s = ProjectionScore.score(g, bars);
+		fr.projScore = s.agg;
+		fr.projScores = s.per;
+	}
+
 	/** Columnar NMA path with optional dirty-spine working-copy hit. */
 	static function evaluateNma(g:StrategyGenome, bars:Array<Bar>, costBps:Float, initialCash:Float, equityFloor:Float):FitnessResult {
+		// Projections (SProj) have no columnar column yet — route to the Expand→interp fallback so a
+		// projection genome still evaluates correctly (just not columnar-fast), and never reaches
+		// NmaBijection's defensive SProj throw. PROJECTION_COEVOLUTION_PLAN.md P0.b.
+		if (g.projections != null && g.projections.length > 0)
+			return new FitnessResult(false, -999, 0, 0, "nma-unsupported",
+				"genome declares projections (SProj) -- columnar NMA not yet wired");
 		if (nmaDirtySpine && nmaWorking != null) {
 			try {
 				var key = Canonical.structuralKey(g);

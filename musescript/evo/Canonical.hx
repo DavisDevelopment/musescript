@@ -92,6 +92,72 @@ class Canonical {
 			d.str(p.tune);
 		}
 		d.str(g.name);
+		digestReferencedProjections(d, g);
+	}
+
+	/**
+	 * Digest the DEFINITIONS of projections the policy references (name, kind, horizon, samples,
+	 * seed, sampler) — two genomes that reference the same `proj_0` but define it with a different
+	 * sampler/seed render to different source and MUST NOT share a fitness-cache entry. Unreferenced
+	 * projections are not rendered (Expand skips them), so they are not digested either — preserving
+	 * the "declared-but-unread projection = identical key" contract. Appended only when present, so a
+	 * projection-free genome's digest is byte-identical to before projections existed.
+	 */
+	static function digestReferencedProjections(d:StructuralDigest, g:StrategyGenome):Void {
+		if (g.projections == null || g.projections.length == 0)
+			return;
+		var refs = referencedProjNames(g);
+		for (p in g.projections) {
+			if (!refs.exists(p.name))
+				continue;
+			d.tag("Q".code);
+			d.str(p.name);
+			d.str(Std.string(p.kind));
+			d.int(p.horizon);
+			d.int(p.samples);
+			d.int(p.seed);
+			switch (p.sampler) {
+				case PSPoint(node):
+					d.tag("p".code);
+					digestSeries(d, node);
+				case PSNoise(base, vol, model):
+					d.tag("n".code);
+					digestSeries(d, base);
+					digestScalar(d, vol);
+					d.str(Std.string(model));
+			}
+		}
+	}
+
+	/** Names of projections referenced by an `SProj` anywhere across the five policy roots. */
+	static function referencedProjNames(g:StrategyGenome):Map<String, Bool> {
+		var m = new Map<String, Bool>();
+		function ws(n:SeriesNode):Void switch (n) {
+			case SPrice(_):
+			case SInd(_, _, _, src): if (src != null) ws(src);
+			case SProj(name, _): m.set(name, true);
+		}
+		function wsc(n:ScalarNode):Void switch (n) {
+			case KConst(_) | KParam(_) | KFeature(_):
+			case KSeries(s): ws(s);
+			case KLookback(s, _): ws(s);
+			case KArith(_, a, b): wsc(a); wsc(b);
+			case KHole(inner): wsc(inner);
+		}
+		function wb(n:BoolNode):Void switch (n) {
+			case BCross(_, a, b): ws(a); ws(b);
+			case BCmp(_, a, b): wsc(a); wsc(b);
+			case BTrend(_, s, _): ws(s);
+			case BAnd(a, b) | BOr(a, b): wb(a); wb(b);
+			case BNot(a): wb(a);
+			case BHole(inner): wb(inner);
+		}
+		wb(g.entryLong);
+		wb(g.entryShort);
+		wb(g.exitLong);
+		wb(g.exitShort);
+		wsc(g.size);
+		return m;
 	}
 
 	static function digestSeries(d:StructuralDigest, n:SeriesNode):Void {
@@ -106,6 +172,10 @@ class Canonical {
 				// forms emit a series token here and the arity stays fixed.
 				if (src != null) digestSeries(d, src) else { d.tag("P".code); d.str(field); }
 				d.int(window);
+			case SProj(name, field):
+				d.tag("J".code);
+				d.str(name);
+				d.str(field);
 		}
 	}
 
@@ -190,6 +260,7 @@ class Canonical {
 			case SPrice(f): ["P", f];
 			case SInd(name, field, window, src):
 				["I", name, src != null ? keySeries(src) : ["P", field], window];
+			case SProj(name, field): ["J", name, field];
 		};
 	}
 
@@ -235,6 +306,7 @@ class Canonical {
 		return switch (n) {
 			case SPrice(_): 1;
 			case SInd(_, _, _, src): 1 + (src != null ? countSeries(src) : 0);
+			case SProj(_, _): 1;
 		};
 	}
 
@@ -292,6 +364,7 @@ class Canonical {
 			switch (n) {
 				case SPrice(_): bump(K_SPRICE);
 				case SInd(_, _, _, src): bump(K_SIND); if (src != null) walkSeries(src);
+					case SProj(_, _): bump(K_SPROJ);
 			}
 		}
 		function walkScalar(n:ScalarNode):Void {
@@ -360,7 +433,7 @@ class Canonical {
 
 	/** Fixed declared order for `shapeVector`/`shapeFeatures`. */
 	static var SHAPE_KINDS = ["BCross", "BCmp", "BTrend", "BAnd", "BOr", "BNot", "BHole",
-		"KConst", "KParam", "KArith", "KSeries", "KLookback", "KFeature", "KHole", "SPrice", "SInd"];
+		"KConst", "KParam", "KArith", "KSeries", "KLookback", "KFeature", "KHole", "SPrice", "SInd", "SProj"];
 
 	static inline var K_BCROSS = 0;
 	static inline var K_BCMP = 1;
@@ -378,6 +451,7 @@ class Canonical {
 	static inline var K_KHOLE = 13;
 	static inline var K_SPRICE = 14;
 	static inline var K_SIND = 15;
+	static inline var K_SPROJ = 16;
 
 	/**
 	 * `shapeSignature` turned into a fixed-length, SCALE-INVARIANT numeric feature vector, for

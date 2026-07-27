@@ -247,6 +247,7 @@ class TestNmaFitness extends Test {
 	static function seriesHasFeature(n:SeriesNode):Bool {
 		return switch (n) {
 			case SPrice(_): false;
+			case SProj(_, _): false;
 			case SInd(_, _, _, src): src != null && seriesHasFeature(src);
 		};
 	}

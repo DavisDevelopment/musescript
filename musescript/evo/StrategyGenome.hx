@@ -11,6 +11,15 @@ typedef StrategyGenome = {
 	var ?lineage:Array<String>;
 	var ?seedOrigin:Null<Int>;
 	/**
+	 * Named forward projections (Monte-Carlo fans) this genome computes each bar and the policy may
+	 * read (PROJECTION_COEVOLUTION_PLAN.md). Null/absent ⇒ byte-identical to a projection-free genome:
+	 * neither `Expand` nor `Canonical` reads this until a policy node references a projection, so an
+	 * unreferenced projection changes neither rendering nor the fitness key. This IS part of genome
+	 * identity (unlike the cache fields below) — `Variation.copyGenome` preserves it so splices and
+	 * elites keep their projections.
+	 */
+	var ?projections:Array<ProjectionDecl>;
+	/**
 	 * Lazy `Canonical.structuralKey` / `nodeCount` / `shapeVector` memos. Valid only while the five
 	 * roots + params are unchanged. `Variation.copyGenome` deliberately omits these so any splice
 	 * starts cold; elites reused across generations keep their hits. Not part of the genome's identity.

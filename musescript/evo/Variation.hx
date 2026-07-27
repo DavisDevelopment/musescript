@@ -508,7 +508,10 @@ class Variation {
 	static function copyGenome(g:StrategyGenome):StrategyGenome {
 		return { entryLong: g.entryLong, entryShort: g.entryShort, exitLong: g.exitLong,
 			exitShort: g.exitShort, size: g.size, params: g.params.copy(), name: g.name,
-			lineage: g.lineage != null ? g.lineage.copy() : [], seedOrigin: g.seedOrigin };
+			lineage: g.lineage != null ? g.lineage.copy() : [], seedOrigin: g.seedOrigin,
+			// Projections are genome identity, not a cache — preserve across splices (decls are
+			// value-like: enums + primitives, so a shallow array copy is independence enough).
+			projections: g.projections != null ? g.projections.copy() : null };
 	}
 
 	static function setEntryLong(g:StrategyGenome, v:BoolNode):StrategyGenome { var o = copyGenome(g); o.entryLong = v; return o; }

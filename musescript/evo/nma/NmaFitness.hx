@@ -573,6 +573,35 @@ class NmaFitness {
 		d.finishWords();
 		return { hex: musescript.evo.StructuralDigest.hexWords(d.outA, d.outB), a: d.outA, b: d.outB };
 	}
+
+	// ---------- projection scoring support (ProjectionScore) ----------
+
+	/** Per-bar column of a plain (non-`SProj`) `SeriesNode` over `bars`, via the same columnar
+	 * indicator tier the strangler uses — so a projection's forecast series is evaluated identically
+	 * to how the strategy would. For leakage-free forecast-skill scoring (`ProjectionScore`). */
+	public static function seriesColumnOf(node:musescript.evo.SeriesNode, bars:Array<Bar>,
+			params:Array<musescript.evo.EvoParam>):Array<Float> {
+		var ctx = scoringContext(bars, params);
+		return NmaEval.evalSeries(NmaBijection.seriesFromEnum(node), ctx).toArray();
+	}
+
+	/** Per-bar column of a plain (non-`SProj`) `ScalarNode` over `bars`. */
+	public static function scalarColumnOf(node:musescript.evo.ScalarNode, bars:Array<Bar>,
+			params:Array<musescript.evo.EvoParam>):Array<Float> {
+		var ctx = scoringContext(bars, params);
+		return NmaEval.evalScalar(NmaBijection.scalarFromEnum(node), ctx).toArray();
+	}
+
+	/** Standalone eval context for scoring — mirrors `prepare`'s construction; no pop-memo. */
+	static function scoringContext(bars:Array<Bar>, params:Array<musescript.evo.EvoParam>):NmaEvalContext {
+		var t = tapeStateFor(bars);
+		var pv = [for (p in params) p.defaultValue];
+		var ctx = new NmaEvalContext(t.n, NmaEpoch.of(t.key, params, t.keyA, t.keyB), t.fields, null, pv,
+			new EngineIndicatorProvider(t.fields, t.columns, t.times), null);
+		ctx.sharedPriceColumns = t.columns;
+		ctx.barColumns = t.barCols;
+		return ctx;
+	}
 }
 
 /**

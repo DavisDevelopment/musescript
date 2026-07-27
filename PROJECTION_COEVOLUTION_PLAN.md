@@ -367,20 +367,86 @@ A projector population and a manager population, evaluated in pairs.
   `Expand` prelude `let`s + `project(name,field)` builtin; `Canonical` key/count arms; validity checks
   (dense names, valid field, DAG, no self/forward ref). *Prove:* projection-free genome byte-identical;
   dead-projection genome score-identical; `PSPoint` inline vs builtin identical.
+
+  **✅ Landed 2026-07-27 (P0.a — types + genome slot, verified 64,180/64,180 tests green):**
+  - Bundle-shaped types: `ProjKind`, `NoiseModel`, `ProjSampler` (`PSPoint`/`PSNoise`), `ProjectionDecl`
+    (`musescript/evo/`) — the full multi-series shape, only `PSPoint` (K=1) exercised.
+  - `StrategyGenome.projections:Array<ProjectionDecl>` (optional, default-absent = byte-identical).
+  - `Variation.copyGenome` preserves it; `TestProjectionScaffold` pins that attaching a projection is
+    **inert for `Expand` and `Canonical.structuralKey`** (neither reads it yet) — the parity contract a
+    future eval-wiring change must move deliberately.
+
+  **✅ Landed 2026-07-27 (P0.b — SProj + rendering + fallback, verified 64,188/64,188 tests green):**
+  - `SeriesNode.SProj(name, field)` added; **all forced switch sites** handled (compiler-verified):
+    `Canonical` digest/key/count/shapeVector (+`K_SPROJ`), `Expand.series` + `KSeries` arm,
+    `GenomeFeatures`, `TreeSurgery` (collect + replace), `LearnedLibrary`, `Simplify`, `TestNmaFitness`,
+    plus a defensive throw in `NmaBijection.seriesFromEnum`.
+  - `Expand.expand` renders each **referenced** projection reduction as a strategy-body field
+    (`proj_0__p50 = sma("close", 5)`, corpus field-style) before `onBar`; unreferenced projections
+    emit nothing (P0.a inertness preserved). `PSPoint` reuses the scalar series renderer; `PSNoise`
+    throws (P1.5).
+  - `Fitness.evaluateNma` routes any genome with `projections` to the **`nma-unsupported`
+    Expand→interp fallback** — runs correctly, never hits the `NmaBijection` throw.
+  - **Proven behavior-equivalent:** a PSPoint projection read once trades bit-identically
+    (ok/sharpe/trades) to inlining its series (`testPointProjectionTradesLikeInlinedSeries`).
+
+  **⏳ Still owed (next slices):**
+  - ~~**P1.5 — `PSNoise` MC sampler**~~ **✅ LANDED 2026-07-27** (see the P1.5 phase note below).
+  - **P1 — columnar eval**: `ProjBundle`/`ProjectionProvider` + an NMA `SProj` column (add `NmaSProj`,
+    mirror `NmaCanonical` byte-for-byte) so projection genomes stop taking the interp fallback.
+  - **P2 — scoring**: leakage-free projection-skill fitness term (`FitnessResult.projScore`).
+  - **Identity-rebuild preservation beyond `copyGenome`**: `Variation.compactParams`/`remapOffsets`
+    (and **remap `KParam` refs inside `PSNoise.vol`**), `Simplify` (~268), `RivalryArena` (~325), NMA-path
+    rebuilds — needed once operators actually *create/evolve* projections (none do yet → P0.b is safe).
 - **P1 — columnar eval + `ProjectionProvider` + reductions.** `NmaEval` `SProj` arm; `ProjBundle` (1
   column for `PSPoint`, K for later); reduction table (`p50`/`spread`/`prob_up`/… — all aliasing the
   single column at K=1). Differential test NMA vs interp/JS on genomes that read projections.
-- **P1.5 — MC sampler (`PSNoise`) + fan reductions.** Seeded K-draw realization (`NGaussian` /
-  `NBlockBootstrap` / `NStudentT`), per-bar quantile/spread/prob_up reductions. Determinism test: same
-  genome+seed ⇒ identical fan across passes. This is where multi-series goes live; everything above
-  already supports it structurally.
-- **P2 — projection scoring (point + distributional).** Leakage-safe scorer: rank-IC/directional for
-  the point case, **CRPS-skill / coverage / pinball** for fans (§6.1), sharing one implementation that
-  degenerates at K=1. `FitnessResult` fields + purge/embargo wiring. Unit tests: a **known-predictive**
-  synthetic projection (scores high), a **known-useless** one (~0), a **well-calibrated fan** (good
-  CRPS/coverage) vs an **overconfident narrow fan** (bad coverage), and a **future-peeking** projection
-  a leakage assertion must *reject*.
-- **P3 — fitness combination.** Modes A/B/C behind flags; same-seed A/B; MAP-Elites descriptor axis.
+- **P1.5 — MC sampler (`PSNoise`) + fan reductions. ✅ LANDED 2026-07-27 (verified 64,219/64,219 green).**
+  Key realization: for a **location-scale** noise family the `K` seeded shocks are a render-time
+  constant, so every fan reduction is **closed-form in `(base, vol)`** — `Expand` bakes the fan into
+  pure MuseScript arithmetic (no runtime builtin, no cross-backend dispatch, exact not sampled).
+  - `McFan.hx` — Park-Miller MINSTD (exact-in-double, target-safe) + Acklam inverse-normal →
+    deterministic `NGaussian`/`NStudentT` shocks; `sortedCopy`/`quantile`/`mean` helpers. Unit-tested
+    (determinism, quantile ordering, gaussian-centered, seed-sensitivity).
+  - `Expand.projReductionExpr` renders `PSNoise`: `sample_i`/`p05..p95`/`mean` as `base + coefᵢ·vol`,
+    `spread` as `(q95−q05)·vol`, `PSPoint.spread` as `0`. `prob_up` (non-linear count) and
+    `NBlockBootstrap` (needs tape residuals) throw — **owed** (both need a runtime column/builtin).
+  - **Fitness-cache correctness fix**: `Canonical` now digests the *definitions* of **referenced**
+    projections (name/kind/horizon/samples/seed/sampler) — two genomes referencing the same `proj_0`
+    with different seeds no longer collide; unreferenced projection defs stay inert (both pinned by test).
+  - Proven: a `PSNoise` fan renders to closed-form arithmetic, parses, evaluates end-to-end, and is
+    deterministic across passes.
+  - **Owed next**: `prob_up` rendering (K-term count or a `<>`-fraction), `NStudentT` is generated but
+    add explicit tests, and the `NBlockBootstrap` runtime path.
+- **P2 — projection scoring. ✅ POINT SCORER LANDED 2026-07-27 (verified 64,231/64,231 green).**
+  `ProjectionScore.hx`: the projection's central forecast series `p_t` is built PIT-causally by
+  `NmaFitness.seriesColumnOf`/`scalarColumnOf` (new public helpers that reuse the exact columnar
+  indicator tier); the realized target `y_t` for `kind`/`horizon` is derived STRICTLY from later bars;
+  skill = **rank-IC** (continuous kinds) or **directional accuracy** (`PDirection`), last `H` bars
+  excluded. `FitnessResult.projScore`/`projScores` + `Fitness.projectionScore`/`attachProjectionScore`
+  (opt-in, off the hot path). Tests: rank-IC perfect/inverse, directional perfect/anti, target shapes +
+  last-H exclusion, a level forecast scores ≈1 on a trend (end-to-end through the column helper),
+  wiring for referenced vs unreferenced. **Leakage guarantee:** future data is touched only in the
+  scorer, never in the eval the policy consumes.
+  - **Owed on the scorer**: the **distributional** side for fans — CRPS-skill / coverage / pinball on
+    `spread`/quantile fields (§6.1) — plus an explicit **future-peek rejection** test and the
+    purge/embargo OOS reporting layer. The point scorer is what P3 needs first.
+- **P3 — fitness combination. ✅ MECHANISM LANDED 2026-07-27 (verified 64,243/64,243 green); live
+  wiring is a gated JVM experiment (owed).**
+  - `MapElites.normSkill` (skill [-1,1]→[0,1], NaN→0.5 neutral), `behaviorVecWithSkill` (forecast skill
+    as a 5th descriptor axis), `assignCellWithSkill` (nearest 5-D centroid; classic mode unchanged) —
+    the exact opt-in pattern of the existing `creditConc` axis, byte-identical when off.
+  - **Proven at the archive level**: two equally-fit, behaviourally-identical genomes — a poor and a
+    strong forecaster — both survive (niched apart by skill), which raw-fitness selection cannot do.
+    That IS the forecaster/manager pair co-evolution.
+  - **Owed — live `CorpusEvoRun` wiring behind `--proj-map-axis`** (mirrors `--credit-map-axis`, JVM):
+    thread `Fitness.projectionScore(g, bars)` into the descriptor at the four `offer` sites + build 5-D
+    centroids. Real caveats to resolve first: (a) per-genome `projScore` cost (NMA column eval every
+    offer) — memoize; (b) the `assignCell` dim-inference can't tell credit-5D from skill-5D apart —
+    needs explicit axis flags, not dim-count; (c) it needs a **same-seed multi-seed JVM A/B** before
+    default-on, because the analogous `creditConc` axis *measurably hurt OOS* (26/50 vs 41/50). The
+    mechanism is proven; whether this axis *helps* a real run is an honest open question, not a
+    foregone win.
 - **P4 — module-aware credit.** Projection-ablation in the attribution oracle → credit bank.
 - **P5 — CCEA (epic).** Two-population co-evolution on Archipelago/Rivalry; pairing + credit design.
 

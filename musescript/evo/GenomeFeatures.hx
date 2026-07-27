@@ -123,6 +123,7 @@ class GenomeFeatures {
 	static function collectSeries(n:SeriesNode, cond:Bool, all:Map<String, Bool>, fed:Map<String, Bool>):Void {
 		switch (n) {
 			case SPrice(_):
+			case SProj(_, _): // projection reference — not an indicator feature
 			case SInd(name, field, window, src):
 				if (src == null && !isPaletteInd(name)) {
 					var key = name + "|" + field + "|" + window;

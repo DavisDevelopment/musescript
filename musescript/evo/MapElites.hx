@@ -202,6 +202,44 @@ class MapElites {
 	static inline function clamp01(x:Float):Float {
 		return x < 0 ? 0 : (x > 1 ? 1 : x);
 	}
+
+	// ---------- forecast-skill niching axis (projections, plan §7) ----------
+
+	/**
+	 * Normalize a projection forecast skill (rank-IC / directional accuracy in [-1,1], or `NaN` when
+	 * the genome has no scoreable forecast) to a [0,1] descriptor axis. `NaN` → 0.5 (neutral/unknown),
+	 * the same convention a missing credit axis uses.
+	 */
+	public static function normSkill(projSkill:Float):Float {
+		if (Math.isNaN(projSkill))
+			return 0.5;
+		return clamp01((projSkill + 1.0) / 2.0);
+	}
+
+	/**
+	 * Descriptor-v2 vector with FORECAST SKILL as a 5th axis — so MAP-Elites niches genomes by how
+	 * well they FORECAST as well as how they trade, co-evolving forecaster/manager pairs across the
+	 * skill spectrum (the locked §7 selection story). Parallel to the `creditConc` axis; a build that
+	 * wants both behaviour+credit+skill (6-D) is a caller concern, out of scope here.
+	 */
+	public static function behaviorVecWithSkill(tradesPerBar:Float, avgHold:Float, longFrac:Float,
+			dutyCycle:Float, projSkill:Float):Array<Float> {
+		var v = behaviorVec(tradesPerBar, avgHold, longFrac, dutyCycle);
+		v.push(normSkill(projSkill));
+		return v;
+	}
+
+	/**
+	 * Nearest 5-D (behaviour + forecast-skill) centroid — build centroids with `sobolCentroids(n, 5)`.
+	 * Classic mode (null/empty centroids) keeps the plain cadence `cellKey`: the skill axis is
+	 * CVT-only, exactly like `creditConc`, so classic 48-bin runs are unchanged.
+	 */
+	public static function assignCellWithSkill(tradesPerBar:Float, avgHold:Float, longFrac:Float,
+			dutyCycle:Float, projSkill:Float, ?centroids:Array<Array<Float>> = null):String {
+		if (centroids == null || centroids.length == 0)
+			return cellKey(tradesPerBar, avgHold, longFrac);
+		return 'cvt_${nearestCentroid(behaviorVecWithSkill(tradesPerBar, avgHold, longFrac, dutyCycle, projSkill), centroids)}';
+	}
 }
 
 /**
