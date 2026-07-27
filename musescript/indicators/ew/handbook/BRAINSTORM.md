@@ -4,6 +4,19 @@
 **Baseline:** Ch1–4 lattice (`8274913`) + deepen correctives (`e9a8757`) + degree nesting (`a524e71`) + φ finetune (`523ac8a`).  
 **Hard rules stay non-learnable.** Soft scores / projection mixes live in `EwPhiParams`.
 
+## Package promotion + MCMC co-evolve (read first)
+
+EW is promoting **out of** `indicators` into infra package **`musescript/ew/`**:
+
+| Doc | Path |
+|-----|------|
+| Architecture (paper × Muse × evo) | [`../../../ew/ARCHITECTURE.md`](../../../ew/ARCHITECTURE.md) |
+| ForecastFn × TradeLogic brainstorm | [`../../../ew/BRAINSTORM_COEVOLVE.md`](../../../ew/BRAINSTORM_COEVOLVE.md) |
+| Move plan | [`../../../ew/PROMOTE_PLAN.md`](../../../ew/PROMOTE_PLAN.md) |
+| Stub contracts | `musescript/ew/ForecastCloud.hx`, `EwForecastHost.hx` |
+
+**Evo forecasting wiring** (EvolutionEngine / Fitness / Variation / `SProj`): owned by parallel Claude session — integrate at `EwForecastHost` → ProjectionProvider boundary. Do not duplicate that work in handbook slices.
+
 Siblings (parallel, not owned here): **B7 invalidation levels**, **C11 parent GeomViz overlay**.
 
 ---
