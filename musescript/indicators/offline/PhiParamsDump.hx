@@ -27,6 +27,12 @@ class PhiParamsDump {
 		m.set("flatBNear", p.flatBNear);
 		m.set("flatBBeyond", p.flatBBeyond);
 		m.set("flatCVsA", p.flatCVsA);
+		m.set("truncTipTol", p.truncTipTol);
+		m.set("truncSoftWeight", p.truncSoftWeight);
+		m.set("truncProjectShrink", p.truncProjectShrink);
+		m.set("extensionMinVsPeer", p.extensionMinVsPeer);
+		m.set("ext3W4ShallowBias", p.ext3W4ShallowBias);
+		m.set("ext5ProjectStretch", p.ext5ProjectStretch);
 		m.set("alternationWeight", p.alternationWeight);
 		m.set("depthPriorFourthWeight", p.depthPriorFourthWeight);
 		m.set("equalityOneFiveWeight", p.equalityOneFiveWeight);
@@ -65,6 +71,12 @@ class PhiParamsDump {
 		p.flatBNear = g("flatBNear", p.flatBNear);
 		p.flatBBeyond = g("flatBBeyond", p.flatBBeyond);
 		p.flatCVsA = g("flatCVsA", p.flatCVsA);
+		p.truncTipTol = g("truncTipTol", p.truncTipTol);
+		p.truncSoftWeight = g("truncSoftWeight", p.truncSoftWeight);
+		p.truncProjectShrink = g("truncProjectShrink", p.truncProjectShrink);
+		p.extensionMinVsPeer = g("extensionMinVsPeer", p.extensionMinVsPeer);
+		p.ext3W4ShallowBias = g("ext3W4ShallowBias", p.ext3W4ShallowBias);
+		p.ext5ProjectStretch = g("ext5ProjectStretch", p.ext5ProjectStretch);
 		p.alternationWeight = g("alternationWeight", p.alternationWeight);
 		p.depthPriorFourthWeight = g("depthPriorFourthWeight", p.depthPriorFourthWeight);
 		p.equalityOneFiveWeight = g("equalityOneFiveWeight", p.equalityOneFiveWeight);

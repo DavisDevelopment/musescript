@@ -41,6 +41,42 @@ class EwRatioTargets {
 		return out;
 	}
 
+	/**
+	 * Extension-aware W5 targets. `extWhich` is 0/1/3/5 from ImpulseRules.extensionWhich.
+	 * Ext-3: shallower typical W5 (equality / φ⁻¹ of W1). Ext-5: stretch toward φ / φ² of W1.
+	 * Ext-1: W5 often ≈ W3 remainder — still project from W1 multiples but damp extremes.
+	 */
+	public static function wave5TargetsExt(p0:PivotPoint, p1:PivotPoint, p4:PivotPoint, extWhich:Int, ?params:EwPhiParams):haxe.ds.Vector<Float> {
+		var p = params != null ? params : EwPhiParams.current();
+		var base = wave5Targets(p0, p1, p4, p);
+		if (extWhich == 0) return base;
+		var w1 = p1.price - p0.price;
+		var out = new haxe.ds.Vector<Float>(base.length);
+		for (i in 0...base.length) {
+			var mult = p.w5ExtTargets[i < p.w5ExtN ? i : p.w5ExtN - 1];
+			if (extWhich == 3) {
+				// Prefer 0.618 / 1.0 of W1 after extended third
+				mult = i == 0 ? p.phiInv : (i == 1 ? 1.0 : p.phiInv * p.phi);
+			} else if (extWhich == 5) {
+				mult = p.w5ExtTargets[i < p.w5ExtN ? i : 0] * p.ext5ProjectStretch;
+			} else if (extWhich == 1) {
+				mult = i == 0 ? p.oneMinusPhiInv : (i == 1 ? p.half : p.phiInv);
+			}
+			out[i] = p4.price + w1 * mult;
+		}
+		return out;
+	}
+
+	/** Shallow W4 retrace prices when W3 is extended (bias toward prior fourth territory). */
+	public static function wave4RetracePricesExt3(p2:PivotPoint, p3:PivotPoint, ?params:EwPhiParams):haxe.ds.Vector<Float> {
+		var p = params != null ? params : EwPhiParams.current();
+		var shallow = new haxe.ds.Vector<Float>(3);
+		shallow[0] = Math.min(p.oneMinusPhiInv, p.w4RetraceTargets[0]);
+		shallow[1] = p.oneMinusPhiInv;
+		shallow[2] = p.half;
+		return projectRetraces(p2.price, p3.price, shallow, 3);
+	}
+
 	public static function zigzagCTargets(p0:PivotPoint, p1:PivotPoint, p2:PivotPoint, ?params:EwPhiParams):haxe.ds.Vector<Float> {
 		var p = params != null ? params : EwPhiParams.current();
 		var out = new haxe.ds.Vector<Float>(p.zigCTargetsN);

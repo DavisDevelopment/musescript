@@ -45,6 +45,19 @@ class EwPhiParams {
 	/** Flat C vs A typical multiple soft targets. */
 	public var flatCVsA:Float;
 
+	// --- Motive truncation / extension soft (never hard gates) ---
+	/** Soft: |W5 tip − W3 tip| / |W3| near 0 under truncation. */
+	public var truncTipTol:Float;
+	public var truncSoftWeight:Float;
+	/** Soft band shrink factor when projecting after truncated fifth. */
+	public var truncProjectShrink:Float;
+	/** Min length ratio vs next-longest to tag an extension (soft classification floor). */
+	public var extensionMinVsPeer:Float;
+	/** When W3 extended, prefer shallower W4 retrace soft weight. */
+	public var ext3W4ShallowBias:Float;
+	/** When W5 extended, stretch W5 projection mix toward φ². */
+	public var ext5ProjectStretch:Float;
+
 	// --- Ch2 guidelines ---
 	public var alternationWeight:Float;
 	public var depthPriorFourthWeight:Float;
@@ -100,6 +113,13 @@ class EwPhiParams {
 		flatBBeyond = 0.05;
 		flatCVsA = 1.0;
 
+		truncTipTol = 0.12;
+		truncSoftWeight = 0.75;
+		truncProjectShrink = 0.55;
+		extensionMinVsPeer = 1.15;
+		ext3W4ShallowBias = 1.1;
+		ext5ProjectStretch = 1.15;
+
 		alternationWeight = 1.0;
 		depthPriorFourthWeight = 1.0;
 		equalityOneFiveWeight = 1.0;
@@ -140,6 +160,11 @@ class EwPhiParams {
 		p.fibHitTol = fibHitTol; p.timeHitTol = timeHitTol; p.equalityTol = equalityTol;
 		p.zigzagBMin = zigzagBMin; p.zigzagBMax = zigzagBMax; p.zigzagCMinVsA = zigzagCMinVsA;
 		p.flatBNear = flatBNear; p.flatBBeyond = flatBBeyond; p.flatCVsA = flatCVsA;
+		p.truncTipTol = truncTipTol; p.truncSoftWeight = truncSoftWeight;
+		p.truncProjectShrink = truncProjectShrink;
+		p.extensionMinVsPeer = extensionMinVsPeer;
+		p.ext3W4ShallowBias = ext3W4ShallowBias;
+		p.ext5ProjectStretch = ext5ProjectStretch;
 		p.alternationWeight = alternationWeight;
 		p.depthPriorFourthWeight = depthPriorFourthWeight;
 		p.equalityOneFiveWeight = equalityOneFiveWeight;

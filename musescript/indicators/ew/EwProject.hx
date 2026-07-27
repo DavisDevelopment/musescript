@@ -17,6 +17,7 @@ typedef EwProjectBand = {
 /**
  * Wave-aware projections (Ch4) with generic last-leg fallback.
  * Bands are always Projected — never Confirmed.
+ * Truncation → cautious (shrunk) bands; extension → W5 mix bias.
  */
 class EwProject {
 	public static function fromLastLeg(g:SwingGraph, ?params:EwPhiParams):Null<EwProjectBand> {
@@ -45,11 +46,35 @@ class EwProject {
 		var p = params != null ? params : EwPhiParams.current();
 		if (h == null) return null;
 		var o = h.offset;
-		if (h.label == "impulse5" || h.label == "diagonal") {
+		if (ImpulseRules.isImpulseFamily(h.label) || ImpulseRules.isDiagonalFamily(h.label)) {
 			if (o + 5 >= scratch.length) return null;
-			var targets = EwRatioTargets.wave5Targets(scratch[o], scratch[o + 1], scratch[o + 4], p);
+			var ext = 0;
+			var kind = "impulseW5";
+			if (h.label == "impulse5_trunc") {
+				kind = "impulseW5_trunc";
+				ext = 0;
+			} else if (h.label == "impulse5_ext1") {
+				kind = "impulseW5_ext1";
+				ext = 1;
+			} else if (h.label == "impulse5_ext3") {
+				kind = "impulseW5_ext3";
+				ext = 3;
+			} else if (h.label == "impulse5_ext5") {
+				kind = "impulseW5_ext5";
+				ext = 5;
+			} else if (ImpulseRules.isDiagonalFamily(h.label)) {
+				kind = h.label == "diagonal_leading" ? "diagonalLeadW5" : "diagonalEndW5";
+				ext = ImpulseRules.extensionWhich(scratch, o, p);
+			} else {
+				ext = ImpulseRules.extensionWhich(scratch, o, p);
+			}
+			var targets = EwRatioTargets.wave5TargetsExt(scratch[o], scratch[o + 1], scratch[o + 4], ext, p);
 			var times = EwRatioTargets.timeBars(scratch[o + 4].bar, scratch[o + 1].bar - scratch[o].bar, p);
-			return bandFromTargets(targets, times, "impulseW5");
+			var band = bandFromTargets(targets, times, kind);
+			if (h.label == "impulse5_trunc") {
+				band = shrinkBand(band, scratch[o + 3].price, p.truncProjectShrink);
+			}
+			return band;
 		}
 		if (h.label == "zigzag" || h.label == "flat" || h.label == "flat_expanded" || h.label == "flat_running") {
 			if (o + 3 >= scratch.length) return null;
@@ -64,7 +89,47 @@ class EwProject {
 			var times = EwRatioTargets.timeBars(scratch[o + 6].bar, scratch[o + 5].bar - scratch[o + 4].bar, p);
 			return bandFromTargets(targets, times, "doubleZigY");
 		}
+		if (h.label == "double_three") {
+			if (o + 7 >= scratch.length) return null;
+			var targets = EwRatioTargets.zigzagCTargets(scratch[o + 4], scratch[o + 5], scratch[o + 6], p);
+			var times = EwRatioTargets.timeBars(scratch[o + 6].bar, scratch[o + 5].bar - scratch[o + 4].bar, p);
+			return bandFromTargets(targets, times, "doubleThreeZ");
+		}
+		if (h.label == "triangle" || h.label == "triangle_expanding") {
+			if (o + 5 >= scratch.length) return null;
+			// Post-triangle thrust ≈ widest triangle span
+			var a0 = scratch[o].price;
+			var a1 = scratch[o + 1].price;
+			var span = Math.abs(a1 - a0);
+			var tip = scratch[o + 5];
+			var dir = tip.price >= scratch[o + 4].price ? 1.0 : -1.0;
+			var prices = new haxe.ds.Vector<Float>(3);
+			prices[0] = tip.price + dir * span * p.phiInv;
+			prices[1] = tip.price + dir * span;
+			prices[2] = tip.price + dir * span * p.phi;
+			var times = EwRatioTargets.timeBars(tip.bar, scratch[o + 1].bar - scratch[o].bar, p);
+			return bandFromTargets(prices, times, h.label == "triangle_expanding" ? "triangleThrustExp" : "triangleThrust");
+		}
 		return null;
+	}
+
+	/** Shrink price band toward `anchor` (W3 tip under truncation). */
+	static function shrinkBand(band:EwProjectBand, anchor:Float, shrink:Float):EwProjectBand {
+		var s = shrink < 0.05 ? 0.05 : (shrink > 1.0 ? 1.0 : shrink);
+		var midP = (band.priceLo + band.priceHi) * 0.5;
+		var halfP = (band.priceHi - band.priceLo) * 0.5 * s;
+		// Pull midpoint toward anchor (cautious: don't chase far past failure tip)
+		var pulled = midP * (1.0 - 0.35) + anchor * 0.35;
+		var midB = (band.barLo + band.barHi) * 0.5;
+		var halfB = (band.barHi - band.barLo) * 0.5 * s;
+		return {
+			priceLo: pulled - halfP,
+			priceHi: pulled + halfP,
+			barLo: midB - halfB,
+			barHi: midB + halfB,
+			status: Projected,
+			kind: band.kind
+		};
 	}
 
 	static function bandFromTargets(prices:haxe.ds.Vector<Float>, bars:haxe.ds.Vector<Float>, kind:String):EwProjectBand {
