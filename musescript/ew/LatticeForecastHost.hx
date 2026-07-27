@@ -155,7 +155,7 @@ class LatticeForecastHost implements EwForecastHost {
 
 		// Preferred-only last-leg fallback when no hyp projected (still rule-valid count).
 		if (sampleN == 0) {
-			var fallback:Null<musescript.indicators.ew.EwProjectBand> = null;
+			var fallback = null;
 			if (stack != null) fallback = EwProject.fromLastLeg(stack.fine, params);
 			else if (graph != null) fallback = EwProject.fromLastLeg(graph, params);
 			if (fallback != null) {

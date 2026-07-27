@@ -1,6 +1,7 @@
 package musescript.ew;
 
 import musescript.harness.Bar;
+import musescript.ew.ForecastCloud.ForecastCloudUtil;
 
 /**
  * Host contract for EW (and later MCMC) forecast emission.
