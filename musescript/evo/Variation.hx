@@ -1019,7 +1019,15 @@ class Variation {
 			params: newParams,
 			name: g.name,
 			lineage: g.lineage,
-			seedOrigin: g.seedOrigin
+			seedOrigin: g.seedOrigin,
+			// `projections` IS genome identity (StrategyGenome doc): elites/splices must keep their
+			// host decls. This non-tight rebuild used to omit the field, silently dropping every
+			// PSHost projection whenever a mutate/XO changed the param count — the real cause of
+			// host genomes draining from the pop after gen 0 (reinject was only a bandage). Live
+			// projections are PSHost (no param refs / nodes), so verbatim is correct here; the
+			// param `mapping` only touches the five policy roots. (PSPoint/PSNoise carry param
+			// refs and would need remapping + inclusion in `used`, but those are test-only today.)
+			projections: g.projections
 		};
 	}
 

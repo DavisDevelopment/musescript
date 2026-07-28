@@ -20,6 +20,8 @@ import musescript.evo.ProjKind;
 import musescript.evo.ProjSampler;
 import musescript.evo.NoiseModel;
 import musescript.evo.ProjectionDecl;
+import musescript.evo.Variation;
+import musescript.evo.EvoParam;
 
 /**
  * P0.a scaffolding coverage for evolvable projections (PROJECTION_COEVOLUTION_PLAN.md).
@@ -108,6 +110,65 @@ class TestProjectionScaffold extends Test {
 		Assert.equals(1, g.projections.length);
 		Assert.equals("proj_0", g.projections[0].name);
 		Assert.isTrue(g.projections[0].sampler.match(PSPoint(_)));
+	}
+
+	// ── compactParams must NOT drop projections (host-genome drain regression) ────────────────
+
+	static function hostProj(name:String):ProjectionDecl {
+		return {
+			name: name, kind: PReturn, horizon: 5,
+			sampler: PSHost("lattice"), samples: 1, seed: 0
+		};
+	}
+
+	static function dummyParam():EvoParam {
+		return { name: "p0", defaultValue: 1.0, min: 0.0, max: 2.0, step: 0.1, tune: "grid" };
+	}
+
+	/**
+	 * `compactParams`' non-tight rebuild (triggered whenever the referenced-param set isn't a dense
+	 * identity — every mutate/XO that changes param count) used to reconstruct the genome struct
+	 * WITHOUT the `projections` field, silently nulling every PSHost decl. That drained host genomes
+	 * from the pop after gen 0 (reinject was only masking it). Here: a host genome with one UNUSED
+	 * param forces the non-tight path; its projection must survive.
+	 */
+	public function testCompactParamsPreservesHostProjection() {
+		var g = baseGenome();
+		g.entryLong = BCross("over", SProj("ew_0", "p50"), SPrice("close"));
+		g.projections = [hostProj("ew_0")];
+		g.params = [dummyParam()]; // referenced by nothing ⇒ non-tight ⇒ rebuild path
+
+		var out = new Variation(1).compactParams(g);
+
+		Assert.equals(0, out.params.length);        // unused param compacted away (rebuild DID run)
+		Assert.notNull(out.projections);            // … and projections were NOT dropped
+		Assert.equals(1, out.projections.length);
+		Assert.equals("ew_0", out.projections[0].name);
+		switch (out.projections[0].sampler) {
+			case PSHost(kind): Assert.equals("lattice", kind);
+			default: Assert.fail("expected PSHost sampler to survive compaction");
+		}
+	}
+
+	/**
+	 * End-to-end drain guard: a host genome dragged through many blind `pointMutate`s (the ~88% path
+	 * that is NOT host-aware and freely changes param counts) must keep its PSHost decl every step.
+	 * The single SProj read may legitimately be severed by a mutation — that's allowed exploration —
+	 * but the decl itself must persist so the host self-heal / selection can re-wire it.
+	 */
+	public function testHostDeclSurvivesRepeatedBlindMutation() {
+		var v = new Variation(123);
+		var g = baseGenome();
+		g.entryLong = BCross("over", SProj("ew_0", "p50"), SPrice("close"));
+		g.projections = [hostProj("ew_0")];
+		g.params = [dummyParam()];
+
+		for (_ in 0...60) {
+			g = v.pointMutate(g); // pointMutate → withBoolRepl(copyGenome) → compactParams
+			Assert.notNull(g.projections);
+			Assert.isTrue(g.projections.length >= 1);
+			Assert.isTrue(g.projections[0].sampler.match(PSHost(_)));
+		}
 	}
 
 	// ── P0.b: a REFERENCED projection renders as a prelude field and runs end-to-end ─────────
