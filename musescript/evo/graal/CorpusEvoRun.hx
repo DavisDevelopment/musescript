@@ -2386,6 +2386,16 @@ class CorpusEvoRun {
 					if (hostG == null && currentBestGenome != null
 							&& ProjectionProvider.hostProjRefs(currentBestGenome).length > 0)
 						hostG = currentBestGenome;
+					if (hostG == null) {
+						for (eg in archive.elites()) {
+							if (eg != null && ProjectionProvider.hostProjRefs(eg).length > 0) {
+								hostG = eg;
+								break;
+							}
+						}
+					}
+					if (hostG == null && ewHostSeeds.length > 0)
+						hostG = ewHostSeeds[0];
 					if (hostG != null) {
 						var frH = Fitness.evaluate(hostG, bars, "js", false, costBps, startCapital, equityFloor);
 						Fitness.attachProjectionScore(frH, hostG, bars, Fitness.projectionProvider);
@@ -2650,6 +2660,35 @@ class CorpusEvoRun {
 				#end
 				if (mapElitesOn && immigrantRate > 0)
 					popG = injectArchiveDiversity(popG, archive, engine.elite, immigrantRate, immigrantRng);
+				// EW-host survival: after elite shrink, host-ref genomes can vanish from the 24-slot
+				// pop even when they still occupy skill niches in the archive. Re-inject so fusion
+				// keeps iterating and FeatureViz keeps real cloud series.
+				if (ewHostOn) {
+					var hostAlive = 0;
+					for (g in popG)
+						if (ProjectionProvider.hostProjRefs(g).length > 0) hostAlive++;
+					if (hostAlive == 0) {
+						var injected = 0;
+						for (eg in archive.elites()) {
+							if (injected >= 2) break;
+							if (eg == null || ProjectionProvider.hostProjRefs(eg).length == 0) continue;
+							var slot = engine.elite + injected;
+							if (slot < popG.length) {
+								popG[slot] = eg;
+								injected++;
+							}
+						}
+						if (injected == 0 && ewHostSeeds.length > 0) {
+							var slot = engine.elite;
+							if (slot < popG.length) {
+								popG[slot] = ewHostSeeds[immigrantRng.int(ewHostSeeds.length)];
+								injected = 1;
+							}
+						}
+						if (injected > 0)
+							Sys.println('[ew-host] reinject host genomes into pop (n=$injected) — fusion was drained');
+					}
+				}
 				// Rare merger event -- see `mergerEvent`'s own doc comment. `evalBatch` differs by
 				// mode: real-tape sharpe is independent per-genome (plain `evalFn` map); compete
 				// z-score needs a shared cohort to be meaningful, so ALL candidate hybrids from
