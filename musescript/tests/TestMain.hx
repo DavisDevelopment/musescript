@@ -75,6 +75,7 @@ class TestMain {
 		runner.addCase(new TestEwHostProjection());
 		runner.addCase(new TestEwBenchmark());
 		runner.addCase(new TestRegimeMcmc());
+		runner.addCase(new TestRegimeHost());
 		runner.addCase(new TestIntPairMap());
 		runner.addCase(new TestIntPairList());
 		runner.addCase(new TestNmaBijection());

@@ -12,6 +12,7 @@ class TestProjectionHostMain {
 		runner.addCase(new TestFeatureViz());
 		runner.addCase(new TestEwBenchmark());
 		runner.addCase(new TestRegimeMcmc());
+		runner.addCase(new TestRegimeHost());
 		Report.create(runner);
 		runner.run();
 	}

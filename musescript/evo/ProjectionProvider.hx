@@ -5,6 +5,7 @@ import musescript.ew.EwForecastHost;
 import musescript.ew.ForecastCloud;
 import musescript.ew.LatticeForecastHost;
 import musescript.ew.McmcForecastHost;
+import musescript.ew.RegimeForecastHost;
 import musescript.indicators.ew.EwPhiParams;
 import musescript.indicators.geom.SwingGraph;
 import musescript.indicators.geom.SwingGraphStack;
@@ -359,6 +360,11 @@ class ProjectionProvider {
 		var phi = applyPhiDeltas(basePhi, decl.phiDeltas);
 		var key = phiKeyOf(decl.phiDeltas);
 		var samples = decl.samples < 1 ? 1 : decl.samples;
+		if (kind == "regime") {
+			// Non-EW substrate: streams its own returns via onBar (ignores graph/stack). Soft φ deltas
+			// don't apply (regime params are its own); horizon carries through from the decl.
+			return new RegimeForecastHost(decl.seed, 2, decl.horizon < 1 ? 20 : decl.horizon);
+		}
 		if (kind == "mcmc") {
 			var m = stack != null
 				? McmcForecastHost.withStack(stack, phi, 5, samples, decl.seed, key)

@@ -31,6 +31,7 @@ class RegimeMcmc {
 	var mu:Vector<Float>;        // emission means (K)
 	var sigma:Vector<Float>;     // emission stddevs (K), kept strictly ascending
 	var logA:Vector<Float>;      // log transition matrix (K*K), fixed
+	var A:Vector<Float>;         // transition matrix (K*K), linear — for forward prediction
 	var rng:DetRng;
 
 	// posterior accumulation
@@ -67,10 +68,14 @@ class RegimeMcmc {
 
 		// fixed strong-diagonal transition (persistence is the regime prior)
 		logA = new Vector<Float>(K * K);
+		A = new Vector<Float>(K * K);
 		var off = (1.0 - persist) / (K - 1);
 		for (i in 0...K)
-			for (j in 0...K)
-				logA[i * K + j] = DetMath.log(i == j ? persist : off);
+			for (j in 0...K) {
+				var p = i == j ? persist : off;
+				A[i * K + j] = p;
+				logA[i * K + j] = DetMath.log(p);
+			}
 
 		// init path by nearest-σ emission (greedy, deterministic)
 		z = new Vector<Int>(T);
@@ -213,6 +218,81 @@ class RegimeMcmc {
 			if (p > 0) e -= p * DetMath.log(p);
 		}
 		return e;
+	}
+
+	/**
+	 * Forward predictive distribution of the cumulative log-return over the next `H` bars: start from
+	 * the current-regime posterior, walk the transition matrix, emit Normal(μ_z, σ_z) each step,
+	 * repeat over `nPaths`. Returns p05/p50/p95 cumulative-return quantiles + P(up). Deterministic
+	 * (all draws via DetRng); this is what a host turns into a ForecastCloud price band.
+	 */
+	public function predictCumReturn(H:Int, nPaths:Int):{p05:Float, p50:Float, p95:Float, probUp:Float, mean:Float} {
+		var cur = new Vector<Float>(K);
+		for (k in 0...K) cur[k] = currentRegimeProb(k);
+		var sums = new Vector<Float>(nPaths);
+		var up = 0;
+		var msum = 0.0;
+		for (p in 0...nPaths) {
+			var zt = sampleCat(cur);
+			var s = 0.0;
+			for (h in 0...H) {
+				s += mu[zt] + sigma[zt] * rng.nextGaussian();
+				zt = sampleRow(zt);
+			}
+			sums[p] = s;
+			msum += s;
+			if (s > 0) up++;
+		}
+		insertionSort(sums);
+		return {
+			p05: quantile(sums, 0.05),
+			p50: quantile(sums, 0.50),
+			p95: quantile(sums, 0.95),
+			probUp: nPaths > 0 ? up / nPaths : Math.NaN,
+			mean: nPaths > 0 ? msum / nPaths : Math.NaN
+		};
+	}
+
+	function sampleCat(pr:Vector<Float>):Int {
+		var u = rng.nextUnit();
+		var acc = 0.0;
+		for (k in 0...K) {
+			acc += pr[k];
+			if (u < acc) return k;
+		}
+		return K - 1;
+	}
+
+	function sampleRow(i:Int):Int {
+		var u = rng.nextUnit();
+		var acc = 0.0;
+		for (j in 0...K) {
+			acc += A[i * K + j];
+			if (u < acc) return j;
+		}
+		return K - 1;
+	}
+
+	static function quantile(sorted:Vector<Float>, q:Float):Float {
+		var n = sorted.length;
+		if (n == 0) return Math.NaN;
+		if (n == 1) return sorted[0];
+		var pos = q * (n - 1);
+		var lo = Std.int(pos);
+		var hi = lo + 1 < n ? lo + 1 : lo;
+		return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
+	}
+
+	static function insertionSort(a:Vector<Float>):Void {
+		for (i in 1...a.length) {
+			var key = a[i];
+			var j = i - 1;
+			while (j >= 0 && a[j] > key) {
+				a[j + 1] = a[j];
+				j--;
+			}
+			a[j + 1] = key;
+		}
 	}
 
 	/** Emission mean / std of a regime (for a host's predictive band). */
