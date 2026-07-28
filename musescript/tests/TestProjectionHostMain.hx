@@ -10,6 +10,7 @@ class TestProjectionHostMain {
 		runner.addCase(new TestProjectionScaffold());
 		runner.addCase(new TestEwHostProjection());
 		runner.addCase(new TestFeatureViz());
+		runner.addCase(new TestEwBenchmark());
 		Report.create(runner);
 		runner.run();
 	}
