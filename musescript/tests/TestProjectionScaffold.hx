@@ -22,6 +22,7 @@ import musescript.evo.NoiseModel;
 import musescript.evo.ProjectionDecl;
 import musescript.evo.Variation;
 import musescript.evo.EvoParam;
+import musescript.evo.Simplify;
 
 /**
  * P0.a scaffolding coverage for evolvable projections (PROJECTION_COEVOLUTION_PLAN.md).
@@ -169,6 +170,27 @@ class TestProjectionScaffold extends Test {
 			Assert.isTrue(g.projections.length >= 1);
 			Assert.isTrue(g.projections[0].sampler.match(PSHost(_)));
 		}
+	}
+
+	/**
+	 * `Simplify.simplifyGenome` rebuilds the genome struct BEFORE handing it to compactParams, and
+	 * used to omit `projections` — so simplification (run on live population genomes each gen) drained
+	 * host decls even after the compactParams fix. A simplifiable host genome must keep its projection.
+	 */
+	public function testSimplifyPreservesHostProjection() {
+		var g = baseGenome();
+		// entryLong has a redundant `&& (1 > 0)` clause Simplify will fold away, plus the host read.
+		g.entryLong = BAnd(
+			BCmp(">", KSeries(SProj("ew_0", "p50")), KSeries(SPrice("close"))),
+			BCmp(">", KConst(1.0), KConst(0.0)));
+		g.projections = [hostProj("ew_0")];
+
+		var out = Simplify.simplifyGenome(g, new Variation(2));
+
+		Assert.notNull(out.projections);
+		Assert.equals(1, out.projections.length);
+		Assert.equals("ew_0", out.projections[0].name);
+		Assert.isTrue(out.projections[0].sampler.match(PSHost(_)));
 	}
 
 	// ── P0.b: a REFERENCED projection renders as a prelude field and runs end-to-end ─────────

@@ -59,7 +59,12 @@ class Simplify {
 		return scalarEq(a, b);
 	}
 
-	static function containsIndicator(n:ScalarNode):Bool {
+	/**
+	 * Returns true if the given ScalarNode contains an SInd call.
+	 * @param n ScalarNode 
+	 * @return Bool
+	 */
+	public static function containsIndicator(n:ScalarNode):Bool {
 		return switch (n) {
 			case KConst(_) | KParam(_) | KFeature(_): false;
 			case KSeries(s) | KLookback(s, _): seriesHasIndicator(s);
@@ -68,7 +73,12 @@ class Simplify {
 		};
 	}
 
-	static function seriesHasIndicator(s:SeriesNode):Bool {
+	/**
+	 * Returns true if the given SeriesNode contains an SInd call.
+	 * @param s SeriesNode 
+	 * @return Bool
+	 */
+	public static function seriesHasIndicator(s:SeriesNode):Bool {
 		return switch (s) {
 			case SPrice(_): false;
 			case SProj(_, _): false; // a projection reference is a variable, not an indicator
@@ -76,7 +86,13 @@ class Simplify {
 		};
 	}
 
-	static function scalarEq(a:ScalarNode, b:ScalarNode):Bool {
+	/**
+	 * Returns true if the given two ScalarNodes are semantically equivalent.
+	 * @param a 
+	 * @param b 
+	 * @return Bool
+	 */
+	public static function scalarEq(a:ScalarNode, b:ScalarNode):Bool {
 		return switch [a, b] {
 			case [KConst(x), KConst(y)]: x == y;
 			case [KParam(x), KParam(y)]: x == y;
@@ -88,7 +104,13 @@ class Simplify {
 		};
 	}
 
-	static function seriesEq(a:SeriesNode, b:SeriesNode):Bool {
+	/**
+	 * Returns true if the given two SeriesNodes are semantically equivalent.
+	 * @param a SeriesNode
+	 * @param b SeriesNode
+	 * @return Bool
+	 */
+	public static function seriesEq(a:SeriesNode, b:SeriesNode):Bool {
 		return switch [a, b] {
 			case [SPrice(x), SPrice(y)]: x == y;
 			case [SInd(nx, fx, wx, sx), SInd(ny, fy, wy, sy)]:
@@ -275,7 +297,11 @@ class Simplify {
 			params: g.params,
 			name: g.name,
 			lineage: g.lineage,
-			seedOrigin: g.seedOrigin
+			seedOrigin: g.seedOrigin,
+			// Preserve host projections (genome identity) — same drop bug compactParams had: this
+			// rebuild runs BEFORE compactParams, so omitting the field nulls the PSHost decl before
+			// the fix downstream can help. Simplify never touches SProj reads or projection nodes.
+			projections: g.projections
 		};
 		return variation.compactParams(out);
 	}
