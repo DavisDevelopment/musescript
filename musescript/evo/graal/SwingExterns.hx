@@ -109,7 +109,8 @@ extern class BorderLayout implements LayoutManager {
 
 @:native("java.awt.FlowLayout")
 extern class FlowLayout implements LayoutManager {
-	function new(?align:Int);
+	function new();
+	function setAlignment(align:Int):Void;
 	static var LEFT(default, never):Int;
 }
 
