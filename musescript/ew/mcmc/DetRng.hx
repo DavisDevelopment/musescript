@@ -53,6 +53,33 @@ class DetRng {
 		return f / 4294967296.0;
 	}
 
+	var haveGauss:Bool = false;
+	var gaussCache:Float = 0.0;
+
+	/**
+	 * Standard-normal draw via the Marsaglia polar method — trig-free, so it stays inside the
+	 * byte-identical op-set (nextUnit + DetMath.log + sqrt, all IEEE-deterministic). Box–Muller is
+	 * avoided because it needs cos/sin, which are not identically rounded across targets.
+	 */
+	public function nextGaussian():Float {
+		if (haveGauss) {
+			haveGauss = false;
+			return gaussCache;
+		}
+		var u = 0.0;
+		var v = 0.0;
+		var s = 0.0;
+		do {
+			u = 2.0 * nextUnit() - 1.0;
+			v = 2.0 * nextUnit() - 1.0;
+			s = u * u + v * v;
+		} while (s >= 1.0 || s == 0.0);
+		var mul = Math.sqrt(-2.0 * DetMath.log(s) / s); // sqrt is IEEE-correctly-rounded on all targets
+		gaussCache = v * mul;
+		haveGauss = true;
+		return u * mul;
+	}
+
 	/** Uniform Int in [0, n) via rejection (no modulo bias); deterministic. n must be > 0. */
 	public function nextInt(n:Int):Int {
 		if (n <= 1) return 0;

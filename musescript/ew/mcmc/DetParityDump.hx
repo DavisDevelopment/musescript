@@ -31,6 +31,19 @@ class DetParityDump {
 			buf.add("exp(" + (x - 5.0) + ")=" + fbits(DetMath.exp(x - 5.0)) + "\n");
 		}
 
+		// Whole-chain parity: a short regime MCMC composes only DetRng/DetMath/sqrt/± ops, so its
+		// posterior must also be byte-identical across targets — prove it, don't assume ("by
+		// construction" is exactly what the compactParams bug looked like).
+		buf.add("-- RegimeMcmc posterior (raw f64 bits) --\n");
+		var tape = new haxe.ds.Vector<Float>(160);
+		var trng = new DetRng(Int64.make(0x5A5A, 0xC3C3));
+		for (t in 0...160) tape[t] = (t < 80 ? 0.004 : 0.02) * trng.nextGaussian();
+		var m = new musescript.ew.mcmc.RegimeMcmc(Int64.make(0, 99), tape, 2);
+		m.run(2000, 800);
+		for (t in [10, 40, 90, 150]) for (k in 0...2)
+			buf.add("P(z" + t + "=" + k + ")=" + fbits(m.regimeProb(t, k)) + "\n");
+		buf.add("sig0=" + fbits(m.regimeSigma(0)) + " sig1=" + fbits(m.regimeSigma(1)) + "\n");
+
 		Sys.print(buf.toString());
 	}
 
