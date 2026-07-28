@@ -1,0 +1,3 @@
+extraParams.hxml
+-main musescript.ew.mcmc.DetParityDump
+--jvm build/jvm/det-parity.jar
