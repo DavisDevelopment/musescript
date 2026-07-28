@@ -9,9 +9,17 @@ import haxe.io.FPHelper;
  * diffed: identical output ⇒ our operation set is byte-identical across the two backends the
  * dual-compiled kernel will run on. (Compare bits, never decimals — decimal formatting itself can
  * differ across targets even when the underlying double is identical.)
+ *
+ * Bucket D4: `render()` is the CI surface — utest locks the bit string on node; `tools/det_parity_ci.*`
+ * builds JVM + node and diffs the same string.
  */
 class DetParityDump {
 	static function main() {
+		Sys.print(render());
+	}
+
+	/** Full parity transcript (stable across targets). Used by CI golden + JVM↔node diff. */
+	public static function render():String {
 		var buf = new StringBuf();
 
 		var rng = new DetRng(Int64.make(0x12345678, 0x9ABCDEF0));
@@ -44,7 +52,25 @@ class DetParityDump {
 			buf.add("P(z" + t + "=" + k + ")=" + fbits(m.regimeProb(t, k)) + "\n");
 		buf.add("sig0=" + fbits(m.regimeSigma(0)) + " sig1=" + fbits(m.regimeSigma(1)) + "\n");
 
-		Sys.print(buf.toString());
+		// Bucket D4: parity for BlockBootstrap + NullForecastHost (new randomized paths).
+		buf.add("-- BlockBootstrap sharpeCi point (raw f64 bits) --\n");
+		var rets:Array<Float> = [];
+		var brng = new DetRng(Int64.make(0xB007, 0x51D));
+		for (_ in 0...64) rets.push(0.001 + 0.01 * brng.nextGaussian());
+		var ci = musescript.evo.rigor.BlockBootstrap.sharpeCi(rets, 42, 50, 4);
+		buf.add("point=" + fbits(ci.point) + " lo=" + fbits(ci.lo) + " hi=" + fbits(ci.hi) + "\n");
+
+		buf.add("-- NullForecastHost cloudAt mid (raw f64 bits) --\n");
+		var host = new musescript.ew.NullForecastHost(0x11, 5);
+		var bar:{open:Float, high:Float, low:Float, close:Float, volume:Float, time:Float, index:Int} =
+			{open: 100, high: 101, low: 99, close: 100.5, volume: 1, time: 0, index: 0};
+		for (i in 0...10) {
+			host.onBar(cast bar, i);
+			var c = host.cloudAt(i);
+			buf.add("t" + i + "=" + fbits(c.priceMid) + "\n");
+		}
+
+		return buf.toString();
 	}
 
 	static function hex32(v:Int):String

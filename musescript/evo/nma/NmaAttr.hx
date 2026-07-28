@@ -305,7 +305,7 @@ class NmaAttr {
 			var repl = NmaBijection.boolFromEnum(r);
 			NmaSurgery.setBoolRoot(pack.nma, site.slot, NmaSurgery.replaceBool(saved, site.path, repl));
 			var fr = NmaFitness.evaluatePrepared(pack.nma, pack.ctx, bars, costBps, initialCash, equityFloor);
-			scores.push(Fitness.score(fr, 1));
+			scores.push(Fitness.score(fr));
 			NmaSurgery.setBoolRoot(pack.nma, site.slot, saved);
 		}
 		return scores;

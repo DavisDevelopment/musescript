@@ -42,8 +42,8 @@ class BasketFitness {
 		return {trades: tradesSum, sharpe: sharpe, finalEquity: equitySum, bankrupt: false};
 	}
 
-	/** Canonical oracle score for an aggregate (no parsimony). */
-	public static inline function scoreAggregate(agg:{trades:Int, sharpe:Float, ?bankrupt:Bool}, minTrades:Int = 1):Float {
+	/** Canonical oracle score for an aggregate (no parsimony). Uses `Fitness.defaultMinTrades` when omitted. */
+	public static inline function scoreAggregate(agg:{trades:Int, sharpe:Float, ?bankrupt:Bool}, ?minTrades:Null<Int>):Float {
 		return Fitness.scoreFacts(agg.trades, agg.sharpe, agg.bankrupt == true, minTrades);
 	}
 }

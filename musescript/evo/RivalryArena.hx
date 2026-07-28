@@ -331,7 +331,9 @@ class RivalryArena {
 			params: newParams,
 			name: loser.name,
 			lineage: (loser.lineage != null ? loser.lineage.copy() : []).concat([Canonical.structuralKey(loser)]),
-			seedOrigin: loser.seedOrigin
+			seedOrigin: loser.seedOrigin,
+			// Bucket F1: param blends must not drop host projections (drain-bug class).
+			projections: loser.projections
 		};
 	}
 

@@ -697,18 +697,21 @@ class CorpusSeed {
 			projections: [decl("ew_0", 3)]
 		});
 		// Price above invalidate → stay long bias.
-		out.push({
-			entryLong: BCmp(">", KSeries(SPrice("close")), KSeries(SProj("ew_0", "inv"))),
-			entryShort: BCmp("<", KSeries(SPrice("close")), KSeries(SProj("ew_0", "inv"))),
-			exitLong: alwaysFalse(),
-			exitShort: alwaysFalse(),
-			size: KConst(1.0),
-			params: [],
-			name: 'ew_host_${kind}_vs_invalidate',
-			lineage: ["ew-host-seed"],
-			seedOrigin: null,
-			projections: [decl("ew_0", 4, ["equalityTol" => 0.02])]
-		});
+		// Regime / auction emit inv=NaN — this seed is dead weight for those kinds (Bucket F5).
+		if (kind == "lattice" || kind == "mcmc") {
+			out.push({
+				entryLong: BCmp(">", KSeries(SPrice("close")), KSeries(SProj("ew_0", "inv"))),
+				entryShort: BCmp("<", KSeries(SPrice("close")), KSeries(SProj("ew_0", "inv"))),
+				exitLong: alwaysFalse(),
+				exitShort: alwaysFalse(),
+				size: KConst(1.0),
+				params: [],
+				name: 'ew_host_${kind}_vs_invalidate',
+				lineage: ["ew-host-seed"],
+				seedOrigin: null,
+				projections: [decl("ew_0", 4, ["equalityTol" => 0.02])]
+			});
+		}
 		return out;
 	}
 }

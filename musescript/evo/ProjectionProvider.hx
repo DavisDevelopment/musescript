@@ -76,6 +76,9 @@ class ProjectionProvider {
 
 	public inline function getHost():Null<EwForecastHost> return host;
 
+	/** Last genome/tape bind key (tests / `[ew-host]` logs). */
+	public inline function debugBindKey():Null<String> return lastBindKey;
+
 	/** Drop cached clouds (call after rebinding host / new tape). */
 	public function invalidate():Void {
 		clouds = null;

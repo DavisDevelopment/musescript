@@ -31,6 +31,26 @@ import js.lib.Atomics;
 class NmaNodeEvalPool {
 	public static var current:Null<NmaNodeEvalPool> = null;
 
+	/**
+	 * Bucket F2: multi-worker JSON wire cannot round-trip Haxe enums inside `ProjectionDecl`
+	 * (PSHost / PSPoint / …). Host genomes must NEVER be silently stripped of projections.
+	 * Returns true when a genome is safe for the worker JSON path.
+	 */
+	public static function isWorkerJsonSafe(g:StrategyGenome):Bool {
+		return g.projections == null || g.projections.length == 0;
+	}
+
+	/** Throw if any genome would lose projections on the worker path. */
+	public static function assertWorkerJsonSafe(gs:Array<StrategyGenome>):Void {
+		for (g in gs) {
+			if (!isWorkerJsonSafe(g)) {
+				var n = g.name != null ? g.name : "?";
+				throw 'NmaNodeEvalPool: genome "$n" declares projections — worker JSON cannot round-trip'
+					+ ' enum samplers; refuse silent strip (use --threads 1 / --ew-host single-thread)';
+			}
+		}
+	}
+
 	public final workers:Int;
 	/** Last scoreAll main-thread put/JSON wire time (ms); 0 when inline or cache-hot. */
 	public var lastSerMs:Float = 0;
@@ -150,7 +170,7 @@ class NmaNodeEvalPool {
 					while (ie < gsE.length) {
 						var gE:StrategyGenome = cast gsE[ie];
 						var frE = Fitness.evaluate(gE, tapeE, "js", false);
-						scoresE[baseE + ie] = Fitness.score(frE, 1);
+						scoresE[baseE + ie] = Fitness.score(frE);
 						ie++;
 					}
 					Atomics.add(syncE, 2, Fitness.nmaOkCount - okE);
@@ -191,7 +211,7 @@ class NmaNodeEvalPool {
 				while (i < count) {
 					var g = store[ids[base + i]];
 					var fr = Fitness.evaluate(g, tape, "js", false);
-					scores[base + i] = Fitness.score(fr, 1);
+					scores[base + i] = Fitness.score(fr);
 					i++;
 				}
 				Atomics.add(sync, 2, Fitness.nmaOkCount - ok0);
@@ -339,11 +359,12 @@ class NmaNodeEvalPool {
 			var i = 0;
 			while (i < n) {
 				var fr = Fitness.evaluate(gs[i], tape, "js", false);
-				out[i] = Fitness.score(fr, 1);
+				out[i] = Fitness.score(fr);
 				i++;
 			}
 			return out;
 		}
+		assertWorkerJsonSafe(gs);
 
 		ensureCapacity(n);
 		Atomics.store(syncView, 0, 0);
@@ -431,11 +452,12 @@ class NmaNodeEvalPool {
 			var i = 0;
 			while (i < n) {
 				var fr = Fitness.evaluate(gs[i], tape, "js", false);
-				out[i] = Fitness.score(fr, 1);
+				out[i] = Fitness.score(fr);
 				i++;
 			}
 			return out;
 		}
+		assertWorkerJsonSafe(gs);
 
 		var tSer0 = haxe.Timer.stamp();
 		var planned = planResident(gs);

@@ -13,18 +13,17 @@ import musescript.ew.mcmc.DetMath;
  * a non-Elliott-Wave substrate drops straight into the benchmark + co-evolution rig (nothing
  * downstream knows the difference between a wave lattice and a regime posterior).
  *
- * Streams log-returns; each `cloudAt(t)` runs an MH chain over the trailing window (data ≤ t only —
- * PIT-causal) and turns the posterior into a `ForecastCloud`: the forward predictive band → price
- * lo/hi/mid, regime-posterior entropy → `countEntropy`, dominant-regime mass → `topMass`, current
- * regime → `labelCode`, P(up over the horizon) → `probUp`. No invalidation concept — regimes don't
- * have a structural kill level (NaN there is honest, not a gap).
+ * Streams closes by bar index; each `cloudAt(t)` runs an MH chain over the trailing window of
+ * log-returns built from closes **≤ t only** (PIT-causal) and turns the posterior into a
+ * `ForecastCloud`. No invalidation concept — regimes don't have a structural kill level (NaN
+ * there is honest, not a gap).
  *
  * Cost note: a fresh chain per queried bar is heavy; this host is an elite-only / offline / benchmark
  * producer, never the per-bar hot path — same governance as the MCMC lattice host.
  */
 class RegimeForecastHost implements EwForecastHost {
-	var rets:Array<Float>;
-	var lastClose:Float;
+	/** Close at each bar index (sparse-filled via onBar). */
+	var closes:Array<Float>;
 
 	var seed:Int;
 	var K:Int;
@@ -40,6 +39,9 @@ class RegimeForecastHost implements EwForecastHost {
 	var cacheCloud:ForecastCloud;
 	var lastProbs:Vector<Float>;
 
+	/** Minimum return count before a non-empty cloud is emitted (warmup honesty). */
+	public static inline var MIN_RETURNS:Int = 30;
+
 	public function new(seed:Int = 0, k:Int = 2, horizon:Int = 20, window:Int = 160,
 			steps:Int = 1500, burnIn:Int = 500, nPaths:Int = 200, persist:Float = 0.97, ?phiKey:String) {
 		this.seed = seed;
@@ -51,23 +53,27 @@ class RegimeForecastHost implements EwForecastHost {
 		this.nPaths = nPaths < 1 ? 1 : nPaths;
 		this.persist = persist;
 		this.key = phiKey;
-		this.rets = [];
-		this.lastClose = Math.NaN;
+		this.closes = [];
 	}
 
 	public function phiKey():Null<String> return key;
 
 	public function onBar(bar:Bar, index:Int):Void {
-		if (Math.isFinite(lastClose) && lastClose > 0 && bar.close > 0)
-			rets.push(DetMath.log(bar.close / lastClose));
-		lastClose = bar.close;
+		if (index < 0) return;
+		while (closes.length <= index) closes.push(Math.NaN);
+		closes[index] = bar.close;
 		cacheT = -1;
 	}
 
 	public function cloudAt(t:Int):ForecastCloud {
 		if (cacheT == t && cacheCloud != null) return cacheCloud;
+		if (t < 0 || t >= closes.length || !Math.isFinite(closes[t]))
+			return ForecastCloudUtil.empty(0);
+
+		// Returns from bars 1..t only — never read closes > t (Bucket C1).
+		var rets = returnsThrough(t);
 		var n = rets.length;
-		if (n < 30) return ForecastCloudUtil.empty(0);
+		if (n < MIN_RETURNS) return ForecastCloudUtil.empty(0);
 
 		var w = n < window ? n : window;
 		var data = new Vector<Float>(w);
@@ -85,7 +91,7 @@ class RegimeForecastHost implements EwForecastHost {
 			if (p > topMass) topMass = p;
 		}
 
-		var lc = lastClose;
+		var lc = closes[t];
 		var a = lc * DetMath.exp(pred.p05);
 		var b = lc * DetMath.exp(pred.p95);
 		var lo = a < b ? a : b;
@@ -123,6 +129,20 @@ class RegimeForecastHost implements EwForecastHost {
 			nestScore: 1.0,
 			degree: k
 		});
+		return out;
+	}
+
+	/** Log-returns using closes[1..t] only. */
+	function returnsThrough(t:Int):Array<Float> {
+		var out:Array<Float> = [];
+		var i = 1;
+		while (i <= t) {
+			var a = closes[i - 1];
+			var b = closes[i];
+			if (Math.isFinite(a) && a > 0 && Math.isFinite(b) && b > 0)
+				out.push(DetMath.log(b / a));
+			i++;
+		}
 		return out;
 	}
 }

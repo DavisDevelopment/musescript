@@ -1,7 +1,6 @@
 package musescript.ew;
 
 import musescript.harness.Bar;
-import musescript.harness.OhlcvCsv;
 import musescript.evo.ProjectionScore;
 
 /**
@@ -25,7 +24,7 @@ class RegimeBenchmarkCli {
 		var tapePath = argStr("--tape", "corpus/tapes/spy_oos_2022_2026.csv");
 		var horizon = argInt("--horizon", 15);
 		var step = argInt("--anchor-step", 10);
-		var warmup = argInt("--warmup", 180);
+		var warmup = argInt("--warmup", HostWarmup.REGIME_BENCHMARK);
 		var k = argInt("--k", 2);
 		var window = argInt("--window", 140);
 		var steps = argInt("--steps", 700);
@@ -33,8 +32,8 @@ class RegimeBenchmarkCli {
 		var nPaths = argInt("--paths", 80);
 
 		var bars = loadBars(tapePath);
-		if (bars.length < warmup + horizon + 20) {
-			Sys.println('tape too short (${bars.length})');
+		try BenchmarkHarness.requireTapeLength(bars, warmup, horizon, 20) catch (e:Dynamic) {
+			Sys.println(Std.string(e));
 			Sys.exit(1);
 		}
 
@@ -48,7 +47,7 @@ class RegimeBenchmarkCli {
 		var t = 0;
 		while (t < bars.length) {
 			host.onBar(bars[t], t);
-			var anchor = t >= warmup && (t - warmup) % step == 0 && t + horizon < bars.length;
+			var anchor = BenchmarkHarness.isLegalAnchor(t, warmup, step, horizon, bars.length);
 			if (anchor) {
 				var c = host.cloudAt(t);
 				if (c.samples > 0 && Math.isFinite(c.spread) && bars[t].close > 0) {
@@ -166,10 +165,8 @@ class RegimeBenchmarkCli {
 	static function pct(x:Float):String
 		return finite(x) ? fmt(x * 100, 1) + "%" : "n/a";
 
-	static function loadBars(path:String):Array<Bar> {
-		if (sys.FileSystem.exists(path)) return OhlcvCsv.parse(sys.io.File.getContent(path));
-		throw 'no tape at $path';
-	}
+	static function loadBars(path:String):Array<Bar>
+		return BenchmarkHarness.loadBars(path);
 
 	static function fmt(x:Float, n:Int):String {
 		if (Math.isNaN(x) || !Math.isFinite(x)) return "n/a";

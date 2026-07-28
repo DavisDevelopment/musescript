@@ -608,13 +608,29 @@ class Fitness {
 	public static inline var NEG_INF = -1.0 / 0.0;
 
 	/**
+	 * Pipeline-hardening min-trade gate (Bucket A1). A genome below this trade count is
+	 * INELIGIBLE — `score` / `scoreFacts` / `robustScore` return NEG_INF. Default 20 closes the
+	 * thin-trade false-positive leak (1 lucky trade → huge Sharpe). Callers that intentionally
+	 * want the old 1-trade floor pass `minTrades=1` explicitly (tests, attribution ablations).
+	 * CorpusEvoRun sets this from `--min-trades`.
+	 */
+	public static var defaultMinTrades:Int = 20;
+
+	/** Resolve optional minTrades; null → `defaultMinTrades`. */
+	public static inline function resolveMinTrades(?minTrades:Null<Int>):Int {
+		return minTrades != null ? minTrades : defaultMinTrades;
+	}
+
+	/**
 	 * Canonical oracle score from a `FitnessResult`: NEG_INF on fail / NaN / too few trades /
 	 * bankruptcy. Optionally soft-caps by genome complexity (see below).
 	 *
 	 * Includes `bankrupt` — callers historically checked it in ad-hoc predicates while this
 	 * function did not. Use `score` / `scoreFacts` everywhere a NEG_INF oracle is needed.
+	 *
+	 * `minTrades` defaults to `defaultMinTrades` (20). Pass `1` only when a low floor is deliberate.
 	 */
-	public static function score(r:FitnessResult, minTrades:Int = 1,
+	public static function score(r:FitnessResult, ?minTrades:Null<Int>,
 			?nodeCount:Int, ?parsimonyThreshold:Int = 20, ?parsimonyLambda:Float = 0.01):Float {
 		if (!r.ok) return NEG_INF;
 		if (r.bankrupt) return NEG_INF;
@@ -626,16 +642,55 @@ class Fitness {
 	 * without a full `FitnessResult`. Pass `bankrupt=true` to force NEG_INF.
 	 */
 	public static function scoreFacts(
-		trades:Int, sharpe:Float, bankrupt:Bool = false, minTrades:Int = 1,
+		trades:Int, sharpe:Float, bankrupt:Bool = false, ?minTrades:Null<Int>,
 		?nodeCount:Int, ?parsimonyThreshold:Int = 20, ?parsimonyLambda:Float = 0.01
 	):Float {
 		if (bankrupt) return NEG_INF;
-		if (trades < minTrades) return NEG_INF;
+		if (trades < resolveMinTrades(minTrades)) return NEG_INF;
 		if (Math.isNaN(sharpe)) return NEG_INF;
 		var s = sharpe;
 		if (nodeCount != null && nodeCount > parsimonyThreshold)
 			s -= parsimonyLambda * (nodeCount - parsimonyThreshold);
 		return s;
+	}
+
+	/**
+	 * Sample-size-aware ranking score (Bucket A2): when `r.equity` is present, rank by
+	 * Probabilistic Sharpe (probit of PSR / DSR); otherwise fall back to `score`.
+	 * Thin-trade genomes still hit NEG_INF via the min-trade gate.
+	 */
+	public static function rankScore(r:FitnessResult, ?minTrades:Null<Int>, ?nTrials:Int = 1,
+			?nodeCount:Int, ?parsimonyThreshold:Int = 20, ?parsimonyLambda:Float = 0.01):Float {
+		var base = score(r, minTrades, nodeCount, parsimonyThreshold, parsimonyLambda);
+		if (base == NEG_INF) return NEG_INF;
+		if (r.equity == null || r.equity.length < 4)
+			return base;
+		var rets = musescript.harness.Metrics.returnsFromEquity(r.equity);
+		var rs = musescript.evo.rigor.ProbSharpe.rankScore(rets, nTrials != null ? nTrials : 1);
+		if (!Math.isFinite(rs)) return NEG_INF;
+		if (nodeCount != null && nodeCount > parsimonyThreshold)
+			rs -= parsimonyLambda * (nodeCount - parsimonyThreshold);
+		return rs;
+	}
+
+	/**
+	 * IS-selection rank from cached eval facts (no equity curve required).
+	 * Uses `ProbSharpe.rankFromAnnualized` so CorpusEvoRun / EvoCache can DSR-rank without
+	 * materializing per-bar equity on every genome. Same NEG_INF gates as `scoreFacts`.
+	 */
+	public static function rankScoreFacts(
+		trades:Int, sharpe:Float, nObs:Int, bankrupt:Bool = false, ?minTrades:Null<Int>,
+		?nTrials:Int = 1, ?nodeCount:Int, ?parsimonyThreshold:Int = 20, ?parsimonyLambda:Float = 0.01
+	):Float {
+		if (bankrupt) return NEG_INF;
+		if (trades < resolveMinTrades(minTrades)) return NEG_INF;
+		if (Math.isNaN(sharpe)) return NEG_INF;
+		var rs = musescript.evo.rigor.ProbSharpe.rankFromAnnualized(
+			sharpe, nObs, 0, 0, nTrials != null ? nTrials : 1);
+		if (!Math.isFinite(rs)) return NEG_INF;
+		if (nodeCount != null && nodeCount > parsimonyThreshold)
+			rs -= parsimonyLambda * (nodeCount - parsimonyThreshold);
+		return rs;
 	}
 
 	/**
@@ -678,16 +733,17 @@ class Fitness {
 		return segSharpes;
 	}
 
-	public static function robustScore(r:FitnessResult, windows:Int, windowLambda:Float, minTrades:Int = 1,
+	public static function robustScore(r:FitnessResult, windows:Int, windowLambda:Float, ?minTrades:Null<Int>,
 			?nodeCount:Int, ?parsimonyThreshold:Int = 20, ?parsimonyLambda:Float = 0.01):Float {
+		var mt = resolveMinTrades(minTrades);
 		if (!r.ok) return NEG_INF;
 		if (r.bankrupt) return NEG_INF;
 		if (Math.isNaN(r.sharpe)) return NEG_INF;
-		if (r.trades < minTrades) return NEG_INF;
+		if (r.trades < mt) return NEG_INF;
 		if (windows <= 1 || r.equity == null || r.equity.length < windows * 2)
-			return score(r, minTrades, nodeCount, parsimonyThreshold, parsimonyLambda);
+			return score(r, mt, nodeCount, parsimonyThreshold, parsimonyLambda);
 		var segSharpes = windowSharpes(r, windows);
-		if (segSharpes.length == 0) return score(r, minTrades, nodeCount, parsimonyThreshold, parsimonyLambda);
+		if (segSharpes.length == 0) return score(r, mt, nodeCount, parsimonyThreshold, parsimonyLambda);
 		var s = cvarAlpha > 0 ? cvar(segSharpes, cvarAlpha) : meanMinusStd(segSharpes, windowLambda);
 		if (nodeCount != null && nodeCount > parsimonyThreshold)
 			s -= parsimonyLambda * (nodeCount - parsimonyThreshold);

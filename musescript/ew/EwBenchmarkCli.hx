@@ -1,7 +1,6 @@
 package musescript.ew;
 
 import musescript.harness.Bar;
-import musescript.harness.OhlcvCsv;
 import musescript.indicators.geom.SwingGraph;
 import musescript.indicators.ew.EwPhiParams;
 import musescript.indicators.ew.EwProject.EwProjectBand;
@@ -28,14 +27,14 @@ class EwBenchmarkCli {
 		var tapePath = argStr("--tape", "corpus/tapes/spy_oos_2022_2026.csv");
 		var horizon = argInt("--horizon", 20);
 		var step = argInt("--anchor-step", 5);
-		var warmup = argInt("--warmup", 60);
+		var warmup = argInt("--warmup", HostWarmup.EW_LATTICE_BENCHMARK);
 		var swing = argFloat("--swing", 0.03);
 		var k = argInt("--k", 5);
 		var atrN = argInt("--atr", 14);
 
 		var bars = loadBars(tapePath);
-		if (bars.length < warmup + horizon + 5) {
-			Sys.println('tape too short (${bars.length} bars) for warmup=$warmup + horizon=$horizon');
+		try BenchmarkHarness.requireTapeLength(bars, warmup, horizon, 5) catch (e:Dynamic) {
+			Sys.println(Std.string(e));
 			Sys.exit(1);
 		}
 
@@ -49,7 +48,7 @@ class EwBenchmarkCli {
 		var t = 0;
 		while (t < bars.length) {
 			host.onBar(bars[t], t);
-			var isAnchor = t >= warmup && (t - warmup) % step == 0 && t + 1 < bars.length;
+			var isAnchor = BenchmarkHarness.isLegalAnchor(t, warmup, step, 1, bars.length);
 			if (isAnchor) {
 				var fan = host.ensembleAt(t);
 				if (fan.length == 0) emptyFans++;
@@ -89,7 +88,7 @@ class EwBenchmarkCli {
 		t = 0;
 		var lastClose = Math.NaN;
 		while (t < bars.length) {
-			var isAnchor = t >= warmup && (t - warmup) % step == 0 && t + 1 < bars.length;
+			var isAnchor = BenchmarkHarness.isLegalAnchor(t, warmup, step, 1, bars.length);
 			if (isAnchor) {
 				var atr = atrAt(bars, t, atrN);
 				var c = bars[t].close;
@@ -135,12 +134,8 @@ class EwBenchmarkCli {
 		return cnt > 0 ? sum / cnt : Math.NaN;
 	}
 
-	static function loadBars(path:String):Array<Bar> {
-		var candidates = [path, "corpus/tapes/spy_oos_2022_2026.csv"];
-		for (p in candidates)
-			if (sys.FileSystem.exists(p)) return OhlcvCsv.parse(sys.io.File.getContent(p));
-		throw 'no tape found (tried $path)';
-	}
+	static function loadBars(path:String):Array<Bar>
+		return BenchmarkHarness.loadBars(path, ["corpus/tapes/spy_oos_2022_2026.csv"]);
 
 	static function pct(x:Float):String
 		return Math.isNaN(x) ? "n/a" : fmt(x * 100, 1) + "%";

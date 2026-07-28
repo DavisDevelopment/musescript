@@ -175,16 +175,63 @@ class RegimeMcmc {
 		else moveMu();
 	}
 
-	/** Run `nSteps` MH steps, accumulating regime posterior over the last `nSteps - burnIn`. */
-	public function run(nSteps:Int, burnIn:Int):Void {
+	/** Run `nSteps` MH steps, accumulating regime posterior over the last `nSteps - burnIn`.
+	 * When `traceCurrent` is true, also records the post-burn-in current-regime indicator for ESS. */
+	public function run(nSteps:Int, burnIn:Int, ?traceCurrent:Bool = false):Void {
 		var b = burnIn < 0 ? 0 : (burnIn > nSteps ? nSteps : burnIn);
+		if (traceCurrent) currentTrace = [];
 		for (i in 0...nSteps) {
 			step();
 			if (i >= b) {
 				for (t in 0...T) counts[t * K + z[t]] += 1.0;
 				samples++;
+				if (traceCurrent) currentTrace.push(z[T - 1] + 0.0);
 			}
 		}
+	}
+
+	/** Post-burn-in trace of the last-bar regime id (populated when `run(..., traceCurrent=true)`). */
+	var currentTrace:Array<Float> = [];
+
+	/**
+	 * Effective sample size of the last-bar regime indicator via lag-1 AR approximation:
+	 * ESS ≈ N · (1−ρ)/(1+ρ). Returns NaN if no trace was collected.
+	 */
+	public function essCurrentRegime():Float {
+		return essFromTrace(currentTrace);
+	}
+
+	/** ESS of a real-valued trace (Bucket E1). */
+	public static function essFromTrace(xs:Array<Float>):Float {
+		var n = xs.length;
+		if (n < 4) return Math.NaN;
+		var mean = 0.0;
+		for (x in xs) mean += x;
+		mean /= n;
+		var var0 = 0.0;
+		var cov1 = 0.0;
+		for (i in 0...n) {
+			var d = xs[i] - mean;
+			var0 += d * d;
+			if (i + 1 < n) cov1 += d * (xs[i + 1] - mean);
+		}
+		var0 /= n;
+		cov1 /= (n - 1);
+		// Degenerate: every draw identical → estimator variance 0, treat as ESS = N.
+		if (!(var0 > 0)) return n + 0.0;
+		var rho = cov1 / var0;
+		if (rho >= 1) return 1.0;
+		if (rho <= -1) return n + 0.0;
+		return n * (1.0 - rho) / (1.0 + rho);
+	}
+
+	/** Flag a too-short budget: ESS below `minEss` or accept rate outside `[lo, hi]`. */
+	public function mixingOk(?minEss:Float = 20.0, ?acceptLo:Float = 0.05, ?acceptHi:Float = 0.6):Bool {
+		var ar = acceptRate();
+		if (ar < acceptLo || ar > acceptHi) return false;
+		var ess = essCurrentRegime();
+		if (!Math.isFinite(ess)) return false;
+		return ess >= minEss;
 	}
 
 	// ---- posterior / prediction ----

@@ -1,7 +1,6 @@
 package musescript.ew;
 
 import musescript.harness.Bar;
-import musescript.harness.OhlcvCsv;
 import musescript.evo.ProjectionScore;
 import musescript.ew.auction.AuctionForecastHost;
 import musescript.ew.auction.VolumeProfile;
@@ -22,11 +21,14 @@ class AuctionBenchmarkCli {
 		var tapePath = argStr("--tape", "corpus/tapes/spy_oos_2022_2026.csv");
 		var horizon = argInt("--horizon", 10);
 		var step = argInt("--anchor-step", 5);
-		var warmup = argInt("--warmup", 120);
+		var warmup = argInt("--warmup", HostWarmup.AUCTION_BENCHMARK);
 		var win = argInt("--window", VolumeProfile.DEFAULT_WINDOW);
 
 		var bars = loadBars(tapePath);
-		if (bars.length < warmup + horizon + 20) { Sys.println('tape too short'); Sys.exit(1); }
+		try BenchmarkHarness.requireTapeLength(bars, warmup, horizon, 20) catch (e:Dynamic) {
+			Sys.println(Std.string(e));
+			Sys.exit(1);
+		}
 
 		var host = new AuctionForecastHost(win, VolumeProfile.DEFAULT_BINS, VolumeProfile.DEFAULT_VALUE_AREA_PCT, horizon);
 
@@ -36,7 +38,7 @@ class AuctionBenchmarkCli {
 		var t = 0;
 		while (t < bars.length) {
 			host.onBar(bars[t], t);
-			var anchor = t >= warmup && (t - warmup) % step == 0 && t + horizon < bars.length;
+			var anchor = BenchmarkHarness.isLegalAnchor(t, warmup, step, horizon, bars.length);
 			if (anchor) {
 				var c = host.cloudAt(t);
 				var close = bars[t].close;
@@ -120,10 +122,8 @@ class AuctionBenchmarkCli {
 	static function pct(x:Float):String return finite(x) ? fmt(x * 100, 1) + "%" : "n/a";
 	static function bps(x:Float):String return finite(x) ? fmt(x * 10000, 1) : "n/a";
 
-	static function loadBars(path:String):Array<Bar> {
-		if (sys.FileSystem.exists(path)) return OhlcvCsv.parse(sys.io.File.getContent(path));
-		throw 'no tape at $path';
-	}
+	static function loadBars(path:String):Array<Bar>
+		return BenchmarkHarness.loadBars(path);
 
 	static function fmt(x:Float, n:Int):String {
 		if (!finite(x)) return "n/a";

@@ -20,6 +20,13 @@ import musescript.harness.Bar;
  */
 class ProjectionScore {
 	/**
+	 * Minimum paired observations for rank-IC / directional metrics (Bucket A6).
+	 * Raised from 3 → 10: Spearman on n&lt;10 is dominated by noise and produced
+	 * spuriously high |IC| on thin samples; 10 is a common floor for a stable rank corr.
+	 */
+	public static var minSample:Int = 10;
+
+	/**
 	 * Aggregate skill (mean of finite per-projection skills) + the per-projection breakdown, aligned
 	 * to `g.projections`. Only REFERENCED projections are scored — an unread forecast has no effect on
 	 * behaviour and earns no skill. `agg` is `NaN` when nothing is scoreable.
@@ -128,13 +135,20 @@ class ProjectionScore {
 				xs.push(p[i]);
 				ys.push(y[i]);
 			}
-		if (xs.length < 3)
+		if (xs.length < minSample)
 			return 0;
 		return pearson(ranks(xs), ranks(ys));
 	}
 
-	/** Directional skill in [-1,1]: `2·accuracy − 1` over pairs with a defined sign on the target. */
+	/** Directional skill in [-1,1]: `2·accuracy − 1` over pairs with a defined sign on the target.
+	 * Returns 0 (not a sharp ±1) when paired count &lt; `minSample`. */
 	public static function directionalSkill(p:Array<Float>, y:Array<Float>):Float {
+		var n = p.length < y.length ? p.length : y.length;
+		var tot = 0;
+		for (i in 0...n) {
+			if (finite(p[i]) && finite(y[i]) && sign(y[i]) != 0) tot++;
+		}
+		if (tot < minSample) return 0;
 		var acc = directionalAccuracy(p, y);
 		return finite(acc) ? 2.0 * acc - 1.0 : Math.NaN;
 	}

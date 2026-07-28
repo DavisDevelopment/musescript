@@ -8,6 +8,12 @@ class TestProjectionHostMain {
 	static function main() {
 		var runner = new Runner();
 		runner.addCase(new TestProjectionScaffold());
+		runner.addCase(new TestPipelineHardening());
+		runner.addCase(new TestPitDiscipline());
+		runner.addCase(new TestP1Hardening());
+		runner.addCase(new TestFrostAdversarial());
+		runner.addCase(new TestDetParity());
+		runner.addCase(new TestTapeLinter());
 		runner.addCase(new TestEwHostProjection());
 		runner.addCase(new TestFeatureViz());
 		runner.addCase(new TestEwBenchmark());

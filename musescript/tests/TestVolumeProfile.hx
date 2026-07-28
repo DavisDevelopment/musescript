@@ -87,4 +87,40 @@ class TestVolumeProfile extends Test {
 		Assert.floatEquals(a.vaLow, b.vaLow, 0);
 		Assert.floatEquals(a.valueAreaVolFrac, b.valueAreaVolFrac, 0);
 	}
+
+	/** Bucket E3 — golden histogram: single-print ladder, heavy bin exact. */
+	public function testGoldenHistogramHeavyBin() {
+		// Establish [100,106] span with zero-vol edges; place prints at bin midpoints so
+		// price→bin is exact (price==winHigh would clamp into the last bin).
+		var bars = [bar(100, 100, 100, 100, 0, 0)];
+		for (i in 0...6) {
+			var px = 100.5 + i; // 100.5..105.5 → bins 0..5 with binWidth=1
+			bars.push(bar(px, px, px, px, i == 4 ? 10000.0 : 10.0, i + 1));
+		}
+		bars.push(bar(106, 106, 106, 106, 0, 7));
+		var hist = VolumeProfile.histogram(bars, 8, 6);
+		Assert.equals(6, hist.length);
+		Assert.floatEquals(10000.0, hist[4], 1e-9);
+		for (i in 0...6) if (i != 4) Assert.floatEquals(10.0, hist[i], 1e-9);
+		var lv = VolumeProfile.fromBars(bars, 8, 6, 0.70);
+		Assert.floatEquals(104.5, lv.poc, 1e-9);
+		Assert.isTrue(lv.poc >= lv.vaLow - 1e-9 && lv.poc <= lv.vaHigh + 1e-9);
+		Assert.isTrue(lv.valueAreaVolFrac >= 0.70 - 1e-9);
+	}
+
+	/** Bucket E3 — bin count change must keep POC near the heavy print. */
+	public function testBinSensitivityPocStableNearHeavy() {
+		var bars = [for (i in 0...20) {
+			var px = 100.0 + (i % 10) * 0.5;
+			var vol = (Math.abs(px - 102.5) < 0.01) ? 5000.0 : 50.0;
+			bar(px, px + 0.01, px - 0.01, px, vol, i);
+		}];
+		var poc20 = VolumeProfile.fromBars(bars, 20, 20, 0.70).poc;
+		var poc40 = VolumeProfile.fromBars(bars, 20, 40, 0.70).poc;
+		var poc80 = VolumeProfile.fromBars(bars, 20, 80, 0.70).poc;
+		Assert.isTrue(Math.abs(poc20 - 102.5) < 1.0, 'poc20=$poc20');
+		Assert.isTrue(Math.abs(poc40 - 102.5) < 0.75, 'poc40=$poc40');
+		Assert.isTrue(Math.abs(poc80 - 102.5) < 0.5, 'poc80=$poc80');
+		Assert.isTrue(Math.abs(poc20 - poc80) < 1.5, 'bin shift too large');
+	}
 }

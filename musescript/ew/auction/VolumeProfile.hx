@@ -135,6 +135,52 @@ class VolumeProfile {
 		};
 	}
 
+	/**
+	 * Bucket E3 — expose the volume histogram for golden / bin-sensitivity tests.
+	 * Same windowing and binning as `fromBars`; returns empty array on degenerate input.
+	 */
+	public static function histogram(
+		bars:Array<Bar>,
+		window:Int = DEFAULT_WINDOW,
+		bins:Int = DEFAULT_BINS,
+		?endInclusive:Int
+	):Array<Float> {
+		if (bars == null || bars.length == 0 || window <= 0 || bins <= 0)
+			return [];
+		var end = endInclusive != null ? endInclusive : bars.length - 1;
+		if (end < 0 || end >= bars.length) return [];
+		var start = end - window + 1;
+		if (start < 0) start = 0;
+
+		var winLow = Math.POSITIVE_INFINITY;
+		var winHigh = Math.NEGATIVE_INFINITY;
+		for (i in start...(end + 1)) {
+			var b = bars[i];
+			if (b == null) continue;
+			if (b.low < winLow) winLow = b.low;
+			if (b.high > winHigh) winHigh = b.high;
+		}
+		if (!Math.isFinite(winLow) || !Math.isFinite(winHigh)) return [];
+		var span = winHigh - winLow;
+		if (span <= 0.0) return [for (_ in 0...bins) 0.0];
+
+		var hist = [for (_ in 0...bins) 0.0];
+		var binWidth = span / bins;
+		for (i in start...(end + 1)) {
+			var b = bars[i];
+			if (b == null || !(b.volume > 0)) continue;
+			if (b.high <= b.low) {
+				hist[priceToBin(b.low, winLow, binWidth, bins)] += b.volume;
+				continue;
+			}
+			var loIdx = priceToBin(b.low, winLow, binWidth, bins);
+			var hiIdx = priceToBin(b.high, winLow, binWidth, bins);
+			var share = b.volume / (hiIdx - loIdx + 1);
+			for (j in loIdx...(hiIdx + 1)) hist[j] += share;
+		}
+		return hist;
+	}
+
 	static inline function priceToBin(price:Float, winLow:Float, binWidth:Float, binCount:Int):Int {
 		var raw = Math.ffloor((price - winLow) / binWidth);
 		var max = binCount - 1;

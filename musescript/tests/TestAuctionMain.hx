@@ -9,6 +9,8 @@ class TestAuctionMain {
 		var runner = new Runner();
 		runner.addCase(new TestVolumeProfile());
 		runner.addCase(new TestAuctionForecastHost());
+		runner.addCase(new TestPitDiscipline());
+		runner.addCase(new TestTapeLinter());
 		Report.create(runner);
 		runner.run();
 	}

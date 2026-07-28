@@ -331,17 +331,32 @@ class TestProjectionScaffold extends Test {
 	}
 
 	public function testRankICPerfectAndInverse() {
-		var p = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
-		Assert.floatEquals(1.0, ProjectionScore.rankIC(p, [10.0, 20.0, 30.0, 40.0, 50.0, 60.0]));
-		Assert.floatEquals(-1.0, ProjectionScore.rankIC(p, [60.0, 50.0, 40.0, 30.0, 20.0, 10.0]));
+		var p = [for (i in 1...13) i + 0.0];
+		var up = [for (i in 1...13) i * 10.0];
+		var dn = [for (i in 0...12) (12 - i) * 10.0];
+		Assert.floatEquals(1.0, ProjectionScore.rankIC(p, up));
+		Assert.floatEquals(-1.0, ProjectionScore.rankIC(p, dn));
+	}
+
+	public function testRankICBelowMinSampleIsZero() {
+		var p = [1.0, 2.0, 3.0];
+		Assert.floatEquals(0.0, ProjectionScore.rankIC(p, [10.0, 20.0, 30.0]));
+	}
+
+	public function testConstantPredictorRankICIsZero() {
+		var p = [for (_ in 0...20) 5.0];
+		var y = [for (i in 0...20) i + 0.0];
+		Assert.floatEquals(0.0, ProjectionScore.rankIC(p, y));
 	}
 
 	public function testDirectionalSkillPerfectAndAnti() {
-		var p = [1.0, -1.0, 1.0, -1.0];
-		Assert.floatEquals(1.0, ProjectionScore.directionalSkill(p, [2.0, -3.0, 4.0, -1.0]));
-		Assert.floatEquals(-1.0, ProjectionScore.directionalSkill(p, [-2.0, 3.0, -4.0, 1.0]));
-		Assert.floatEquals(1.0, ProjectionScore.directionalAccuracy(p, [2.0, -3.0, 4.0, -1.0]));
-		Assert.floatEquals(0.0, ProjectionScore.directionalAccuracy(p, [-2.0, 3.0, -4.0, 1.0]));
+		var p = [for (i in 0...12) (i % 2 == 0 ? 1.0 : -1.0)];
+		var good = [for (i in 0...12) (i % 2 == 0 ? 2.0 : -3.0)];
+		var bad = [for (i in 0...12) (i % 2 == 0 ? -2.0 : 3.0)];
+		Assert.floatEquals(1.0, ProjectionScore.directionalSkill(p, good));
+		Assert.floatEquals(-1.0, ProjectionScore.directionalSkill(p, bad));
+		Assert.floatEquals(1.0, ProjectionScore.directionalAccuracy(p, good));
+		Assert.floatEquals(0.0, ProjectionScore.directionalAccuracy(p, bad));
 	}
 
 	public function testHitRateTracksForecastMoveDirection() {

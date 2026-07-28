@@ -30,6 +30,10 @@ import musescript.evo.MapElites.EliteArchive;
 import musescript.plan.ExecutionProfile;
 import musescript.harness.Bar;
 import musescript.harness.OhlcvCsv;
+import musescript.harness.TapeLinter;
+import musescript.evo.rigor.Pbo;
+import musescript.evo.rigor.SeedRobustness;
+import musescript.evo.rigor.UniverseRobustness;
 // `--sim-tape` (see this session's MurmurationSim x corpus-evo integration plan): gated behind
 // `-D kestrel`, same convention musescript.murmuration is imported under everywhere else (see
 // GeneRunner.hx's `loadBars` -- "public build strips this and every use of them below; core
@@ -105,6 +109,25 @@ class CorpusEvoRun {
 		var tapesArg = argStr("--tapes", null);
 		var oosFrac = argFloat("--oos-frac", 0.25);
 		var embargo = argInt("--embargo", 21);
+		// Bucket A1: genomes below this trade count score NEG_INF (thin-trade false-positive gate).
+		var minTrades = argInt("--min-trades", 20);
+		if (minTrades < 1) minTrades = 1;
+		Fitness.defaultMinTrades = minTrades;
+		// Bucket A3: effective trial count for DSR / multiple-testing correction on OOS + IS rank.
+		// Default 50 (not 1) so DSR deflation is ON unless explicitly disabled. `--n-trials 1`
+		// without `--prereg` prints a loud WARNING — silent no-deflation is the soft spot.
+		var nTrials = argInt("--n-trials", 50);
+		if (nTrials < 1) nTrials = 1;
+		var preregOn = argFlag("--prereg");
+		if (nTrials <= 1 && !preregOn)
+			Sys.println('WARNING: --n-trials=$nTrials disables DSR multi-testing deflation; pass --prereg to acknowledge, or raise --n-trials');
+		// IS selection uses ProbSharpe rank (DSR when nTrials>1) instead of raw Sharpe.
+		var rankDsrOn = !argFlag("--no-rank-dsr");
+		Sys.println('min-trades gate: $minTrades (fitness/OOS INELIGIBLE below this; --min-trades)');
+		Sys.println('DSR trials: $nTrials (--n-trials; deflates OOS BEATS + IS rankScore)'
+			+ (rankDsrOn ? '; IS selection=rankScoreFacts' : '; IS selection=raw Sharpe (--no-rank-dsr)'));
+		if (preregOn)
+			Sys.println('prereg: on — multi-testing acknowledged (PreRegistration seal; threshold locked at run start)');
 		// Soft-cap parsimony: free below the threshold, `parsimonyLambda` sharpe per node past
 		// it. See Fitness.score's doc comment. Threshold=20 is roughly "typical" genome size
 		// observed across this run's own champions so far; tune both from the command line
@@ -444,7 +467,8 @@ class CorpusEvoRun {
 		// Window Sharpes are the only consumer of the per-bar curve, and `Fitness.windowSharpes`
 		// short-circuits at `windows <= 1` — so a plain whole-tape run (including `--lexicase`,
 		// which then scores on per-symbol Sharpes) never reads it back.
-		Fitness.equityCurveNeeded = fitnessWindows > 1 || nmaVerifyOn;
+		// Equity curves required for OOS DSR/CI/PBO (printRealHoldout) + optional windowed IS.
+		Fitness.equityCurveNeeded = true;
 		Fitness.cvarAlpha = fitnessCvarAlpha;
 		if (fitnessCvarAlpha > 0)
 			Sys.println('robustness combine: CVaR over the worst ${Math.round(fitnessCvarAlpha * 100)}% of'
@@ -1252,9 +1276,14 @@ class CorpusEvoRun {
 		// threshold/lambda semantics) -- one definition used everywhere a CachedEval becomes a
 		// selectable fitness, so the WASM path and the JS-fallback path can never drift apart the
 		// way they did before this was a shared function.
+		// Bucket A2 live: default rankScoreFacts (DSR/PSR probit) so IS selection is sample-size
+		// aware — not raw Sharpe. `--no-rank-dsr` restores Sharpe-only selection for A/B.
 		var scoreOf = function(e:CachedEval, nodes:Int):Float {
 			if (e == null) return Fitness.NEG_INF;
-			return Fitness.scoreFacts(e.trades, e.sharpe, e.bankrupt == true, 1, nodes, parsimonyThreshold, parsimonyLambda);
+			if (rankDsrOn)
+				return Fitness.rankScoreFacts(e.trades, e.sharpe, bars.length, e.bankrupt == true,
+					minTrades, nTrials, nodes, parsimonyThreshold, parsimonyLambda);
+			return Fitness.scoreFacts(e.trades, e.sharpe, e.bankrupt == true, minTrades, nodes, parsimonyThreshold, parsimonyLambda);
 		};
 
 		// Per-generation memo of `Fitness.projectionScore` (structural key → skill). Cleared each
@@ -1745,7 +1774,7 @@ class CorpusEvoRun {
 				else e = raced;
 				attrCacheLock.release();
 			}
-			return Fitness.scoreFacts(e.trades, e.sharpe, e.bankrupt == true, 1);
+			return Fitness.scoreFacts(e.trades, e.sharpe, e.bankrupt == true, minTrades);
 		};
 		// Same worker count as the fallback fitness pool: attribution ablations are independent
 		// genomes, and during `engine.step` the fb pool is idle. Dedicated threads rather than
@@ -1996,7 +2025,7 @@ class CorpusEvoRun {
 				var prefixMiss:Array<String> = [];
 				for (key in fallbackMiss) {
 					var pc = triageCache.get(key);
-					if (pc != null) scored.push({key: key, s: Fitness.scoreFacts(pc.trades, pc.sharpe, pc.bankrupt == true, 1)});
+					if (pc != null) scored.push({key: key, s: Fitness.scoreFacts(pc.trades, pc.sharpe, pc.bankrupt == true, minTrades)});
 					else prefixMiss.push(key);
 				}
 				for (key in prefixMiss) fbJobQueue.add({key: key, useFullTape: false, stop: false});
@@ -2004,7 +2033,7 @@ class CorpusEvoRun {
 					var r = fbResultQueue.pop(true);
 					var pc:CachedEval = r.ok ? {trades: r.trades, sharpe: r.sharpe, finalEquity: r.equity, bankrupt: r.bankrupt} : {trades: 0, sharpe: Math.NaN, finalEquity: 0};
 					triageCache.put(r.key, pc);
-					scored.push({key: r.key, s: Fitness.scoreFacts(pc.trades, pc.sharpe, pc.bankrupt == true, 1)});
+					scored.push({key: r.key, s: Fitness.scoreFacts(pc.trades, pc.sharpe, pc.bankrupt == true, minTrades)});
 				}
 				scored.sort((a, b) -> a.s < b.s ? 1 : (a.s > b.s ? -1 : 0));
 				var keep = Std.int(Math.ceil(scored.length * triageKeep));
@@ -2055,7 +2084,7 @@ class CorpusEvoRun {
 					// (fresh evals already set multi-window lexCases above).
 					var arr = perSymbolByKey.get(key);
 					if (arr != null && arr.length > 1) casesByKey.set(key, arr);
-					else if (e != null && Fitness.scoreFacts(e.trades, e.sharpe, e.bankrupt == true, 1) != Fitness.NEG_INF)
+					else if (e != null && Fitness.scoreFacts(e.trades, e.sharpe, e.bankrupt == true, minTrades) != Fitness.NEG_INF)
 						casesByKey.set(key, [e.sharpe]);
 				}
 				// MAP-Elites: offer this genome into its behavioral cell -- BEFORE parsimony, using
@@ -2065,7 +2094,7 @@ class CorpusEvoRun {
 				// lose its niche slot to a smaller one that behaves identically). The
 				// parsimony-adjusted `fitness` is deliberately NOT what's compared here.
 				// With `--proj-map-axis`, niches also by forecast skill so host genomes survive.
-				if (mapElitesOn && e != null && Fitness.scoreFacts(e.trades, e.sharpe, e.bankrupt == true, 1) != Fitness.NEG_INF) {
+				if (mapElitesOn && e != null && Fitness.scoreFacts(e.trades, e.sharpe, e.bankrupt == true, minTrades) != Fitness.NEG_INF) {
 					var tradesPerBar = e.trades / bars.length;
 					var avgHold = e.avgHold != null ? e.avgHold : 0.0;
 					var longFrac = e.longFrac != null ? e.longFrac : 0.5;
@@ -2350,7 +2379,7 @@ class CorpusEvoRun {
 				var isPerf:Array<Float> = [];
 				for (key in order) {
 					var e = evalByKey.get(key);
-					if (e != null && Fitness.scoreFacts(e.trades, e.sharpe, e.bankrupt == true, 1) != Fitness.NEG_INF)
+					if (e != null && Fitness.scoreFacts(e.trades, e.sharpe, e.bankrupt == true, minTrades) != Fitness.NEG_INF)
 						isPerf.push(e.sharpe);
 				}
 				var oosPerf:Null<Array<Float>> = null;
@@ -2359,7 +2388,7 @@ class CorpusEvoRun {
 					for (key in order) {
 						var g = popG[keyToIdx.get(key)[0]];
 						var oosr = Fitness.evaluate(g, oosBars, "js", false, costBps, startCapital, equityFloor);
-						if (Fitness.score(oosr, 1) != Fitness.NEG_INF) oosPerf.push(oosr.sharpe);
+						if (Fitness.score(oosr, minTrades) != Fitness.NEG_INF) oosPerf.push(oosr.sharpe);
 					}
 				}
 				dashboard.update(gen, genBest, mean, archive.size(), currentBestGenome != null ? currentBestGenome.name : "?",
@@ -2664,9 +2693,7 @@ class CorpusEvoRun {
 				// pop even when they still occupy skill niches in the archive. Re-inject so fusion
 				// keeps iterating and FeatureViz keeps real cloud series.
 				if (ewHostOn) {
-					var hostAlive = 0;
-					for (g in popG)
-						if (ProjectionProvider.hostProjRefs(g).length > 0) hostAlive++;
+					var hostAlive = musescript.evo.HostDrainGuard.countHostAlive(popG);
 					if (hostAlive == 0) {
 						var injected = 0;
 						for (eg in archive.elites()) {
@@ -2685,8 +2712,10 @@ class CorpusEvoRun {
 								injected = 1;
 							}
 						}
-						if (injected > 0)
+						if (injected > 0) {
+							musescript.evo.HostDrainGuard.reinjectEvents++;
 							Sys.println('[ew-host] reinject host genomes into pop (n=$injected) — fusion was drained');
+						}
 					}
 				}
 				// Rare merger event -- see `mergerEvent`'s own doc comment. `evalBatch` differs by
@@ -2867,12 +2896,14 @@ class CorpusEvoRun {
 		// project's own walk-forward evidence discipline -- not everything IS-strong survives
 		// contact with data it was never fit on, and that's the whole point of checking.
 		function printRealHoldout(lastFit:Array<Float>):Void {
-			Sys.println('\n=== OOS RE-SCORE (top 10 by IS fitness, held-out ${oosBars.length}-bar tail' + (oosBasket.length > 1 ? ', aggregated across ${oosBasket.length} symbols' : '') + ') ===');
+			Sys.println('\n=== OOS RE-SCORE (top 10 by IS fitness, held-out ${oosBars.length}-bar tail' + (oosBasket.length > 1 ? ', aggregated across ${oosBasket.length} symbols' : '') + ', minTrades=$minTrades) ===');
 			var ranked = [for (i in 0...popG.length) {g: popG[i], isFit: lastFit[i]}];
 			ranked.sort((a, b) -> a.isFit != b.isFit ? (a.isFit < b.isFit ? 1 : -1) : 0);
 			var seen = new Map<String, Bool>();
 			var shown = 0;
 			var held = 0, checked = 0;
+			var oosMetrics:Array<Float> = [];
+			var pboPerf:Array<Array<Float>> = [];
 			for (r in ranked) {
 				if (shown >= 10) break;
 				if (r.isFit == Fitness.NEG_INF) break;
@@ -2883,41 +2914,75 @@ class CorpusEvoRun {
 				// Aggregated across the WHOLE oos basket (cheap: only the top 10 genomes, unlike the
 				// per-generation eval loop which stays scoped to basket[0] for speed) -- see
 				// BasketFitness.aggregateBasket. Degenerates to exactly the old single-symbol
-				// Fitness.score(oos, 1) behavior when oosBasket has one element.
+				// Fitness.score(oos, minTrades) behavior when oosBasket has one element.
 				var anyErr = false;
 				var perSymbol:Array<{trades:Int, sharpe:Float, finalEquity:Float, ?bankrupt:Bool}> = [];
+				var oosEquity:Array<Float> = null;
 				for (sym in oosBasket) {
 					var fr = Fitness.evaluate(r.g, sym, "js", false, costBps, startCapital, equityFloor);
 					if (!fr.ok) { anyErr = true; break; }
 					perSymbol.push({trades: fr.trades, sharpe: fr.sharpe, finalEquity: fr.finalEquity, bankrupt: fr.bankrupt});
+					if (oosEquity == null && fr.equity != null) oosEquity = fr.equity;
 				}
 				checked++;
 				var agg = anyErr ? {trades: 0, sharpe: Math.NaN, finalEquity: 0.0, bankrupt: false} : BasketFitness.aggregateBasket(perSymbol);
-				var oosScore = BasketFitness.scoreAggregate(agg);
+				var oosScore = BasketFitness.scoreAggregate(agg, minTrades);
 				var holdMark = oosScore > 0 ? "HELD" : "did not hold";
 				if (oosScore > 0) held++;
+				if (oosScore != Fitness.NEG_INF && Math.isFinite(oosScore) && agg.trades >= minTrades)
+					oosMetrics.push(oosScore);
+				// PBO slices: window Sharpes on first OOS symbol equity (even # windows).
+				if (!anyErr && oosEquity != null) {
+					var frWin = new FitnessResult(true, agg.sharpe, agg.trades, agg.finalEquity, "js");
+					frWin.equity = oosEquity;
+					var wins = Fitness.windowSharpes(frWin, 4);
+					if (wins.length >= 4) pboPerf.push(wins.slice(0, 4));
+				}
 				Sys.println('  ${pad(Std.string(shown), 2)}. IS=${fmt(r.isFit, 4)}  OOS=${!anyErr ? fmt(oosScore, 4) : "n/a"} (trades=${agg.trades})  [$holdMark]  ${r.g.name}');
 			}
-			Sys.println('OOS summary: ${held}/${checked} of the top IS performers held a positive Sharpe out of sample.');
+			Sys.println('OOS summary: ${held}/${checked} of the top IS performers held a positive Sharpe out of sample (minTrades=$minTrades).');
+
+			// B4 live: elite-OOS median (not max) — blocks cherry-picking one lucky top-K slot.
+			// Note: this is within-run elite robustness, not multi-`--seed` CLI restarts.
+			if (oosMetrics.length > 0) {
+				var seedV = SeedRobustness.verdict(oosMetrics, 0.0);
+				Sys.println('[rigor seed-median] n=${seedV.n} median=${fmt(seedV.median, 4)} max=${fmt(seedV.max, 4)}'
+					+ ' => ${seedV.go ? "GO" : "NO-GO"} (elite OOS median must clear 0; multi-seed restarts still soft)');
+			}
+
+			// B1 live: CSCV PBO on top-K OOS window slices.
+			if (pboPerf.length >= 2) {
+				var pbo = Pbo.estimate(pboPerf);
+				Sys.println('[rigor PBO] strategies=${pboPerf.length} slices=4 PBO=${fmt(pbo, 4)}'
+					+ ' => ${Pbo.isOverfit(pbo) ? "OVERFIT-FLAG" : "ok"} (gate ≥0.5)');
+			} else {
+				Sys.println('[rigor PBO] skipped (need ≥2 top-K genomes with 4 OOS windows; got ${pboPerf.length})');
+			}
 
 			// Host-specific honest check (Phase 0 edge test): does the best EVOLVED EW-host-referencing
-			// genome beat buy-and-hold on the held-out tail? The top-10 above can be all non-host trading
-			// strategies, which never answers whether EW fusion itself earns its keep. Additive, headless.
-			function oosScoreOf(g:StrategyGenome):Float {
+			// genome beat buy-and-hold on the held-out tail? Uses DSR + block-bootstrap CI + min-trade
+			// gate so a 1-trade lucky genome can never print BEATS (Bucket A3/A4/A5).
+			function oosFrOf(g:StrategyGenome):{agg:{trades:Int, sharpe:Float, finalEquity:Float, bankrupt:Bool}, equity:Null<Array<Float>>, perSymbol:Array<{name:String, metric:Float}>} {
 				var perSymbol:Array<{trades:Int, sharpe:Float, finalEquity:Float, ?bankrupt:Bool}> = [];
-				for (sym in oosBasket) {
-					var fr = Fitness.evaluate(g, sym, "js", false, costBps, startCapital, equityFloor);
-					if (!fr.ok) return Math.NaN;
+				var equity:Array<Float> = null;
+				var named:Array<{name:String, metric:Float}> = [];
+				for (i in 0...oosBasket.length) {
+					var fr = Fitness.evaluate(g, oosBasket[i], "js", false, costBps, startCapital, equityFloor);
+					if (!fr.ok) return {agg: {trades: 0, sharpe: Math.NaN, finalEquity: 0, bankrupt: false}, equity: null, perSymbol: []};
 					perSymbol.push({trades: fr.trades, sharpe: fr.sharpe, finalEquity: fr.finalEquity, bankrupt: fr.bankrupt});
+					if (equity == null) equity = fr.equity;
+					var lab = i < bagLabels.length ? bagLabels[i] : 'sym$i';
+					named.push({name: lab, metric: fr.sharpe});
 				}
-				return BasketFitness.scoreAggregate(BasketFitness.aggregateBasket(perSymbol));
+				return {agg: BasketFitness.aggregateBasket(perSymbol), equity: equity, perSymbol: named};
 			}
 			var bhGenome:StrategyGenome = {
 				entryLong: BCmp(">", KConst(1.0), KConst(0.0)), entryShort: BCmp(">", KConst(0.0), KConst(1.0)),
 				exitLong: BCmp(">", KConst(0.0), KConst(1.0)), exitShort: BCmp(">", KConst(0.0), KConst(1.0)),
 				size: KConst(1.0), params: [], name: "buy_and_hold", lineage: [], seedOrigin: null
 			};
-			var bhOos = oosScoreOf(bhGenome);
+			var bh = oosFrOf(bhGenome);
+			var bhOos = BasketFitness.scoreAggregate(bh.agg, minTrades);
 			var bestHostG:StrategyGenome = null;
 			var bestHostFit = Fitness.NEG_INF;
 			var hostCount = 0;
@@ -2927,11 +2992,27 @@ class CorpusEvoRun {
 				if (lastFit[i] > bestHostFit) { bestHostFit = lastFit[i]; bestHostG = popG[i]; }
 			}
 			if (bestHostG == null) {
-				Sys.println('[ew-host OOS] no host-referencing genome survived in final pop (hostCount=0) — EW fusion earned no place; buyHold OOS=${fmt(bhOos, 4)}');
+				Sys.println('[ew-host OOS] no host-referencing genome survived in final pop (hostCount=0) — EW fusion earned no place; buyHold OOS=${fmt(bhOos, 4)} trials=$nTrials minTrades=$minTrades');
 			} else {
-				var hostOos = oosScoreOf(bestHostG);
-				var beats = hostOos > bhOos && hostOos > 0;
-				Sys.println('[ew-host OOS] hostInPop=$hostCount bestHost=${bestHostG.name} IS=${fmt(bestHostFit, 4)} OOS=${fmt(hostOos, 4)} | buyHold OOS=${fmt(bhOos, 4)} => ${beats ? "HOST BEATS BUY-HOLD (pulse!)" : "NO-GO"}');
+				var host = oosFrOf(bestHostG);
+				var hostOos = BasketFitness.scoreAggregate(host.agg, minTrades);
+				var rets = host.equity != null
+					? musescript.harness.Metrics.returnsFromEquity(host.equity)
+					: [];
+				var verdict = musescript.evo.rigor.OosVerdict.evaluate(rets, host.agg.trades, bh.agg.sharpe, {
+					minTrades: minTrades,
+					nTrials: nTrials,
+					bootSeed: seed,
+					nBoot: 200,
+					psrGate: 0.95
+				});
+				Sys.println(musescript.evo.rigor.OosVerdict.formatLine(verdict,
+					'hostInPop=$hostCount bestHost=${bestHostG.name} IS=${fmt(bestHostFit, 4)} OOS=${fmt(hostOos, 4)} buyHold=${fmt(bhOos, 4)}'));
+				// B5 live: multi-name basket → universe gate; single-name always flagged.
+				var univ = UniverseRobustness.verdict(host.perSymbol, 0.0);
+				Sys.println('[rigor universe] names=${univ.total} passed=${univ.passed} singleName=${univ.singleName}'
+					+ ' => ${univ.go ? "GO" : "NO-GO"}'
+					+ (univ.singleName ? ' (single-name OOS — not universe-robust)' : ''));
 			}
 		}
 		#if kestrel
@@ -3254,8 +3335,18 @@ class CorpusEvoRun {
 		var candidates = explicitPath != null
 			? [explicitPath]
 			: ["data/real/spy.csv", "muse-script/data/real/spy.csv", "../muse-script/data/real/spy.csv"];
-		for (path in candidates)
-			if (sys.FileSystem.exists(path)) return OhlcvCsv.parse(sys.io.File.getContent(path));
+		for (path in candidates) {
+			if (!sys.FileSystem.exists(path)) continue;
+			var bars = OhlcvCsv.parse(sys.io.File.getContent(path));
+			var issues = TapeLinter.lint(bars, {allowZeroVolume: true});
+			if (TapeLinter.errorCount(issues) > 0) {
+				Sys.println(TapeLinter.formatReport(issues, 20));
+				throw 'tape failed TapeLinter: $path';
+			}
+			if (issues.length > 0)
+				Sys.println(TapeLinter.formatReport(issues, 8));
+			return bars;
+		}
 		throw '${explicitPath != null ? explicitPath : "spy.csv"} not found -- run from muse-lab/muse-script';
 	}
 

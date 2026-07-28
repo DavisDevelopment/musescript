@@ -1,0 +1,65 @@
+# Pipeline hardening CI — standing gates from PIPELINE_HARDENING_TODO.md
+# Runs critical suites + JVM↔node DetParityDump byte-identity (Bucket D4).
+name: pipeline-hardening
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  hardening-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Haxe
+        uses: krdlab/setup-haxe@v1
+        with:
+          # Match local toolkit when possible; 4.3.6 is the stable CI fallback.
+          haxe-version: 4.3.6
+
+      - name: Install haxelib deps
+        run: |
+          haxelib install utest --quiet
+          haxelib install hxnodejs --quiet
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build + run projection-host / hardening suite
+        run: |
+          haxe build-projection-host-tests.hxml
+          node build/js/tests-projection-host.js
+
+      - name: Build + run auction hardening suite
+        run: |
+          haxe build-auction-tests.hxml
+          node build/js/tests-auction.js
+
+  det-parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Haxe
+        uses: krdlab/setup-haxe@v1
+        with:
+          # Match local toolkit when possible; 4.3.6 is the stable CI fallback.
+          haxe-version: 4.3.6
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: DetParity JVM ↔ node ↔ golden
+        run: bash tools/det_parity_ci.sh

@@ -1,7 +1,6 @@
 package musescript.ew;
 
 import musescript.harness.Bar;
-import musescript.harness.OhlcvCsv;
 import musescript.evo.Fitness;
 import musescript.evo.FitnessResult;
 import musescript.evo.ProjectionProvider;
@@ -107,12 +106,8 @@ class EwProfitCli {
 		};
 	}
 
-	static function loadBars(path:String):Array<Bar> {
-		var candidates = [path, "corpus/tapes/spy_oos_2022_2026.csv"];
-		for (p in candidates)
-			if (sys.FileSystem.exists(p)) return OhlcvCsv.parse(sys.io.File.getContent(p));
-		throw 'no tape found (tried $path)';
-	}
+	static function loadBars(path:String):Array<Bar>
+		return BenchmarkHarness.loadBars(path, ["corpus/tapes/spy_oos_2022_2026.csv"]);
 
 	static function sep():String return "-------------------------------------------------------------------------";
 

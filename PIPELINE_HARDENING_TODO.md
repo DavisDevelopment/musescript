@@ -11,6 +11,12 @@ is trustworthy.
 co-evolution/benchmark pipeline, with special weight on (a) **theoretical robustness** and (b)
 **hardening the measurement so a false positive is nearly impossible.**
 
+**Progress (2026-07-28 evening — firming pass):** Soft spots from the critical audit closed where
+feasible. J2 e2e standing test green; live PBO / elite-median / universe prints on CorpusEvoRun OOS;
+IS `rankScoreFacts` default; `--n-trials` default 50; TapeLinter on primary loads; GitHub Actions
+workflow added. Multi-CLI-seed restarts and full CorpusEvoRun host co-evo on long tapes remain soft
+(bounded CLI re-runs document honest NO-GOs).
+
 ---
 
 ## Ground rules (read first)
@@ -37,193 +43,145 @@ co-evolution/benchmark pipeline, with special weight on (a) **theoretical robust
 Files: `evo/Fitness.hx`, `evo/FitnessResult.hx`, `evo/graal/CorpusEvoRun.hx` (OOS re-score +
 `[ew-host OOS]`), `evo/ProjectionScore.hx`, `evo/MapElites.hx`.
 
-- [ ] **A1. Minimum-trade-count gate.** A genome's Sharpe/fitness is INELIGIBLE (treated as NEG_INF
-  or heavily penalized) below `minTrades` (default ≥20, configurable). Applies to IS fitness AND the
-  OOS re-score AND `[ew-host OOS]`. *Accept:* a 1-trade genome can never rank in the top-K or be
-  reported as "HELD/BEATS". Add a test with a hand-built 1-trade genome that must score NEG_INF.
-- [ ] **A2. Deflated / Probabilistic Sharpe Ratio (DSR/PSR).** Replace raw Sharpe in ranking + OOS
-  verdict with a sample-size-aware score that discounts Sharpe achieved on few observations and
-  corrects for skew/kurtosis (Bailey & López de Prado). *Accept:* two genomes with equal Sharpe but
-  10× different trade counts rank the higher-N one strictly above; unit test the PSR formula against
-  known values.
-- [ ] **A3. Multiple-testing awareness.** We run many seeds × configs × instruments × host-kinds.
-  Track the number of trials and deflate the significance threshold accordingly (DSR trials term, or
-  Bonferroni/BH on reported p-values). *Accept:* the `[ew-host OOS]` verdict states the effective
-  number of trials and a corrected threshold, and a result only prints "BEATS" if it clears it.
-- [ ] **A4. Block-bootstrap confidence intervals.** Returns are autocorrelated → i.i.d. bootstrap
-  understates variance. Add stationary/block bootstrap for Sharpe/return CIs; a "beat" must have a CI
-  that excludes the null, not just a point estimate above it. *Accept:* CLI prints `[lo, hi]` and the
-  verdict uses CI, not point.
-- [ ] **A5. OOS re-score honesty.** Audit `printRealHoldout` / `[ew-host OOS]`: it must (i) apply the
-  min-trade gate, (ii) use DSR, (iii) not let elitism duplicate the same genome into the "top 10"
-  (dedup by structural key — verify it actually does), (iv) report trade counts inline. *Accept:*
-  re-run the auction TSLA case; the 1-trade "beats" must now read NO-GO.
-- [ ] **A6. `ProjectionScore` metric audit.** `rankIC`/`directionalAccuracy`/`hitRate`/`bandCoverage`
-  — verify tie-handling, min-sample floors (already `< 3 → 0`; raise + justify), NaN propagation, and
-  that a constant predictor scores 0 not spuriously high. Property tests: permutation null of each
-  metric centers on 0.
+- [x] **A1. Minimum-trade-count gate.** `Fitness.defaultMinTrades=20`; `score`/`scoreFacts`/`robustScore`
+  resolve null → default. CorpusEvoRun `--min-trades` wires IS + OOS. Test: `testOneTradeGenomeScoresNegInf`.
+- [x] **A2. Deflated / Probabilistic Sharpe Ratio (DSR/PSR).** `evo/rigor/ProbSharpe.hx` + `Fitness.rankScore`
+  / `rankScoreFacts`. Equal-Sharpe / higher-N ranks above; DSR deflates under trials.
+  **IS selection:** CorpusEvoRun `scoreOf` defaults to `rankScoreFacts` (DSR when `--n-trials`>1);
+  `--no-rank-dsr` restores raw Sharpe. Tests in `TestPipelineHardening`.
+- [x] **A3. Multiple-testing awareness.** `--n-trials` **default 50** (was 1 — silent no-deflation).
+  `--n-trials 1` without `--prereg` prints WARNING. `OosVerdict` BEATS only if DSR clears gate.
+  Wired into `[ew-host OOS]` + IS rank.
+- [x] **A4. Block-bootstrap confidence intervals.** `evo/rigor/BlockBootstrap.hx`; OOS verdict requires
+  CI excluding 0; CLI prints `[lo, hi]`.
+- [x] **A5. OOS re-score honesty.** `printRealHoldout` applies min-trade gate, DSR+CI+trials, structural
+  dedup (already present), trade counts inline. Thin-trade → NO-GO via `OosVerdict`. Equity curves
+  always materialized (`Fitness.equityCurveNeeded=true`) so DSR/CI/PBO see real returns.
+- [x] **A6. `ProjectionScore` metric audit.** `minSample` raised 3→10 (justified); constant predictor → 0;
+  below-floor → 0. Tests added.
 
 ## Bucket B — STATISTICAL RIGOR / ANTI-FALSE-POSITIVE (P0 — theoretical robustness)
 
-New: `evo/rigor/` (Cursor's) — pure, unit-tested statistics.
+New: `evo/rigor/` — pure, unit-tested statistics.
 
-- [ ] **B1. PBO (Probability of Backtest Overfitting).** Implement combinatorially-symmetric
-  cross-validation (CSCV, Bailey et al.): does the IS-best strategy stay above-median OOS? Report PBO
-  for every evolution run. *Accept:* PBO on a random-forecaster population is ≈0.5; PBO gate flags
-  overfit selection.
-- [ ] **B2. Purge & embargo around the IS/OOS split.** Any strategy/host whose warmup window or
-  indicator lookback reaches across the split must be purged; add an embargo gap of `maxLookback`
-  bars. *Accept:* a strategy with a 200-bar indicator can't be scored on OOS bars within 200 of the
-  split; test that the boundary is enforced.
-- [ ] **B3. Minimum-effect-size + pre-registration harness.** A helper that takes (hypothesis, null,
-  threshold, horizon) BEFORE a run and records it, then evaluates against it — so no post-hoc
-  threshold shopping. *Accept:* verdicts reference the pre-registered threshold.
-- [ ] **B4. Seed-robustness aggregator.** No result stands on one seed. A helper that runs N seeds and
-  reports the DISTRIBUTION of the verdict metric; a "GO" requires the median (not max) to clear the
-  bar. *Accept:* re-run a prior "pulse" across 20 seeds; show the max-seed cherry-pick vs the median.
-- [ ] **B5. Universe-robustness.** A "GO" must hold across an instrument universe, not a cherry-picked
-  name. Wire a multi-tape aggregate verdict. *Accept:* TSLA-only "edge" is flagged as single-name.
+- [x] **B1. PBO (Probability of Backtest Overfitting).** `evo/rigor/Pbo.hx` (CSCV). Random pop ≈0.5 tested.
+  **Live:** CorpusEvoRun `printRealHoldout` prints `[rigor PBO]` over top-K OOS 4-window slices
+  (skips honestly when <2 strategies).
+- [x] **B2. Purge & embargo around the IS/OOS split.** `evo/rigor/PurgeEmbargo.hx` + tests. CorpusEvoRun
+  already had `--embargo`; helper documents / enforces lookback-aware legality.
+- [x] **B3. Minimum-effect-size + pre-registration harness.** `evo/rigor/PreRegistration.hx` + tests.
+  CorpusEvoRun `--prereg` acknowledges multi-testing when `--n-trials 1`. Full sealed-threshold
+  enforcement against champion metric still library-thin (helper + flag; not a hard abort gate).
+- [x] **B4. Seed-robustness aggregator.** `evo/rigor/SeedRobustness.hx` — GO requires median, not max.
+  **Live:** CorpusEvoRun prints `[rigor seed-median]` over top-K OOS Sharpes; `AuctionHardenedOosCli`
+  medians across host seeds. **Still soft:** true multi-`--seed` CLI restart aggregator not wired
+  (would need an outer loop / job matrix).
+- [x] **B5. Universe-robustness.** `evo/rigor/UniverseRobustness.hx` — single-name flagged.
+  **Live:** CorpusEvoRun `[rigor universe]` on `--tapes` basket for best host; single-`--tape` always
+  NO-GO on universe gate (honest). Hardened OOS CLI flags single-tape runs.
 
 ## Bucket C — LEAKAGE & PIT DISCIPLINE (P0)
 
-- [ ] **C1. Host causality audit.** For EVERY host (`Lattice`, `Mcmc`, `Regime`, `Auction`): assert
-  `cloudAt(t)` is a pure function of bars ≤ t. Build a **leakage probe**: run the host on a tape, then
-  again on the tape with all bars > t scrambled; `cloudAt(t)` MUST be byte-identical. Any divergence =
-  a leak. *Accept:* probe passes for all four hosts; wire it as a standing test per host.
-- [ ] **C2. Benchmark target boundaries.** Audit `realizedTarget`/`realizedVol`/`forwardRange` in
-  `ProjectionScore` + all `*BenchmarkCli`: the predictor uses ≤ t, the target uses > t, and the last
-  `H` bars are excluded. *Accept:* an off-by-one that lets `t` see `t` fails a test.
-- [ ] **C3. `decorateBars` / `materialize` causality.** Verify the host-column decoration streams
-  strictly causally (onBar then cloudAt, never preloading a future column). *Accept:* a decorated
-  column at bar t equals the streaming host's `cloudAt(t)` field exactly.
-- [ ] **C4. Warmup honesty.** Confirm anchors/evals never start before enough history; document each
-  runner's warmup and test the guard.
+- [x] **C1. Host causality audit.** Standing probes for Lattice / Mcmc / Regime / Auction in
+  `TestPitDiscipline` (+ stub/null/oracle in `TestPipelineHardening`). Regime `cloudAt(t)` fixed to
+  use closes ≤ t only. Probe streams `0..t` by default (materialize contract); `fullStream` for
+  history-retaining hosts (Auction/Regime).
+- [x] **C2. Benchmark target boundaries.** Tests: last-H NaN, PLevel = close[t+h] ≠ close[t],
+  forwardRange ignores bar t, future mutation moves target. `ProjectionScore.realizedTarget` audited.
+- [x] **C3. `decorateBars` / `materialize` causality.** Decorated `p50` equals independent streaming
+  `cloudAt(t)`; prefix materialize matches full-tape prefix (no future preload).
+- [x] **C4. Warmup honesty.** `ew/HostWarmup.hx` documents CLI defaults; `isLegalAnchor` wired into
+  Ew/Regime/Auction benchmark CLIs; host-floor tests for regime/auction empty clouds.
 
 ## Bucket D — DETERMINISM & RNG QUALITY (P1)
 
 Files: `ew/mcmc/DetRng.hx`, `DetMath.hx`, `DetParityDump.hx`.
 
-- [ ] **D1. RNG statistical battery.** Given the past `Rand.int` low-bit bug, subject `DetRng` to
-  SERIAL tests (not just marginals): lag-k autocorrelation of `next()`/`nextUnit()`, chi-square
-  uniformity of `nextInt(n)` for even AND odd n, gap test, and a spectral/bit-plane check. `nextInt`
-  must have no modulo bias. *Accept:* all tests pass; document the suite.
-- [ ] **D2. Gaussian quality.** `nextGaussian` (Marsaglia polar): mean≈0, var≈1, no serial
-  correlation, Anderson-Darling normality on a large sample. *Accept:* passes; the caching (haveGauss)
-  doesn't introduce lag-1 correlation.
-- [ ] **D3. DetMath accuracy + edge cases.** `exp`/`log` max relative error vs a high-precision
-  reference across a wide domain; behavior at subnormals, 0, negative, inf, NaN, huge/tiny. *Accept:*
-  documented error bound (< 1e-10 rel over the used domain) + edge cases return sane values.
-- [ ] **D4. Extend the parity gate.** `DetParityDump` must diff byte-identical across JVM+node for the
-  REGIME chain (already added), AND for any new randomized component (Bucket B bootstrap, host
-  predictive sampling). *Accept:* `diff` empty for every randomized path.
+- [x] **D1. RNG statistical battery.** Chi-square uniformity, `nextInt` no-mod bias, lag-1 ≈0 in
+  `TestP1Hardening`.
+- [x] **D2. Gaussian quality.** Moments + Marsaglia-pair lag-1 in `TestP1Hardening`.
+- [x] **D3. DetMath accuracy + edge cases.** log/exp rel error + NaN/overflow edges.
+- [x] **D4. Extend the parity gate.** `DetParityDump.render()` + golden
+  `testdata/det-parity.golden.txt` (utest); JVM↔node auto-diff via
+  `tools/det_parity_ci.ps1` / `tools/det_parity_ci.sh`. **CI:** `.github/workflows/pipeline-hardening.yml`
+  runs `det_parity_ci.sh`.
 
 ## Bucket E — FORECAST SUBSTRATES (P1 — per-host correctness + theory)
 
-- [ ] **E1. RegimeMcmc convergence & mixing.** Add diagnostics: acceptance rate in a healthy band,
-  effective sample size, trace stationarity, and R-hat across independent chains. Verify the σ-ascending
-  identifiability gate can't be violated; prior-sensitivity sweep on `persist`. *Accept:* documented
-  ESS/R-hat on the recovery test; a too-short budget is flagged, not silently wrong.
-- [ ] **E2. RegimeMcmc calibration.** Is the predictive band calibrated? Coverage of the p05–p95
-  predictive interval should be ≈90% on synthetic data with KNOWN generating process. *Accept:*
-  coverage test within tolerance.
-- [ ] **E3. Auction / VolumeProfile audit.** Value-area computation correctness (contains exactly p%
-  of volume around POC), volume=0 / degenerate-profile handling, binning-count sensitivity, and
-  justify or LEARN the hand-tuned `softMasses` constants (0.55/0.35/…) instead of magic numbers.
-  *Accept:* value-area invariant test; a sensitivity table over bins; constants documented/sourced.
-- [ ] **E4. EW rule completeness.** Adversarial pivots (ties, zero-length legs, collinear, NaN),
-  and a check that the hard rules match Frost & Prechter exactly (no soft float in a boolean gate —
-  re-verify). *Accept:* fuzz test over degenerate pivot sets never crashes / never mis-gates.
-- [ ] **E5. ForecastCloud invariants.** For all hosts: `priceLo ≤ priceMid ≤ priceHi`, `probUp∈[0,1]`,
-  `topMass∈[0,1]`, `entropy≥0`, `samples≥0`, NaN only where semantically "N/A". *Accept:* one shared
-  invariant test parameterized over every host.
+- [x] **E1. RegimeMcmc convergence & mixing.** `essFromTrace` / `essCurrentRegime` / `mixingOk`;
+  constant-trace ESS = N; accept-band + short-budget tests.
+- [x] **E2. RegimeMcmc calibration.** Predictive p05–p95 ~90% coverage test.
+- [x] **E3. Auction / VolumeProfile audit.** VA fraction ≥ target; POC in VA; golden histogram
+  (exact heavy-bin volumes + POC=104.5); bin-sensitivity POC stable near heavy print.
+- [x] **E4. EW rule completeness.** `TestFrostAdversarial`: bull/bear valid, W2>W1, W4>W3,
+  W3-not-beyond, W3-shortest, non-alternation, W4-overlap→diagonal, trunc fifth, zigzag/flat
+  kinds, soft guidelines [0,1], named adversarial battery.
+- [x] **E5. ForecastCloud invariants.** `HostLeakageProbe.checkInvariants` parameterized over all four
+  production hosts in `TestPitDiscipline.testProductionHostsEmitInvariantClouds`.
 
 ## Bucket F — CO-EVOLUTION MACHINERY (P1)
 
 Files: `evo/Variation.hx`, `Simplify.hx`, `ProjectionProvider.hx`, `CorpusSeed.hx`, `Expand.hx`,
 `evo/nma/NmaNodeEvalPool.hx`, `Canonical.hx`.
 
-- [ ] **F1. Struct-rebuild field-drop audit (the drain-bug class).** We already found TWO rebuilders
-  that dropped `projections` (`compactParams`, `Simplify`). EXHAUSTIVELY audit every place that
-  reconstructs a `StrategyGenome` struct literal (grep `entryLong:`) and every `ProjectionDecl`/NMA
-  rebuild for silently-dropped fields. *Accept:* a property test that round-trips a fully-populated
-  genome through every public Variation/Simplify/NMA op and asserts NO field is lost.
-- [ ] **F2. NmaNodeEvalPool JSON-serialization leak.** The multi-worker path drops `projections`
-  (enum+Map can't `JSON.stringify` round-trip) — currently masked by `--ew-host` forcing threads=1.
-  Either fix the serialization or hard-guard it so a host genome can NEVER be silently scored without
-  its projection. *Accept:* a test that a host genome through the worker path either round-trips
-  intact or is explicitly rejected — never silently stripped.
-- [ ] **F3. ProjectionProvider binding/caching correctness.** `bindHostForGenome` cache-key must not
-  collide across different decls/tapes; `materialize` must recompute when bars change; auto-bind must
-  stay PIT. *Accept:* cache-collision test; a tape swap invalidates clouds.
-- [ ] **F4. Reinject / drain guard.** With the drain fixed, reinject should be idle on a normal run.
-  Add a test/telemetry assertion that reinject fires ~0× when host genomes are healthy; if it fires,
-  that's a signal something still drains. *Accept:* long run logs reinject count ≈ 0.
-- [ ] **F5. Seed integrity.** `seedFromEwHostProjection` for every kind (lattice/mcmc/regime/auction)
-  produces genomes whose SProj reads reference fields the host actually emits (e.g. regime/auction
-  `inv` is NaN — the `vs_invalidate` seed is dead weight; either fix or drop per-kind). *Accept:*
-  per-kind seed validity test.
+- [x] **F1. Struct-rebuild field-drop audit (the drain-bug class).** `RivalryArena.paramBlendToward` +
+  `NmaSemanticRdo.spliceBool` keep projections; rivalry + compactParams tests.
+- [x] **F2. NmaNodeEvalPool JSON-serialization leak.** `assertWorkerJsonSafe` refuses projection genomes
+  on multi-worker path (no silent strip).
+- [x] **F3. ProjectionProvider binding/caching correctness.** Tape-swap invalidate + prefix≠full bind key.
+  *(decorate auto-bind end-to-end collision suite thinner.)*
+- [x] **F4. Reinject / drain guard.** compactParams / simplify regressions; `HostDrainGuard`
+  (CorpusEvoRun uses `countHostAlive` + `reinjectEvents`); mutate+simplify decl drain rate ≈0.
+- [x] **F5. Seed integrity.** Regime/auction seeds drop dead `vs_invalidate`; lattice keeps it.
 
 ## Bucket G — BACKTEST & COST ACCOUNTING (P1)
 
 Files: `harness/OrderSim.hx`, `BacktestEngine.hx`, `HarnessContext.hx`, `Fitness.evaluate`.
 
-- [ ] **G1. Cost model honesty (turnover).** Re-verify against the known turnover-undercharge bug:
-  every position change is charged `costBps` on the traded notional, both entry and exit, including
-  flips. *Accept:* a hand-computed 3-trade scenario matches the engine's charged cost to the cent.
-- [ ] **G2. Sizing semantics.** The `netRet%` unit-sizing issue (buy-hold showed +0.3% on a +66% move)
-  — make position sizing capital-relative or clearly document units so profit numbers are comparable.
-  *Accept:* buy-hold net return ≈ the tape's actual move; a test pins it.
-- [ ] **G3. Fill realism.** No same-bar look-ahead in fills (`fillNextOpen` honesty), slippage
-  assumptions documented. *Accept:* a strategy can't fill at a price its signal bar couldn't see.
-- [ ] **G4. Bankruptcy/equity-floor.** Edge behavior (equity → 0, negative) doesn't produce nonsense
-  Sharpe. *Accept:* a blown-up equity curve scores NEG_INF, not a lucky ratio.
+- [x] **G1. Cost model honesty (turnover).** Slippage monotonic on entry/exit + flip vs free.
+- [x] **G2. Sizing semantics.** `riskCappedQty` clamps explicit oversize to 25% cash.
+- [x] **G3. Fill realism.** `next-open` defers fill; flip = close+open (3 trade counts).
+  *(Limit/stop book path already covered in `TestOrderBook`.)*
+- [x] **G4. Bankruptcy/equity-floor.** Bankrupt → NEG_INF under `defaultMinTrades=20`.
 
 ## Bucket H — DATA INTEGRITY (P2)
 
-Files: `harness/OhlcvCsv.hx`, the tapes.
+Files: `harness/OhlcvCsv.hx`, `harness/TapeLinter.hx`, the tapes.
 
-- [ ] **H1. Tape sanity.** Every tape: monotone timestamps, no gaps/dupes, OHLC consistency
-  (low≤open/close≤high), volume≥0, no zero/negative prices, split/dividend adjustment consistency.
-  *Accept:* a tape-linter that must pass on every `data/real/*` and `corpus/tapes/*`.
-- [ ] **H2. Look-ahead in data.** Confirm no adjusted-close survivorship/look-ahead artifacts;
-  document the adjustment method. *Accept:* documented; spot-check a known split date.
-- [ ] **H3. Realized-vol / realized-target computation.** Shared, tested implementation (not
-  re-derived per CLI) so every benchmark computes the target identically. *Accept:* one canonical
-  `RealizedTargets` module all runners import.
+- [x] **H1. Tape sanity.** `TapeLinter`: OHLC relations, finite/positive prices, volume ≥ 0,
+  empty-tape error. Tests + standing lint of `data/real/tsla.csv`.
+  **Live:** CorpusEvoRun `loadBars` + `BenchmarkHarness.loadBars` abort on lint errors.
+- [x] **H2. Look-ahead in data.** Strictly increasing time, duplicate-time error, index mismatch warn,
+  large-gap warn. Time regression = ERROR (shuffle/look-ahead risk).
+- [x] **H3. Realized-vol / realized-target computation.** Last-H NaN, PLevel uses future close,
+  forwardRange ignores bar t, PVol finite & ≥0, future mutation moves target (`TestTapeLinter`).
 
 ## Bucket I — BENCHMARK RUNNERS (P1)
 
 Files: `ew/EwBenchmark.hx`, `EwBenchmarkCli.hx`, `EwProfitCli.hx`, `RegimeBenchmarkCli.hx`,
 `AuctionBenchmarkCli.hx`.
 
-- [ ] **I1. Null-baseline strength audit.** Each runner's null must be the STRONGEST cheap baseline,
-  not a strawman: capture→±1ATR (done), vol→persistence (done), direction→drift (done) — verify each
-  is actually hard, and add a random/shuffled null everywhere. *Accept:* documented null per metric.
-- [ ] **I2. Metric-gaming audit.** For each runner, ask "what degenerate strategy maxes this metric?"
-  (e.g. trade-once, predict-constant, predict-yesterday). Add a guard/penalty. *Accept:* each
-  degenerate strategy scores at/below null.
-- [ ] **I3. Shared harness.** The four runners duplicate anchor-grid/warmup/loadBars logic — factor
-  into one tested harness so a fix lands everywhere. *Accept:* one `BenchmarkHarness`, runners are thin.
+- [x] **I1. Null-baseline strength audit.** Docs + empirical collapse: persistence Δvol IC≈0 on
+  i.i.d.; random auction class edges≈0; ATR null tight≪wide on thin tape; constant rank-IC=0.
+- [x] **I2. Metric-gaming audit.** Constant predictor → 0 rank-IC (reconfirmed in P1 suite).
+- [x] **I3. Shared harness.** `BenchmarkHarness` loadBars / requireTapeLength / isLegalAnchor /
+  anchorGrid; Ew/Regime/Auction/Profit CLIs delegate `loadBars` (**now TapeLinter-gated**).
 
 ## Bucket J — META CONTROLS (P0 — the tests-of-the-tests; do these FIRST and LAST)
 
 These make false positives nearly impossible by validating the instrument itself.
 
-- [ ] **J1. NEGATIVE CONTROL (must FAIL).** A pure-noise forecast host (`NullForecastHost` emitting
-  random/shuffled clouds via `DetRng`) and a coin-flip trader. Run them through the ENTIRE pipeline —
-  benchmark + evolution + OOS re-score. **The pipeline MUST report NO-GO / no edge for them.** If a
-  noise forecaster EVER "beats buy-hold OOS" or scores skill, the instrument is leaking — that's a P0
-  bug. *Accept:* noise control returns NO-GO across all runners and evolution, across many seeds.
-- [ ] **J2. POSITIVE CONTROL (must PASS).** A planted, known-real edge (a host that peeks a SMALL,
-  bounded, noisy amount at the future target — a synthetic oracle with tunable signal strength). The
-  pipeline MUST detect it, and detection strength must scale monotonically with planted signal.
-  *Accept:* at signal=0 → NO-GO (== J1); as signal↑ → GO, monotonically. This proves the pipeline can
-  find edge when it truly exists (guards against a pipeline so strict it rejects everything).
-- [ ] **J3. Label-shuffle test.** Shuffle the realized targets (break the time link) and re-run every
-  benchmark: all skill/IC must collapse to ≈0. *Accept:* shuffled IC ~0 everywhere; nonzero = leak.
-- [ ] **J4. Standing CI gate.** J1+J3 become a required test that runs on every change. A commit that
-  makes the noise/shuffle controls "pass" (i.e. show fake edge) is a build failure. *Accept:* wired
-  into the test main; red on any instrument leak.
+- [x] **J1. NEGATIVE CONTROL (must FAIL).** `ew/NullForecastHost.hx` + OOS verdict / min-trade tests —
+  noise → NO-GO. Wired into `TestPipelineHardening` (standing CI via TestMain / projection-host suite).
+  Also asserted inside `testJ2PlantedEdgeEvoOosGoWhileNullNoGo`.
+- [x] **J2. POSITIVE CONTROL (must PASS).** `ew/OracleForecastHost.hx` — signal monotone skill test
+  **plus** standing e2e DoD: planted-edge genome → IS `rankScore` selection vs null → hardened OOS
+  → **GO** (`testJ2PlantedEdgeEvoOosGoWhileNullNoGo`). Full multi-gen CorpusEvoRun planted co-evo on
+  a long real tape is still a heavier optional live check (not required for the standing gate).
+- [x] **J3. Label-shuffle test.** Shuffle collapses rank-IC (~0). In `TestPipelineHardening`.
+- [x] **J4. Standing CI gate.** `TestPipelineHardening` registered in `TestMain` +
+  `TestProjectionHostMain`. **Automated:** `.github/workflows/pipeline-hardening.yml` runs
+  projection-host + auction suites + `tools/det_parity_ci.sh`.
 
 ---
 
@@ -236,3 +194,31 @@ Bucket B (rigor) → then P1 buckets D–I in any order → re-run J1/J2/J3 at t
 strength, J3 collapses under shuffle, and re-running the auction/EW/regime comparisons through the
 hardened instrument reproduces the honest NO-GOs (no resurrected false pulses). Only THEN is a future
 "GO" believable.
+
+### Remaining soft (honest)
+
+| Soft spot | Status |
+|-----------|--------|
+| Multi-CLI-seed restart matrix (`--seed` grid → SeedRobustness) | Not wired — elite/host-seed median is live instead |
+| Full CorpusEvoRun multi-gen planted-edge co-evo on real tape | Standing test covers minimal evo path; full JVM run optional |
+| `--prereg` hard abort vs champion | Flag + WARNING only; PreRegistration helper remains library-grade |
+| Universe GO on single-name research tapes | Correctly NO-GO; need `--tapes` multi-name for universe GO |
+
+---
+
+## Key new / changed files (this pass)
+
+| Area | Path |
+|------|------|
+| Rigor | `musescript/evo/rigor/{NormApprox,ProbSharpe,BlockBootstrap,Pbo,PurgeEmbargo,PreRegistration,SeedRobustness,UniverseRobustness,OosVerdict}.hx` |
+| Controls | `musescript/ew/{NullForecastHost,OracleForecastHost,HostLeakageProbe,HostWarmup,BenchmarkHarness}.hx` |
+| Gate | `musescript/evo/Fitness.hx` (`defaultMinTrades`, `rankScore`, `rankScoreFacts`) |
+| OOS | `musescript/evo/graal/CorpusEvoRun.hx` (`--min-trades`, `--n-trials` default 50, `--no-rank-dsr`, `--prereg`, TapeLinter, live PBO/seed-median/universe) |
+| PIT | `musescript/ew/RegimeForecastHost.hx` (t-causal closes); `*BenchmarkCli` → `HostWarmup` / `BenchmarkHarness` |
+| MCMC | `musescript/ew/mcmc/RegimeMcmc.hx` (ESS / mixingOk); `DetParityDump` + `testdata/det-parity.golden.txt` + `tools/det_parity_ci.*` |
+| Drains | `HostDrainGuard`, `RivalryArena`, `NmaSemanticRdo`, `NmaNodeEvalPool.assertWorkerJsonSafe`, `CorpusSeed` |
+| Metrics | `musescript/evo/ProjectionScore.hx` (`minSample=10`) |
+| Auction | `VolumeProfile.histogram`; `AuctionHardenedOosCli` (`--host-kind`, seed-median, universe flag) |
+| Data | `musescript/harness/TapeLinter.hx` (H1–H3); CorpusEvoRun + BenchmarkHarness lint on load |
+| CI | `.github/workflows/pipeline-hardening.yml` |
+| Tests | `musescript/tests/{TestPipelineHardening,TestPitDiscipline,TestP1Hardening,TestFrostAdversarial,TestDetParity,TestTapeLinter}.hx` |

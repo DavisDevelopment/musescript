@@ -72,6 +72,12 @@ class TestMain {
 		runner.addCase(new TestStrategyParserGrammarExtensions());
 		runner.addCase(new TestEvoVariation());
 		runner.addCase(new TestProjectionScaffold());
+		runner.addCase(new TestPipelineHardening());
+		runner.addCase(new TestPitDiscipline());
+		runner.addCase(new TestP1Hardening());
+		runner.addCase(new TestFrostAdversarial());
+		runner.addCase(new TestDetParity());
+		runner.addCase(new TestTapeLinter());
 		runner.addCase(new TestEwHostProjection());
 		runner.addCase(new TestEwBenchmark());
 		runner.addCase(new TestRegimeMcmc());
