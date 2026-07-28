@@ -1,0 +1,6 @@
+extraParams.hxml
+-main musescript.ew.EwBenchmarkCli
+-lib hxnodejs
+-D node
+-D js_es=6
+-js build/js/ew-benchmark.js

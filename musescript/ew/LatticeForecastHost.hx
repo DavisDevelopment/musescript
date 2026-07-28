@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.ew.EwLattice;
 import musescript.indicators.ew.EwPhiParams;
 import musescript.indicators.ew.EwProject;
+import musescript.indicators.ew.EwProject.EwProjectBand;
 import musescript.indicators.geom.SwingGraph;
 import musescript.indicators.geom.SwingGraphStack;
 import musescript.ew.EwForecastHost.EwCountMass;
@@ -82,6 +83,24 @@ class LatticeForecastHost implements EwForecastHost {
 	public function cloudAt(t:Int):ForecastCloud {
 		ensureRebuilt(t);
 		return assembleCloud(t);
+	}
+
+	/**
+	 * Per-interpretation projection fan at t: one band per rule-valid rival the lattice holds, in
+	 * rank order (mass ∝ soft score via `topCounts`). This is the "all interpretations at once, each
+	 * with its prediction" surface the benchmark scores — the un-reduced counterpart to `cloudAt`.
+	 * PIT-causal: bands are built from pivots ≤ t only. Rivals that project nothing are skipped.
+	 */
+	public function ensembleAt(t:Int):Array<EwProjectBand> {
+		ensureRebuilt(t);
+		var scratch = lattice.scratch();
+		var n = lattice.hypothesisCount();
+		var out:Array<EwProjectBand> = [];
+		for (i in 0...n) {
+			var band = EwProject.fromHypothesis(lattice.at(i), scratch, params);
+			if (band != null) out.push(band);
+		}
+		return out;
 	}
 
 	public function topCounts(t:Int, kMax:Int):Array<EwCountMass> {
