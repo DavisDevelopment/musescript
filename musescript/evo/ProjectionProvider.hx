@@ -6,6 +6,8 @@ import musescript.ew.ForecastCloud;
 import musescript.ew.LatticeForecastHost;
 import musescript.ew.McmcForecastHost;
 import musescript.ew.RegimeForecastHost;
+import musescript.ew.auction.AuctionForecastHost;
+import musescript.ew.auction.VolumeProfile;
 import musescript.indicators.ew.EwPhiParams;
 import musescript.indicators.geom.SwingGraph;
 import musescript.indicators.geom.SwingGraphStack;
@@ -364,6 +366,12 @@ class ProjectionProvider {
 			// Non-EW substrate: streams its own returns via onBar (ignores graph/stack). Soft φ deltas
 			// don't apply (regime params are its own); horizon carries through from the decl.
 			return new RegimeForecastHost(decl.seed, 2, decl.horizon < 1 ? 20 : decl.horizon);
+		}
+		if (kind == "auction") {
+			// Volume-profile fair-value host (parallel session). Streams bars via onBar; volume-at-price
+			// drives balance-vs-discovery — a target the price-capture null can't trivially win.
+			return new AuctionForecastHost(VolumeProfile.DEFAULT_WINDOW, VolumeProfile.DEFAULT_BINS,
+				VolumeProfile.DEFAULT_VALUE_AREA_PCT, decl.horizon < 1 ? 5 : decl.horizon);
 		}
 		if (kind == "mcmc") {
 			var m = stack != null

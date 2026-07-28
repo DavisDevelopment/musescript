@@ -219,7 +219,8 @@ class TestEwHostProjection extends Test {
 		Assert.notNull(g1.projections);
 		Assert.isTrue(g1.projections.length >= 1);
 		switch (g1.projections[0].sampler) {
-			case PSHost(k): Assert.isTrue(k == "lattice" || k == "mcmc");
+			case PSHost(k): Assert.isTrue(musescript.evo.Variation.HOST_KINDS.indexOf(k) >= 0,
+					'grown host kind "$k" must be a registered HOST_KIND');
 			default: Assert.fail("expected PSHost");
 		}
 		Assert.isTrue(ProjectionProvider.hostProjRefs(g1).length >= 1);

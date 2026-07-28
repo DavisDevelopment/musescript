@@ -1332,7 +1332,7 @@ class Variation {
 	public function crossover(a:StrategyGenome, b:StrategyGenome):StrategyGenome return subtreeCrossover(a, b);
 
 	/** Host kinds Variation may assign to `PSHost` (soft backend choice only). */
-	public static var HOST_KINDS:Array<String> = ["lattice", "mcmc", "regime"];
+	public static var HOST_KINDS:Array<String> = ["lattice", "mcmc", "regime", "auction"];
 
 	/** When true, print `[ew-host] mutate …` lines (CorpusEvoRun `--ew-host` turns this on). */
 	public static var logHostProjection:Bool = false;
