@@ -125,6 +125,9 @@ class Canonical {
 					digestSeries(d, base);
 					digestScalar(d, vol);
 					d.str(Std.string(model));
+				case PSHost(kind):
+					d.tag("h".code);
+					d.str(kind);
 			}
 		}
 	}

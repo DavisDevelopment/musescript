@@ -71,7 +71,8 @@ Geom (`SwingGraph`, `SwingGraphStack`, SoftScores, GeomViz) stays under `indicat
 
 - [x] Add `musescript.ew.LatticeForecastHost` that **imports** `musescript.indicators.ew.*` and fills `ForecastCloud`.
 - [x] Tests under `musescript/tests/TestEwForecastHost.hx`.
-- **LatticeForecastHost done — Claude can wire** ProjectionProvider → this host at boundary X.
+- [x] Boundary X: evo `ProjectionProvider` + `PSHost` + `TestEwHostProjection` (score path).
+- **Remaining:** Expand trading prelude for host columns; package promote of lattice sources.
 
 ### Phase 2 — mechanical package move
 

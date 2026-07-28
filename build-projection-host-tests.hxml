@@ -1,0 +1,7 @@
+extraParams.hxml
+-main musescript.tests.TestProjectionHostMain
+-lib utest
+-lib hxnodejs
+-D node
+-D js_es=6
+-js build/js/tests-projection-host.js

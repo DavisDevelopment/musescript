@@ -80,17 +80,19 @@ At `samples=1`, quantiles collapse; `spread` may still be φ-band width (informa
 musescript.ew.EwForecastHost
         │  cloudAt(t) / topCounts
         ▼
-[ Claude ] ProjectionProvider / NmaFeatureHost sibling
+[ evo ] ProjectionProvider  (PSHost sampler)
         │  SProj("ew_0", field) → columns
         ▼
-[ Claude ] StrategyGenome.tradeGenes read SProj
+[ evo ] StrategyGenome.tradeGenes read SProj
         ▼
-[ Claude ] Fitness: equity terms + optional projScore
-             (coverage / CRPS / invalidation survivability)
+[ evo ] Fitness.attachProjectionScore(+ provider)
+             (point skill + band coverage blend)
 ```
 
 **Integrate at boundary X:** host → provider → `SProj` → fitness.  
-If Claude’s generic `ProjectionDecl` / `PSPoint`/`PSNoise` lands first, EW is one **named host-backed sampler** (`hostKind: lattice|mcmc`) that fills a `ProjBundle` from `ForecastCloud` rather than from a free SeriesNode tree.
+**Status 2026-07-27: DONE for lattice score path** — `PSHost` + `ProjectionProvider` + smoke
+`TestEwHostProjection`. EW is a **named host-backed sampler** (`hostKind: lattice|mcmc`) that
+fills reduction columns from `ForecastCloud` rather than from a free SeriesNode tree.
 
 **Do not** (in the ew package session):
 
@@ -148,34 +150,48 @@ Avoid double-counting: if `EwLattice` soft scores already used θ to pick the pr
 ### Slice 0 — contracts (this pass)
 
 - [x] `musescript/ew/` docs + `ForecastCloud` + `EwForecastHost`
-- [ ] Pointer from `indicators/ew/handbook/BRAINSTORM.md`
+- [x] Pointer from `indicators/ew/handbook/BRAINSTORM.md`
 
 ### Slice 1 — LatticeForecastHost adapter (ew package; small)
 
 - [x] Implement `LatticeForecastHost implements EwForecastHost` wrapping `EwLattice` / `EwProject` / `EwInvalidation` (still importing from `indicators.ew` until promote).
 - [x] Unit test: synthetic impulse → non-NaN band + invalidate price.
 - [x] **No** EvolutionEngine changes.
-- **LatticeForecastHost done — Claude can wire** at boundary X.
+- **LatticeForecastHost done.**
 
-### Slice 2 — Claude evo boundary
+### Slice 2 — evo boundary X (**DONE** for lattice score path)
 
-- Provider maps host cloud → `SProj` fields.
-- One seed genome: enter long when `prob_up` or mid > close and `spread` < param; exit on invalidate proximity or cross.
-- Fitness: PnL + simple coverage term, default-off flag.
-- Parity: genomes with `forecast == null` match today.
+- [x] `ProjSampler.PSHost(hostKind)` + `ProjectionProvider` maps host cloud → `SProj` fields.
+- [x] Genome can declare `ew_0` host projection and reference `SProj("ew_0", …)` in policy trees.
+- [x] Fitness: `attachProjectionScore(…, provider)` — point skill + band coverage blend (default opt-in).
+- [x] Smoke: `TestEwHostProjection` (bars → `cloudAt` → columns → `projScore`).
+- [x] Parity: genomes with `projections == null` / unread decls still match prior behavior.
+- **Remaining (Slice 2+):** Expand trading prelude for `PSHost` (needs host builtin / interp column injection); Variation growth of `PSHost`; live equity eval of host-reading genomes.
 
 ### Slice 3 — Soft φ gene only
 
-- `phiDeltas` applied via `EwPhiParams.clone()` + host `phiKey` for cache.
+- [ ] `phiDeltas` applied via `EwPhiParams.clone()` + host `phiKey` for cache.
 - Offline finetune pack remains a prior; genes are residual deltas.
 
 ### Slice 4 — Tiny MCMC stub (optional)
 
-- Inner MH: propose swap among **already valid** top-K lattice rivals (or valid corrective sibling labels), accept via soft likelihood under θ.
+- [ ] Inner MH: propose swap among **already valid** top-K lattice rivals (or valid corrective sibling labels), accept via soft likelihood under θ.
 - Same `EwForecastHost` API; `samples` = chain thin count; aggregate bands.
 - Still no CYK/CFG engine required.
 
 ---
+
+## Integration status (2026-07-27)
+
+| Piece | Status |
+|-------|--------|
+| `ForecastCloud` / `EwForecastHost` / `LatticeForecastHost` | **DONE** |
+| Claude generic projections (`PSPoint`/`PSNoise`/`SProj`/`ProjectionScore`) | **DONE** |
+| Boundary X: `PSHost` + `ProjectionProvider` → fitness | **DONE** (lattice) |
+| Expand prelude trading with host columns | **remaining** |
+| `phiDeltas` forecast genes / Variation | **remaining** |
+| Full MCMC host | **remaining** |
+| Demo CLI | **remaining** |
 
 ## Mapping existing Muse pieces
 

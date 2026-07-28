@@ -119,6 +119,11 @@ class Expand {
 					default:
 						throw 'Expand: unknown projection field "$field" for projection "${decl.name}"';
 				};
+			case PSHost(kind):
+				// Host clouds are columnar via ProjectionProvider — no MuseScript prelude yet
+				// (needs a host builtin or interp column injection). Boundary X score path works.
+				throw 'Expand: PSHost($kind) projection "${decl.name}" is host-backed; '
+					+ 'use ProjectionProvider columns (Expand trading prelude not wired)';
 		}
 	}
 

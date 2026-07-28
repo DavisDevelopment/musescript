@@ -72,6 +72,7 @@ class TestMain {
 		runner.addCase(new TestStrategyParserGrammarExtensions());
 		runner.addCase(new TestEvoVariation());
 		runner.addCase(new TestProjectionScaffold());
+		runner.addCase(new TestEwHostProjection());
 		runner.addCase(new TestIntPairMap());
 		runner.addCase(new TestIntPairList());
 		runner.addCase(new TestNmaBijection());

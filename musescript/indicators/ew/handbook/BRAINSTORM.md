@@ -15,7 +15,9 @@ EW is promoting **out of** `indicators` into infra package **`musescript/ew/`**:
 | Move plan | [`../../../ew/PROMOTE_PLAN.md`](../../../ew/PROMOTE_PLAN.md) |
 | Stub contracts | `musescript/ew/ForecastCloud.hx`, `EwForecastHost.hx` |
 
-**Evo forecasting wiring** (EvolutionEngine / Fitness / Variation / `SProj`): owned by parallel Claude session — integrate at `EwForecastHost` → ProjectionProvider boundary. Do not duplicate that work in handbook slices.
+**Evo forecasting wiring** (EvolutionEngine / Fitness / Variation / `SProj`): boundary X
+**DONE** for lattice score path — `ProjectionProvider` + `PSHost` consume `EwForecastHost`.
+See `musescript/ew/BRAINSTORM_COEVOLVE.md` § Integration status. Do not duplicate that work in handbook slices.
 
 Siblings (parallel, not owned here): **B7 invalidation levels**, **C11 parent GeomViz overlay**.
 

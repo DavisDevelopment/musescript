@@ -24,7 +24,9 @@ class ProjectionScore {
 	 * to `g.projections`. Only REFERENCED projections are scored — an unread forecast has no effect on
 	 * behaviour and earns no skill. `agg` is `NaN` when nothing is scoreable.
 	 */
-	public static function score(g:StrategyGenome, bars:Array<Bar>):{agg:Float, per:Array<Float>} {
+	public static function score(
+		g:StrategyGenome, bars:Array<Bar>, ?provider:ProjectionProvider
+	):{agg:Float, per:Array<Float>} {
 		var per:Array<Float> = [];
 		if (g.projections == null || g.projections.length == 0)
 			return {agg: Math.NaN, per: per};
@@ -32,7 +34,7 @@ class ProjectionScore {
 		var sum = 0.0;
 		var cnt = 0;
 		for (decl in g.projections) {
-			var s = refs.exists(decl.name) ? skill(decl, g.params, bars) : Math.NaN;
+			var s = refs.exists(decl.name) ? skill(decl, g.params, bars, provider) : Math.NaN;
 			per.push(s);
 			if (finite(s)) {
 				sum += s;
@@ -43,20 +45,37 @@ class ProjectionScore {
 	}
 
 	/** Skill of one projection: rank-IC (or directional accuracy for `PDirection`) of its central
-	 * forecast vs the realized target. `NaN` when the forecast can't be evaluated or there's no signal. */
-	public static function skill(decl:ProjectionDecl, params:Array<EvoParam>, bars:Array<Bar>):Float {
-		var p = centralSeries(decl, params, bars);
+	 * forecast vs the realized target. `NaN` when the forecast can't be evaluated or there's no signal.
+	 * Host-backed (`PSHost`) projections need a `ProjectionProvider` with an `EwForecastHost`. */
+	public static function skill(
+		decl:ProjectionDecl, params:Array<EvoParam>, bars:Array<Bar>, ?provider:ProjectionProvider
+	):Float {
+		var p = centralSeries(decl, params, bars, provider);
 		if (p == null)
 			return Math.NaN;
 		var y = realizedTarget(bars, decl.kind, decl.horizon < 1 ? 1 : decl.horizon);
-		return switch (decl.kind) {
+		var point = switch (decl.kind) {
 			case PDirection: directionalSkill(p, y);
 			default: rankIC(p, y);
 		};
+		// Host projections: blend forward point skill with band coverage so UQ width is scored
+		// without rewarding hard-rule soft hits (lattice already ranked those into the cloud).
+		if (decl.sampler.match(PSHost(_)) && provider != null) {
+			var cov = provider.bandCoverage(bars, decl.horizon < 1 ? 1 : decl.horizon);
+			if (finite(cov)) {
+				var covSkill = 2.0 * cov - 1.0; // map [0,1] → [-1,1]
+				if (finite(point))
+					return 0.5 * point + 0.5 * covSkill;
+				return covSkill;
+			}
+		}
+		return point;
 	}
 
 	/** The projection's central (median) forecast series over the tape; `null` if un-evaluable. */
-	public static function centralSeries(decl:ProjectionDecl, params:Array<EvoParam>, bars:Array<Bar>):Array<Float> {
+	public static function centralSeries(
+		decl:ProjectionDecl, params:Array<EvoParam>, bars:Array<Bar>, ?provider:ProjectionProvider
+	):Array<Float> {
 		try {
 			return switch (decl.sampler) {
 				case PSPoint(node):
@@ -68,6 +87,10 @@ class ProjectionScore {
 					var c50 = McFan.quantile(McFan.sortedCopy(McFan.shocks(decl.seed, k, model)), 0.5);
 					var n = baseCol.length < volCol.length ? baseCol.length : volCol.length;
 					[for (i in 0...n) baseCol[i] + c50 * volCol[i]];
+				case PSHost(_):
+					if (provider == null)
+						return null;
+					provider.fieldColumn("p50", bars);
 			};
 		} catch (e:Dynamic) {
 			return null;

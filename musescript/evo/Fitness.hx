@@ -351,15 +351,20 @@ class Fitness {
 	 * `NaN` if the genome declares none. This is the forecast-quality SIGNAL; it feeds selection as a
 	 * MAP-Elites descriptor axis (plan §7), computed off the fitness hot path by callers that want it.
 	 */
-	public static function projectionScore(g:StrategyGenome, bars:Array<Bar>):Float {
-		return ProjectionScore.score(g, bars).agg;
+	public static function projectionScore(
+		g:StrategyGenome, bars:Array<Bar>, ?provider:ProjectionProvider
+	):Float {
+		return ProjectionScore.score(g, bars, provider).agg;
 	}
 
-	/** Populate `fr.projScore`/`fr.projScores` from `g`'s projections vs `bars`. No-op when none. */
-	public static function attachProjectionScore(fr:FitnessResult, g:StrategyGenome, bars:Array<Bar>):Void {
+	/** Populate `fr.projScore`/`fr.projScores` from `g`'s projections vs `bars`. No-op when none.
+	 * Pass a `ProjectionProvider` (with `EwForecastHost`) when the genome uses `PSHost` samplers. */
+	public static function attachProjectionScore(
+		fr:FitnessResult, g:StrategyGenome, bars:Array<Bar>, ?provider:ProjectionProvider
+	):Void {
 		if (g.projections == null || g.projections.length == 0)
 			return;
-		var s = ProjectionScore.score(g, bars);
+		var s = ProjectionScore.score(g, bars, provider);
 		fr.projScore = s.agg;
 		fr.projScores = s.per;
 	}

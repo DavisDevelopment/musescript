@@ -9,7 +9,8 @@ package musescript.evo;
  * migration.
  *
  * Both variants are built from `≤ t` inputs only; "forward-looking" is a scoring interpretation, not
- * a data-access privilege (see `ProjKind`).
+ * a data-access privilege (see `ProjKind`). Host-backed fans (`PSHost`) are the same contract with
+ * samples supplied by an `EwForecastHost` via `ProjectionProvider`.
  */
 enum ProjSampler {
 	/**
@@ -24,4 +25,13 @@ enum ProjSampler {
 	 * attribution ablations, and the champion re-check).
 	 */
 	PSNoise(base:SeriesNode, vol:ScalarNode, model:NoiseModel);
+
+	/**
+	 * Host-backed fan: reductions come from an `EwForecastHost` (`LatticeForecastHost` today;
+	 * MCMC later) via `ProjectionProvider`, never from a free SeriesNode tree. `hostKind` is
+	 * `"lattice"` | `"mcmc"`. Hard EW grammar stays inside the host — this gene only selects the
+	 * backend. Policy still reads `SProj(name, field)` with the same field vocabulary
+	 * (`p50`/`spread`/`prob_up`/`inv`/…).
+	 */
+	PSHost(hostKind:String);
 }

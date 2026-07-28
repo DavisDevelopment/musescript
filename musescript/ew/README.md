@@ -13,7 +13,8 @@ reads cloud features.
 | Co-evolution brainstorm + MVP | [`BRAINSTORM_COEVOLVE.md`](BRAINSTORM_COEVOLVE.md) |
 | Package move plan | [`PROMOTE_PLAN.md`](PROMOTE_PLAN.md) |
 | Stub surfaces | `ForecastCloud.hx`, `EwForecastHost.hx` |
-| Lattice adapter | `LatticeForecastHost.hx` (**done — Claude can wire**) |
+| Lattice adapter | `LatticeForecastHost.hx` (**done**) |
+| Boundary X (evo) | `ProjectionProvider` + `PSHost` → `projScore` (**done** — lattice score path) |
 | **Implementation still under** | `musescript/indicators/ew/*` (temporary) |
 
 Hard EW grammar stays non-learnable. Soft φ / guideline weights (`EwPhiParams`) are
@@ -21,13 +22,15 @@ learnable. MCMC (when landed) samples **rule-valid** labelings; soft params sit 
 outer loop. OHLCV-first. Emit probabilistic counts / bands / invalidations first;
 trading signals are derived consumers.
 
-## Evo handoff (Claude)
+## Evo handoff (boundary X)
 
-Do **not** wire EvolutionEngine / Fitness / Variation from this package session.
-Claude owns forecasting integration in evo. Consume:
+Consume:
 
 - `ForecastCloud` / `EwForecastHost` as the EW boundary (**boundary X** in `ARCHITECTURE.md`)
-- Gene sketch + fitness principles in `BRAINSTORM_COEVOLVE.md` (docs only)
+- Gene sketch + fitness principles in `BRAINSTORM_COEVOLVE.md`
+
+**Integration status:** lattice score path **DONE** (`PSHost` + `ProjectionProvider` + smoke).
+See `BRAINSTORM_COEVOLVE.md` § Integration status for remaining (Expand trading, φ genes, MCMC, CLI).
 
 ## Related
 

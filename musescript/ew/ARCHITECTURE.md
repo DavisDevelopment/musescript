@@ -103,7 +103,9 @@ topCounts(t, kMax)    — discrete mass for entropy / rivalry
 phiKey()              — cache key for soft-param pack
 ```
 
-**Handoff boundary X (evo):** Claude’s ProjectionProvider / NMA column path should resolve EW projections by asking an `EwForecastHost` (or an adapter that wraps today’s lattice + `EwProject`) and mapping `ForecastCloud` fields → `SProj` fan reductions (`p50`, `spread`, `prob_up`, …).  
+**Handoff boundary X (evo):** `ProjectionProvider` resolves EW projections by asking an
+`EwForecastHost` (typically `LatticeForecastHost`) and mapping `ForecastCloud` fields → `SProj`
+fan reductions (`p50`, `spread`, `prob_up`, `inv`, `entropy`, …). Sampler gene: `PSHost("lattice"|"mcmc")`.
 
 **Do not** teach EvolutionEngine hard EW rules. Hard rules stay inside the host.
 
@@ -142,7 +144,9 @@ Constraints:
 - Prefer additive, default-off `projScore` so genomes without EW hosts stay byte-parity.  
 - Cap MCMC / K inside fitness; prefer lattice host for population eval, MCMC for elite re-score or offline.
 
-**Evo wiring: Claude in progress — integrate at boundary X** (`EwForecastHost` → ProjectionProvider → `SProj` reductions → Fitness `projScore`).
+**Evo wiring: boundary X DONE for lattice score path** (`EwForecastHost` → `ProjectionProvider` /
+`PSHost` → `SProj` reductions → Fitness `projScore`). Remaining: Expand trading prelude for host
+columns, φ gene deltas, MCMC host.
 
 ---
 
@@ -162,6 +166,6 @@ Constraints:
 
 See `BRAINSTORM_COEVOLVE.md` § MVP. Short version:
 
-1. Adapter: `EwLattice` + `EwProject` + `EwInvalidation` → `ForecastCloud` (`LatticeForecastHost` **done** — Claude can wire).  
-2. Claude wires policy reads of cloud reductions + optional `projScore`.  
+1. Adapter: `EwLattice` + `EwProject` + `EwInvalidation` → `ForecastCloud` (`LatticeForecastHost` **done**).  
+2. Evo wires policy reads of cloud reductions + optional `projScore` (**done** — `PSHost` + `ProjectionProvider` + `TestEwHostProjection`).  
 3. Only then: stub inner MH over **already-valid** lattice rivals (no full CFG/CYK yet).
