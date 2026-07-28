@@ -1,0 +1,6 @@
+extraParams.hxml
+-main musescript.ew.RegimeBenchmarkCli
+-lib hxnodejs
+-D node
+-D js_es=6
+-js build/js/regime-benchmark.js
