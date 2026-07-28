@@ -42,7 +42,8 @@ extern class Dimension {
 
 @:native("java.awt.Color")
 extern class Color {
-	function new(r:Int, g:Int, b:Int);
+	@:overload function new(r:Int, g:Int, b:Int);
+	@:overload function new(r:Int, g:Int, b:Int, a:Int);
 	static var WHITE(default, never):Color;
 	static var BLACK(default, never):Color;
 }
@@ -78,7 +79,15 @@ extern class Graphics {
 	function drawLine(x1:Int, y1:Int, x2:Int, y2:Int):Void;
 	function drawString(s:String, x:Int, y:Int):Void;
 	function fillRect(x:Int, y:Int, w:Int, h:Int):Void;
+	function drawRect(x:Int, y:Int, w:Int, h:Int):Void;
+	function fillPolygon(p:Polygon):Void;
 	function setFont(f:Font):Void;
+}
+
+@:native("java.awt.Polygon")
+extern class Polygon {
+	function new();
+	function addPoint(x:Int, y:Int):Void;
 }
 
 @:native("java.awt.Graphics2D")

@@ -135,6 +135,12 @@ class ProjectionScore {
 
 	/** Directional skill in [-1,1]: `2·accuracy − 1` over pairs with a defined sign on the target. */
 	public static function directionalSkill(p:Array<Float>, y:Array<Float>):Float {
+		var acc = directionalAccuracy(p, y);
+		return finite(acc) ? 2.0 * acc - 1.0 : Math.NaN;
+	}
+
+	/** Directional accuracy in [0,1]: fraction of bars where `sign(p)` matches `sign(y)`. */
+	public static function directionalAccuracy(p:Array<Float>, y:Array<Float>):Float {
 		var n = p.length < y.length ? p.length : y.length;
 		var ok = 0;
 		var tot = 0;
@@ -148,7 +154,64 @@ class ProjectionScore {
 			if (sign(p[i]) == sy)
 				ok++;
 		}
-		return tot == 0 ? Math.NaN : 2.0 * (ok / tot) - 1.0;
+		return tot == 0 ? Math.NaN : ok / tot;
+	}
+
+	/**
+	 * Interpretable predictive hit-rate in [0,1] for a projection: directional accuracy of the
+	 * forecasted move (`p_t − close_t` vs `close_{t+H} − close_t`). Prefer this for on-screen
+	 * "predictive accuracy"; `skill` remains the selection signal (rank-IC / blended coverage).
+	 */
+	public static function hitRate(
+		decl:ProjectionDecl, params:Array<EvoParam>, bars:Array<Bar>, ?provider:ProjectionProvider
+	):Float {
+		var p = centralSeries(decl, params, bars, provider);
+		if (p == null)
+			return Math.NaN;
+		var h = decl.horizon < 1 ? 1 : decl.horizon;
+		var n = p.length < bars.length ? p.length : bars.length;
+		var pred:Array<Float> = [];
+		var real:Array<Float> = [];
+		var t = 0;
+		while (t < n - h) {
+			if (finite(p[t]) && finite(bars[t].close) && finite(bars[t + h].close)) {
+				pred.push(p[t] - bars[t].close);
+				real.push(bars[t + h].close - bars[t].close);
+			}
+			t++;
+		}
+		return directionalAccuracy(pred, real);
+	}
+
+	/**
+	 * Aggregate hit-rate over REFERENCED projections (mean of finite). `NaN` when nothing scoreable.
+	 * Host genomes: also blend band coverage when a provider is bound (same honesty as `skill`).
+	 */
+	public static function hitRateAgg(
+		g:StrategyGenome, bars:Array<Bar>, ?provider:ProjectionProvider
+	):Float {
+		if (g.projections == null || g.projections.length == 0)
+			return Math.NaN;
+		var refs = referencedNames(g);
+		var sum = 0.0;
+		var cnt = 0;
+		for (decl in g.projections) {
+			if (!refs.exists(decl.name))
+				continue;
+			var hr = hitRate(decl, g.params, bars, provider);
+			if (decl.sampler.match(PSHost(_)) && provider != null) {
+				var cov = provider.bandCoverage(bars, decl.horizon < 1 ? 1 : decl.horizon);
+				if (finite(hr) && finite(cov))
+					hr = 0.5 * hr + 0.5 * cov;
+				else if (finite(cov))
+					hr = cov;
+			}
+			if (finite(hr)) {
+				sum += hr;
+				cnt++;
+			}
+		}
+		return cnt > 0 ? sum / cnt : Math.NaN;
 	}
 
 	// ---------- helpers ----------

@@ -14,10 +14,10 @@ import musescript.indicators.geom.GeomViz; // LevelSet, PivotMarkSet
  * Kind strings (extensible):
  * - `fib` — live now (from FibRetracement)
  * - `elliot` — reserved (Elliott count ribbon)
- * - `forecast` — reserved (MC / ForecastCloud fan)
+ * - `forecast` — live for `--ew-host` (cloud p50/band/inv + aux entropy/equity paths)
  *
  * Payload stays flexible: levels + anchors proven for fib; confidence / paths
- * documented for Elliott / MC emitters next.
+ * for forecast / Elliott emitters.
  */
 enum abstract FeatureVizKind(String) from String to String {
 	var Fib = "fib";
@@ -321,4 +321,105 @@ class FeatureVizFib {
 		}
 		return out;
 	}
+}
+
+/**
+ * Forecast emit for EW host clouds — gen-boundary series the dashboard can paint as real curves
+ * (not constant fib levels). Paths are price-space: close, p50, p05, p95, invalidate.
+ * Aux series (entropy, equity) live in `payload.extra.aux` as `{name, values}` for a second strip.
+ */
+class FeatureVizForecast {
+	/**
+	 * Build a `forecast` frame from a provider that already materialised (or will materialise)
+	 * clouds over `bars`. Optional `equity` (same length or shorter) becomes an aux sparkline.
+	 * `stride` downsamples for Swing paint cost (default 2).
+	 */
+	public static function fromProvider(
+		provider:ProjectionProvider,
+		bars:Array<Bar>,
+		?equity:Array<Float>,
+		?meta:FeatureVizMeta,
+		?stride:Int = 2,
+		?hitRate:Float,
+		?projScore:Float
+	):Null<FeatureVizEvent> {
+		if (provider == null || bars == null || bars.length < 2)
+			return null;
+		var cs = provider.materialize(bars);
+		if (cs == null || cs.length == 0)
+			return null;
+		var step = stride != null && stride > 0 ? stride : 1;
+		var closeP:Array<FeatureVizPathPoint> = [];
+		var p50P:Array<FeatureVizPathPoint> = [];
+		var p05P:Array<FeatureVizPathPoint> = [];
+		var p95P:Array<FeatureVizPathPoint> = [];
+		var invP:Array<FeatureVizPathPoint> = [];
+		var entVals:Array<Float> = [];
+		var i = 0;
+		while (i < bars.length && i < cs.length) {
+			var b = bars[i];
+			var c = cs[i];
+			var barIdx:Float = b.index;
+			closeP.push({bar: barIdx, price: b.close});
+			if (finite(c.priceMid)) p50P.push({bar: barIdx, price: c.priceMid});
+			if (finite(c.priceLo)) p05P.push({bar: barIdx, price: c.priceLo});
+			if (finite(c.priceHi)) p95P.push({bar: barIdx, price: c.priceHi});
+			if (finite(c.invalidatePrice)) invP.push({bar: barIdx, price: c.invalidatePrice});
+			entVals.push(finite(c.countEntropy) ? c.countEntropy : Math.NaN);
+			i += step;
+		}
+		if (p50P.length < 2)
+			return null;
+		var aux:Array<Dynamic> = [
+			{name: "entropy", values: entVals}
+		];
+		if (equity != null && equity.length > 1) {
+			var eqVals:Array<Float> = [];
+			var j = 0;
+			while (j < equity.length) {
+				eqVals.push(equity[j]);
+				j += step;
+			}
+			aux.push({name: "equity", values: eqVals});
+		}
+		var conf = Math.NaN;
+		if (hitRate != null && Math.isFinite(hitRate))
+			conf = hitRate;
+		else if (projScore != null && Math.isFinite(projScore))
+			conf = (projScore + 1.0) / 2.0;
+		var note = "ew_host_cloud";
+		if (hitRate != null && Math.isFinite(hitRate))
+			note += " hitRate=" + round3(hitRate);
+		if (projScore != null && Math.isFinite(projScore))
+			note += " projScore=" + round3(projScore);
+		var payload:FeatureVizPayload = {
+			paths: [closeP, p50P, p05P, p95P, invP],
+			confidence: Math.isFinite(conf) ? conf : null,
+			note: note,
+			extra: {
+				pathLabels: ["close", "p50", "p05", "p95", "inv"],
+				aux: aux
+			}
+		};
+		var barLo = bars[0].index;
+		var barHi = bars[bars.length - 1].index;
+		return FeatureVizEvent.make(
+			FeatureVizKind.Forecast, barLo, barHi, payload,
+			withSourceMeta(meta, "ew_host_forecast")
+		);
+	}
+
+	static function withSourceMeta(meta:Null<FeatureVizMeta>, defaultSource:String):FeatureVizMeta {
+		return {
+			genomeKey: meta != null ? meta.genomeKey : null,
+			sourceId: (meta != null && meta.sourceId != null) ? meta.sourceId : defaultSource,
+			epoch: meta != null ? meta.epoch : null
+		};
+	}
+
+	static inline function finite(x:Float):Bool
+		return !Math.isNaN(x) && Math.isFinite(x);
+
+	static function round3(x:Float):String
+		return Std.string(Math.round(x * 1000) / 1000);
 }

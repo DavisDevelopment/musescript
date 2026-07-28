@@ -20,6 +20,7 @@ import musescript.evo.BasketFitness;
 import musescript.evo.SurrogateModel;
 import musescript.evo.SymbolSelector;
 import musescript.evo.FeatureVizEvent.FeatureVizFib;
+import musescript.evo.FeatureVizEvent.FeatureVizForecast;
 import musescript.evo.graal.CompeteVizState;
 import musescript.evo.graal.Polyglot;
 import musescript.evo.graal.GraalWasmHost;
@@ -684,18 +685,39 @@ class CorpusEvoRun {
 			ewHostKind = (ewHostArg == "mcmc") ? "mcmc" : "lattice";
 			Fitness.projectionProvider = ProjectionProvider.forEvoHost(true);
 			Variation.logHostProjection = true;
+			Variation.hostMutateRate = 0.35;
 			if (threads > 1) {
 				Sys.println('EW-HOST: forcing --threads 1 (autoBind ProjectionProvider is process-singleton; concurrent decorateBars would race)');
 				threads = 1;
 			}
 			Sys.println('EW-HOST: on -- kind=$ewHostKind (ProjectionProvider.autoBindGenomeHost; PSHost seeds + mutate logs; decorate→JS fallback)');
 		}
+		// Forecast-skill MAP axis (plan §7 / P3 owed wiring). Opt-in via `--proj-map-axis`;
+		// `--ew-host` defaults it ON (CVT-only) so host genomes can niche apart by projScore.
+		// Disable with `--no-proj-map-axis`. Conflicts with `--credit-map-axis` → skill wins + warn.
+		var projMapAxis = argFlag("--proj-map-axis") || (ewHostOn && !argFlag("--no-proj-map-axis"));
+		if (projMapAxis && creditMapAxis) {
+			Sys.println("WARNING: --proj-map-axis and --credit-map-axis both set — using forecast-skill 5D (credit axis suppressed)");
+			creditMapAxis = false;
+		}
+		if (projMapAxis && cvtCells <= 0) {
+			cvtCells = 48;
+			Sys.println("PROJ-MAP-AXIS: enabling --cvt-cells 48 (skill axis is CVT-only; pass --cvt-cells N to override)");
+		}
+		if (projMapAxis)
+			Sys.println("PROJ-MAP-AXIS: on — MAP-Elites niches by forecast skill (Fitness.projectionScore → 5th CVT axis)");
+		// P3 smoke knob: additive `tradingScore + w·projScore` (plan §7). Default 0.2 under
+		// `--ew-host` so fusion can move fitness when host columns are referenced; 0 otherwise.
+		var projWeight = argFloat("--proj-weight", ewHostOn ? 0.2 : 0.0);
+		if (projWeight != 0)
+			Sys.println('PROJ-WEIGHT: $projWeight — selection fitness += w·projScore when finite (smoke / fusion pressure)');
 		var dashTitle = "MuseGene Evolution -- " + (simTapeOn ? "sim-tape (MurmurationSim)" : (tapePath != null ? tapePath : "default tape"));
 		if (ewHostOn) dashTitle = "MuseGene Evolution -- EW host (" + ewHostKind + ") -- " + (tapePath != null ? tapePath : "default tape");
 		var dashboard = guiOn ? new EvoDashboardWindow(dashTitle, guiCompete) : null;
 		if (guiCompete) Sys.println("gui-compete: on -- deme strip + arena wealth + foundry timeline panels");
 		if (ewHostOn && dashboard != null)
-			dashboard.setStatus("EW host=" + ewHostKind + " -- streaming ProjectionProvider decorate + gen progress");
+			dashboard.setStatus("EW host=" + ewHostKind + " projW=" + projWeight + " projMap=" + (projMapAxis ? "on" : "off")
+				+ " -- streaming decorate + gen progress");
 		// How often the GUI's performance-vs-benchmark panel re-samples OOS for the WHOLE
 		// population -- every generation would double fitness-eval cost (fighting the whole
 		// point of PLAN_EVO_SPEED.md) and isn't needed for a live diagnostic view. IS is free
@@ -863,13 +885,14 @@ class CorpusEvoRun {
 		var archiveReal = new EliteArchive();
 		var archiveCompete = new EliteArchive();
 		var archive = competeOn ? archiveCompete : archiveReal;
-		var cvtDims = creditMapAxis ? 5 : 4;
+		var cvtDims = (creditMapAxis || projMapAxis) ? 5 : 4;
 		var cvtCentroids:Array<Array<Float>> = (cvtCells > 0) ? MapElites.sobolCentroids(cvtCells, cvtDims) : [];
 		var archiveTotalCells = cvtCells > 0 ? cvtCells : 48;
 		var immigrantRng = new musescript.evo.Rand(seed + 991);
 		if (mapElitesOn) {
+			var axisNote = creditMapAxis ? " (+credit)" : (projMapAxis ? " (+projSkill)" : "");
 			var cellDesc = cvtCells > 0
-				? 'CVT $cvtCells cells × ${cvtDims}D' + (creditMapAxis ? " (+credit)" : "")
+				? 'CVT $cvtCells cells × ${cvtDims}D$axisNote'
 				: 'classic 48 cells';
 			Sys.println('MAP-Elites: on ($cellDesc, immigrant rate ${Std.int(immigrantRate * 100)}% of non-elite slots/gen)');
 		}
@@ -1233,6 +1256,48 @@ class CorpusEvoRun {
 			if (e == null) return Fitness.NEG_INF;
 			return Fitness.scoreFacts(e.trades, e.sharpe, e.bankrupt == true, 1, nodes, parsimonyThreshold, parsimonyLambda);
 		};
+
+		// Per-generation memo of `Fitness.projectionScore` (structural key → skill). Cleared each
+		// gen so tape/provider rebinds stay honest; avoids N× redundant cloud materialize on offer.
+		var projScoreByKey:Map<String, Float> = new Map();
+		var projHitByKey:Map<String, Float> = new Map();
+		function memoProjScore(g:StrategyGenome):Float {
+			if (g == null || g.projections == null || g.projections.length == 0)
+				return Math.NaN;
+			var key = Canonical.structuralKey(g);
+			if (projScoreByKey.exists(key))
+				return projScoreByKey.get(key);
+			var ps = Fitness.projectionScore(g, bars, Fitness.projectionProvider);
+			projScoreByKey.set(key, ps);
+			return ps;
+		}
+		function memoHitRate(g:StrategyGenome):Float {
+			if (g == null || g.projections == null || g.projections.length == 0)
+				return Math.NaN;
+			var key = Canonical.structuralKey(g);
+			if (projHitByKey.exists(key))
+				return projHitByKey.get(key);
+			var hr = musescript.evo.ProjectionScore.hitRateAgg(g, bars, Fitness.projectionProvider);
+			projHitByKey.set(key, hr);
+			return hr;
+		}
+		function withProjWeight(base:Float, g:StrategyGenome):Float {
+			if (base == Fitness.NEG_INF || projWeight == 0 || g == null)
+				return base;
+			var ps = memoProjScore(g);
+			return Math.isFinite(ps) ? base + projWeight * ps : base;
+		}
+		function assignNicheCell(
+			tradesPerBar:Float, avgHold:Float, longFrac:Float, dutyCycle:Float,
+			gOffer:StrategyGenome, cc:Null<Float>
+		):String {
+			if (projMapAxis && cvtCentroids.length > 0) {
+				var ps = memoProjScore(gOffer);
+				return MapElites.assignCellWithSkill(tradesPerBar, avgHold, longFrac, dutyCycle, ps, cvtCentroids);
+			}
+			return MapElites.assignCell(tradesPerBar, avgHold, longFrac, dutyCycle,
+				cvtCentroids.length > 0 ? cvtCentroids : null, cc);
+		}
 
 		// Training target for SurrogateModel.update: an invalid eval (no trades / NaN sharpe /
 		// bankrupt — what scoreOf would call Fitness.NEG_INF) is clamped to a bounded "very bad"
@@ -1695,6 +1760,8 @@ class CorpusEvoRun {
 		for (gen in 0...gens) {
 			var tGen0 = haxe.Timer.stamp();
 			profile.beginGeneration();
+			projScoreByKey = new Map();
+			projHitByKey = new Map();
 			if (Fitness.preferNma && Fitness.nmaPopMemo != null) Fitness.beginNmaPopMemo();
 			if (Fitness.nmaDirtySpine) {
 				var keepKeys = [for (g in popG) Canonical.structuralKey(g)];
@@ -1982,7 +2049,7 @@ class CorpusEvoRun {
 			for (key in order) {
 				var e = evalByKey.get(key);
 				var idxs = keyToIdx.get(key);
-				for (idx in idxs) fitness[idx] = scoreOf(e, Canonical.nodeCount(popG[idx]));
+				for (idx in idxs) fitness[idx] = withProjWeight(scoreOf(e, Canonical.nodeCount(popG[idx])), popG[idx]);
 				if (lexicaseOn && !casesByKey.exists(key)) {
 					// Cache hits / triage kills: no equity curve → length-1 aggregate case only
 					// (fresh evals already set multi-window lexCases above).
@@ -1997,6 +2064,7 @@ class CorpusEvoRun {
 				// complexity penalty that would make a legitimately larger-but-still-novel genome
 				// lose its niche slot to a smaller one that behaves identically). The
 				// parsimony-adjusted `fitness` is deliberately NOT what's compared here.
+				// With `--proj-map-axis`, niches also by forecast skill so host genomes survive.
 				if (mapElitesOn && e != null && Fitness.scoreFacts(e.trades, e.sharpe, e.bankrupt == true, 1) != Fitness.NEG_INF) {
 					var tradesPerBar = e.trades / bars.length;
 					var avgHold = e.avgHold != null ? e.avgHold : 0.0;
@@ -2004,8 +2072,13 @@ class CorpusEvoRun {
 					var dutyCycle = e.dutyCycle != null ? e.dutyCycle : 0.0;
 					var gOffer = popG[idxs[0]];
 					var cc:Null<Float> = creditMapAxis ? MapElites.creditConcentration(gOffer) : null;
-					var ck = MapElites.assignCell(tradesPerBar, avgHold, longFrac, dutyCycle, cvtCentroids.length > 0 ? cvtCentroids : null, cc);
-					archive.offer(gOffer, e.sharpe, ck, tradesPerBar, avgHold, longFrac, dutyCycle, creditMapAxis && cc != null ? cc : 0.0);
+					var offerFit = e.sharpe;
+					if (projWeight != 0) {
+						var psOffer = memoProjScore(gOffer);
+						if (Math.isFinite(psOffer)) offerFit = e.sharpe + projWeight * psOffer;
+					}
+					var ck = assignNicheCell(tradesPerBar, avgHold, longFrac, dutyCycle, gOffer, cc);
+					archive.offer(gOffer, offerFit, ck, tradesPerBar, avgHold, longFrac, dutyCycle, creditMapAxis && cc != null ? cc : 0.0);
 				}
 			}
 			profile.stop(PhaseTimer.EVAL_OFFER, tOffer);
@@ -2293,24 +2366,55 @@ class CorpusEvoRun {
 					validFitness, [for (c in nicheSummary) c.key], [for (c in nicheSummary) c.fitness],
 					isPerf, oosPerf, isBenchmark, oosBenchmark);
 				if (guiCompete) dashboard.updateCompete(competeViz);
-				// FeatureViz fib snapshot — same FibRetracement engine as NmaFeatureHost / IndicatorCache.
-				// Gen-boundary only (never from arena tick path).
+				// FeatureViz: fib always; under `--ew-host` also emit host cloud forecast curves
+				// from the best host-referencing genome (or champion if it has PSHost).
 				var fibFrame = FeatureVizFib.snapshotTape(bars, 20, {
 					genomeKey: currentBestGenome != null ? currentBestGenome.name : null,
 					epoch: gen
 				});
-				dashboard.updateFeatureViz(fibFrame != null ? [fibFrame] : []);
+				var vizFrames:Array<musescript.evo.FeatureVizEvent> = fibFrame != null ? [fibFrame] : [];
+				if (ewHostOn && Fitness.projectionProvider != null) {
+					var hostG:StrategyGenome = null;
+					var hostFit = Fitness.NEG_INF;
+					for (i in 0...popG.length) {
+						if (ProjectionProvider.hostProjRefs(popG[i]).length == 0) continue;
+						if (fitness[i] > hostFit) {
+							hostFit = fitness[i];
+							hostG = popG[i];
+						}
+					}
+					if (hostG == null && currentBestGenome != null
+							&& ProjectionProvider.hostProjRefs(currentBestGenome).length > 0)
+						hostG = currentBestGenome;
+					if (hostG != null) {
+						var frH = Fitness.evaluate(hostG, bars, "js", false, costBps, startCapital, equityFloor);
+						Fitness.attachProjectionScore(frH, hostG, bars, Fitness.projectionProvider);
+						var hrH = memoHitRate(hostG);
+						var fc = FeatureVizForecast.fromProvider(
+							Fitness.projectionProvider, bars, frH.equity,
+							{genomeKey: hostG.name, epoch: gen},
+							Std.int(Math.max(1, bars.length / 120)),
+							hrH, frH.projScore
+						);
+						if (fc != null) vizFrames.unshift(fc);
+					}
+				}
+				dashboard.updateFeatureViz(vizFrames);
 				if (ewHostOn) {
 					var champName = currentBestGenome != null ? currentBestGenome.name : "?";
 					var projS = Math.NaN;
+					var hitR = Math.NaN;
 					var eq0 = Math.NaN;
 					var eqN = Math.NaN;
 					var tradesC = 0;
 					var sharpeC = Math.NaN;
+					var digest = "no-pshost";
+					var stuckWhy = "";
 					if (currentBestGenome != null) {
 						var frC = Fitness.evaluate(currentBestGenome, bars, "js", false, costBps, startCapital, equityFloor);
 						Fitness.attachProjectionScore(frC, currentBestGenome, bars, Fitness.projectionProvider);
 						projS = frC.projScore;
+						hitR = memoHitRate(currentBestGenome);
 						tradesC = frC.trades;
 						sharpeC = frC.sharpe;
 						if (frC.equity != null && frC.equity.length > 0) {
@@ -2318,14 +2422,42 @@ class CorpusEvoRun {
 							eqN = frC.equity[frC.equity.length - 1];
 						}
 						var declC = ProjectionProvider.firstPsHostDecl(currentBestGenome);
-						var digest = declC != null ? ProjectionProvider.declDigest(declC) : "no-pshost";
-						Sys.println('[ew-host] gen=$gen best=${fmt(genBest, 4)} mean=${fmt(mean, 4)} niches=${archive.size()} champion=$champName'
-							+ ' sharpe=${fmt(sharpeC, 4)} trades=$tradesC projScore=${fmt(projS, 4)} equity=[$eq0->$eqN] digest=$digest');
-						dashboard.setStatus('gen $gen  best=${fmt(genBest, 3)}  mean=${fmt(mean, 3)}  niches=${archive.size()}  champ=$champName  projScore=${fmt(projS, 3)}  trades=$tradesC');
-					} else {
-						Sys.println('[ew-host] gen=$gen best=${fmt(genBest, 4)} mean=${fmt(mean, 4)} niches=${archive.size()} champion=?');
-						dashboard.setStatus('gen $gen  best=${fmt(genBest, 3)}  mean=${fmt(mean, 3)}  niches=${archive.size()}');
+						digest = declC != null ? ProjectionProvider.declDigest(declC) : "no-pshost";
+						if (digest == "no-pshost")
+							stuckWhy = "champ_no_pshost";
+						else if (!Math.isFinite(projS))
+							stuckWhy = "champ_unref_proj";
+						else if (ProjectionProvider.hostProjRefs(currentBestGenome).length == 0)
+							stuckWhy = "champ_no_sproj_refs";
 					}
+					// Best host-referencing genome this gen (honest fusion progress vs pure trading champ).
+					var hostBestName = "-";
+					var hostBestFit = Fitness.NEG_INF;
+					var hostBestProj = Math.NaN;
+					var hostBestHit = Math.NaN;
+					var hostN = 0;
+					for (i in 0...popG.length) {
+						if (ProjectionProvider.hostProjRefs(popG[i]).length == 0) continue;
+						hostN++;
+						if (fitness[i] > hostBestFit) {
+							hostBestFit = fitness[i];
+							hostBestName = popG[i].name != null ? popG[i].name : "?";
+							hostBestProj = memoProjScore(popG[i]);
+							hostBestHit = memoHitRate(popG[i]);
+						}
+					}
+					if (stuckWhy == "" && hostN == 0)
+						stuckWhy = "no_host_refs_in_pop";
+					Sys.println('[ew-host] gen=$gen best=${fmt(genBest, 4)} mean=${fmt(mean, 4)} niches=${archive.size()} champion=$champName'
+						+ ' sharpe=${fmt(sharpeC, 4)} trades=$tradesC projScore=${fmt(projS, 4)} hitRate=${fmt(hitR, 4)}'
+						+ ' equity=[$eq0->$eqN] digest=$digest'
+						+ ' hostN=$hostN hostBest=$hostBestName hostFit=${fmt(hostBestFit, 4)} hostProj=${fmt(hostBestProj, 4)} hostHit=${fmt(hostBestHit, 4)}'
+						+ (stuckWhy != "" ? ' stuck=$stuckWhy' : ""));
+					var status = 'gen $gen  best=${fmt(genBest, 3)}  mean=${fmt(mean, 3)}  niches=${archive.size()}'
+						+ '  champ=$champName  proj=${fmt(projS, 3)}  hit=${fmt(hitR, 3)}  trades=$tradesC'
+						+ '  hostBest=${fmt(hostBestFit, 3)}/${fmt(hostBestHit, 3)}';
+					if (stuckWhy != "") status += '  [$stuckWhy]';
+					dashboard.setStatus(status);
 				}
 			}
 

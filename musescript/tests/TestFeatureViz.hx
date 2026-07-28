@@ -94,4 +94,22 @@ class TestFeatureViz extends Test {
 		Assert.equals(0, bus.length());
 		Assert.equals("forecast", a[0].kind);
 	}
+
+	public function testForecastPayloadHasPaths() {
+		var paths = [
+			[{bar: 0.0, price: 100.0}, {bar: 1.0, price: 101.0}],
+			[{bar: 0.0, price: 100.5}, {bar: 1.0, price: 101.5}]
+		];
+		var e = FeatureVizEvent.make(FeatureVizKind.Forecast, 0, 1, {
+			paths: paths,
+			confidence: 0.62,
+			note: "ew_host_cloud",
+			extra: {pathLabels: ["close", "p50"], aux: [{name: "entropy", values: [1.0, 1.2]}]}
+		}, {genomeKey: "host0", sourceId: "ew_host_forecast", epoch: 2});
+		var back = FeatureVizCodec.parse(FeatureVizCodec.toJson(e));
+		Assert.equals("forecast", back.kind);
+		Assert.equals(2, back.payload.paths.length);
+		Assert.floatEquals(0.62, back.payload.confidence, 1e-9);
+		Assert.equals("host0", back.genomeKey);
+	}
 }

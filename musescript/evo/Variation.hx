@@ -1299,10 +1299,19 @@ class Variation {
 
 	// ---- back-compat names (EvolutionEngine calls these) — now backed by the real operators ----
 
+	/**
+	 * Probability a blind `mutate` tries host projection / soft-φ growth first.
+	 * CorpusEvoRun `--ew-host` raises this so fusion actually iterates.
+	 */
+	public static var hostMutateRate:Float = 0.12;
+
 	public function mutate(g:StrategyGenome):StrategyGenome {
-		// Soft forecast-gene / PSHost growth stays off the hot path unless gated on — ~12% of
-		// blind mutates may touch host projections / φ deltas without rewriting hard EW rules.
-		if (rng.float() < 0.12) {
+		// Soft forecast-gene / PSHost growth stays off the hot path unless gated on — default ~12%
+		// of blind mutates may touch host projections / φ deltas without rewriting hard EW rules.
+		var rate = hostMutateRate;
+		if (rate < 0) rate = 0;
+		if (rate > 1) rate = 1;
+		if (rng.float() < rate) {
 			var h = mutateHostProjection(g);
 			if (h != g) {
 				if (logHostProjection)
@@ -1353,6 +1362,9 @@ class Variation {
 				}
 				o.projections = o.projections.copy();
 				o.projections[idx] = np;
+				// φ / backend churn with no SProj read cannot move trading or projScore — soft-wire.
+				if (ProjectionProvider.hostProjRefs(o).length == 0)
+					return attachHostProjection(o);
 				o.lineage = (g.lineage != null ? g.lineage.copy() : []).concat([Canonical.structuralKey(g)]);
 				return compactParams(o);
 			default:

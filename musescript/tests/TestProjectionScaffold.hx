@@ -257,6 +257,25 @@ class TestProjectionScaffold extends Test {
 		var p = [1.0, -1.0, 1.0, -1.0];
 		Assert.floatEquals(1.0, ProjectionScore.directionalSkill(p, [2.0, -3.0, 4.0, -1.0]));
 		Assert.floatEquals(-1.0, ProjectionScore.directionalSkill(p, [-2.0, 3.0, -4.0, 1.0]));
+		Assert.floatEquals(1.0, ProjectionScore.directionalAccuracy(p, [2.0, -3.0, 4.0, -1.0]));
+		Assert.floatEquals(0.0, ProjectionScore.directionalAccuracy(p, [-2.0, 3.0, -4.0, 1.0]));
+	}
+
+	public function testHitRateTracksForecastMoveDirection() {
+		// PSPoint(close): predicted move is 0 → hit-rate 0 on a trending tape (never matches sign).
+		var bars = rampBars(20);
+		var decl:ProjectionDecl = {
+			name: "p",
+			kind: PLevel,
+			horizon: 1,
+			sampler: PSPoint(SPrice("close")),
+			samples: 1,
+			seed: 1
+		};
+		var hr = ProjectionScore.hitRate(decl, [], bars);
+		Assert.isTrue(Math.isFinite(hr));
+		Assert.isTrue(hr >= 0 && hr <= 1);
+		Assert.floatEquals(0.0, hr);
 	}
 
 	public function testRealizedTargetShapesAndLastHExcluded() {

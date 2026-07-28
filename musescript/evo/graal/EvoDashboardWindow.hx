@@ -11,6 +11,7 @@ import musescript.evo.graal.SwingExterns.Font;
 import musescript.evo.graal.SwingExterns.RenderingHints;
 import musescript.evo.graal.SwingExterns.Graphics;
 import musescript.evo.graal.SwingExterns.Graphics2D;
+import musescript.evo.graal.SwingExterns.Polygon;
 import musescript.evo.graal.SwingExterns.BorderLayout;
 import musescript.evo.graal.SwingExterns.LayoutPanel;
 import musescript.evo.graal.SwingExterns.JButton;
@@ -179,6 +180,11 @@ private class EvoChartPanel extends JPanel {
 	static var COL_OOS = new Color(233, 196, 106);   // slot 4-ish yellow/gold, distinct from IS blue
 	static var COL_ARENA = new Color(180, 60, 60);
 	static var COL_FIB = new Color(42, 120, 214);
+	static var COL_CLOSE = new Color(11, 11, 11);
+	static var COL_P50 = new Color(42, 120, 214);
+	static var COL_BAND = new Color(180, 190, 210);
+	static var COL_INV = new Color(180, 60, 60);
+	static var COL_AUX = new Color(27, 175, 122);
 
 	public function new() {
 		super();
@@ -219,7 +225,18 @@ private class EvoChartPanel extends JPanel {
 		var modeBadge = competeEnabled ? '  |  mode ${compete.mode}' : "";
 		var pulseBadge = (competeEnabled && compete.arenaPulse != null && compete.arenaPulse.length > 0)
 			? '  |  ${compete.arenaPulse}' : "";
-		g2.drawString('generation $gen  |  best fitness ${fmt(best)}  |  mean fitness ${fmt(mean)}  |  niches $niches / $TOTAL_CELLS  |  champion "$champion"$modeBadge$pulseBadge', 16, 47);
+		var vizBadge = "";
+		if (featureEvents.length > 0) {
+			var kinds = [for (e in featureEvents) e.kind];
+			var conf = Math.NaN;
+			for (e in featureEvents) {
+				if (e.kind == "forecast" && e.payload != null && e.payload.confidence != null)
+					conf = e.payload.confidence;
+			}
+			vizBadge = '  |  FeatureViz ${kinds.join("+")}';
+			if (Math.isFinite(conf)) vizBadge += ' hit=${fmt(conf)}';
+		}
+		g2.drawString('generation $gen  |  best fitness ${fmt(best)}  |  mean fitness ${fmt(mean)}  |  niches $niches / $TOTAL_CELLS  |  champion "$champion"$modeBadge$pulseBadge$vizBadge', 16, 47);
 
 		// Row 1: three equal columns (fitness | niches | perf-vs-benchmark), all "beside" each
 		// other rather than stacked. Row 2: two wider columns (pop distribution | niche grid)
@@ -257,25 +274,179 @@ private class EvoChartPanel extends JPanel {
 	}
 
 	/**
-	 * Minimal FeatureViz proof paint: fib level list + horizontal price marks.
-	 * No OHLC tape here (evo dashboard is niches/fitness); full chart overlay is the app's job.
+	 * FeatureViz paint: prefer `forecast` paths (ew-host cloud series) when present;
+	 * otherwise fib level list + horizontal price marks.
 	 */
 	function featureVizPanel(g2:Graphics2D, x:Int, y:Int, w:Int, h:Int):Void {
 		panelTitle(g2, x, y + 2, "FeatureViz (gen-boundary)");
 		if (featureEvents.length == 0) {
 			g2.setColor(COL_MUTED);
 			g2.setFont(new Font("SansSerif", Font.PLAIN, 12));
-			g2.drawString("no frames yet — fib snapshot lands each generation under --gui", x + 12, y + 40);
+			g2.drawString("no frames yet — fib / forecast snapshot lands each generation under --gui", x + 12, y + 40);
 			return;
 		}
+		var forecast:FeatureVizEvent = null;
 		var fib:FeatureVizEvent = null;
 		for (e in featureEvents) {
-			if (e.kind == "fib") {
-				fib = e;
-				break;
-			}
+			if (e.kind == "forecast" && forecast == null) forecast = e;
+			if (e.kind == "fib" && fib == null) fib = e;
+		}
+		if (forecast != null) {
+			paintForecastViz(g2, x, y, w, h, forecast);
+			return;
 		}
 		if (fib == null) fib = featureEvents[0];
+		paintFibViz(g2, x, y, w, h, fib);
+	}
+
+	function paintForecastViz(g2:Graphics2D, x:Int, y:Int, w:Int, h:Int, fc:FeatureVizEvent):Void {
+		var src = fc.sourceId != null ? fc.sourceId : fc.kind;
+		var gk = fc.genomeKey != null ? fc.genomeKey : "-";
+		var note = fc.payload != null && fc.payload.note != null ? fc.payload.note : "";
+		var conf = fc.payload != null && fc.payload.confidence != null ? fc.payload.confidence : Math.NaN;
+		g2.setColor(COL_MUTED);
+		g2.setFont(new Font("SansSerif", Font.PLAIN, 11));
+		var confTxt = Math.isFinite(conf) ? '  hit/conf=${fmt2(conf)}' : "";
+		g2.drawString('kind=${fc.kind}  bars ${fc.barLo}..${fc.barHi}  src=$src  genome=$gk  epoch=${fc.epoch != null ? Std.string(fc.epoch) : "-"}$confTxt',
+			x + 12, y + 28);
+		if (note.length > 0)
+			g2.drawString(note, x + 12, y + 42);
+
+		var paths = fc.payload != null && fc.payload.paths != null ? fc.payload.paths : [];
+		if (paths.length == 0) {
+			g2.drawString("(empty payload.paths)", x + 12, y + 60);
+			return;
+		}
+		var labels:Array<String> = ["close", "p50", "p05", "p95", "inv"];
+		if (fc.payload.extra != null) {
+			try {
+				var pl:Array<Dynamic> = fc.payload.extra.pathLabels;
+				if (pl != null && pl.length > 0)
+					labels = [for (s in pl) Std.string(s)];
+			} catch (_:Dynamic) {}
+		}
+		var lo = Math.POSITIVE_INFINITY;
+		var hi = Math.NEGATIVE_INFINITY;
+		for (path in paths) {
+			for (pt in path) {
+				if (!Math.isFinite(pt.price)) continue;
+				if (pt.price < lo) lo = pt.price;
+				if (pt.price > hi) hi = pt.price;
+			}
+		}
+		if (!(hi > lo)) { lo -= 1; hi += 1; }
+		var padL = 12, padR = 120, padT = 52, padB = 36;
+		var plotX = x + padL;
+		var plotY = y + padT;
+		var plotW = w - padL - padR;
+		var plotH = h - padT - padB;
+		g2.setColor(COL_BORDER);
+		g2.drawRect(plotX, plotY, plotW, plotH);
+
+		var colors = [COL_CLOSE, COL_P50, COL_BAND, COL_BAND, COL_INV];
+		var barLo = fc.barLo;
+		var barHi = fc.barHi;
+		if (!(barHi > barLo)) barHi = barLo + 1;
+
+		// Band fill between p05 (idx 2) and p95 (idx 3) when both present.
+		if (paths.length > 3 && paths[2].length > 1 && paths[3].length > 1) {
+			g2.setColor(new Color(180, 190, 210, 90));
+			var n = Std.int(Math.min(paths[2].length, paths[3].length));
+			var xs:Array<Int> = [];
+			var yLo:Array<Int> = [];
+			var yHi:Array<Int> = [];
+			for (i in 0...n) {
+				var a = paths[2][i];
+				var b = paths[3][i];
+				if (!Math.isFinite(a.price) || !Math.isFinite(b.price)) continue;
+				xs.push(plotX + Std.int(((a.bar - barLo) / (barHi - barLo)) * plotW));
+				yLo.push(plotY + plotH - Std.int(((a.price - lo) / (hi - lo)) * plotH));
+				yHi.push(plotY + plotH - Std.int(((b.price - lo) / (hi - lo)) * plotH));
+			}
+			if (xs.length > 1) {
+				var poly = new Polygon();
+				for (i in 0...xs.length) poly.addPoint(xs[i], yHi[i]);
+				var j = xs.length - 1;
+				while (j >= 0) { poly.addPoint(xs[j], yLo[j]); j--; }
+				g2.fillPolygon(poly);
+			}
+		}
+
+		for (pi in 0...paths.length) {
+			var path = paths[pi];
+			if (path.length < 2) continue;
+			var col = pi < colors.length ? colors[pi] : COL_POP;
+			g2.setColor(col);
+			g2.setStroke(new BasicStroke(pi == 1 ? 2.0 : 1.2));
+			var prevX = -1;
+			var prevY = -1;
+			for (pt in path) {
+				if (!Math.isFinite(pt.price) || !Math.isFinite(pt.bar)) continue;
+				var xx = plotX + Std.int(((pt.bar - barLo) / (barHi - barLo)) * plotW);
+				var yy = plotY + plotH - Std.int(((pt.price - lo) / (hi - lo)) * plotH);
+				if (prevX >= 0) g2.drawLine(prevX, prevY, xx, yy);
+				prevX = xx;
+				prevY = yy;
+			}
+		}
+		g2.setStroke(new BasicStroke(1));
+
+		// Aux strip (entropy / equity) — normalized sparklines under the price plot.
+		var auxH = 28;
+		var auxY = plotY + plotH + 4;
+		if (fc.payload.extra != null) {
+			try {
+				var auxArr:Array<Dynamic> = fc.payload.extra.aux;
+				if (auxArr != null && auxArr.length > 0) {
+					var slotW = Std.int(plotW / auxArr.length);
+					for (ai in 0...auxArr.length) {
+						var a:Dynamic = auxArr[ai];
+						var name:String = a.name != null ? Std.string(a.name) : 'aux$ai';
+						var vals:Array<Float> = a.values;
+						if (vals == null || vals.length < 2) continue;
+						var aLo = Math.POSITIVE_INFINITY;
+						var aHi = Math.NEGATIVE_INFINITY;
+						for (v in vals) {
+							if (!Math.isFinite(v)) continue;
+							if (v < aLo) aLo = v;
+							if (v > aHi) aHi = v;
+						}
+						if (!(aHi > aLo)) { aLo -= 1; aHi += 1; }
+						var ax0 = plotX + ai * slotW;
+						g2.setColor(COL_AUX);
+						g2.setStroke(new BasicStroke(1.2));
+						var px = -1;
+						var py = -1;
+						for (vi in 0...vals.length) {
+							if (!Math.isFinite(vals[vi])) continue;
+							var xx = ax0 + Std.int((vi / (vals.length - 1)) * (slotW - 8));
+							var yy = auxY + auxH - Std.int(((vals[vi] - aLo) / (aHi - aLo)) * auxH);
+							if (px >= 0) g2.drawLine(px, py, xx, yy);
+							px = xx;
+							py = yy;
+						}
+						g2.setColor(COL_MUTED);
+						g2.setFont(new Font("SansSerif", Font.PLAIN, 10));
+						g2.drawString(name, ax0 + 2, auxY + 10);
+					}
+				}
+			} catch (_:Dynamic) {}
+		}
+
+		var listX = plotX + plotW + 8;
+		var listY = plotY + 12;
+		g2.setFont(new Font("SansSerif", Font.PLAIN, 11));
+		for (i in 0...Std.int(Math.min(labels.length, paths.length))) {
+			var col = i < colors.length ? colors[i] : COL_POP;
+			g2.setColor(col);
+			g2.fillRect(listX, listY + i * 16 - 8, 10, 10);
+			g2.setColor(COL_TEXT);
+			g2.drawString(labels[i], listX + 14, listY + i * 16);
+		}
+		g2.setStroke(new BasicStroke(1));
+	}
+
+	function paintFibViz(g2:Graphics2D, x:Int, y:Int, w:Int, h:Int, fib:FeatureVizEvent):Void {
 		var src = fib.sourceId != null ? fib.sourceId : fib.kind;
 		var gk = fib.genomeKey != null ? fib.genomeKey : "-";
 		g2.setColor(COL_MUTED);
