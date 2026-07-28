@@ -648,7 +648,10 @@ class CorpusSeed {
 	 * `ProjectionProvider.forEvoHost`) so Expand→compile sees aux `Bar.data` columns.
 	 */
 	public static function seedFromEwHostProjection(hostKind:String = "lattice"):Array<StrategyGenome> {
-		var kind = hostKind == "mcmc" ? "mcmc" : "lattice";
+		var kind = switch (hostKind) {
+			case "mcmc", "regime", "auction": hostKind; // non-lattice host substrates
+			default: "lattice";
+		};
 		var samples = kind == "mcmc" ? 8 : 1;
 		var out:Array<StrategyGenome> = [];
 		function decl(name:String, seed:Int, ?phi:Map<String, Float>):ProjectionDecl {

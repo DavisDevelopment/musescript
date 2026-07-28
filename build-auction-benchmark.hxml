@@ -1,0 +1,6 @@
+extraParams.hxml
+-main musescript.ew.AuctionBenchmarkCli
+-lib hxnodejs
+-D node
+-D js_es=6
+-js build/js/auction-benchmark.js

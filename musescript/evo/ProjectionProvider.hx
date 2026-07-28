@@ -364,8 +364,11 @@ class ProjectionProvider {
 		var samples = decl.samples < 1 ? 1 : decl.samples;
 		if (kind == "regime") {
 			// Non-EW substrate: streams its own returns via onBar (ignores graph/stack). Soft φ deltas
-			// don't apply (regime params are its own); horizon carries through from the decl.
-			return new RegimeForecastHost(decl.seed, 2, decl.horizon < 1 ? 20 : decl.horizon);
+			// don't apply (regime params are its own); horizon carries through from the decl. CHEAP
+			// config — a fresh MH chain runs per queried bar, so population eval needs a small budget
+			// (benchmark/elite use the richer default via the direct constructor).
+			return new RegimeForecastHost(decl.seed, 2, decl.horizon < 1 ? 20 : decl.horizon,
+				100, 300, 100, 40, 0.97);
 		}
 		if (kind == "auction") {
 			// Volume-profile fair-value host (parallel session). Streams bars via onBar; volume-at-price

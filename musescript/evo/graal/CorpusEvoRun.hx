@@ -682,7 +682,7 @@ class CorpusEvoRun {
 		var ewHostOn = ewHostArg != null && ewHostArg != "" && ewHostArg != "off";
 		var ewHostKind = "lattice";
 		if (ewHostOn) {
-			ewHostKind = (ewHostArg == "mcmc") ? "mcmc" : "lattice";
+			ewHostKind = switch (ewHostArg) { case "mcmc", "regime", "auction": ewHostArg; default: "lattice"; };
 			Fitness.projectionProvider = ProjectionProvider.forEvoHost(true);
 			Variation.logHostProjection = true;
 			Variation.hostMutateRate = 0.35;
