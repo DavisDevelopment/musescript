@@ -1,5 +1,6 @@
 package musescript.evo.graal;
 
+import musescript.evo.FeatureVizEvent;
 import musescript.evo.graal.SwingExterns.JFrame;
 import musescript.evo.graal.SwingExterns.JPanel;
 import musescript.evo.graal.SwingExterns.JComponent;
@@ -53,7 +54,7 @@ class EvoDashboardWindow {
 	public function new(title:String, ?competePanels:Bool = false) {
 		panel = new EvoChartPanel();
 		panel.competeEnabled = competePanels;
-		panel.setPreferredSize(new Dimension(1160, competePanels ? 1400 : 900));
+		panel.setPreferredSize(new Dimension(1160, competePanels ? 1580 : 1080));
 
 		pauseBtn = new JButton("Pause");
 		pauseBtn.addActionListener(new ActionFn(togglePause));
@@ -70,7 +71,7 @@ class EvoDashboardWindow {
 		frame = new JFrame(title);
 		frame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
 		frame.add(root);
-		frame.setSize(1180, competePanels ? 1480 : 980);
+		frame.setSize(1180, competePanels ? 1660 : 1160);
 		frame.setLocationRelativeTo(null);
 		frame.setVisible(true);
 	}
@@ -115,6 +116,28 @@ class EvoDashboardWindow {
 		panel.repaint();
 	}
 
+	/**
+	 * FeatureViz frames (fib / reserved elliot|forecast) — gen- or scrub-boundary only.
+	 * Same snapshot rule as `updateCompete`: never push from the Murmuration tick path.
+	 */
+	public function updateFeatureViz(events:Array<FeatureVizEvent>):Void {
+		panel.pushFeatureViz(events != null ? events : []);
+		panel.repaint();
+	}
+
+	/** Update the south status strip (CorpusEvoRun `--ew-host` progress lines). */
+	public function setStatus(msg:String):Void {
+		pauseStatusLabel.setText(msg);
+	}
+
+	public function isOpen():Bool {
+		try {
+			return untyped frame.isDisplayable();
+		} catch (_:Dynamic) {
+			return false;
+		}
+	}
+
 	public function close():Void frame.dispose();
 }
 
@@ -138,6 +161,7 @@ private class EvoChartPanel extends JPanel {
 	var oosBenchmark:Float = 0;
 	public var competeEnabled:Bool = false;
 	var compete:CompeteVizState = CompeteVizState.empty();
+	var featureEvents:Array<FeatureVizEvent> = [];
 
 	static inline var TOTAL_CELLS = 48; // 4 (tradeFreq) x 4 (hold) x 3 (bias) -- see MapElites.hx
 	static var TRADEFREQ_LABELS = ["rare", "occasional", "frequent", "scalper"];
@@ -154,6 +178,7 @@ private class EvoChartPanel extends JPanel {
 	static var COL_POP = new Color(74, 58, 167);     // slot 7 violet
 	static var COL_OOS = new Color(233, 196, 106);   // slot 4-ish yellow/gold, distinct from IS blue
 	static var COL_ARENA = new Color(180, 60, 60);
+	static var COL_FIB = new Color(42, 120, 214);
 
 	public function new() {
 		super();
@@ -175,6 +200,10 @@ private class EvoChartPanel extends JPanel {
 
 	public function pushCompete(state:CompeteVizState):Void {
 		compete = state;
+	}
+
+	public function pushFeatureViz(events:Array<FeatureVizEvent>):Void {
+		featureEvents = events;
 	}
 
 	override public function paintComponent(g:Graphics):Void {
@@ -221,7 +250,78 @@ private class EvoChartPanel extends JPanel {
 			var rowH4 = 180;
 			competeMarketPanel(g2, x1, y4, colW2, rowH4);
 			competeMetaPanel(g2, x1 + colW2 + gap, y4, colW2, rowH4);
+			featureVizPanel(g2, x1, y4 + rowH4 + 24, totalW, 160);
+		} else {
+			featureVizPanel(g2, x1, y2 + rowH + 24, totalW, 160);
 		}
+	}
+
+	/**
+	 * Minimal FeatureViz proof paint: fib level list + horizontal price marks.
+	 * No OHLC tape here (evo dashboard is niches/fitness); full chart overlay is the app's job.
+	 */
+	function featureVizPanel(g2:Graphics2D, x:Int, y:Int, w:Int, h:Int):Void {
+		panelTitle(g2, x, y + 2, "FeatureViz (gen-boundary)");
+		if (featureEvents.length == 0) {
+			g2.setColor(COL_MUTED);
+			g2.setFont(new Font("SansSerif", Font.PLAIN, 12));
+			g2.drawString("no frames yet — fib snapshot lands each generation under --gui", x + 12, y + 40);
+			return;
+		}
+		var fib:FeatureVizEvent = null;
+		for (e in featureEvents) {
+			if (e.kind == "fib") {
+				fib = e;
+				break;
+			}
+		}
+		if (fib == null) fib = featureEvents[0];
+		var src = fib.sourceId != null ? fib.sourceId : fib.kind;
+		var gk = fib.genomeKey != null ? fib.genomeKey : "-";
+		g2.setColor(COL_MUTED);
+		g2.setFont(new Font("SansSerif", Font.PLAIN, 11));
+		g2.drawString('kind=${fib.kind}  bars ${fib.barLo}..${fib.barHi}  src=$src  genome=$gk  epoch=${fib.epoch != null ? Std.string(fib.epoch) : "-"}',
+			x + 12, y + 28);
+
+		var levels = fib.payload != null && fib.payload.levels != null ? fib.payload.levels : [];
+		if (levels.length == 0) {
+			g2.drawString("(empty payload.levels)", x + 12, y + 52);
+			return;
+		}
+		var lo = levels[0].price;
+		var hi = levels[0].price;
+		for (L in levels) {
+			if (L.price < lo) lo = L.price;
+			if (L.price > hi) hi = L.price;
+		}
+		if (!(hi > lo)) {
+			lo -= 1;
+			hi += 1;
+		}
+		var padL = 12, padR = 160, padT = 44, padB = 16;
+		var plotX = x + padL;
+		var plotY = y + padT;
+		var plotW = w - padL - padR;
+		var plotH = h - padT - padB;
+		g2.setColor(COL_BORDER);
+		g2.drawLine(plotX, plotY, plotX + plotW, plotY);
+		g2.drawLine(plotX, plotY + plotH, plotX + plotW, plotY + plotH);
+		g2.drawLine(plotX, plotY, plotX, plotY + plotH);
+		g2.drawLine(plotX + plotW, plotY, plotX + plotW, plotY + plotH);
+		g2.setStroke(new BasicStroke(1.5));
+		var listX = plotX + plotW + 12;
+		var listY = plotY + 12;
+		g2.setFont(new Font("SansSerif", Font.PLAIN, 11));
+		for (i in 0...levels.length) {
+			var L = levels[i];
+			var yy = plotY + plotH - Std.int(((L.price - lo) / (hi - lo)) * plotH);
+			g2.setColor(COL_FIB);
+			g2.drawLine(plotX + 4, yy, plotX + plotW - 4, yy);
+			var ratioTxt = Math.isFinite(L.ratio) ? fmt2(L.ratio) : "?";
+			g2.setColor(COL_TEXT);
+			g2.drawString('${ratioTxt}  ${fmt2(L.price)}', listX, listY + i * 16);
+		}
+		g2.setStroke(new BasicStroke(1));
 	}
 
 	function competeDemeStrip(g2:Graphics2D, x:Int, y:Int, w:Int, h:Int):Void {

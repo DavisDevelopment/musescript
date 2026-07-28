@@ -10,6 +10,7 @@ import musescript.evo.Fitness;
 import musescript.evo.FitnessResult;
 import musescript.evo.Foundry;
 import musescript.evo.PhaseTimer;
+import musescript.evo.ProjectionProvider;
 import musescript.evo.RegistryPalette;
 import musescript.evo.RivalryArena;
 import musescript.evo.RngStreams;
@@ -18,6 +19,7 @@ import musescript.evo.StrategyGenome;
 import musescript.evo.BasketFitness;
 import musescript.evo.SurrogateModel;
 import musescript.evo.SymbolSelector;
+import musescript.evo.FeatureVizEvent.FeatureVizFib;
 import musescript.evo.graal.CompeteVizState;
 import musescript.evo.graal.Polyglot;
 import musescript.evo.graal.GraalWasmHost;
@@ -79,6 +81,12 @@ typedef FallbackResult = {var key:String; var ok:Bool; var trades:Int; var sharp
  */
 class CorpusEvoRun {
 	static var watDir = "build/graal/evo-corpus";
+
+	/**
+	 * Optional argv override so `HostProjectionDemo` can thin-launch into this real GUI without
+	 * re-execing a second JVM. Null ⇒ read `Sys.args()` as usual.
+	 */
+	public static var argOverride:Null<Array<String>> = null;
 
 	static function main() {
 		var pop = argInt("--pop", 64);
@@ -666,8 +674,28 @@ class CorpusEvoRun {
 		var humanLoopOn = argFlag("--human-in-loop");
 		var guiOn = argFlag("--gui") || humanLoopOn;
 		var guiCompete = argFlag("--gui-compete") || (guiOn && (rivalryOn || rivalryArenaRequested));
-		var dashboard = guiOn ? new EvoDashboardWindow("MuseGene Evolution -- " + (simTapeOn ? "sim-tape (MurmurationSim)" : (tapePath != null ? tapePath : "default tape")), guiCompete) : null;
+		// EW host-backed projections (LatticeForecastHost / McmcForecastHost via PSHost).
+		// Installs Fitness.projectionProvider, seeds host genomes, forces those genomes onto the
+		// JS decorateBars path, and emits rate-limited `[ew-host]` fusion logs.
+		var ewHostArg = argStr("--ew-host", null);
+		var ewHostOn = ewHostArg != null && ewHostArg != "" && ewHostArg != "off";
+		var ewHostKind = "lattice";
+		if (ewHostOn) {
+			ewHostKind = (ewHostArg == "mcmc") ? "mcmc" : "lattice";
+			Fitness.projectionProvider = ProjectionProvider.forEvoHost(true);
+			Variation.logHostProjection = true;
+			if (threads > 1) {
+				Sys.println('EW-HOST: forcing --threads 1 (autoBind ProjectionProvider is process-singleton; concurrent decorateBars would race)');
+				threads = 1;
+			}
+			Sys.println('EW-HOST: on -- kind=$ewHostKind (ProjectionProvider.autoBindGenomeHost; PSHost seeds + mutate logs; decorate→JS fallback)');
+		}
+		var dashTitle = "MuseGene Evolution -- " + (simTapeOn ? "sim-tape (MurmurationSim)" : (tapePath != null ? tapePath : "default tape"));
+		if (ewHostOn) dashTitle = "MuseGene Evolution -- EW host (" + ewHostKind + ") -- " + (tapePath != null ? tapePath : "default tape");
+		var dashboard = guiOn ? new EvoDashboardWindow(dashTitle, guiCompete) : null;
 		if (guiCompete) Sys.println("gui-compete: on -- deme strip + arena wealth + foundry timeline panels");
+		if (ewHostOn && dashboard != null)
+			dashboard.setStatus("EW host=" + ewHostKind + " -- streaming ProjectionProvider decorate + gen progress");
 		// How often the GUI's performance-vs-benchmark panel re-samples OOS for the WHOLE
 		// population -- every generation would double fitness-eval cost (fighting the whole
 		// point of PLAN_EVO_SPEED.md) and isn't needed for a live diagnostic view. IS is free
@@ -881,8 +909,13 @@ class CorpusEvoRun {
 		Sys.println('fib_retracement seeds: ${fibSeeds.length} genomes (3 windows x breakout/reclaim)');
 		Sys.println('fourier_projection seeds: ${fourierSeeds.length} genomes (2 custom smoothed configs)');
 
-		var seedPop = tournament.genomes.concat(indicatorSeeds).concat(fibSeeds).concat(fourierSeeds);
-		Sys.println('seeded generation 0: ${seedPop.length} real genomes (${tournament.genomes.length} corpus-derived + ${indicatorSeeds.length} indicator-derived + ${fibSeeds.length} fib-retracement + ${fourierSeeds.length} fourier-projection)');
+		var ewHostSeeds:Array<StrategyGenome> = ewHostOn ? CorpusSeed.seedFromEwHostProjection(ewHostKind) : [];
+		if (ewHostOn)
+			Sys.println('ew-host seeds: ${ewHostSeeds.length} genomes (PSHost kind=$ewHostKind)');
+
+		var seedPop = tournament.genomes.concat(indicatorSeeds).concat(fibSeeds).concat(fourierSeeds).concat(ewHostSeeds);
+		Sys.println('seeded generation 0: ${seedPop.length} real genomes (${tournament.genomes.length} corpus-derived + ${indicatorSeeds.length} indicator-derived + ${fibSeeds.length} fib-retracement + ${fourierSeeds.length} fourier-projection'
+			+ (ewHostOn ? ' + ${ewHostSeeds.length} ew-host' : "") + ")");
 
 		// Own Variation instance, deliberately independent of `engine`'s internal one -- candidate
 		// generation for a human browsing the population has no business perturbing the main run's
@@ -1810,6 +1843,12 @@ class CorpusEvoRun {
 				// engine that doesn't check it. Force every genome down fallback rather than
 				// silently letting WASM-routed genomes skip the solvency gate.
 				if (forceFallback) { fallbackMiss.push(key); continue; }
+				// PSHost genomes need ProjectionProvider.decorateBars (aux Bar.data) — WASM has no
+				// host cloud path, so route them to JS fallback whenever `--ew-host` is on.
+				if (ewHostOn && ProjectionProvider.hostProjRefs(g).length > 0) {
+					fallbackMiss.push(key);
+					continue;
+				}
 				if (moduleCache.exists(key)) { wasmMiss.push(key); continue; }
 				if (unsupportedKeys.exists(key)) { fallbackMiss.push(key); unsupported++; continue; }
 				var emitted = emitGenome(g);
@@ -2254,6 +2293,40 @@ class CorpusEvoRun {
 					validFitness, [for (c in nicheSummary) c.key], [for (c in nicheSummary) c.fitness],
 					isPerf, oosPerf, isBenchmark, oosBenchmark);
 				if (guiCompete) dashboard.updateCompete(competeViz);
+				// FeatureViz fib snapshot — same FibRetracement engine as NmaFeatureHost / IndicatorCache.
+				// Gen-boundary only (never from arena tick path).
+				var fibFrame = FeatureVizFib.snapshotTape(bars, 20, {
+					genomeKey: currentBestGenome != null ? currentBestGenome.name : null,
+					epoch: gen
+				});
+				dashboard.updateFeatureViz(fibFrame != null ? [fibFrame] : []);
+				if (ewHostOn) {
+					var champName = currentBestGenome != null ? currentBestGenome.name : "?";
+					var projS = Math.NaN;
+					var eq0 = Math.NaN;
+					var eqN = Math.NaN;
+					var tradesC = 0;
+					var sharpeC = Math.NaN;
+					if (currentBestGenome != null) {
+						var frC = Fitness.evaluate(currentBestGenome, bars, "js", false, costBps, startCapital, equityFloor);
+						Fitness.attachProjectionScore(frC, currentBestGenome, bars, Fitness.projectionProvider);
+						projS = frC.projScore;
+						tradesC = frC.trades;
+						sharpeC = frC.sharpe;
+						if (frC.equity != null && frC.equity.length > 0) {
+							eq0 = frC.equity[0];
+							eqN = frC.equity[frC.equity.length - 1];
+						}
+						var declC = ProjectionProvider.firstPsHostDecl(currentBestGenome);
+						var digest = declC != null ? ProjectionProvider.declDigest(declC) : "no-pshost";
+						Sys.println('[ew-host] gen=$gen best=${fmt(genBest, 4)} mean=${fmt(mean, 4)} niches=${archive.size()} champion=$champName'
+							+ ' sharpe=${fmt(sharpeC, 4)} trades=$tradesC projScore=${fmt(projS, 4)} equity=[$eq0->$eqN] digest=$digest');
+						dashboard.setStatus('gen $gen  best=${fmt(genBest, 3)}  mean=${fmt(mean, 3)}  niches=${archive.size()}  champ=$champName  projScore=${fmt(projS, 3)}  trades=$tradesC');
+					} else {
+						Sys.println('[ew-host] gen=$gen best=${fmt(genBest, 4)} mean=${fmt(mean, 4)} niches=${archive.size()} champion=?');
+						dashboard.setStatus('gen $gen  best=${fmt(genBest, 3)}  mean=${fmt(mean, 3)}  niches=${archive.size()}');
+					}
+				}
 			}
 
 			// Pause/resume lives on the dashboard (its Pause button, always the primary window);
@@ -2719,6 +2792,11 @@ class CorpusEvoRun {
 		var verify = Fitness.verifySummary();
 		if (verify != null) Sys.println("\n" + verify);
 		Sys.println("\nCORPUS_EVO_OK");
+		if (dashboard != null) {
+			dashboard.setStatus("run complete — close this window to exit");
+			Sys.println("[gui] run complete — leaving MuseGene Evolution window open; close it to exit");
+			while (dashboard.isOpen()) Sys.sleep(0.25);
+		}
 	}
 
 	/**
@@ -2976,14 +3054,18 @@ class CorpusEvoRun {
 		throw '${explicitPath != null ? explicitPath : "spy.csv"} not found -- run from muse-lab/muse-script';
 	}
 
+	static function cliArgs():Array<String> {
+		return argOverride != null ? argOverride : Sys.args();
+	}
+
 	static function argStr(name:String, dflt:Null<String>):Null<String> {
-		var args = Sys.args();
+		var args = cliArgs();
 		for (i in 0...args.length - 1) if (args[i] == name) return args[i + 1];
 		return dflt;
 	}
 
 	static function argFloat(name:String, dflt:Float):Float {
-		var args = Sys.args();
+		var args = cliArgs();
 		for (i in 0...args.length - 1) {
 			if (args[i] == name) {
 				var v = Std.parseFloat(args[i + 1]);
@@ -2994,12 +3076,12 @@ class CorpusEvoRun {
 	}
 
 	static function argFlag(name:String):Bool {
-		for (a in Sys.args()) if (a == name) return true;
+		for (a in cliArgs()) if (a == name) return true;
 		return false;
 	}
 
 	static function argInt(name:String, dflt:Int):Int {
-		var args = Sys.args();
+		var args = cliArgs();
 		for (i in 0...args.length - 1) {
 			if (args[i] == name) {
 				var v = Std.parseInt(args[i + 1]);

@@ -116,10 +116,35 @@ background corpus-evo run has that same jar open (see `PLAN_EVO_SPEED.md`'s
 hard rule) -- check `wmic process where "name='java.exe'" get CommandLine`
 first.
 
+## FeatureViz (shared TA / forecast overlay contract)
+
+`FeatureVizEvent` (`FeatureVizEvent.hx`) is the scrub-/gen-boundary POD for painting
+advanced TA and MC forecasts in `--gui` / the app — and later as website replay frames.
+Not the indicator hot-path `GeomViz` LevelSet slots; those stay inside libs.
+
+| field | role |
+|---|---|
+| `kind` | `fib` (live) · `elliot` / `forecast` (reserved) · extensible string |
+| `barLo` / `barHi` | inclusive bar range this frame describes |
+| `payload` | `levels`, `anchors`, optional `confidence` / `paths` / `note` / `extra` |
+| `genomeKey` / `sourceId` / `epoch` | optional provenance (champion name, `fib_retracement:20`, gen) |
+
+**Emit:** `FeatureVizFib.snapshotTape` walks the IS tape once through the existing
+`FibRetracement` engine (same math as `NmaFeatureHost` / IndicatorCache) — no second fib.
+`CorpusEvoRun` pushes the frame into `EvoDashboardWindow.updateFeatureViz` at each
+generation boundary when `--gui` is on.
+
+**Consume:** Swing paints a compact level list under the niche panels. Full OHLC overlay
+belongs in the app chart workbench; website = recorded-frame replay of the same JSON.
+
+**Cadence rule:** gen-boundary or explicit scrub only — never per Murmuration tick, and
+don't couple rivalry arenas onto the EDT without this snapshot bus.
+
 ## Layout
 
 | module | role |
 |---|---|
+| `FeatureVizEvent` | shared fib/elliot/forecast overlay POD + bus + FibRetracement emit |
 | `nma/JIT_AUTHORING_GUIDE.md` | Haxe authoring for GraalVM host JIT + V8 (kind-switch, unboxed vecs, Engine reuse, Maps/ICs) |
 | `nma/*` | Neural Muse AST substrate (bijection, columnar eval, attr, kernels) |
 | `SeriesNode` / `ScalarNode` / `BoolNode` | typed IR |

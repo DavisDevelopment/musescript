@@ -26,6 +26,21 @@ class ProjectionProvider {
 	var host:Null<EwForecastHost>;
 	var clouds:Null<Array<ForecastCloud>>;
 	var boundBars:Null<Array<Bar>>;
+	var lastBindKey:Null<String> = null;
+	var decorateCount:Int = 0;
+
+	/**
+	 * When true, `decorateBars` rebuilds a streaming `SwingGraphStack` + host from the genome's
+	 * first `PSHost` decl (CorpusEvoRun `--ew-host`). Fresh stack per bind so PIT causality holds
+	 * across prefix triage vs full-tape evals.
+	 */
+	public var autoBindGenomeHost:Bool = false;
+
+	/** Rate-limited `[ew-host]` decorate / cloud console logs (CorpusEvoRun fusion debug). */
+	public var logDecorate:Bool = false;
+
+	/** Log every Nth decorate when `logDecorate` (default 12 — rich but greppable). */
+	public var logDecorateEvery:Int = 12;
 
 	/** Soft φ keys Variation / genes may touch — tolerances & guideline weights only. */
 	public static var SOFT_PHI_KEYS:Array<String> = [
@@ -41,6 +56,14 @@ class ProjectionProvider {
 		this.host = host;
 		this.clouds = null;
 		this.boundBars = null;
+	}
+
+	/** Factory for CorpusEvoRun `--ew-host`: per-genome host rebuild + optional decorate logs. */
+	public static function forEvoHost(?log:Bool = true):ProjectionProvider {
+		var p = new ProjectionProvider();
+		p.autoBindGenomeHost = true;
+		p.logDecorate = log;
+		return p;
 	}
 
 	public function bindHost(h:EwForecastHost):Void {
@@ -136,11 +159,18 @@ class ProjectionProvider {
 		if (g.projections == null || g.projections.length == 0) return bars;
 		var refs = hostProjRefs(g);
 		if (refs.length == 0) return bars;
+		if (autoBindGenomeHost)
+			bindHostForGenome(g, bars);
 		if (host == null)
 			throw "ProjectionProvider.decorateBars: no EwForecastHost bound for PSHost genome";
-		var cs = streaming ? materialize(bars) : (clouds != null && clouds.length == bars.length
-			? clouds : snapshot(bars));
+		// Auto-bound hosts always stream (stack advances only via onBar). Explicit streaming=true
+		// same path; otherwise reuse snapshot when a caller pre-bound clouds.
+		var cs = (streaming || autoBindGenomeHost)
+			? materialize(bars)
+			: (clouds != null && clouds.length == bars.length ? clouds : snapshot(bars));
 		var out:Array<Bar> = [];
+		var colNames:Array<String> = [];
+		for (r in refs) colNames.push(Expand.projRef(r.name, r.field));
 		for (i in 0...bars.length) {
 			var b = bars[i];
 			var data:Map<String, Float> = b.data != null ? copyMap(b.data) : new Map();
@@ -154,7 +184,77 @@ class ProjectionProvider {
 				volume: b.volume, time: b.time, index: b.index, data: data
 			});
 		}
+		if (logDecorate) {
+			decorateCount++;
+			if (decorateCount % logDecorateEvery == 1)
+				logDecorateSnapshot(g, bars, cs, colNames);
+		}
 		return out;
+	}
+
+	/**
+	 * Rebuild host from genome's first `PSHost` decl + fresh SwingGraphStack over `bars`.
+	 * Bind key includes decl digest + tape endpoints so prefix vs full-tape never share stack state.
+	 */
+	public function bindHostForGenome(g:StrategyGenome, bars:Array<Bar>):Void {
+		var decl = firstPsHostDecl(g);
+		if (decl == null) return;
+		var t0 = bars.length > 0 ? bars[0].time : 0.0;
+		var t1 = bars.length > 0 ? bars[bars.length - 1].time : 0.0;
+		var key = declDigest(decl) + ":" + bars.length + ":" + t0 + ":" + t1;
+		if (key == lastBindKey && host != null && clouds != null && boundBars == bars)
+			return;
+		var stack = new SwingGraphStack(0.02, 0.05, 16);
+		host = hostForDecl(decl, null, stack);
+		lastBindKey = key;
+		invalidate();
+	}
+
+	public static function firstPsHostDecl(g:StrategyGenome):Null<ProjectionDecl> {
+		if (g.projections == null) return null;
+		for (p in g.projections) {
+			switch (p.sampler) {
+				case PSHost(_): return p;
+				default:
+			}
+		}
+		return null;
+	}
+
+	public static function declDigest(decl:ProjectionDecl):String {
+		var kind = switch (decl.sampler) {
+			case PSHost(k): k;
+			default: "?";
+		};
+		var phi = phiKeyOf(decl.phiDeltas);
+		return decl.name + "|" + kind + "|h" + decl.horizon + "|n" + decl.samples
+			+ "|s" + decl.seed + "|" + (phi != null ? phi : "-");
+	}
+
+	function logDecorateSnapshot(
+		g:StrategyGenome, bars:Array<Bar>, cs:Array<ForecastCloud>, colNames:Array<String>
+	):Void {
+		var mid = bars.length > 0 ? Std.int(bars.length / 2) : 0;
+		var c = mid < cs.length ? cs[mid] : null;
+		var p50 = c != null ? fmtLog(c.priceMid) : "n/a";
+		var p05 = c != null ? fmtLog(c.priceLo) : "n/a";
+		var p95 = c != null ? fmtLog(c.priceHi) : "n/a";
+		var inv = c != null ? fmtLog(c.invalidatePrice) : "n/a";
+		var ent = c != null ? fmtLog(c.countEntropy) : "n/a";
+		var rivals = "[]";
+		if (host != null && bars.length > 0) {
+			var masses = host.topCounts(mid, 5);
+			rivals = "[" + [for (m in masses) m.label + ":" + fmtLog(m.mass)].join(",") + "]";
+		}
+		var gname = g.name != null ? g.name : "?";
+		Sys.println('[ew-host] decorate genome=$gname bars=${bars.length} cols=${colNames.join(",")}'
+			+ ' cloud@$mid p50=$p50 band=[$p05,$p95] inv=$inv entropy=$ent rivals=$rivals'
+			+ ' bind=${lastBindKey != null ? lastBindKey : "-"}');
+	}
+
+	static function fmtLog(x:Float):String {
+		if (!Math.isFinite(x)) return "n/a";
+		return Std.string(Math.round(x * 1000) / 1000);
 	}
 
 	/** Referenced (name, field) pairs whose decl is `PSHost`. */

@@ -639,4 +639,73 @@ class CorpusSeed {
 		}
 		return out;
 	}
+
+	// ---- EW host-projection seed genomes (CorpusEvoRun `--ew-host`) ---------------------
+
+	/**
+	 * Seed genomes that trade LatticeForecastHost / McmcForecastHost reductions via `SProj`
+	 * (`PSHost`). Requires `Fitness.projectionProvider` with `autoBindGenomeHost` (see
+	 * `ProjectionProvider.forEvoHost`) so Expand→compile sees aux `Bar.data` columns.
+	 */
+	public static function seedFromEwHostProjection(hostKind:String = "lattice"):Array<StrategyGenome> {
+		var kind = hostKind == "mcmc" ? "mcmc" : "lattice";
+		var samples = kind == "mcmc" ? 8 : 1;
+		var out:Array<StrategyGenome> = [];
+		function decl(name:String, seed:Int, ?phi:Map<String, Float>):ProjectionDecl {
+			return ProjectionProvider.ewDecl(name, 5, kind, seed, phi, samples);
+		}
+		// p50 above close → long (demo shape from HostProjectionDemoCore).
+		out.push({
+			entryLong: BCmp(">", KSeries(SProj("ew_0", "p50")), KSeries(SPrice("close"))),
+			entryShort: BCmp(">", KConst(0.0), KConst(1.0)),
+			exitLong: BCmp("<", KSeries(SProj("ew_0", "spread")), KConst(1000.0)),
+			exitShort: BCmp(">", KConst(0.0), KConst(1.0)),
+			size: KConst(1.0),
+			params: [],
+			name: 'ew_host_${kind}_p50_gt_close',
+			lineage: ["ew-host-seed"],
+			seedOrigin: null,
+			projections: [decl("ew_0", 1, ["fibHitTol" => 0.01])]
+		});
+		// Tight band (low spread) → long; widen → flat.
+		out.push({
+			entryLong: BCmp("<", KSeries(SProj("ew_0", "spread")), KConst(8.0)),
+			entryShort: BCmp(">", KConst(0.0), KConst(1.0)),
+			exitLong: BCmp(">", KSeries(SProj("ew_0", "spread")), KConst(20.0)),
+			exitShort: BCmp(">", KConst(0.0), KConst(1.0)),
+			size: KConst(1.0),
+			params: [],
+			name: 'ew_host_${kind}_tight_spread',
+			lineage: ["ew-host-seed"],
+			seedOrigin: null,
+			projections: [decl("ew_0", 2, ["fibHitTol" => 0.02])]
+		});
+		// Low entropy (confident count) → long.
+		out.push({
+			entryLong: BCmp("<", KSeries(SProj("ew_0", "entropy")), KConst(0.8)),
+			entryShort: BCmp(">", KConst(0.0), KConst(1.0)),
+			exitLong: BCmp(">", KSeries(SProj("ew_0", "entropy")), KConst(1.4)),
+			exitShort: BCmp(">", KConst(0.0), KConst(1.0)),
+			size: KConst(1.0),
+			params: [],
+			name: 'ew_host_${kind}_low_entropy',
+			lineage: ["ew-host-seed"],
+			seedOrigin: null,
+			projections: [decl("ew_0", 3)]
+		});
+		// Price above invalidate → stay long bias.
+		out.push({
+			entryLong: BCmp(">", KSeries(SPrice("close")), KSeries(SProj("ew_0", "inv"))),
+			entryShort: BCmp("<", KSeries(SPrice("close")), KSeries(SProj("ew_0", "inv"))),
+			exitLong: alwaysFalse(),
+			exitShort: alwaysFalse(),
+			size: KConst(1.0),
+			params: [],
+			name: 'ew_host_${kind}_vs_invalidate',
+			lineage: ["ew-host-seed"],
+			seedOrigin: null,
+			projections: [decl("ew_0", 4, ["equalityTol" => 0.02])]
+		});
+		return out;
+	}
 }

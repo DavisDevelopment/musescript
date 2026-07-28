@@ -1304,7 +1304,11 @@ class Variation {
 		// blind mutates may touch host projections / φ deltas without rewriting hard EW rules.
 		if (rng.float() < 0.12) {
 			var h = mutateHostProjection(g);
-			if (h != g) return h;
+			if (h != g) {
+				if (logHostProjection)
+					logHostMutate(g, h);
+				return h;
+			}
 		}
 		return pointMutate(g);
 	}
@@ -1312,6 +1316,9 @@ class Variation {
 
 	/** Host kinds Variation may assign to `PSHost` (soft backend choice only). */
 	public static var HOST_KINDS:Array<String> = ["lattice", "mcmc"];
+
+	/** When true, print `[ew-host] mutate …` lines (CorpusEvoRun `--ew-host` turns this on). */
+	public static var logHostProjection:Bool = false;
 
 	/** Fan-reduction fields TradeLogic may grow against a host projection. */
 	static var HOST_FIELDS:Array<String> = [
@@ -1388,6 +1395,22 @@ class Variation {
 		}
 		o.lineage = (g.lineage != null ? g.lineage.copy() : []).concat([Canonical.structuralKey(g)]);
 		return compactParams(o);
+	}
+
+	static function logHostMutate(before:StrategyGenome, after:StrategyGenome):Void {
+		var decl = ProjectionProvider.firstPsHostDecl(after);
+		var kind = "?";
+		var phi = "-";
+		var samples = 0;
+		if (decl != null) {
+			kind = switch (decl.sampler) { case PSHost(k): k; default: "?"; };
+			phi = ProjectionProvider.phiKeyOf(decl.phiDeltas);
+			if (phi == null) phi = "-";
+			samples = decl.samples;
+		}
+		var bname = before.name != null ? before.name : "?";
+		var aname = after.name != null ? after.name : "?";
+		Sys.println('[ew-host] mutate from=$bname to=$aname kind=$kind samples=$samples phi=$phi digest=${decl != null ? ProjectionProvider.declDigest(decl) : "-"}');
 	}
 
 	/** Small Gaussian steps on soft φ residuals; clamp magnitudes so soft scores stay sane. */

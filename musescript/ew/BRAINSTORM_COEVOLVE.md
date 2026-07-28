@@ -202,15 +202,17 @@ node build/js/host-proj-cli.js --host lattice
 node build/js/host-proj-cli.js --host mcmc
 ```
 
-**JVM GUI viz** (same SwingExterns stack as `CorpusEvoRun --gui` / `EvoDashboardWindow`):
+**JVM GUI — real MuseGene evo dashboard** (`CorpusEvoRun --gui --ew-host`, not a toy line viz):
 ```powershell
-haxe build-host-proj-demo.hxml
+haxe build-corpus-evo.hxml
 $env:JAVA_HOME = "C:\Users\epiki\graalvm\graalvm-community-25.1.3"  # or your JDK/Graal
 $JAVA = Join-Path $env:JAVA_HOME "bin\java.exe"
 $CP = (Get-Content graal\cp.txt -Raw).Trim()
-& $JAVA --sun-misc-unsafe-memory-access=allow -cp "$CP;build\jvm\host-proj-demo.jar" `
-  musescript.evo.graal.HostProjectionDemo --host lattice
-# headless smoke: add --headless
+& $JAVA --sun-misc-unsafe-memory-access=allow -cp "$CP;build\jvm\corpus-evo.jar" `
+  musescript.evo.graal.CorpusEvoRun --gui --ew-host lattice `
+  --tape corpus/tapes/spy_oos_2022_2026.csv --pop 32 --gens 16 --threads 1
+# grep fusion logs: [ew-host]
+# HostProjectionDemo --host lattice is a thin forwarder into the same entry
 ```
 
 ## Mapping existing Muse pieces
