@@ -2899,6 +2899,40 @@ class CorpusEvoRun {
 				Sys.println('  ${pad(Std.string(shown), 2)}. IS=${fmt(r.isFit, 4)}  OOS=${!anyErr ? fmt(oosScore, 4) : "n/a"} (trades=${agg.trades})  [$holdMark]  ${r.g.name}');
 			}
 			Sys.println('OOS summary: ${held}/${checked} of the top IS performers held a positive Sharpe out of sample.');
+
+			// Host-specific honest check (Phase 0 edge test): does the best EVOLVED EW-host-referencing
+			// genome beat buy-and-hold on the held-out tail? The top-10 above can be all non-host trading
+			// strategies, which never answers whether EW fusion itself earns its keep. Additive, headless.
+			function oosScoreOf(g:StrategyGenome):Float {
+				var perSymbol:Array<{trades:Int, sharpe:Float, finalEquity:Float, ?bankrupt:Bool}> = [];
+				for (sym in oosBasket) {
+					var fr = Fitness.evaluate(g, sym, "js", false, costBps, startCapital, equityFloor);
+					if (!fr.ok) return Math.NaN;
+					perSymbol.push({trades: fr.trades, sharpe: fr.sharpe, finalEquity: fr.finalEquity, bankrupt: fr.bankrupt});
+				}
+				return BasketFitness.scoreAggregate(BasketFitness.aggregateBasket(perSymbol));
+			}
+			var bhGenome:StrategyGenome = {
+				entryLong: BCmp(">", KConst(1.0), KConst(0.0)), entryShort: BCmp(">", KConst(0.0), KConst(1.0)),
+				exitLong: BCmp(">", KConst(0.0), KConst(1.0)), exitShort: BCmp(">", KConst(0.0), KConst(1.0)),
+				size: KConst(1.0), params: [], name: "buy_and_hold", lineage: [], seedOrigin: null
+			};
+			var bhOos = oosScoreOf(bhGenome);
+			var bestHostG:StrategyGenome = null;
+			var bestHostFit = Fitness.NEG_INF;
+			var hostCount = 0;
+			for (i in 0...popG.length) {
+				if (ProjectionProvider.hostProjRefs(popG[i]).length == 0) continue;
+				hostCount++;
+				if (lastFit[i] > bestHostFit) { bestHostFit = lastFit[i]; bestHostG = popG[i]; }
+			}
+			if (bestHostG == null) {
+				Sys.println('[ew-host OOS] no host-referencing genome survived in final pop (hostCount=0) — EW fusion earned no place; buyHold OOS=${fmt(bhOos, 4)}');
+			} else {
+				var hostOos = oosScoreOf(bestHostG);
+				var beats = hostOos > bhOos && hostOos > 0;
+				Sys.println('[ew-host OOS] hostInPop=$hostCount bestHost=${bestHostG.name} IS=${fmt(bestHostFit, 4)} OOS=${fmt(hostOos, 4)} | buyHold OOS=${fmt(bhOos, 4)} => ${beats ? "HOST BEATS BUY-HOLD (pulse!)" : "NO-GO"}');
+			}
 		}
 		#if kestrel
 		// --- compete fresh-market re-check: NOT a real-tape holdout (that's Phase 3's honesty
