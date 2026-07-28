@@ -28,11 +28,19 @@ class Expand {
 		// guards — the same shape corpus strategies use for `maFast = sma(close, 5)`). Emitted ONLY
 		// for projections the policy actually references, so a declared-but-unread projection stays
 		// byte-inert (the P0.a parity contract). PROJECTION_COEVOLUTION_PLAN.md §4.
+		//
+		// PSHost reductions are NOT prelude-bound: a `let ew_0__p50 = …` would shadow the aux
+		// Bar.data series `ProjectionProvider.decorateBars` injects under the same name. Bare
+		// identifiers in when-guards resolve to those causal aux columns (same as `sentiment`).
 		if (g.projections != null && g.projections.length > 0) {
 			for (r in collectProjRefs(g)) {
 				var decl = findProj(g, r.name);
 				if (decl == null) throw 'Expand: policy references undeclared projection "${r.name}"';
-				lines.push('  ${projRef(r.name, r.field)} = ${projReductionExpr(decl, r.field, g.params)}');
+				switch (decl.sampler) {
+					case PSHost(_): // bare ident → aux series; no prelude assign
+					default:
+						lines.push('  ${projRef(r.name, r.field)} = ${projReductionExpr(decl, r.field, g.params)}');
+				}
 			}
 		}
 		lines.push("  onBar {");
@@ -120,10 +128,10 @@ class Expand {
 						throw 'Expand: unknown projection field "$field" for projection "${decl.name}"';
 				};
 			case PSHost(kind):
-				// Host clouds are columnar via ProjectionProvider — no MuseScript prelude yet
-				// (needs a host builtin or interp column injection). Boundary X score path works.
-				throw 'Expand: PSHost($kind) projection "${decl.name}" is host-backed; '
-					+ 'use ProjectionProvider columns (Expand trading prelude not wired)';
+				// Should not be reached — expand() skips prelude for PSHost. Kept as a hard fail
+				// so a future caller of projReductionExpr alone cannot invent a fake series expr.
+				throw 'Expand: PSHost($kind) "${decl.name}" uses aux Bar.data columns '
+					+ '(ProjectionProvider.decorateBars); do not inline-render host reductions';
 		}
 	}
 

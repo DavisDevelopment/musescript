@@ -9,6 +9,7 @@ import musescript.evo.ScalarNode;
 import musescript.evo.SeriesNode;
 import musescript.evo.StrategyGenome;
 import musescript.evo.Canonical;
+import musescript.evo.Expand;
 import musescript.evo.Fitness;
 import musescript.evo.FitnessResult;
 import musescript.evo.ProjectionProvider;
@@ -21,8 +22,7 @@ import musescript.indicators.geom.SwingGraph;
 /**
  * Boundary X smoke: LatticeForecastHost.cloudAt → ProjectionProvider → SProj / Fitness.projScore.
  *
- * Proves co-evolved agents can consume EW projection clouds without Expand trading prelude
- * (PSHost columns are provider-backed; Expand still throws for host samplers).
+ * Covers Expand trading prelude (PSHost → bare aux idents + decorateBars) and soft φ digests.
  */
 class TestEwHostProjection extends Test {
 	static function piv(price:Float, dir:Float, bar:Int):PivotPoint {
@@ -150,5 +150,78 @@ class TestEwHostProjection extends Test {
 		Assert.isTrue(ImpulseRules.isValidFiveWave(v, 0));
 		var cloud = seededHost().host.cloudAt(50);
 		Assert.floatEquals(100.0, cloud.invalidatePrice, 1e-9);
+	}
+
+	public function testExpandHostPreludeUsesBareAuxIdents() {
+		var g = hostGenome();
+		var src = Expand.expand(g);
+		// No prelude assign that would shadow aux columns.
+		Assert.isFalse(src.indexOf("ew_0__p50 =") >= 0);
+		Assert.isTrue(src.indexOf("ew_0__p50") >= 0);
+		Assert.isTrue(src.indexOf("ew_0__spread") >= 0);
+		// Must parse as modern strategy surface.
+		var prog = new musescript.parse.MuseParser().parse(src, "<ew-host>");
+		Assert.notNull(prog);
+	}
+
+	public function testDecorateBarsAndEvaluateTrading() {
+		var bars = tapeAroundImpulse(80);
+		var s = seededHost();
+		var provider = new ProjectionProvider(s.host);
+		provider.snapshot(bars);
+		var g = hostGenome();
+		var decorated = provider.decorateBars(bars, g);
+		Assert.notNull(decorated[50].data);
+		Assert.isTrue(Math.isFinite(decorated[50].data.get("ew_0__p50")));
+		Assert.isTrue(Math.isFinite(decorated[50].data.get("ew_0__spread")));
+
+		var prev = Fitness.projectionProvider;
+		Fitness.projectionProvider = provider;
+		var fr = Fitness.evaluate(g, bars, "js");
+		Fitness.projectionProvider = prev;
+		Assert.isTrue(fr.ok, "host-reading genome should evaluate: " + fr.error);
+		Fitness.attachProjectionScore(fr, g, bars, provider);
+		Assert.isTrue(Math.isFinite(fr.projScore));
+	}
+
+	public function testPhiDeltasChangeStructuralKey() {
+		var g1 = hostGenome();
+		var g2 = hostGenome();
+		g2.projections = [ProjectionProvider.ewDecl("ew_0", 5, "lattice", 1, ["fibHitTol" => 0.02])];
+		Assert.notEquals(Canonical.structuralKey(g1), Canonical.structuralKey(g2));
+	}
+
+	public function testMcmcHostSamplesRuleValidCloud() {
+		var s = seededHost();
+		var mcmc = musescript.ew.McmcForecastHost.withGraph(s.graph, null, 5, 8, 7);
+		var cloud = mcmc.cloudAt(50);
+		Assert.isTrue(cloud.samples >= 1);
+		Assert.isTrue(Math.isFinite(cloud.priceMid));
+		Assert.isTrue(Math.isFinite(cloud.invalidatePrice));
+		// Soft-only: invalidate still comes from a rule-valid count (impulse W1 start).
+		Assert.floatEquals(100.0, cloud.invalidatePrice, 1e-6);
+	}
+
+	public function testVariationGrowsHostProjection() {
+		var v = new musescript.evo.Variation(42);
+		var g0:StrategyGenome = {
+			entryLong: BCmp(">", KConst(1.0), KConst(0.0)),
+			entryShort: BCmp(">", KConst(0.0), KConst(1.0)),
+			exitLong: BCmp(">", KConst(0.0), KConst(1.0)),
+			exitShort: BCmp(">", KConst(0.0), KConst(1.0)),
+			size: KConst(1.0),
+			params: [],
+			name: "grow_host",
+			lineage: [],
+			seedOrigin: 0
+		};
+		var g1 = v.attachHostProjection(g0);
+		Assert.notNull(g1.projections);
+		Assert.isTrue(g1.projections.length >= 1);
+		switch (g1.projections[0].sampler) {
+			case PSHost(k): Assert.isTrue(k == "lattice" || k == "mcmc");
+			default: Assert.fail("expected PSHost");
+		}
+		Assert.isTrue(ProjectionProvider.hostProjRefs(g1).length >= 1);
 	}
 }

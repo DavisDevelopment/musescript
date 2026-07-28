@@ -509,9 +509,9 @@ class Variation {
 		return { entryLong: g.entryLong, entryShort: g.entryShort, exitLong: g.exitLong,
 			exitShort: g.exitShort, size: g.size, params: g.params.copy(), name: g.name,
 			lineage: g.lineage != null ? g.lineage.copy() : [], seedOrigin: g.seedOrigin,
-			// Projections are genome identity, not a cache — preserve across splices (decls are
-			// value-like: enums + primitives, so a shallow array copy is independence enough).
-			projections: g.projections != null ? g.projections.copy() : null };
+			// Projections are genome identity, not a cache — preserve across splices. Deep-copy
+			// decls so φ-delta map mutations cannot leak into the parent.
+			projections: g.projections != null ? [for (p in g.projections) copyProj(p)] : null };
 	}
 
 	static function setEntryLong(g:StrategyGenome, v:BoolNode):StrategyGenome { var o = copyGenome(g); o.entryLong = v; return o; }
@@ -1299,6 +1299,122 @@ class Variation {
 
 	// ---- back-compat names (EvolutionEngine calls these) — now backed by the real operators ----
 
-	public function mutate(g:StrategyGenome):StrategyGenome return pointMutate(g);
+	public function mutate(g:StrategyGenome):StrategyGenome {
+		// Soft forecast-gene / PSHost growth stays off the hot path unless gated on — ~12% of
+		// blind mutates may touch host projections / φ deltas without rewriting hard EW rules.
+		if (rng.float() < 0.12) {
+			var h = mutateHostProjection(g);
+			if (h != g) return h;
+		}
+		return pointMutate(g);
+	}
 	public function crossover(a:StrategyGenome, b:StrategyGenome):StrategyGenome return subtreeCrossover(a, b);
+
+	/** Host kinds Variation may assign to `PSHost` (soft backend choice only). */
+	public static var HOST_KINDS:Array<String> = ["lattice", "mcmc"];
+
+	/** Fan-reduction fields TradeLogic may grow against a host projection. */
+	static var HOST_FIELDS:Array<String> = [
+		"p50", "spread", "prob_up", "inv", "dist_inv", "entropy", "nest", "top_mass"
+	];
+
+	/**
+	 * Grow or mutate `PSHost` projections + soft `phiDeltas`. Never invents hard-rule constants.
+	 * Returns `g` unchanged when there is nothing useful to do.
+	 */
+	public function mutateHostProjection(g:StrategyGenome):StrategyGenome {
+		var o = copyGenome(g);
+		var roll = rng.float();
+		if (o.projections == null || o.projections.length == 0 || roll < 0.35) {
+			return attachHostProjection(o);
+		}
+		var idx = rng.int(o.projections.length);
+		var p = o.projections[idx];
+		switch (p.sampler) {
+			case PSHost(kind):
+				var np = copyProj(p);
+				if (rng.float() < 0.4) {
+					// Flip lattice ↔ mcmc backend.
+					var next = kind == "mcmc" ? "lattice" : "mcmc";
+					np.sampler = PSHost(next);
+					if (next == "mcmc" && np.samples < 2) np.samples = 4 + rng.int(5);
+				} else if (rng.float() < 0.5) {
+					np.phiDeltas = mutatePhiDeltas(np.phiDeltas);
+				} else {
+					np.seed = np.seed ^ (rng.int(0x7fffffff) + 1);
+					if (np.samples < 1) np.samples = 1;
+				}
+				o.projections = o.projections.copy();
+				o.projections[idx] = np;
+				o.lineage = (g.lineage != null ? g.lineage.copy() : []).concat([Canonical.structuralKey(g)]);
+				return compactParams(o);
+			default:
+				return attachHostProjection(o);
+		}
+	}
+
+	/** Ensure a host projection exists and wire one `SProj` read into entryLong when absent. */
+	public function attachHostProjection(g:StrategyGenome):StrategyGenome {
+		var o = copyGenome(g);
+		var name = "ew_0";
+		var hasHost = false;
+		if (o.projections != null) {
+			for (p in o.projections) {
+				switch (p.sampler) {
+					case PSHost(_):
+						hasHost = true;
+						name = p.name;
+					default:
+				}
+				if (hasHost) break;
+			}
+		}
+		if (!hasHost) {
+			var kind = rng.pick(HOST_KINDS);
+			var decl = ProjectionProvider.ewDecl(
+				name, 5, kind, rng.int(10000),
+				mutatePhiDeltas(null),
+				kind == "mcmc" ? 4 + rng.int(5) : 1
+			);
+			o.projections = o.projections != null ? o.projections.concat([decl]) : [decl];
+		}
+		// Soft-wire a host field into entryLong if the policy never reads this host.
+		var refs = ProjectionProvider.hostProjRefs(o);
+		if (refs.length == 0) {
+			var field = rng.pick(HOST_FIELDS);
+			var cmp = rng.pick(Palette.CMP);
+			o.entryLong = BAnd(o.entryLong,
+				BCmp(cmp, KSeries(SProj(name, field)), KSeries(SPrice("close"))));
+		}
+		o.lineage = (g.lineage != null ? g.lineage.copy() : []).concat([Canonical.structuralKey(g)]);
+		return compactParams(o);
+	}
+
+	/** Small Gaussian steps on soft φ residuals; clamp magnitudes so soft scores stay sane. */
+	public function mutatePhiDeltas(?cur:Map<String, Float>):Map<String, Float> {
+		var out:Map<String, Float> = cur != null ? copyFloatMap(cur) : new Map();
+		var key = rng.pick(ProjectionProvider.SOFT_PHI_KEYS);
+		var step = (rng.float() - 0.5) * 0.08; // ±0.04 typical
+		var prev = out.exists(key) ? out.get(key) : 0.0;
+		var next = prev + step;
+		if (next > 0.25) next = 0.25;
+		if (next < -0.25) next = -0.25;
+		if (Math.abs(next) < 1e-6) out.remove(key);
+		else out.set(key, next);
+		return out;
+	}
+
+	static function copyProj(p:ProjectionDecl):ProjectionDecl {
+		return {
+			name: p.name, kind: p.kind, horizon: p.horizon, sampler: p.sampler,
+			samples: p.samples, seed: p.seed,
+			phiDeltas: p.phiDeltas != null ? copyFloatMap(p.phiDeltas) : null
+		};
+	}
+
+	static function copyFloatMap(m:Map<String, Float>):Map<String, Float> {
+		var out = new Map<String, Float>();
+		for (k => v in m) out.set(k, v);
+		return out;
+	}
 }

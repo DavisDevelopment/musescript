@@ -72,7 +72,9 @@ Geom (`SwingGraph`, `SwingGraphStack`, SoftScores, GeomViz) stays under `indicat
 - [x] Add `musescript.ew.LatticeForecastHost` that **imports** `musescript.indicators.ew.*` and fills `ForecastCloud`.
 - [x] Tests under `musescript/tests/TestEwForecastHost.hx`.
 - [x] Boundary X: evo `ProjectionProvider` + `PSHost` + `TestEwHostProjection` (score path).
-- **Remaining:** Expand trading prelude for host columns; package promote of lattice sources.
+- [x] Expand trading prelude for host columns (`decorateBars` aux series).
+- [x] Pragmatic `McmcForecastHost` + demo CLI / JVM GUI viz.
+- **Remaining:** package promote of lattice sources (Phase 2).
 
 ### Phase 2 — mechanical package move
 

@@ -24,4 +24,10 @@ typedef ProjectionDecl = {
 	var samples:Int;
 	/** Deterministic Monte-Carlo seed, so the fan is stable across re-evaluations of the genome. */
 	var seed:Int;
+	/**
+	 * Soft φ residual deltas for `PSHost` only (keys ⊆ `EwPhiParams` soft fields). Applied via
+	 * `EwPhiParams.clone()` + `PhiParamsDump.applyMap` — never touch hard EW grammar.
+	 * Null/absent ⇒ host uses process-default / shared pack.
+	 */
+	var ?phiDeltas:Map<String, Float>;
 }

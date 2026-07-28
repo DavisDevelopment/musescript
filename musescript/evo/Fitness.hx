@@ -21,6 +21,13 @@ import musescript.BarStrategyFn;
  */
 class Fitness {
 	/**
+	 * Optional host-backed projection provider. When set, `evaluateCompiled` decorates bars with
+	 * `PSHost` aux columns before running Expand→compile so trading logic can read `SProj` fields.
+	 * Null (default) ⇒ prior behaviour; genomes without `PSHost` are unaffected either way.
+	 */
+	public static var projectionProvider:Null<ProjectionProvider> = null;
+
+	/**
 	 * Compiled-program cache keyed on `(structural key, target, strict)` -- `Expand.expand(g)`
 	 * is a pure function of the genome, and structurally-identical genomes (same
 	 * `Canonical.structuralKey`) always produce byte-identical source, so the ENTIRE
@@ -504,6 +511,9 @@ class Fitness {
 			// the branch is removed -- JVM now runs the exact same real execution path as
 			// every other target, matching MuseCompiler's own documented "js (default) --
 			// JsEmitter hot path + eval on JS; MuseInterp elsewhere" fallback contract.
+			var evalBars = bars;
+			if (projectionProvider != null && ProjectionProvider.hostProjRefs(g).length > 0)
+				evalBars = projectionProvider.decorateBars(bars, g);
 			var cacheKey = Canonical.structuralKey(g) + ":" + target + ":" + strict;
 			fnCacheLock.acquire();
 			var cached = fnCache.get(cacheKey);
@@ -540,7 +550,7 @@ class Fitness {
 			if (equityFloor > 0) harness.orders.equityFloor = equityFloor;
 			var seed = new MuseInterp(harness);
 			for (d in decls) seed.registerDeclPublic(d);
-			harness.feed = new BarFeed(bars);
+			harness.feed = new BarFeed(evalBars);
 			TradeBuiltins.resetCrossState();
 			var result:Dynamic = fn(harness);
 			var fr = new FitnessResult(

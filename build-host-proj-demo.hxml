@@ -1,0 +1,4 @@
+extraParams.hxml
+-D kestrel
+-main musescript.evo.graal.HostProjectionDemo
+--jvm build/jvm/host-proj-demo.jar

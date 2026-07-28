@@ -166,18 +166,18 @@ Avoid double-counting: if `EwLattice` soft scores already used θ to pick the pr
 - [x] Fitness: `attachProjectionScore(…, provider)` — point skill + band coverage blend (default opt-in).
 - [x] Smoke: `TestEwHostProjection` (bars → `cloudAt` → columns → `projScore`).
 - [x] Parity: genomes with `projections == null` / unread decls still match prior behavior.
-- **Remaining (Slice 2+):** Expand trading prelude for `PSHost` (needs host builtin / interp column injection); Variation growth of `PSHost`; live equity eval of host-reading genomes.
+- [x] Expand trading prelude for `PSHost`: bare aux idents + `ProjectionProvider.decorateBars` / `Fitness.projectionProvider`.
+- [x] Variation growth of `PSHost` + soft `phiDeltas` (no hard-rule mutation).
 
 ### Slice 3 — Soft φ gene only
 
-- [ ] `phiDeltas` applied via `EwPhiParams.clone()` + host `phiKey` for cache.
+- [x] `phiDeltas` on `ProjectionDecl` applied via `ProjectionProvider.applyPhiDeltas` (`clone` + `PhiParamsDump`) + `phiKey` for host cache.
 - Offline finetune pack remains a prior; genes are residual deltas.
 
-### Slice 4 — Tiny MCMC stub (optional)
+### Slice 4 — Tiny MCMC stub (pragmatic)
 
-- [ ] Inner MH: propose swap among **already valid** top-K lattice rivals (or valid corrective sibling labels), accept via soft likelihood under θ.
-- Same `EwForecastHost` API; `samples` = chain thin count; aggregate bands.
-- Still no CYK/CFG engine required.
+- [x] `McmcForecastHost`: multinomial sample among rule-valid top-K lattice rivals (soft mass); aggregate bands. Not full MH.
+- Same `EwForecastHost` API; `samples` = draw count.
 
 ---
 
@@ -188,10 +188,30 @@ Avoid double-counting: if `EwLattice` soft scores already used θ to pick the pr
 | `ForecastCloud` / `EwForecastHost` / `LatticeForecastHost` | **DONE** |
 | Claude generic projections (`PSPoint`/`PSNoise`/`SProj`/`ProjectionScore`) | **DONE** |
 | Boundary X: `PSHost` + `ProjectionProvider` → fitness | **DONE** (lattice) |
-| Expand prelude trading with host columns | **remaining** |
-| `phiDeltas` forecast genes / Variation | **remaining** |
-| Full MCMC host | **remaining** |
-| Demo CLI | **remaining** |
+| Expand prelude trading with host columns | **DONE** (aux `Bar.data`) |
+| `phiDeltas` forecast genes / Variation | **DONE** (soft only) |
+| Pragmatic MCMC host (`hostKind: mcmc`) | **DONE** |
+| Demo CLI + JVM GUI viz | **DONE** — see README launch commands |
+
+## Demo launch
+
+**Headless CLI (Node):**
+```powershell
+haxe build-host-proj-cli.hxml
+node build/js/host-proj-cli.js --host lattice
+node build/js/host-proj-cli.js --host mcmc
+```
+
+**JVM GUI viz** (same SwingExterns stack as `CorpusEvoRun --gui` / `EvoDashboardWindow`):
+```powershell
+haxe build-host-proj-demo.hxml
+$env:JAVA_HOME = "C:\Users\epiki\graalvm\graalvm-community-25.1.3"  # or your JDK/Graal
+$JAVA = Join-Path $env:JAVA_HOME "bin\java.exe"
+$CP = (Get-Content graal\cp.txt -Raw).Trim()
+& $JAVA --sun-misc-unsafe-memory-access=allow -cp "$CP;build\jvm\host-proj-demo.jar" `
+  musescript.evo.graal.HostProjectionDemo --host lattice
+# headless smoke: add --headless
+```
 
 ## Mapping existing Muse pieces
 

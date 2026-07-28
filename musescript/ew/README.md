@@ -14,7 +14,9 @@ reads cloud features.
 | Package move plan | [`PROMOTE_PLAN.md`](PROMOTE_PLAN.md) |
 | Stub surfaces | `ForecastCloud.hx`, `EwForecastHost.hx` |
 | Lattice adapter | `LatticeForecastHost.hx` (**done**) |
-| Boundary X (evo) | `ProjectionProvider` + `PSHost` → `projScore` (**done** — lattice score path) |
+| MCMC adapter (pragmatic) | `McmcForecastHost.hx` (**done** — top-K soft resampling) |
+| Boundary X (evo) | `ProjectionProvider` + `PSHost` → trading + `projScore` (**done**) |
+| Demo | CLI `HostProjectionCli` + JVM GUI `HostProjectionDemo` (see BRAINSTORM) |
 | **Implementation still under** | `musescript/indicators/ew/*` (temporary) |
 
 Hard EW grammar stays non-learnable. Soft φ / guideline weights (`EwPhiParams`) are
@@ -29,8 +31,8 @@ Consume:
 - `ForecastCloud` / `EwForecastHost` as the EW boundary (**boundary X** in `ARCHITECTURE.md`)
 - Gene sketch + fitness principles in `BRAINSTORM_COEVOLVE.md`
 
-**Integration status:** lattice score path **DONE** (`PSHost` + `ProjectionProvider` + smoke).
-See `BRAINSTORM_COEVOLVE.md` § Integration status for remaining (Expand trading, φ genes, MCMC, CLI).
+**Integration status:** Expand trading, φ genes, pragmatic MCMC, demo CLI/GUI — **DONE**.
+See `BRAINSTORM_COEVOLVE.md` § Demo launch for exact commands.
 
 ## Related
 

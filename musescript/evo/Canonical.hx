@@ -128,7 +128,20 @@ class Canonical {
 				case PSHost(kind):
 					d.tag("h".code);
 					d.str(kind);
+					digestPhiDeltas(d, p.phiDeltas);
 			}
+		}
+	}
+
+	/** Sorted key→value digest so Map iteration order cannot fork structural keys. */
+	static function digestPhiDeltas(d:StructuralDigest, deltas:Null<Map<String, Float>>):Void {
+		if (deltas == null) return;
+		var keys = [for (k in deltas.keys()) k];
+		keys.sort(Reflect.compare);
+		for (k in keys) {
+			d.tag("d".code);
+			d.str(k);
+			d.float(deltas.get(k));
 		}
 	}
 
