@@ -1,0 +1,3 @@
+extraParams.hxml
+-main musescript.ew.ForecastHostParityDump
+--jvm build/jvm/forecast-host-parity.jar

@@ -1,0 +1,6 @@
+extraParams.hxml
+-main musescript.ew.ForecastHostParityDump
+-lib hxnodejs
+-D node
+-D js_es=6
+-js build/js/forecast-host-parity.js

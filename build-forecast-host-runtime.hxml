@@ -1,0 +1,6 @@
+# Browser Forecast Panel host facade (Initiative 2.1).
+# Pure Haxe→JS, @:expose("ForecastHostRuntime") — same pattern as muse-runtime.js.
+extraParams.hxml
+-main musescript.ew.ForecastHostRuntime
+-D js_es=6
+-js build/js/forecast-host-runtime.js

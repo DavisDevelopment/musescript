@@ -46,4 +46,12 @@ class BasketFitness {
 	public static inline function scoreAggregate(agg:{trades:Int, sharpe:Float, ?bankrupt:Bool}, ?minTrades:Null<Int>):Float {
 		return Fitness.scoreFacts(agg.trades, agg.sharpe, agg.bankrupt == true, minTrades);
 	}
+
+	/**
+	 * Score a null-baseline aggregate (buy-and-hold) without the candidate min-trades gate
+	 * (Initiative 1.4). Candidates still use `scoreAggregate`.
+	 */
+	public static inline function scoreNullBaseline(agg:{trades:Int, sharpe:Float, ?bankrupt:Bool}):Float {
+		return Fitness.scoreFactsNullBaseline(agg.trades, agg.sharpe, agg.bankrupt == true);
+	}
 }

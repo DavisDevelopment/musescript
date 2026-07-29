@@ -1,0 +1,34 @@
+{
+  "schema": "mederos.equityDigest.webAppParity.v1",
+  "strategy": "BuyHold",
+  "seed": 42,
+  "nBars": 120,
+  "equityDigest": "505dd5750ae38019",
+  "fillDigest": "5661fa4f91729652",
+  "verdict": "Coin-flip",
+  "trades": 1,
+  "museRuntimeSha256": "bb412648c503690739de29f88151bac47d520c52f300383297bcd5708bd9ab74",
+  "hosts": [
+    {
+      "label": "build",
+      "equityDigest": "505dd5750ae38019",
+      "fillDigest": "5661fa4f91729652",
+      "verdict": "Coin-flip",
+      "fileSha256": "bb412648c503690739de29f88151bac47d520c52f300383297bcd5708bd9ab74"
+    },
+    {
+      "label": "web",
+      "equityDigest": "505dd5750ae38019",
+      "fillDigest": "5661fa4f91729652",
+      "verdict": "Coin-flip",
+      "fileSha256": "bb412648c503690739de29f88151bac47d520c52f300383297bcd5708bd9ab74"
+    },
+    {
+      "label": "mobile",
+      "equityDigest": "505dd5750ae38019",
+      "fillDigest": "5661fa4f91729652",
+      "verdict": "Coin-flip",
+      "fileSha256": "bb412648c503690739de29f88151bac47d520c52f300383297bcd5708bd9ab74"
+    }
+  ]
+}

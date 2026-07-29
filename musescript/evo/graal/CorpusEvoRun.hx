@@ -126,6 +126,10 @@ class CorpusEvoRun {
 		Sys.println('min-trades gate: $minTrades (fitness/OOS INELIGIBLE below this; --min-trades)');
 		Sys.println('DSR trials: $nTrials (--n-trials; deflates OOS BEATS + IS rankScore)'
 			+ (rankDsrOn ? '; IS selection=rankScoreFacts' : '; IS selection=raw Sharpe (--no-rank-dsr)'));
+		// Initiative 4.2 — every evo run is seed-stamped for bit-identical re-runs / shareable reports.
+		Sys.println(musescript.repro.ReproStamp.make({
+			seed: seed, bootSeed: seed, profile: "CorpusEvoRun", backend: "jvm"
+		}).describe());
 		if (preregOn)
 			Sys.println('prereg: on — multi-testing acknowledged (PreRegistration seal; threshold locked at run start)');
 		// Soft-cap parsimony: free below the threshold, `parsimonyLambda` sharpe per node past
@@ -2982,7 +2986,9 @@ class CorpusEvoRun {
 				size: KConst(1.0), params: [], name: "buy_and_hold", lineage: [], seedOrigin: null
 			};
 			var bh = oosFrOf(bhGenome);
-			var bhOos = BasketFitness.scoreAggregate(bh.agg, minTrades);
+			// Initiative 1.4: buy-and-hold is a legit 1-trade null — do NOT apply the candidate
+			// min-trades gate (that sent the baseline to −∞ and made "beats null?" vacuous).
+			var bhOos = BasketFitness.scoreNullBaseline(bh.agg);
 			var bestHostG:StrategyGenome = null;
 			var bestHostFit = Fitness.NEG_INF;
 			var hostCount = 0;

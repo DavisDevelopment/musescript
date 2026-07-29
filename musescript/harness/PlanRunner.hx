@@ -24,6 +24,8 @@ class PlanRunner {
 	var prog:Null<MuseProgram>;
 	var interp:Null<MuseInterp>;
 	var compiled:Null<musescript.BarStrategyFn>;
+	/** Initiative 4.2 — stamped onto every OptimizeResult (default matches CLI `--seed`). */
+	public var seed:Int = musescript.repro.ReproStamp.DEFAULT_SEED;
 
 	public function new(harness:HarnessContext) {
 		this.harness = harness;
@@ -148,6 +150,24 @@ class PlanRunner {
 	}
 
 	/**
+	 * Initiative 3 — enumerate every optimize trial (params + backtest) without picking a winner.
+	 * Used by `HonestOptimize` so each candidate can be Truth-Report-gated.
+	 */
+	public function trialSweep(plan:ExecutionPlan, metric:String):Array<OptimizeTrial> {
+		var paramNames:Array<String> = [];
+		var method = "grid";
+		for (step in plan.steps) {
+			switch (step) {
+				case OptimizeStep(_, _, ps, m):
+					paramNames = ps;
+					method = m;
+				default:
+			}
+		}
+		return evaluateTrials(metric, paramNames, method, plan);
+	}
+
+	/**
 	 * The `pipeline` walk-forward primitive's real execution: split the bound
 	 * feed into `folds` expanding-window train/test splits (an `embargo`-bar
 	 * gap purged between each split's train end and test start, guarding
@@ -170,7 +190,7 @@ class PlanRunner {
 	):OptimizeResult {
 		var names = resolveParamNames(explicitParams, plan);
 		if (names.length == 0 || !canEvaluate() || feed == null || folds < 1)
-			return { bestParams: snapshotParams(names), bestMetric: Math.NaN, trials: 0 };
+			return stampOpt({ bestParams: snapshotParams(names), bestMetric: Math.NaN, trials: 0 });
 
 		var allBars = feed.all();
 		var n = allBars.length;
@@ -214,7 +234,7 @@ class PlanRunner {
 
 		applyParams(lastBestParams);
 		if (foldResults.length == 0)
-			return { bestParams: lastBestParams, bestMetric: Math.NaN, trials: 0 };
+			return stampOpt({ bestParams: lastBestParams, bestMetric: Math.NaN, trials: 0 });
 
 		var aggSharpe = meanOf([for (f in foldResults) f.oosSharpe]);
 		var aggDD = meanOf([for (f in foldResults) f.oosMaxDrawdown]);
@@ -228,7 +248,7 @@ class PlanRunner {
 			})
 			: null;
 
-		return {
+		return stampOpt({
 			bestParams: lastBestParams,
 			bestMetric: aggSharpe,
 			trials: foldResults.length,
@@ -236,7 +256,7 @@ class PlanRunner {
 				folds: foldResults, aggregateSharpe: aggSharpe, aggregateMaxDrawdown: aggDD,
 				aggregateWinRate: aggWin, aggregateFinalEquity: aggEq, promoted: promoted
 			}
-		};
+		});
 	}
 
 	/** Materializes and calls `cond` (a `fn(r) => ...` lambda AST) against `metrics`. */
@@ -256,31 +276,39 @@ class PlanRunner {
 
 	function optimizeStep(metric:String, paramNames:Array<String>, method:String, plan:ExecutionPlan):OptimizeResult {
 		var names = resolveParamNames(paramNames, plan);
-		var bestMetric = Math.NEGATIVE_INFINITY;
 		var bestParams = snapshotParams(names);
-		var trials = 0;
-
 		if (names.length == 0 || !canEvaluate()) {
 			// Honest "could not search" — not a zero-sharpe result.
-			return { bestParams: bestParams, bestMetric: Math.NaN, trials: 0 };
+			return stampOpt({ bestParams: bestParams, bestMetric: Math.NaN, trials: 0 });
 		}
+		var trials = evaluateTrials(metric, paramNames, method, plan);
+		var bestMetric = Math.NEGATIVE_INFINITY;
+		for (t in trials) {
+			if (t.score > bestMetric) {
+				bestMetric = t.score;
+				bestParams = t.params;
+			}
+		}
+		applyParams(bestParams);
+		return stampOpt({ bestParams: bestParams, bestMetric: bestMetric, trials: trials.length });
+	}
 
+	function evaluateTrials(metric:String, paramNames:Array<String>, method:String, plan:ExecutionPlan):Array<OptimizeTrial> {
+		var out:Array<OptimizeTrial> = [];
+		var names = resolveParamNames(paramNames, plan);
+		if (names.length == 0 || !canEvaluate()) return out;
 		var baseline = snapshotParams(names);
 		var combos = buildTrials(names, baseline, method);
-
 		for (combo in combos) {
 			applyParams(combo);
 			var result = evaluateCandidate();
-			var score = scoreMetric(result, metric);
-			trials++;
-			if (score > bestMetric) {
-				bestMetric = score;
-				bestParams = snapshotParams(names);
-			}
+			out.push({
+				params: snapshotParams(names),
+				result: result,
+				score: scoreMetric(result, metric)
+			});
 		}
-
-		applyParams(bestParams);
-		return { bestParams: bestParams, bestMetric: bestMetric, trials: trials };
+		return out;
 	}
 
 	function canEvaluate():Bool {
@@ -471,5 +499,17 @@ class PlanRunner {
 		if (Std.isOfType(v, Int)) return cast v;
 		if (Std.isOfType(v, Float)) return cast v;
 		return Std.parseFloat(Std.string(v));
+	}
+
+	/** Attach Initiative 4.2 seed stamp without changing search semantics. */
+	function stampOpt(r:OptimizeResult):OptimizeResult {
+		r.seed = seed;
+		r.repro = musescript.repro.ReproStamp.make({
+			seed: seed,
+			bootSeed: seed,
+			profile: "plan",
+			backend: compiled != null ? "js" : (interp != null ? "interp" : "harness")
+		}).toJson();
+		return r;
 	}
 }

@@ -145,10 +145,42 @@ class VolumeProfile {
 		bins:Int = DEFAULT_BINS,
 		?endInclusive:Int
 	):Array<Float> {
+		var pack = histogramPack(bars, window, bins, endInclusive);
+		return pack != null ? pack.vols : [];
+	}
+
+	/**
+	 * Overlay-ready histogram: mid-bin `price` + `vol` (Initiative 2.4).
+	 * Same windowing/binning as `fromBars` / `histogram`. Empty on degenerate input.
+	 */
+	public static function histogramBins(
+		bars:Array<Bar>,
+		window:Int = DEFAULT_WINDOW,
+		bins:Int = DEFAULT_BINS,
+		?endInclusive:Int
+	):Array<{price:Float, vol:Float}> {
+		var pack = histogramPack(bars, window, bins, endInclusive);
+		if (pack == null) return [];
+		var out:Array<{price:Float, vol:Float}> = [];
+		for (i in 0...pack.vols.length) {
+			out.push({
+				price: pack.winLow + pack.binWidth * (i + 0.5),
+				vol: pack.vols[i]
+			});
+		}
+		return out;
+	}
+
+	static function histogramPack(
+		bars:Array<Bar>,
+		window:Int,
+		bins:Int,
+		?endInclusive:Int
+	):Null<{vols:Array<Float>, winLow:Float, binWidth:Float}> {
 		if (bars == null || bars.length == 0 || window <= 0 || bins <= 0)
-			return [];
+			return null;
 		var end = endInclusive != null ? endInclusive : bars.length - 1;
-		if (end < 0 || end >= bars.length) return [];
+		if (end < 0 || end >= bars.length) return null;
 		var start = end - window + 1;
 		if (start < 0) start = 0;
 
@@ -160,9 +192,11 @@ class VolumeProfile {
 			if (b.low < winLow) winLow = b.low;
 			if (b.high > winHigh) winHigh = b.high;
 		}
-		if (!Math.isFinite(winLow) || !Math.isFinite(winHigh)) return [];
+		if (!Math.isFinite(winLow) || !Math.isFinite(winHigh)) return null;
 		var span = winHigh - winLow;
-		if (span <= 0.0) return [for (_ in 0...bins) 0.0];
+		if (span <= 0.0) {
+			return { vols: [for (_ in 0...bins) 0.0], winLow: winLow, binWidth: 0.0 };
+		}
 
 		var hist = [for (_ in 0...bins) 0.0];
 		var binWidth = span / bins;
@@ -178,7 +212,7 @@ class VolumeProfile {
 			var share = b.volume / (hiIdx - loIdx + 1);
 			for (j in loIdx...(hiIdx + 1)) hist[j] += share;
 		}
-		return hist;
+		return { vols: hist, winLow: winLow, binWidth: binWidth };
 	}
 
 	static inline function priceToBin(price:Float, winLow:Float, binWidth:Float, binCount:Int):Int {

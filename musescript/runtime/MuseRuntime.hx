@@ -36,8 +36,30 @@ import musescript.builtins.TradeBuiltins;
  *   - "auto":   js, letting MuseCompiler fall back to interp if emission fails.
  *
  * JS API (after `haxe build-runtime.hxml`):
- *   MuseRuntime.run(sourceString, barsArray, { tier, instrument, initialCash })
+ *   MuseRuntime.run(sourceString, barsArray, { tier, instrument, initialCash, seed })
  *   MuseRuntime.check(sourceString)   // structured diagnostics, no run
+ *   MuseRuntime.proveDeterminism(source, bars, { seed, engines })  // Initiative 4.1
+ *   MuseRuntime.equityDigest(equity) / foundationDigest()           // proof helpers
+ *
+ * Successful runs attach `repro: { schemaVersion, seed, bootSeed, profile, backend }`
+ * plus `equityDigest` / `fillDigest` when instrumented (Initiative 4.2 seed stamp).
+ *
+ * Instrumented runs also attach `truthReport` (Initiative 1 — Honest Backtest) unless
+ * `opts.skipTruthReport` is true. Pass `nTrials` / `nullSharpe` / `purgeEmbargoApplied` /
+ * `oosHeld` / `pbo` from the IDE; omit `nTrials` to use `TrialsSession.effectiveTrials()`.
+ *
+ * When `opts.honestOos` is true, Truth Report is scored on a purge/embargo OOS slice
+ * (`oosFrac` default 0.25, `embargoBars` default 20) — full-tape metrics/chart stay
+ * unchanged. Nested OOS re-run sets `honestOos=false` to avoid recursion.
+ *
+ * Initiative 3 — honesty-gated optimizer:
+ *   MuseRuntime.optimize(source, bars, opts) / MuseRuntime.evolve(...)  // alias
+ *   MuseRuntime.forecastFields()  // SProj / forecast reduction vocabulary (3.3)
+ *
+ * Initiative 5 — Report Card / Honest Ledger:
+ *   Instrumented runs also attach `reportCard` (from Truth Report; seed/universe slots pending).
+ *   MuseRuntime.buildReportCard(truthReport|payload) / seedRobustnessSweep(source, bars, opts)
+ *   MuseRuntime.ledgerEntryFromTruth(truthReport) — serializable Honest Ledger entry
  */
 @:expose("MuseRuntime")
 class MuseRuntime {
@@ -122,6 +144,15 @@ class MuseRuntime {
 			var out = baseResult(backend, emitted, feed.length(), result);
 			if (instrument) attachOrdersInstrumentation(out, harness);
 			attachParams(out, harness);
+			attachRepro(out, opts, backend,
+				instrument ? Reflect.field(out, "equity") : null,
+				instrument ? Reflect.field(out, "fills") : null);
+			if (instrument) {
+				var barsForOos:Array<Dynamic> = bars != null ? bars : barsToDyn(feed.all());
+				finalizeTruthReport(out, opts, closesOf(feed.all()), {
+					kind: "single", source: source, bars: barsForOos, bySym: null
+				});
+			}
 			return out;
 		} 
 		catch (e:Dynamic) {
@@ -190,6 +221,16 @@ class MuseRuntime {
 				Reflect.setField(out, "logs", harness.logs);
 			}
 			attachParams(out, harness);
+			attachRepro(out, opts, backend,
+				instrument ? Reflect.field(out, "equity") : null,
+				instrument ? Reflect.field(out, "fills") : null);
+			if (instrument) {
+				// Panel null baseline: equal-weight buy-and-hold of the panel's primary feed closes.
+				var feedBars = harness.feed != null ? harness.feed.all() : [];
+				finalizeTruthReport(out, opts, closesOf(feedBars), {
+					kind: "panel", source: source, bars: null, bySym: bySym
+				});
+			}
 			return out;
 		} catch (e:Dynamic) {
 			return err(Std.string(e));
@@ -258,6 +299,15 @@ class MuseRuntime {
 			var out = baseResult("wasm", true, feed.length(), result);
 			if (instrument) attachOrdersInstrumentation(out, harness);
 			attachParams(out, harness);
+			attachRepro(out, opts, "wasm",
+				instrument ? Reflect.field(out, "equity") : null,
+				instrument ? Reflect.field(out, "fills") : null);
+			if (instrument) {
+				var barsForOos:Array<Dynamic> = bars != null ? bars : barsToDyn(feed.all());
+				finalizeTruthReport(out, opts, closesOf(feed.all()), {
+					kind: "wasm", source: source, bars: barsForOos, bySym: null, wasmBytes: wasmBytes
+				});
+			}
 			return out;
 		} catch (e:Dynamic) {
 			return err(Std.string(e));
@@ -265,6 +315,312 @@ class MuseRuntime {
 		#else
 		return err("runWasm is only available in the JS build");
 		#end
+	}
+
+	/**
+	 * Initiative 4.1 — callable determinism proof for Studio / Truth Report.
+	 * See `musescript.repro.DeterminismProof.prove`.
+	 */
+	public static function proveDeterminism(source:String, ?bars:Array<Dynamic>, ?opts:Dynamic):Dynamic {
+		return musescript.repro.DeterminismProof.prove(source, bars, opts);
+	}
+
+	/**
+	 * Initiative 1 — evaluate a Truth Report from equity / trades / nullSharpe without a full run.
+	 * `payload`: { equity:[], trades, nullSharpe?, closes?[], nTrials?, …TruthReportOpts }.
+	 * When `nullSharpe` is omitted, buy-and-hold Sharpe is derived from `closes` (or equity itself).
+	 */
+	public static function evaluateTruthReport(payload:Dynamic):Dynamic {
+		try {
+			if (payload == null) return err("evaluateTruthReport requires a payload object");
+			var equity:Array<Float> = Reflect.hasField(payload, "equity")
+				? cast Reflect.field(payload, "equity") : null;
+			if (equity == null) return err("evaluateTruthReport requires equity:[]");
+			var trades = intField(payload, "trades");
+			var closes:Array<Float> = Reflect.hasField(payload, "closes")
+				? cast Reflect.field(payload, "closes") : null;
+			var out:Dynamic = {
+				ok: true,
+				trades: trades,
+				equity: equity,
+				finalEquity: equity.length > 0 ? equity[equity.length - 1] : null,
+				backend: Reflect.hasField(payload, "backend") ? Reflect.field(payload, "backend") : "js",
+				equityDigest: Reflect.field(payload, "equityDigest"),
+				fillDigest: Reflect.field(payload, "fillDigest")
+			};
+			attachTruthReport(out, payload, closes != null ? closes : []);
+			return {
+				ok: true,
+				truthReport: Reflect.field(out, "truthReport"),
+				reportCard: Reflect.field(out, "reportCard")
+			};
+		} catch (e:Dynamic) {
+			return err(Std.string(e));
+		}
+	}
+
+	/** Initiative 1.3 — reset / record / set / get session trial count (DSR deflation). */
+	public static function trialsReset():Void {
+		musescript.evo.rigor.TrialsSession.reset();
+	}
+	public static function trialsRecord():Int {
+		return musescript.evo.rigor.TrialsSession.recordTrial();
+	}
+	public static function trialsSetCount(n:Int):Int {
+		musescript.evo.rigor.TrialsSession.setCount(n);
+		return musescript.evo.rigor.TrialsSession.getCount();
+	}
+	public static function trialsGetCount():Int {
+		return musescript.evo.rigor.TrialsSession.getCount();
+	}
+
+	/**
+	 * Initiative 3 — honesty-gated param search ("Evolve this strategy").
+	 * Enumerates `@param` / `tune`/`optimize` holes, Truth-Report-gates every candidate,
+	 * and returns only non-overfit survivors — or an honest empty result
+	 * (`reason: "no robust strategy found"` / `"nothing beat the null"`).
+	 *
+	 * `opts`: { metric, method, seed, initialCash, params, paramNames, acceptVerdicts,
+	 *   nTrials, tier, oosHeld, purgeEmbargoApplied, pbo, minTrades }
+	 * Default acceptVerdicts: ["Robust","Fragile"] (Overfit / Coin-flip never ship).
+	 */
+	public static function optimize(source:String, ?bars:Array<Dynamic>, ?opts:Dynamic):Dynamic {
+		try {
+			var typed = toBars(bars);
+			return musescript.harness.HonestOptimize.search(source, typed, opts);
+		} catch (e:Dynamic) {
+			return err(Std.string(e));
+		}
+	}
+
+	/** Alias for `optimize` — Studio "Evolve this strategy" entry point. */
+	public static function evolve(source:String, ?bars:Array<Dynamic>, ?opts:Dynamic):Dynamic {
+		return optimize(source, bars, opts);
+	}
+
+	/**
+	 * Initiative 5.1 — build a Report Card from a Truth Report dyn (or evaluateTruthReport payload).
+	 * Does not invent metrics — skill/profit come from the Truth Report; seed/universe
+	 * slots stay pending unless `seedMetrics` / `instruments` are supplied.
+	 */
+	public static function buildReportCard(payload:Dynamic):Dynamic {
+		try {
+			if (payload == null) return err("buildReportCard requires a truthReport or payload");
+			var trDyn:Dynamic = Reflect.hasField(payload, "verdict")
+				? payload
+				: (Reflect.hasField(payload, "truthReport") ? Reflect.field(payload, "truthReport") : null);
+			if (trDyn == null) return err("buildReportCard requires truthReport with verdict");
+			var tr = musescript.evo.rigor.TruthReport.fromDyn(trDyn);
+			var seedMetrics:Null<Array<Float>> = null;
+			var seedThreshold:Null<Float> = null;
+			var instruments:Null<Array<{name:String, metric:Float, go:Bool}>> = null;
+			var strategyLabel:Null<String> = null;
+			var tape:Null<String> = null;
+			if (Reflect.hasField(payload, "seedMetrics"))
+				seedMetrics = cast Reflect.field(payload, "seedMetrics");
+			if (Reflect.hasField(payload, "seedThreshold") && Reflect.field(payload, "seedThreshold") != null)
+				seedThreshold = (Reflect.field(payload, "seedThreshold") : Float);
+			if (Reflect.hasField(payload, "instruments"))
+				instruments = cast Reflect.field(payload, "instruments");
+			if (Reflect.hasField(payload, "strategyLabel"))
+				strategyLabel = Std.string(Reflect.field(payload, "strategyLabel"));
+			if (Reflect.hasField(payload, "tape"))
+				tape = Std.string(Reflect.field(payload, "tape"));
+			var card = musescript.evo.rigor.ReportCard.fromTruthReport(tr, {
+				seedMetrics: seedMetrics,
+				seedThreshold: seedThreshold,
+				instruments: instruments,
+				strategyLabel: strategyLabel,
+				tape: tape
+			});
+			return { ok: true, reportCard: card.toDyn() };
+		} catch (e:Dynamic) {
+			return err(Std.string(e));
+		}
+	}
+
+	/**
+	 * Initiative 5.1 — light seed-robustness sweep: re-run the strategy at each seed,
+	 * collect Sharpes, aggregate with SeedRobustness (median, not max). Returns an
+	 * updated reportCard when `truthReport` is also supplied in opts.
+	 *
+	 * `opts.seeds` default [42, 43, 44]; nested runs use skipTruthReport for speed
+	 * then score skill vs the primary nullSharpe from opts / first run.
+	 */
+	public static function seedRobustnessSweep(source:String, ?bars:Array<Dynamic>, ?opts:Dynamic):Dynamic {
+		try {
+			var seeds:Array<Int> = [42, 43, 44];
+			if (opts != null && Reflect.hasField(opts, "seeds") && Reflect.field(opts, "seeds") != null) {
+				var raw:Dynamic = Reflect.field(opts, "seeds");
+				if (Std.isOfType(raw, Array)) {
+					seeds = [];
+					for (x in (raw : Array<Dynamic>)) seeds.push(Std.int((x : Float)));
+				}
+			}
+			if (seeds.length < 1) return err("seedRobustnessSweep requires at least one seed");
+
+			var metrics:Array<Float> = [];
+			var perSeed:Array<Dynamic> = [];
+			var nullSharpe = Math.NaN;
+			if (opts != null && Reflect.hasField(opts, "nullSharpe") && Reflect.field(opts, "nullSharpe") != null)
+				nullSharpe = (Reflect.field(opts, "nullSharpe") : Float);
+
+			for (s in seeds) {
+				var nested = cloneRunOpts(opts);
+				Reflect.setField(nested, "seed", s);
+				Reflect.setField(nested, "skipTruthReport", true);
+				Reflect.setField(nested, "honestOos", false);
+				var r = run(source, bars, nested);
+				if (r == null || Reflect.field(r, "ok") != true) {
+					perSeed.push({ seed: s, ok: false, error: Reflect.field(r, "error") });
+					continue;
+				}
+				var sharpe = Reflect.field(r, "sharpe");
+				var sr = sharpe != null ? (sharpe : Float) : Math.NaN;
+				if (Math.isFinite(sr)) metrics.push(sr);
+				perSeed.push({
+					seed: s, ok: true, sharpe: Math.isFinite(sr) ? sr : null,
+					trades: Reflect.field(r, "trades")
+				});
+				if (!Math.isFinite(nullSharpe)) {
+					var closes = closesOf(toBars(bars));
+					var bh = buyHoldFromCloses(closes, optFloat(opts, "initialCash", 100000));
+					nullSharpe = bh.sharpe;
+				}
+			}
+
+			var thr = Math.isFinite(nullSharpe) ? nullSharpe : 0.0;
+			if (opts != null && Reflect.hasField(opts, "seedThreshold") && Reflect.field(opts, "seedThreshold") != null)
+				thr = (Reflect.field(opts, "seedThreshold") : Float);
+			var verdict = musescript.evo.rigor.SeedRobustness.verdict(metrics, thr);
+			var slot = musescript.evo.rigor.ReportCard.fromSeedVerdict(verdict);
+
+			var out:Dynamic = {
+				ok: true,
+				seedRobustness: slot,
+				metrics: metrics,
+				perSeed: perSeed,
+				threshold: thr,
+				nullSharpe: Math.isFinite(nullSharpe) ? nullSharpe : null
+			};
+
+			var trDyn:Dynamic = null;
+			if (opts != null && Reflect.hasField(opts, "truthReport"))
+				trDyn = Reflect.field(opts, "truthReport");
+			if (trDyn != null) {
+				var card = musescript.evo.rigor.ReportCard.fromTruthReport(
+					musescript.evo.rigor.TruthReport.fromDyn(trDyn),
+					{ seedMetrics: metrics, seedThreshold: thr }
+				);
+				Reflect.setField(out, "reportCard", card.toDyn());
+			}
+			return out;
+		} catch (e:Dynamic) {
+			return err(Std.string(e));
+		}
+	}
+
+	/**
+	 * Initiative 5.2 — build one Honest Ledger entry from a Truth Report dyn.
+	 * IDE persists the list; this only shapes the entry (GO / CAUTION / NO-GO).
+	 */
+	public static function ledgerEntryFromTruth(payload:Dynamic):Dynamic {
+		try {
+			if (payload == null) return err("ledgerEntryFromTruth requires a truthReport");
+			var trDyn:Dynamic = Reflect.hasField(payload, "verdict")
+				? payload
+				: (Reflect.hasField(payload, "truthReport") ? Reflect.field(payload, "truthReport") : null);
+			if (trDyn == null) return err("ledgerEntryFromTruth requires truthReport with verdict");
+			var tr = musescript.evo.rigor.TruthReport.fromDyn(trDyn);
+			var meta:{
+				?at:String, ?id:String, ?strategyLabel:String, ?tape:String,
+				?skillVsNull:Float, ?profitVsBaseline:Float
+			} = {};
+			if (Reflect.hasField(payload, "at")) meta.at = Std.string(Reflect.field(payload, "at"));
+			if (Reflect.hasField(payload, "id")) meta.id = Std.string(Reflect.field(payload, "id"));
+			if (Reflect.hasField(payload, "strategyLabel"))
+				meta.strategyLabel = Std.string(Reflect.field(payload, "strategyLabel"));
+			if (Reflect.hasField(payload, "tape")) meta.tape = Std.string(Reflect.field(payload, "tape"));
+			var entry = musescript.evo.rigor.HonestLedger.entryFromTruth(tr, meta);
+			return { ok: true, entry: musescript.evo.rigor.HonestLedger.entryToDyn(entry) };
+		} catch (e:Dynamic) {
+			return err(Std.string(e));
+		}
+	}
+
+	/**
+	 * Initiative 3.3 — forecast reduction vocabulary for `SProj(name, field)` /
+	 * host-decorated aux series. Studio/docs: `forecast("regime").entropy` maps to
+	 * field `"entropy"` on a regime/lattice/auction host projection.
+	 */
+	public static function forecastFields():Dynamic {
+		return {
+			ok: true,
+			schema: "mederos.forecastFields.v1",
+			fields: [
+				{ field: "p50", aliases: ["mean", "poc"], note: "price mid / auction POC" },
+				{ field: "p05", aliases: [], note: "lower price band" },
+				{ field: "p95", aliases: [], note: "upper price band" },
+				{ field: "spread", aliases: [], note: "band width (p95−p05)" },
+				{ field: "prob_up", aliases: ["breakout_prob"], note: "P(up) / auction breakout-up mass" },
+				{ field: "entropy", aliases: [], note: "count / regime ambiguity (high = uncertain)" },
+				{ field: "inv", aliases: [], note: "invalidation price (lattice; often NaN on regime/auction)" },
+				{ field: "dist_inv", aliases: [], note: "distance to invalidation" },
+				{ field: "top_mass", aliases: [], note: "posterior mass on preferred count" },
+				{ field: "nest", aliases: [], note: "soft nest score across degrees" },
+				{ field: "label", aliases: [], note: "opaque label code for viz" }
+			],
+			hosts: ["lattice", "regime", "auction", "mcmc"],
+			usage: {
+				evo: 'SProj("ew_0", "entropy")',
+				studioNote: "Co-evolution Boundary X decorates bars with Expand.projRef columns; authored MuseScript can read the same reductions as aux series once a forecast host is bound.",
+				doc: "musescript/ew/FORECAST_STRATEGY_INPUTS.md"
+			}
+		};
+	}
+
+	/**
+	 * Initiative 1 — CSCV PBO from a trial cloud.
+	 * `perf` is `[[sliceScore…], …]` (strategies × even #slices ≥ 2).
+	 * Returns `{ ok, pbo }` or `{ ok:false, error, pbo:null }` — never invents a number.
+	 */
+	public static function estimatePbo(perf:Array<Array<Float>>, ?maxCombos:Int):Dynamic {
+		try {
+			if (perf == null || perf.length < 1)
+				return { ok: false, error: "estimatePbo requires perf[strategy][slice]", pbo: null };
+			var pbo = musescript.evo.rigor.Pbo.estimate(perf, maxCombos != null ? maxCombos : 2000);
+			if (!Math.isFinite(pbo))
+				return { ok: false, error: "PBO undefined — need ≥1 strategy and even #slices ≥ 2", pbo: null };
+			return { ok: true, pbo: pbo };
+		} catch (e:Dynamic) {
+			return { ok: false, error: Std.string(e), pbo: null };
+		}
+	}
+
+	/** Purge/embargo split helper for IDE (same as hardened instrument). */
+	public static function purgeEmbargoSplit(n:Int, ?oosFrac:Float, ?embargoBars:Int):Dynamic {
+		var frac = oosFrac != null ? oosFrac : 0.25;
+		var emb = embargoBars != null ? embargoBars : 20;
+		var s = musescript.evo.rigor.PurgeEmbargo.split(n, frac, emb);
+		return {
+			ok: true,
+			isEnd: s.isEnd,
+			oosStart: s.oosStart,
+			embargo: s.embargo,
+			purged: s.purged,
+			oosFrac: frac,
+			n: n
+		};
+	}
+
+	/** Equity-curve bit digest (16-hex). Same as `result.equityDigest` after a run. */
+	public static function equityDigest(equity:Array<Float>):String {
+		return musescript.repro.EquityDigest.of(equity);
+	}
+
+	/** DetParityDump foundation digest — CI/golden parity substrate fingerprint. */
+	public static function foundationDigest():String {
+		return musescript.repro.DeterminismProof.foundationDigest();
 	}
 
 	/**
@@ -355,6 +711,333 @@ class MuseRuntime {
 			});
 		}
 		Reflect.setField(out, "params", arr);
+	}
+
+	/**
+	 * Initiative 4.2 — stamp every successful run with seed + digests so a
+	 * shareable Truth Report can be re-verified later.
+	 */
+	static function attachRepro(out:Dynamic, opts:Dynamic, backend:String,
+			equity:Null<Array<Float>>, fills:Dynamic):Void {
+		var seed = optInt(opts, "seed", musescript.repro.ReproStamp.DEFAULT_SEED);
+		var boot = optInt(opts, "bootSeed", seed);
+		var profile = optStr(opts, "profile", "studio");
+		var stamp = musescript.repro.ReproStamp.make({
+			seed: seed, bootSeed: boot, profile: profile, backend: backend
+		});
+		Reflect.setField(out, "repro", stamp.toJson());
+		if (equity != null)
+			Reflect.setField(out, "equityDigest", musescript.repro.EquityDigest.of(equity));
+		if (fills != null)
+			Reflect.setField(out, "fillDigest", musescript.evo.FillHash.of(fills));
+	}
+
+	/**
+	 * Initiative 1 — attach Honest Backtest Truth Report onto an instrumented run result.
+	 * When `opts.honestOos` is true, re-runs on a purge/embargo OOS slice and marks
+	 * `oosHeld` / `purgeEmbargoApplied` honestly (full-tape chart/metrics unchanged).
+	 * If OOS is too short or the nested run fails, falls back without faking the flags.
+	 */
+	static function finalizeTruthReport(
+		out:Dynamic, opts:Dynamic, fullCloses:Array<Float>,
+		ctx:{kind:String, source:String, bars:Null<Array<Dynamic>>, bySym:Null<Dynamic>, ?wasmBytes:Dynamic}
+	):Void {
+		if (optBool(opts, "skipTruthReport", false)) return;
+
+		// Caller already applied a real OOS hold — trust their flags; no nested re-run.
+		var callerHeld = optBool(opts, "oosHeld", false) || optBool(opts, "purgeEmbargoApplied", false);
+		if (!optBool(opts, "honestOos", false) || callerHeld) {
+			attachTruthReport(out, opts, fullCloses);
+			return;
+		}
+
+		var n = tapeLength(ctx);
+		if (n < 80) {
+			Reflect.setField(out, "oosSplit", {
+				applied: false, reason: "tape too short for purge/embargo OOS (need ≥80 bars)", n: n
+			});
+			attachTruthReport(out, opts, fullCloses);
+			return;
+		}
+
+		var oosFrac = optFloat(opts, "oosFrac", 0.25);
+		var embargo = optInt(opts, "embargoBars", 20);
+		// Keep a usable OOS window on short Studio tapes — shrink embargo before giving up.
+		var minOos = 40;
+		var rawOos = Std.int(n * oosFrac);
+		if (rawOos < 1) rawOos = 1;
+		if (rawOos - embargo < minOos && embargo > 0) {
+			var shrink = rawOos - minOos;
+			embargo = shrink > 0 ? shrink : 0;
+		}
+		var split = musescript.evo.rigor.PurgeEmbargo.split(n, oosFrac, embargo);
+		var oosLen = n - split.oosStart;
+		if (oosLen < minOos || split.isEnd < 40) {
+			Reflect.setField(out, "oosSplit", {
+				applied: false,
+				reason: 'OOS/IS too short after purge (IS=${split.isEnd} OOS=$oosLen embargo=${split.embargo})',
+				isEnd: split.isEnd, oosStart: split.oosStart, embargo: split.embargo, n: n
+			});
+			attachTruthReport(out, opts, fullCloses);
+			return;
+		}
+
+		var nestedOpts = cloneRunOpts(opts);
+		Reflect.setField(nestedOpts, "honestOos", false);
+		Reflect.setField(nestedOpts, "skipTruthReport", true);
+		Reflect.setField(nestedOpts, "instrument", true);
+		Reflect.setField(nestedOpts, "oosHeld", false);
+		Reflect.setField(nestedOpts, "purgeEmbargoApplied", false);
+
+		var oosRun:Dynamic = null;
+		if (ctx.kind == "panel") {
+			var sliced = slicePanel(ctx.bySym, split.oosStart, n);
+			if (sliced == null) {
+				Reflect.setField(out, "oosSplit", { applied: false, reason: "panel slice failed", n: n });
+				attachTruthReport(out, opts, fullCloses);
+				return;
+			}
+			oosRun = runPanel(ctx.source, sliced, nestedOpts);
+		} else if (ctx.kind == "wasm") {
+			#if js
+			var oosBars = ctx.bars != null ? ctx.bars.slice(split.oosStart, n) : null;
+			if (oosBars == null || oosBars.length < 40) {
+				Reflect.setField(out, "oosSplit", { applied: false, reason: "wasm OOS bars missing", n: n });
+				attachTruthReport(out, opts, fullCloses);
+				return;
+			}
+			oosRun = runWasm(ctx.source, oosBars, ctx.wasmBytes, nestedOpts);
+			#else
+			Reflect.setField(out, "oosSplit", { applied: false, reason: "wasm OOS unavailable", n: n });
+			attachTruthReport(out, opts, fullCloses);
+			return;
+			#end
+		} else {
+			var oosBars2 = ctx.bars != null ? ctx.bars.slice(split.oosStart, n) : null;
+			if (oosBars2 == null) {
+				// Synthetic path — rebuild from typed closes length via fresh synthetic slice not available;
+				// fall back honestly.
+				Reflect.setField(out, "oosSplit", {
+					applied: false, reason: "bars array required for honestOos", n: n
+				});
+				attachTruthReport(out, opts, fullCloses);
+				return;
+			}
+			oosRun = run(ctx.source, oosBars2, nestedOpts);
+		}
+
+		if (oosRun == null || Reflect.field(oosRun, "ok") != true) {
+			Reflect.setField(out, "oosSplit", {
+				applied: false,
+				reason: "OOS re-run failed"
+					+ (oosRun != null && Reflect.hasField(oosRun, "error")
+						? ': ${Std.string(Reflect.field(oosRun, "error"))}' : ""),
+				isEnd: split.isEnd, oosStart: split.oosStart, embargo: split.embargo, n: n
+			});
+			attachTruthReport(out, opts, fullCloses);
+			return;
+		}
+
+		var oosCloses:Array<Float> = [];
+		if (ctx.kind == "panel") {
+			oosCloses = fullCloses.length > split.oosStart ? fullCloses.slice(split.oosStart) : fullCloses;
+		} else if (ctx.bars != null) {
+			var sliceBars = ctx.bars.slice(split.oosStart, n);
+			for (b in sliceBars) oosCloses.push(num(b, "close"));
+		} else {
+			oosCloses = fullCloses.length > split.oosStart ? fullCloses.slice(split.oosStart) : fullCloses;
+		}
+
+		var trOpts = cloneRunOpts(opts);
+		Reflect.setField(trOpts, "honestOos", false);
+		Reflect.setField(trOpts, "purgeEmbargoApplied", true);
+		Reflect.setField(trOpts, "oosHeld", true);
+		Reflect.setField(trOpts, "embargoBars", split.embargo);
+		// Prefer OOS digests for the Truth Report stamp (re-verifiable on OOS slice).
+		var trCarrier:Dynamic = {
+			ok: true,
+			trades: Reflect.field(oosRun, "trades"),
+			equity: Reflect.field(oosRun, "equity"),
+			finalEquity: Reflect.field(oosRun, "finalEquity"),
+			backend: Reflect.hasField(out, "backend") ? Reflect.field(out, "backend") : Reflect.field(oosRun, "backend"),
+			equityDigest: Reflect.field(oosRun, "equityDigest"),
+			fillDigest: Reflect.field(oosRun, "fillDigest")
+		};
+		attachTruthReport(trCarrier, trOpts, oosCloses);
+		Reflect.setField(out, "truthReport", Reflect.field(trCarrier, "truthReport"));
+		if (Reflect.hasField(trCarrier, "reportCard"))
+			Reflect.setField(out, "reportCard", Reflect.field(trCarrier, "reportCard"));
+		Reflect.setField(out, "oosSplit", {
+			applied: true,
+			isEnd: split.isEnd,
+			oosStart: split.oosStart,
+			embargo: split.embargo,
+			purged: split.purged,
+			oosFrac: oosFrac,
+			oosBars: oosLen,
+			isBars: split.isEnd,
+			n: n,
+			oosTrades: Reflect.field(oosRun, "trades"),
+			oosSharpe: Reflect.field(oosRun, "sharpe")
+		});
+		// Expose OOS equity for PBO cloud / Studio without replacing full-tape chart.
+		Reflect.setField(out, "oosEquity", Reflect.field(oosRun, "equity"));
+		Reflect.setField(out, "oosTrades", Reflect.field(oosRun, "trades"));
+	}
+
+	static function tapeLength(ctx:{kind:String, source:String, bars:Null<Array<Dynamic>>, bySym:Null<Dynamic>, ?wasmBytes:Dynamic}):Int {
+		if (ctx.kind == "panel" && ctx.bySym != null) {
+			for (sym in Reflect.fields(ctx.bySym)) {
+				var raw:Dynamic = Reflect.field(ctx.bySym, sym);
+				if (Std.isOfType(raw, Array)) return (raw : Array<Dynamic>).length;
+			}
+			return 0;
+		}
+		return ctx.bars != null ? ctx.bars.length : 0;
+	}
+
+	static function slicePanel(bySym:Dynamic, from:Int, to:Int):Null<Dynamic> {
+		if (bySym == null) return null;
+		var out:Dynamic = {};
+		var any = false;
+		for (sym in Reflect.fields(bySym)) {
+			var raw:Dynamic = Reflect.field(bySym, sym);
+			if (!Std.isOfType(raw, Array)) continue;
+			var arr:Array<Dynamic> = cast raw;
+			var end = to < arr.length ? to : arr.length;
+			var start = from < end ? from : end;
+			Reflect.setField(out, sym, arr.slice(start, end));
+			any = true;
+		}
+		return any ? out : null;
+	}
+
+	/** Shallow-clone run opts so nested OOS re-run can flip honesty flags safely. */
+	static function cloneRunOpts(opts:Dynamic):Dynamic {
+		var o:Dynamic = {};
+		if (opts == null) return o;
+		for (k in Reflect.fields(opts)) Reflect.setField(o, k, Reflect.field(opts, k));
+		return o;
+	}
+
+	/**
+	 * Initiative 1 — attach Honest Backtest Truth Report onto an instrumented run result.
+	 * Null baseline defaults to buy-and-hold of `closes` (Initiative 1.4 fair bar).
+	 */
+	static function attachTruthReport(out:Dynamic, opts:Dynamic, closes:Array<Float>):Void {
+		if (optBool(opts, "skipTruthReport", false)) return;
+		var equity:Array<Float> = Reflect.field(out, "equity");
+		if (equity == null) return;
+		var rets = musescript.harness.Metrics.returnsFromEquity(equity);
+		var trades = intField(out, "trades");
+		var initialCash = optFloat(opts, "initialCash", 100000);
+
+		var nullSharpe:Float;
+		var nullReturn:Null<Float> = null;
+		if (opts != null && Reflect.hasField(opts, "nullSharpe") && Reflect.field(opts, "nullSharpe") != null) {
+			nullSharpe = (Reflect.field(opts, "nullSharpe") : Float);
+			if (opts != null && Reflect.hasField(opts, "nullReturn") && Reflect.field(opts, "nullReturn") != null)
+				nullReturn = (Reflect.field(opts, "nullReturn") : Float);
+		} else {
+			var bh = buyHoldFromCloses(closes, initialCash);
+			nullSharpe = bh.sharpe;
+			nullReturn = bh.ret;
+		}
+
+		var nTrials:Int;
+		if (opts != null && Reflect.hasField(opts, "nTrials") && Reflect.field(opts, "nTrials") != null) {
+			nTrials = Std.int((Reflect.field(opts, "nTrials") : Float));
+			if (nTrials < 1) nTrials = 1;
+			musescript.evo.rigor.TrialsSession.setCount(nTrials);
+		} else {
+			nTrials = musescript.evo.rigor.TrialsSession.effectiveTrials();
+		}
+
+		var strategyReturn:Null<Float> = null;
+		var fe = Reflect.field(out, "finalEquity");
+		if (fe != null && Math.isFinite((fe : Float)) && initialCash > 0)
+			strategyReturn = (fe : Float) / initialCash - 1.0;
+
+		var pbo:Null<Float> = null;
+		if (opts != null && Reflect.hasField(opts, "pbo") && Reflect.field(opts, "pbo") != null)
+			pbo = (Reflect.field(opts, "pbo") : Float);
+
+		var seed = optInt(opts, "seed", musescript.repro.ReproStamp.DEFAULT_SEED);
+		var report = musescript.evo.rigor.TruthReport.evaluate(rets, trades, nullSharpe, {
+			nTrials: nTrials,
+			bootSeed: optInt(opts, "bootSeed", seed),
+			seed: seed,
+			pbo: pbo,
+			purgeEmbargoApplied: optBool(opts, "purgeEmbargoApplied", false),
+			embargoBars: optInt(opts, "embargoBars", 0),
+			oosHeld: optBool(opts, "oosHeld", false),
+			nullReturn: nullReturn,
+			strategyReturn: strategyReturn,
+			equityDigest: Reflect.field(out, "equityDigest"),
+			fillDigest: Reflect.field(out, "fillDigest"),
+			profile: optStr(opts, "profile", "studio"),
+			backend: Reflect.hasField(out, "backend") ? Std.string(Reflect.field(out, "backend")) : "js"
+		});
+		Reflect.setField(out, "truthReport", report.toDyn());
+		// Initiative 5.1 — Report Card from Truth Report (seed/universe pending unless opts supply them).
+		if (!optBool(opts, "skipReportCard", false)) {
+			var seedMetrics:Null<Array<Float>> = null;
+			var instruments:Null<Array<{name:String, metric:Float, go:Bool}>> = null;
+			var strategyLabel:Null<String> = null;
+			var tape:Null<String> = null;
+			if (opts != null && Reflect.hasField(opts, "seedMetrics"))
+				seedMetrics = cast Reflect.field(opts, "seedMetrics");
+			if (opts != null && Reflect.hasField(opts, "instruments"))
+				instruments = cast Reflect.field(opts, "instruments");
+			if (opts != null && Reflect.hasField(opts, "strategyLabel"))
+				strategyLabel = Std.string(Reflect.field(opts, "strategyLabel"));
+			if (opts != null && Reflect.hasField(opts, "tape"))
+				tape = Std.string(Reflect.field(opts, "tape"));
+			var card = musescript.evo.rigor.ReportCard.fromTruthReport(report, {
+				seedMetrics: seedMetrics,
+				instruments: instruments,
+				strategyLabel: strategyLabel,
+				tape: tape
+			});
+			Reflect.setField(out, "reportCard", card.toDyn());
+		}
+	}
+
+	/** Close series for buy-and-hold null baseline. */
+	static function closesOf(bars:Array<musescript.harness.Bar>):Array<Float> {
+		if (bars == null) return [];
+		return [for (b in bars) b.close];
+	}
+
+	/** Re-materialize Dynamic bars for nested OOS re-runs (synthetic / typed path). */
+	static function barsToDyn(bars:Array<musescript.harness.Bar>):Array<Dynamic> {
+		if (bars == null) return [];
+		var out:Array<Dynamic> = [];
+		for (b in bars) {
+			out.push({
+				open: b.open, high: b.high, low: b.low, close: b.close,
+				volume: b.volume, time: b.time
+			});
+		}
+		return out;
+	}
+
+	/**
+	 * Passive long-from-bar-0 equity curve — fair null for Studio when a full Fitness
+	 * buy-and-hold genome isn't run (same economics as always-in long).
+	 */
+	static function buyHoldFromCloses(closes:Array<Float>, initialCash:Float):{sharpe:Float, ret:Null<Float>} {
+		if (closes == null || closes.length < 2 || !(closes[0] > 0) || !(initialCash > 0))
+			return { sharpe: Math.NaN, ret: null };
+		var eq:Array<Float> = [];
+		var c0 = closes[0];
+		for (c in closes) eq.push(initialCash * (c / c0));
+		var rets = musescript.harness.Metrics.returnsFromEquity(eq);
+		var last = eq[eq.length - 1];
+		return {
+			sharpe: musescript.harness.Metrics.sharpe(rets, 0.0),
+			ret: last / initialCash - 1.0
+		};
 	}
 
 	static function parse(source:String):MuseProgram {
@@ -451,5 +1134,12 @@ class MuseRuntime {
 		if (opts == null || !Reflect.hasField(opts, key)) return def;
 		var v = Reflect.field(opts, key);
 		return v == null ? def : (v : Float);
+	}
+
+	static function optInt(opts:Dynamic, key:String, def:Int):Int {
+		if (opts == null || !Reflect.hasField(opts, key)) return def;
+		var v:Dynamic = Reflect.field(opts, key);
+		if (v == null) return def;
+		return Std.isOfType(v, Int) ? cast v : Std.int((v : Float));
 	}
 }

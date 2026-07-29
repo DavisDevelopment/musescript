@@ -20,6 +20,13 @@ import musescript.evo.rigor.PreRegistration;
 import musescript.evo.rigor.SeedRobustness;
 import musescript.evo.rigor.UniverseRobustness;
 import musescript.evo.rigor.OosVerdict;
+import musescript.evo.rigor.TruthReport;
+import musescript.evo.rigor.TruthVerdict;
+import musescript.evo.rigor.TrialsSession;
+import musescript.evo.rigor.ReportCard;
+import musescript.evo.rigor.HonestLedger;
+import musescript.evo.rigor.LedgerDisposition;
+import musescript.evo.BasketFitness;
 import musescript.ew.NullForecastHost;
 import musescript.ew.OracleForecastHost;
 import musescript.ew.HostLeakageProbe;
@@ -74,6 +81,26 @@ class TestPipelineHardening extends Test {
 	public function testNineteenTradesStillNegInfTwentyClears() {
 		Assert.equals(Fitness.NEG_INF, Fitness.scoreFacts(19, 1.5));
 		Assert.floatEquals(1.5, Fitness.scoreFacts(20, 1.5));
+	}
+
+	// ── Initiative 1.4: null-baseline min-trades exemption ───────────────────
+
+	public function testBuyAndHoldNullBaselineNotNegInf() {
+		// Candidate gate still kills 1-trade luck; null baseline must stay a fair bar.
+		Assert.equals(Fitness.NEG_INF, Fitness.scoreFacts(1, 2.5));
+		Assert.floatEquals(2.5, Fitness.scoreFactsNullBaseline(1, 2.5));
+		var bh = new FitnessResult(true, 1.2, 1, 110000, "js");
+		Assert.equals(Fitness.NEG_INF, Fitness.score(bh));
+		Assert.floatEquals(1.2, Fitness.scoreNullBaseline(bh));
+		var agg = {trades: 1, sharpe: 0.8, bankrupt: false};
+		Assert.equals(Fitness.NEG_INF, BasketFitness.scoreAggregate(agg));
+		Assert.floatEquals(0.8, BasketFitness.scoreNullBaseline(agg));
+	}
+
+	public function testNullBaselineBankruptStillNegInf() {
+		var dead = new FitnessResult(true, 3.0, 1, 0, "js");
+		dead.bankrupt = true;
+		Assert.equals(Fitness.NEG_INF, Fitness.scoreNullBaseline(dead));
 	}
 
 	// ── A2: PSR / DSR ─────────────────────────────────────────────────────────
@@ -404,5 +431,199 @@ class TestPipelineHardening extends Test {
 		var many = Fitness.rankScoreFacts(50, 0.8, 200, false, 20, 100);
 		Assert.isTrue(many <= one + 1e-9, 'more trials must not raise rankScoreFacts');
 		Assert.equals(Fitness.NEG_INF, Fitness.rankScoreFacts(5, 3.0, 200));
+	}
+
+	// ── Initiative 1: Truth Report + trials ───────────────────────────────────
+
+	public function testTrialsSessionIncrementsAndEffectiveFloor() {
+		TrialsSession.reset();
+		Assert.equals(0, TrialsSession.getCount());
+		Assert.equals(1, TrialsSession.effectiveTrials());
+		Assert.equals(1, TrialsSession.recordTrial());
+		Assert.equals(2, TrialsSession.recordTrial());
+		Assert.equals(2, TrialsSession.effectiveTrials());
+		TrialsSession.setCount(40);
+		Assert.equals(40, TrialsSession.getCount());
+		TrialsSession.reset();
+		Assert.equals(0, TrialsSession.getCount());
+	}
+
+	public function testTruthReportThinTradeIsCoinFlip() {
+		TrialsSession.reset();
+		var rets = iidReturns(40, 0.02, 0.01, 31);
+		var tr = TruthReport.evaluate(rets, 1, 0.0, {
+			minTrades: 20, nTrials: 1, nBoot: 40, oosHeld: true, purgeEmbargoApplied: true
+		});
+		Assert.equals(TruthVerdict.CoinFlip, tr.verdict);
+		Assert.isFalse(tr.minTradesPassed);
+		Assert.isFalse(tr.gates.minTrades);
+		Assert.isTrue(tr.reasons.length > 0);
+		Assert.isTrue(tr.reasons[0].indexOf("trade") >= 0);
+	}
+
+	public function testTruthReportPboOverfitVerdict() {
+		var rets = iidReturns(80, 0.002, 0.01, 32);
+		var tr = TruthReport.evaluate(rets, 40, -0.5, {
+			minTrades: 20, nTrials: 1, nBoot: 40, pbo: 0.72,
+			oosHeld: true, purgeEmbargoApplied: true, psrGate: 0.5
+		});
+		Assert.equals(TruthVerdict.Overfit, tr.verdict);
+		Assert.isFalse(tr.gates.pbo);
+	}
+
+	public function testTruthReportJsonRoundTrip() {
+		var rets = iidReturns(100, 0.001, 0.01, 33);
+		var tr = TruthReport.evaluate(rets, 30, 0.0, {
+			minTrades: 20, nTrials: 5, nBoot: 50,
+			purgeEmbargoApplied: true, embargoBars: 10, oosHeld: true
+		});
+		var json = tr.toJson();
+		var back = TruthReport.parse(json);
+		Assert.equals(tr.verdict, back.verdict);
+		Assert.equals(tr.trades, back.trades);
+		Assert.equals(tr.nTrials, back.nTrials);
+		Assert.equals(tr.gates.minTrades, back.gates.minTrades);
+		Assert.equals(tr.reasons.length, back.reasons.length);
+	}
+
+	public function testTruthReportUsesTrialsSessionWhenNTrialsOmitted() {
+		TrialsSession.reset();
+		TrialsSession.setCount(25);
+		var rets = iidReturns(60, 0.001, 0.01, 34);
+		var tr = TruthReport.evaluate(rets, 25, 0.0, {
+			minTrades: 20, nBoot: 40, oosHeld: true, purgeEmbargoApplied: true
+		});
+		Assert.equals(25, tr.nTrials);
+		TrialsSession.reset();
+	}
+
+	// ── Initiative 3: honesty-gated optimizer ─────────────────────────────────
+
+	public function testHonestOptimizeNoTunableParams() {
+		TrialsSession.reset();
+		var src = "
+strategy NoParams {
+  onBar {
+    when close > open: long()
+    when close < open: flat()
+  }
+}";
+		var r:Dynamic = musescript.harness.HonestOptimize.search(src, bars(80, 7), {
+			seed: 42, minTrades: 5
+		});
+		Assert.isTrue(r.ok == true);
+		Assert.isFalse(r.found == true);
+		Assert.equals("no tunable params", r.reason);
+	}
+
+	public function testHonestOptimizeEmptyIsFeature() {
+		// Tiny grid on noise tape — Truth Report should refuse to ship a "winner".
+		TrialsSession.reset();
+		var src = '
+{
+  @strategy("NoiseGrid")
+  @param("fast", 5) { min: 5, max: 8, step: 3, tune: "grid" }
+  @macro("discover") {
+    tune(fast);
+    optimize(sharpe, [fast]);
+  }
+  @on(bar) {
+    var a = sma(close, fast);
+    if (close > a) long();
+    if (close < a) flat();
+  }
+}';
+		var r:Dynamic = musescript.harness.HonestOptimize.search(src, bars(120, 11), {
+			seed: 7,
+			minTrades: 20,
+			acceptVerdicts: ["Robust"],
+			oosHeld: true,
+			purgeEmbargoApplied: true
+		});
+		Assert.isTrue(r.ok == true, Std.string(r.error));
+		Assert.isTrue(r.trials > 0, "expected at least one trial");
+		// Honest empty (or rare Robust) — never returns Overfit/Coin-flip as best.
+		if (r.found == true) {
+			Assert.equals("Robust", Reflect.field(Reflect.field(r.best, "truthReport"), "verdict"));
+		} else {
+			Assert.isTrue(
+				r.reason == "nothing beat the null" || r.reason == "no robust strategy found",
+				'unexpected reason: ${r.reason}'
+			);
+		}
+		TrialsSession.reset();
+	}
+
+	public function testForecastFieldAliases() {
+		var c:musescript.ew.ForecastCloud = {
+			horizon: 5,
+			priceLo: 90, priceHi: 110, barLo: 0, barHi: 5,
+			priceMid: 100, spread: 20, probUp: 0.62,
+			topMass: 0.5, countEntropy: 0.4,
+			invalidatePrice: Math.NaN, distToInvalidation: Math.NaN,
+			nestScore: 1.0, labelCode: 0, samples: 1
+		};
+		Assert.floatEquals(100, ProjectionProvider.cloudField(c, "poc"), 1e-12);
+		Assert.floatEquals(0.62, ProjectionProvider.cloudField(c, "breakout_prob"), 1e-12);
+		Assert.floatEquals(0.4, ProjectionProvider.cloudField(c, "entropy"), 1e-12);
+	}
+
+	// ── Initiative 5: Report Card / Honest Ledger ─────────────────────────────
+
+	public function testReportCardFromTruthReport() {
+		TrialsSession.reset();
+		var rets = iidReturns(80, 0.002, 0.01, 41);
+		var tr = TruthReport.evaluate(rets, 30, 0.0, {
+			minTrades: 20, nTrials: 1, nBoot: 40,
+			oosHeld: true, purgeEmbargoApplied: true,
+			strategyReturn: 0.12, nullReturn: 0.05
+		});
+		var card = ReportCard.fromTruthReport(tr, { strategyLabel: "demo", tape: "SPY" });
+		Assert.equals(ReportCard.SCHEMA, card.schema);
+		Assert.equals(tr.verdict, card.verdict);
+		Assert.isTrue(Math.isFinite(card.skillVsNull));
+		Assert.isTrue(card.profitVsBaseline != null && Math.abs(card.profitVsBaseline - 0.07) < 1e-9);
+		Assert.equals("pending", card.seedRobustness.status);
+		Assert.equals("single-tape", card.universeRobustness.status);
+		var dyn = card.toDyn();
+		var back = ReportCard.fromDyn(dyn);
+		Assert.equals(card.verdict, back.verdict);
+		Assert.equals("demo", back.strategyLabel);
+	}
+
+	public function testReportCardSeedMetrics() {
+		var rets = iidReturns(60, 0.001, 0.01, 42);
+		var tr = TruthReport.evaluate(rets, 25, -0.1, {
+			minTrades: 20, nTrials: 1, nBoot: 40, oosHeld: true, purgeEmbargoApplied: true
+		});
+		var card = ReportCard.fromTruthReport(tr, {
+			seedMetrics: [-0.5, -0.2, 2.0, 0.1, -0.1],
+			seedThreshold: 0.0
+		});
+		Assert.equals("no-go", card.seedRobustness.status);
+		Assert.isFalse(card.seedRobustness.go);
+		Assert.isTrue(card.seedRobustness.max > 0);
+	}
+
+	public function testHonestLedgerDispositions() {
+		Assert.equals(LedgerDisposition.Go, HonestLedger.dispositionOf(TruthVerdict.Robust));
+		Assert.equals(LedgerDisposition.Caution, HonestLedger.dispositionOf(TruthVerdict.Fragile));
+		Assert.equals(LedgerDisposition.NoGo, HonestLedger.dispositionOf(TruthVerdict.CoinFlip));
+		Assert.equals(LedgerDisposition.NoGo, HonestLedger.dispositionOf(TruthVerdict.Overfit));
+
+		var rets = iidReturns(50, 0.0, 0.02, 43);
+		var tr = TruthReport.evaluate(rets, 1, 0.0, {
+			minTrades: 20, nTrials: 1, nBoot: 30, oosHeld: true, purgeEmbargoApplied: true
+		});
+		var entry = HonestLedger.entryFromTruth(tr, {
+			at: "2026-07-28T00:00:00.000Z", strategyLabel: "thin", tape: "SPY"
+		});
+		Assert.equals(LedgerDisposition.NoGo, entry.disposition);
+		Assert.equals(TruthVerdict.CoinFlip, entry.verdict);
+		Assert.equals("thin", entry.strategyLabel);
+		var list = HonestLedger.listToDyn([entry]);
+		Assert.equals(HonestLedger.LIST_SCHEMA, list.schema);
+		Assert.equals(1, list.noGoCount);
+		Assert.equals(0, list.goCount);
 	}
 }

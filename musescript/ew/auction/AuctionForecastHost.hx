@@ -6,6 +6,7 @@ import musescript.ew.EwForecastHost.EwCountMass;
 import musescript.ew.ForecastCloud;
 import musescript.ew.ForecastCloud.ForecastCloudUtil;
 import musescript.ew.auction.VolumeProfile.VolumeProfileLevels;
+import musescript.ew.mcmc.DetMath;
 
 /**
  * Forecast host whose latent state is **fair value** from a volume-at-price
@@ -84,6 +85,12 @@ class AuctionForecastHost implements EwForecastHost {
 	public inline function forecastHorizon():Int return horizon;
 	public inline function lastRegimeLabel():String return lastRegime;
 	public inline function lastProfile():Null<VolumeProfileLevels> return lastLevels;
+
+	/** Mid-bin `{price, vol}` histogram for the last assembled profile window (2.4 overlay). */
+	public function lastHistogramBins():Array<{price:Float, vol:Float}> {
+		if (lastCloudAt < 0 || bars.length == 0) return [];
+		return VolumeProfile.histogramBins(bars, window, bins, lastCloudAt);
+	}
 
 	public function phiKey():Null<String> return key;
 
@@ -291,7 +298,8 @@ class AuctionForecastHost implements EwForecastHost {
 	static function entropy3(a:Float, b:Float, c:Float):Float {
 		var ent = 0.0;
 		inline function add(m:Float) {
-			if (m > 0) ent -= m * Math.log(m);
+			// DetMath.log — native Math.log is not byte-identical across JVM/JS.
+			if (m > 0) ent -= m * DetMath.log(m);
 		}
 		add(a);
 		add(b);

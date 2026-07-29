@@ -140,11 +140,12 @@ class ProjectionProvider {
 	 */
 	public static function cloudField(c:ForecastCloud, field:String):Float {
 		return switch (field) {
-			case "p50", "mean": c.priceMid;
+			// Initiative 3.3 — Studio aliases: poc≈auction mid, breakout_prob≈prob_up
+			case "p50", "mean", "poc": c.priceMid;
 			case "p05": c.priceLo;
 			case "p95": c.priceHi;
 			case "spread": c.spread;
-			case "prob_up": c.probUp;
+			case "prob_up", "breakout_prob": c.probUp;
 			case "inv": c.invalidatePrice;
 			case "dist_inv": c.distToInvalidation;
 			case "entropy": c.countEntropy;
@@ -253,9 +254,11 @@ class ProjectionProvider {
 			rivals = "[" + [for (m in masses) m.label + ":" + fmtLog(m.mass)].join(",") + "]";
 		}
 		var gname = g.name != null ? g.name : "?";
+		#if sys
 		Sys.println('[ew-host] decorate genome=$gname bars=${bars.length} cols=${colNames.join(",")}'
 			+ ' cloud@$mid p50=$p50 band=[$p05,$p95] inv=$inv entropy=$ent rivals=$rivals'
 			+ ' bind=${lastBindKey != null ? lastBindKey : "-"}');
+		#end
 	}
 
 	static function fmtLog(x:Float):String {

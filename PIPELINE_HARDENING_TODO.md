@@ -210,9 +210,9 @@ hardened instrument reproduces the honest NO-GOs (no resurrected false pulses). 
 
 | Area | Path |
 |------|------|
-| Rigor | `musescript/evo/rigor/{NormApprox,ProbSharpe,BlockBootstrap,Pbo,PurgeEmbargo,PreRegistration,SeedRobustness,UniverseRobustness,OosVerdict}.hx` |
+| Rigor | `musescript/evo/rigor/{NormApprox,ProbSharpe,BlockBootstrap,Pbo,PurgeEmbargo,PreRegistration,SeedRobustness,UniverseRobustness,OosVerdict,TruthReport,TruthVerdict,TrialsSession}.hx` |
 | Controls | `musescript/ew/{NullForecastHost,OracleForecastHost,HostLeakageProbe,HostWarmup,BenchmarkHarness}.hx` |
-| Gate | `musescript/evo/Fitness.hx` (`defaultMinTrades`, `rankScore`, `rankScoreFacts`) |
+| Gate | `musescript/evo/Fitness.hx` (`defaultMinTrades`, `scoreNullBaseline`, `rankScore`, `rankScoreFacts`) |
 | OOS | `musescript/evo/graal/CorpusEvoRun.hx` (`--min-trades`, `--n-trials` default 50, `--no-rank-dsr`, `--prereg`, TapeLinter, live PBO/seed-median/universe) |
 | PIT | `musescript/ew/RegimeForecastHost.hx` (t-causal closes); `*BenchmarkCli` → `HostWarmup` / `BenchmarkHarness` |
 | MCMC | `musescript/ew/mcmc/RegimeMcmc.hx` (ESS / mixingOk); `DetParityDump` + `testdata/det-parity.golden.txt` + `tools/det_parity_ci.*` |

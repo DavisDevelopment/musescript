@@ -9,6 +9,7 @@ import musescript.indicators.geom.SwingGraph;
 import musescript.indicators.geom.SwingGraphStack;
 import musescript.ew.EwForecastHost.EwCountMass;
 import musescript.ew.ForecastCloud.ForecastCloudUtil;
+import musescript.ew.mcmc.DetMath;
 
 /**
  * MVP adapter: live / pre-fed SwingGraph(+Stack) + EwLattice → ForecastCloud.
@@ -245,7 +246,8 @@ class LatticeForecastHost implements EwForecastHost {
 		var ent = 0.0;
 		for (i in 0...n) {
 			var m = Math.max(0.0, lattice.at(i).score) / sum;
-			if (m > 0) ent -= m * Math.log(m);
+			// DetMath.log — native Math.log is not byte-identical across JVM/JS.
+			if (m > 0) ent -= m * DetMath.log(m);
 		}
 		return ent;
 	}

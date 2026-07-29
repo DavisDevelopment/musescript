@@ -17,6 +17,9 @@ reads cloud features.
 | MCMC adapter (pragmatic) | `McmcForecastHost.hx` (**done** — top-K soft resampling) |
 | Boundary X (evo) | `ProjectionProvider` + `PSHost` → trading + `projScore` (**done**) |
 | Demo | CLI `HostProjectionCli` + JVM GUI `HostProjectionDemo` (see BRAINSTORM) |
+| Browser host facade (2.1) | `ForecastHostRuntime.hx` + `FORECAST_HOST_WASM.md` — `haxe build-forecast-host-runtime.hxml` |
+| Host JVM↔JS parity | `ForecastHostParityDump` + `tools/forecast_host_parity_ci.*` |
+| Strategy forecast inputs (3.3) | [`FORECAST_STRATEGY_INPUTS.md`](FORECAST_STRATEGY_INPUTS.md) — `SProj` / `forecastFields()` |
 | **Implementation still under** | `musescript/indicators/ew/*` (temporary) |
 
 Hard EW grammar stays non-learnable. Soft φ / guideline weights (`EwPhiParams`) are

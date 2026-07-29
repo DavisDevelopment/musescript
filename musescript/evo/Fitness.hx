@@ -616,6 +616,14 @@ class Fitness {
 	 */
 	public static var defaultMinTrades:Int = 20;
 
+	/**
+	 * Floor used when scoring a *null baseline* (buy-and-hold, cash, shuffled labels, …).
+	 * Passive buy-and-hold is a legitimate 1-trade strategy; applying `defaultMinTrades` to it
+	 * sent the baseline to NEG_INF and made "beats null?" meaningless (Initiative 1.4).
+	 * Candidate strategies still use `defaultMinTrades` — only nulls use this exemption.
+	 */
+	public static inline var NULL_BASELINE_MIN_TRADES:Int = 1;
+
 	/** Resolve optional minTrades; null → `defaultMinTrades`. */
 	public static inline function resolveMinTrades(?minTrades:Null<Int>):Int {
 		return minTrades != null ? minTrades : defaultMinTrades;
@@ -652,6 +660,27 @@ class Fitness {
 		if (nodeCount != null && nodeCount > parsimonyThreshold)
 			s -= parsimonyLambda * (nodeCount - parsimonyThreshold);
 		return s;
+	}
+
+	/**
+	 * Score a null baseline (buy-and-hold / cash / shuffled) without the candidate min-trades
+	 * gate. Bankrupt / NaN / fail still → NEG_INF. Initiative 1.4.
+	 */
+	public static function scoreNullBaseline(r:FitnessResult,
+			?nodeCount:Int, ?parsimonyThreshold:Int = 20, ?parsimonyLambda:Float = 0.01):Float {
+		if (!r.ok) return NEG_INF;
+		if (r.bankrupt) return NEG_INF;
+		return scoreFacts(r.trades, r.sharpe, false, NULL_BASELINE_MIN_TRADES,
+			nodeCount, parsimonyThreshold, parsimonyLambda);
+	}
+
+	/** Facts variant of `scoreNullBaseline` for basket aggregates / CachedEval. */
+	public static inline function scoreFactsNullBaseline(
+		trades:Int, sharpe:Float, bankrupt:Bool = false,
+		?nodeCount:Int, ?parsimonyThreshold:Int = 20, ?parsimonyLambda:Float = 0.01
+	):Float {
+		return scoreFacts(trades, sharpe, bankrupt, NULL_BASELINE_MIN_TRADES,
+			nodeCount, parsimonyThreshold, parsimonyLambda);
 	}
 
 	/**

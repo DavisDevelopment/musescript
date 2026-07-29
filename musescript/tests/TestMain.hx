@@ -77,6 +77,7 @@ class TestMain {
 		runner.addCase(new TestP1Hardening());
 		runner.addCase(new TestFrostAdversarial());
 		runner.addCase(new TestDetParity());
+		runner.addCase(new TestReproDeterminism());
 		runner.addCase(new TestTapeLinter());
 		runner.addCase(new TestEwHostProjection());
 		runner.addCase(new TestEwBenchmark());

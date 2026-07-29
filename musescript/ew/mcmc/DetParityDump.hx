@@ -15,7 +15,9 @@ import haxe.io.FPHelper;
  */
 class DetParityDump {
 	static function main() {
+		#if (sys || node)
 		Sys.print(render());
+		#end
 	}
 
 	/** Full parity transcript (stable across targets). Used by CI golden + JVM↔node diff. */

@@ -63,3 +63,54 @@ jobs:
 
       - name: DetParity JVM ↔ node ↔ golden
         run: bash tools/det_parity_ci.sh
+
+  forecast-host-parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Haxe
+        uses: krdlab/setup-haxe@v1
+        with:
+          haxe-version: 4.3.6
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install haxelib deps
+        run: haxelib install hxnodejs --quiet
+
+      - name: ForecastHostParity JVM ↔ node ↔ golden
+        run: bash tools/forecast_host_parity_ci.sh
+
+  equity-digest-web-app-parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Haxe
+        uses: krdlab/setup-haxe@v1
+        with:
+          # Prefer matching local toolkit; digests are Haxe-source stable, bundle hash is soft.
+          haxe-version: 4.3.6
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build muse-runtime.js
+        run: haxe build-runtime.hxml
+
+      - name: EquityDigest web↔app ↔ golden
+        # Full web+mobile accept locally: MUSE_PARITY_STRICT=1 (siblings present).
+        # CI locks build digests to testdata golden (siblings usually absent).
+        run: bash tools/equity_digest_web_app_parity_ci.sh

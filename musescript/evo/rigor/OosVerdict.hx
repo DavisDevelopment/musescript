@@ -29,11 +29,13 @@ class OosVerdict {
 		threshold:Float,
 		ciLo:Float,
 		ciHi:Float,
-		reason:String
+		reason:String,
+		/** Initiative 4.2 — bootstrap seed used for CI (re-runnable Truth Report). */
+		bootSeed:Int
 	} {
 		var minTrades = opts != null && opts.minTrades != null ? opts.minTrades : 20;
 		var nTrials = opts != null && opts.nTrials != null ? opts.nTrials : 1;
-		var bootSeed = opts != null && opts.bootSeed != null ? opts.bootSeed : 42;
+		var bootSeed = opts != null && opts.bootSeed != null ? opts.bootSeed : musescript.repro.ReproStamp.DEFAULT_SEED;
 		var nBoot = opts != null && opts.nBoot != null ? opts.nBoot : 200;
 		var psrGate = opts != null && opts.psrGate != null ? opts.psrGate : 0.95;
 
@@ -44,32 +46,33 @@ class OosVerdict {
 		var sr0 = ProbSharpe.expectedMaxSr(nTrials, 1.0);
 
 		if (trades < minTrades) {
-			return mk(false, "NO-GO", trades, sharpe, dsr, psr, nTrials, sr0, ci,
+			return mk(false, "NO-GO", trades, sharpe, dsr, psr, nTrials, sr0, ci, bootSeed,
 				'trades=$trades < minTrades=$minTrades');
 		}
 		if (!BlockBootstrap.excludesNull(ci, 0.0)) {
-			return mk(false, "NO-GO", trades, sharpe, dsr, psr, nTrials, sr0, ci,
+			return mk(false, "NO-GO", trades, sharpe, dsr, psr, nTrials, sr0, ci, bootSeed,
 				'Sharpe CI [${fmt(ci.lo)}, ${fmt(ci.hi)}] does not exclude 0');
 		}
 		if (!(dsr >= psrGate)) {
-			return mk(false, "NO-GO", trades, sharpe, dsr, psr, nTrials, sr0, ci,
+			return mk(false, "NO-GO", trades, sharpe, dsr, psr, nTrials, sr0, ci, bootSeed,
 				'DSR=${fmt(dsr)} < gate=$psrGate (trials=$nTrials, SR0≈${fmt(sr0)})');
 		}
 		if (!(sharpe > buyHoldSharpe)) {
-			return mk(false, "NO-GO", trades, sharpe, dsr, psr, nTrials, sr0, ci,
+			return mk(false, "NO-GO", trades, sharpe, dsr, psr, nTrials, sr0, ci, bootSeed,
 				'OOS Sharpe=${fmt(sharpe)} ≤ buyHold=${fmt(buyHoldSharpe)}');
 		}
-		return mk(true, "BEATS", trades, sharpe, dsr, psr, nTrials, sr0, ci,
+		return mk(true, "BEATS", trades, sharpe, dsr, psr, nTrials, sr0, ci, bootSeed,
 			'DSR=${fmt(dsr)} CI=[${fmt(ci.lo)}, ${fmt(ci.hi)}] trials=$nTrials');
 	}
 
 	static function mk(
 		go:Bool, label:String, trades:Int, sharpe:Float, dsr:Float, psr:Float,
-		nTrials:Int, threshold:Float, ci:{lo:Float, hi:Float, point:Float}, reason:String
+		nTrials:Int, threshold:Float, ci:{lo:Float, hi:Float, point:Float}, bootSeed:Int, reason:String
 	) {
 		return {
 			go: go, label: label, trades: trades, sharpe: sharpe, dsr: dsr, psr: psr,
-			nTrials: nTrials, threshold: threshold, ciLo: ci.lo, ciHi: ci.hi, reason: reason
+			nTrials: nTrials, threshold: threshold, ciLo: ci.lo, ciHi: ci.hi,
+			bootSeed: bootSeed, reason: reason
 		};
 	}
 
