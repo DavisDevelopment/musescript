@@ -305,7 +305,11 @@ class NmaAttr {
 			var repl = NmaBijection.boolFromEnum(r);
 			NmaSurgery.setBoolRoot(pack.nma, site.slot, NmaSurgery.replaceBool(saved, site.path, repl));
 			var fr = NmaFitness.evaluatePrepared(pack.nma, pack.ctx, bars, costBps, initialCash, equityFloor);
-			scores.push(Fitness.score(fr));
+			// Attribution ablation: use the 1-trade floor (like scorePrepared / swapScore / the
+			// robust sibling / the credit-bank means), NOT defaultMinTrades. The bare 1-arg call
+			// resolved to 20, so the fresh loop disagreed with the warm credit-bank short-circuit
+			// above and zeroed thin-tape candidates to NEG_INF, blinding attribution.
+			scores.push(Fitness.score(fr, 1));
 			NmaSurgery.setBoolRoot(pack.nma, site.slot, saved);
 		}
 		return scores;
