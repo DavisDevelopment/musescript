@@ -870,6 +870,22 @@ class StrategyParser {
 			expect("}");
 			return stampExpr(start, MuseNodes.block(es));
 		}
+		// Author hole: `?` (untyped) or `?Bool` / `?Scalar` / `?Series`. Lowers (via
+		// CorpusSeed) to a synthesis hole the engine fills under the honest gate. Encoded as
+		// EMeta("__hole", [tyString], seed) so an UNFILLED sketch is still a valid runnable
+		// program — any pass ignorant of __hole just evaluates the seed. Domain/name are P1.
+		if (c == "?") {
+			i++;
+			var ty = matchIdent("Bool") ? "Bool"
+				: matchIdent("Scalar") ? "Scalar"
+				: matchIdent("Series") ? "Series" : "";
+			var seed:Expr = switch (ty) {
+				case "Bool": MuseNodes.boolExpr(true);
+				case "Series": MuseNodes.ident("close");
+				default: MuseNodes.floatExpr(0.0);
+			};
+			return stampExpr(start, MuseNodes.meta("__hole", [MuseNodes.stringExpr(ty)], seed));
+		}
 		var id = expectIdentValue();
 		// General `if (cond) { ... } [else if (cond) { ... }]* [else { ... }]?`, building a
 		// nested EIf chain -- the SAME node `when cond: { ... }` already desugars to (minus
