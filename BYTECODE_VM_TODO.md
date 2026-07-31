@@ -37,7 +37,18 @@
   `RegistryPalette.compatibleNames()` + fib + fourier, as `CorpusEvoRun` seeds) + the subset programs.
   Invariant `diverged==0` now gates in CI. Current coverage: 83 progs → identical=3, fallback=80,
   diverged=0 — `fallback` shrinks as V3 lands, each newly-covered genome byte-checked for free.
-- [ ] **V3. Indicator subset — the real unlock.** `LOOKBACK`, `SERIES id n`, `CROSS id n` mirroring
+- [~] **V3. Indicator subset — the real unlock. CORE LANDED** (`a5ee099` CROSS+CALL_BUILTIN,
+  `78ed65c` LOOKBACK). Corpus gate: **identical 3 → 77, fallback 80 → 6, diverged=0**; full suite
+  green. Done: plain builtin calls (`CALL_BUILTIN`, static series-name arg resolution + scratch
+  capability check + `MuseVmBuiltins` mirror of `installBuiltins`), `__cs` CROSS
+  (crossover/crossunder/rising/falling), `LOOKBACK` (bar-field/ident `series[n]`).
+  **Remaining V3 (all need `EField`):** the 6 fallback are fib `fib_retracement(w).level382`
+  multi-output FIELD access; `__scr` SERIES (macd/bbands/stoch) returns a scratch object whose fields
+  are read via `EField` too — so **do `EField` (read `.field` off an indicator/scratch object) FIRST,
+  then `__scr` SERIES falls out.** Also deferred: `ELookback` of an `ECall`/offset series
+  (`withSeriesOffset` re-entrancy). Original design detail retained below.
+
+  Original target: `LOOKBACK`, `SERIES id n`, `CROSS id n` mirroring
   interp semantics exactly: callsite-keyed slots via `CallsiteIds` ids, same
   `HarnessContext.seriesBuffers` / `IndicatorInstance.stateFor` / `TradeBuiltins.*CS` state.
   Until this lands, nearly every real evo genome misses the VM (V2 gate: 80/83 fallback).
