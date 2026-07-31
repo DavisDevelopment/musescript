@@ -375,6 +375,49 @@ class Variation {
 		};
 	}
 
+	/**
+	 * Fill every BHole/KHole in `g` with a freshly-grown subtree (P0 of SPEC_AUTHOR_HOLES §5).
+	 * Each hole is REPLACED by the grow (not re-wrapped), so the result is an UNTEMPLATED candidate
+	 * Fitness/Expand see as a clean, byte-identical-recordable genome. Each call draws a fresh fill
+	 * from this instance's rng, so repeated calls sample the fill space (the `muse fill` search).
+	 * Bool/scalar holes only in P0; series holes (SHole) + domain constraints are P1.
+	 */
+	public function fillHoles(g:StrategyGenome):StrategyGenome {
+		return {
+			entryLong: refillBool(g.entryLong),
+			entryShort: refillBool(g.entryShort),
+			exitLong: refillBool(g.exitLong),
+			exitShort: refillBool(g.exitShort),
+			size: refillScalar(g.size),
+			params: g.params,
+			name: g.name,
+			lineage: g.lineage,
+			seedOrigin: g.seedOrigin,
+			projections: g.projections
+		};
+	}
+
+	static inline var HOLE_FILL_DEPTH = 3;
+
+	function refillBool(n:BoolNode):BoolNode {
+		return switch (n) {
+			case BHole(_): growBool(HOLE_FILL_DEPTH);
+			case BAnd(a, b): BAnd(refillBool(a), refillBool(b));
+			case BOr(a, b): BOr(refillBool(a), refillBool(b));
+			case BNot(a): BNot(refillBool(a));
+			case BCmp(op, a, b): BCmp(op, refillScalar(a), refillScalar(b));
+			case BCross(_, _, _) | BTrend(_, _, _): n; // series holes are P1 (no SHole yet)
+		};
+	}
+
+	function refillScalar(n:ScalarNode):ScalarNode {
+		return switch (n) {
+			case KHole(_): growScalar(HOLE_FILL_DEPTH);
+			case KArith(op, a, b): KArith(op, refillScalar(a), refillScalar(b));
+			case KConst(_) | KParam(_) | KFeature(_) | KSeries(_) | KLookback(_, _): n;
+		};
+	}
+
 	function buildCatalog(g:StrategyGenome):Array<CatalogEntry> {
 		// Instance hit first: same elite object, no lock. Map hit second: same structure, other ref.
 		if (g.variationCacheGen == cacheGen && g.catalogCache != null) return g.catalogCache;
