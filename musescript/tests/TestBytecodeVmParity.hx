@@ -41,7 +41,11 @@ class TestBytecodeVmParity extends Test {
 		"strategy S { onBar {\n  fast = sma(close, 5)\n  slow = sma(close, 20)\n  when fast > slow: { long(1); }\n  when fast < slow: { flat(); }\n} }",
 		// V3: LOOKBACK — bar-field series[n] (momentum) and a local series[n]
 		"strategy S { onBar {\n  when close > close[1]: { long(1); }\n  when close < close[1]: { flat(); }\n} }",
-		"strategy S { onBar {\n  m = sma(close, 5)\n  when m > m[2]: { long(1); }\n  when m < m[2]: { flat(); }\n} }"
+		"strategy S { onBar {\n  m = sma(close, 5)\n  when m > m[2]: { long(1); }\n  when m < m[2]: { flat(); }\n} }",
+		// V3: EField — read a field off a multi-output indicator (bbands), incl. a lookback of it
+		"strategy S { onBar {\n  when close > bbands(close, 20).upper: { long(1); }\n  when close < bbands(close, 20).lower: { flat(); }\n} }",
+		// V3: __scr macd multi-output field access driving orders
+		"strategy S { onBar {\n  when macd(close).macd > macd(close).signal: { long(1); }\n  when macd(close).macd < macd(close).signal: { flat(); }\n} }"
 	];
 
 	public function testInterpVsVmByteParity() {

@@ -73,6 +73,15 @@ class MuseBytecodeCompiler {
 		}
 	}
 
+	static function scrCode(name:String):Int {
+		return switch (name) {
+			case "macd": Op.SCR_MACD;
+			case "bbands": Op.SCR_BBANDS;
+			case "stoch": Op.SCR_STOCH;
+			default: -1;
+		}
+	}
+
 	function new() {}
 
 	/**
@@ -124,6 +133,7 @@ class MuseBytecodeCompiler {
 			case ECall(callee, args): prescanLocalsExpr(callee); for (a in args) prescanLocalsExpr(a);
 			case EMeta(_, margs, inner): for (a in margs) prescanLocalsExpr(a); prescanLocalsExpr(inner);
 			case ELookback(series, nExpr): prescanLocalsExpr(series); prescanLocalsExpr(nExpr);
+			case EField(obj, _): prescanLocalsExpr(obj);
 			default:
 		}
 	}
@@ -267,6 +277,20 @@ class MuseBytecodeCompiler {
 				if (sname == null) throw new VmUnsupported("lookback of non-series expr");
 				expr(nExpr);
 				emit(Op.LOOKBACK); emit(constIndex(sname));
+			// `__scr` multi-output indicators (macd/bbands/stoch): fill a per-callsite scratch object
+			// (`indCols.scratchObj(scrId)`) and return it — the fields are read via EField below.
+			// Args via plain `expr()` (interp uses plain evalExpr; SERIES applies Std.int per-indicator
+			// at runtime, matching the interp's exact default handling).
+			case EMeta("__scr", [EConst(CInt(scrId))], ECall(EIdent(scrName), scrArgs)) if (scrCode(scrName) >= 0):
+				if (scrName == "bbands" && scrArgs.length < 2) throw new VmUnsupported("bbands needs a period arg");
+				for (a in scrArgs) expr(a);
+				emit(Op.SERIES); emit(scrId); emit(scrCode(scrName)); emit(scrArgs.length);
+			// `obj.field` — bare field read (multi-output indicator / scratch object). Matches the
+			// interp's `EField` case: `evalExpr(obj)` then `Reflect.getProperty`. Method calls
+			// (`ECall(EField(...))`) are NOT this case and stay out of subset.
+			case EField(obj, f):
+				expr(obj);
+				emit(Op.GET_FIELD); emit(constIndex(f));
 			default:
 				throw new VmUnsupported("expression " + exprName(e));
 		}

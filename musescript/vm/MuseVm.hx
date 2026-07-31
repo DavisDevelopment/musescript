@@ -177,6 +177,31 @@ class MuseVm {
 					var sname:String = consts[code[pc++]];
 					var n = Std.int(sp.pop());
 					sp.push(harness.seriesLookback(sname, n));
+				case Op.GET_FIELD:
+					var f:String = consts[code[pc++]];
+					var o = sp.pop();
+					sp.push(o == null ? null : Reflect.getProperty(o, f));
+				case Op.SERIES:
+					var scrId = code[pc++];
+					var fnCode = code[pc++];
+					var argc = code[pc++];
+					var s0:Array<Dynamic> = [for (_ in 0...argc) null];
+					var k = argc - 1;
+					while (k >= 0) { s0[k] = sp.pop(); k--; }
+					var scrOut = harness.indCols.scratchObj(scrId);
+					// Exact mirror of MuseInterp's __scr default/Std.int handling per indicator.
+					switch (fnCode) {
+						case Op.SCR_MACD:
+							TradeBuiltins.macd(harness, s0[0], argc > 1 ? Std.int(s0[1]) : 12,
+								argc > 2 ? Std.int(s0[2]) : 26, argc > 3 ? Std.int(s0[3]) : 9, scrOut);
+						case Op.SCR_BBANDS:
+							TradeBuiltins.bbands(harness, s0[0], Std.int(s0[1]),
+								argc > 2 ? (s0[2] : Float) : 2.0, scrOut);
+						default: // SCR_STOCH — no series arg
+							TradeBuiltins.stoch(harness, argc > 0 ? Std.int(s0[0]) : 14,
+								argc > 1 ? Std.int(s0[1]) : 3, argc > 2 ? Std.int(s0[2]) : 3, scrOut);
+					}
+					sp.push(scrOut);
 				case Op.POP: sp.pop();
 				case Op.HALT: return;
 				default: throw "MuseVm: bad opcode " + op + " @ " + (pc - 1);

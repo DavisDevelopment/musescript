@@ -32,6 +32,8 @@ enum abstract Op(Int) from Int to Int {
 	var CALL_BUILTIN; // + Int nameConst + Int argc -> push preserveNum(Reflect.callMethod(globals[name], argv))
 	var CROSS;        // + Int csId + Int fnCode + Int argc -> push TradeBuiltins.<fn>CS(harness, csId, ...)
 	var LOOKBACK;     // + Int nameConst -> pop n; push harness.seriesLookback(name, Std.int(n))  (series[n])
+	var GET_FIELD;    // + Int fieldConst -> pop o; push o==null ? null : Reflect.getProperty(o, field)  (obj.field)
+	var SERIES;       // + Int scrId + Int fnCode + Int argc -> multi-output indicator -> push scratch object
 	var POP;                                       // discard top
 	var HALT;
 
@@ -54,4 +56,9 @@ enum abstract Op(Int) from Int to Int {
 	public static inline var CS_CROSSUNDER = 1;
 	public static inline var CS_RISING = 2;
 	public static inline var CS_FALLING = 3;
+
+	// SERIES fn codes (the three __scr multi-output indicators).
+	public static inline var SCR_MACD = 0;
+	public static inline var SCR_BBANDS = 1;
+	public static inline var SCR_STOCH = 2;
 }
