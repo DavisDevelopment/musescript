@@ -31,6 +31,10 @@ class MuseVm {
 	// Builtin globals — same install as MuseInterp, so CALL_BUILTIN resolves the
 	// identical function the interp's callValue plain-fn path would (§V3).
 	final globals:Map<String, Dynamic>;
+	// P1a inline cache: `CALL_BUILTIN name` resolves `globals.get(name)` ONCE per callsite (keyed by
+	// the name's const index) and reuses it across every bar — the resolved function is stable for a
+	// VM instance's lifetime. Removes a per-bar hashmap lookup the interp pays on every call.
+	final builtinIC:haxe.ds.Vector<Dynamic>;
 
 	function new(harness:HarnessContext, chunk:MuseChunk) {
 		this.harness = harness;
@@ -38,6 +42,7 @@ class MuseVm {
 		this.locals = [for (_ in 0...chunk.localCount()) null];
 		this.globals = new Map();
 		MuseVmBuiltins.install(this.globals, harness);
+		this.builtinIC = new haxe.ds.Vector(chunk.consts.length);
 	}
 
 	/**
@@ -163,13 +168,16 @@ class MuseVm {
 					var bar = harness.currentBar;
 					harness.orders.submit(verbStr, arg, bar.close, bar.index);
 				case Op.CALL_BUILTIN:
-					var name:String = consts[code[pc++]];
+					var nameIdx = code[pc++];
 					var argc = code[pc++];
 					var argv:Array<Dynamic> = [for (_ in 0...argc) null];
 					var i = argc - 1;
 					while (i >= 0) { argv[i] = sp.pop(); i--; }
+					// Inline cache (P1a): resolve the builtin once per callsite, reuse across bars.
+					var fn = builtinIC[nameIdx];
+					if (fn == null) { fn = globals.get(consts[nameIdx]); builtinIC[nameIdx] = fn; }
 					// Mirror of MuseInterp.callValue's plain-function path (recv = null).
-					sp.push(MuseVmOps.preserveNum(Reflect.callMethod(null, globals.get(name), argv)));
+					sp.push(MuseVmOps.preserveNum(Reflect.callMethod(null, fn, argv)));
 				case Op.CROSS:
 					var csId = code[pc++];
 					var fnCode = code[pc++];
