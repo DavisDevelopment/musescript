@@ -123,8 +123,13 @@
 
 ## P2+ — gated, not scheduled
 
-- [ ] **P2** Tier B Truffle Bytecode-DSL interpreter — only if Tier A is proven AND the per-genome
-  WASM emit/instantiate residual still matters. Kill-criterion per spec §9.
+- [ ] **P2 → see `TIER_B_BUILD_PLAN.md`** (scoped 2026-07-31). Key reframe from the P1 measurement:
+  the ~1.2× ceiling is because the VM does opaque `CALL_BUILTIN`; the WASM tier already beats it by
+  **lowering indicators to primitives** (`StrategyWasmEmitter`), and that logic is reusable. So the
+  ceiling-breaker is **TB0: lower indicators to primitive bytecode** (target-agnostic, pure Haxe,
+  helps every tier, prerequisite for PE) — do it FIRST and measure; Tier B's Truffle component
+  (TB1–TB5, GraalVM-only) is gated on TB0's numbers + the §9 ≥1.5× kill-criterion. Truffle runtime is
+  already on the classpath.
 - [ ] **P3** Long-tail coverage (objects/arrays/classes/match; generators stay interp on Tier A).
 - [ ] **P4** Retarget JS/WASM emitters from the shared IR — do not destabilize audited WASM parity
   before Tier A has earned default status.
