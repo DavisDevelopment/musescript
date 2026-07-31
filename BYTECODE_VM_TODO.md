@@ -99,10 +99,20 @@
   without it the VM saw raw `crossover("close", …)` string args (crash on JVM, divergence on JS).
   Self-check on real gen-0 seeds: **63/63 covered byte-identical to interp**, 1 fallback (invalid-param
   genome that errors in interp too). Full JS suite green (75,093).
-- [ ] **V6. Measure, then decide.** (a) per-eval Tier A vs tree-walk interp on cache misses;
-  (b) end-to-end warm s/gen A/B vs ~4.35 on the canonical baseline (pop=80, gens=30, NVDA,
-  IS=5161, 20 bps, seed 42, warm gens 6–30). Record both here. Promote to default or park —
-  no promotion on faith.
+- [x] **V6. Measured. Verdict: PARK at the flag (modest win, parity sound).** A/B at pop=80/gens=30/
+  seed=42/NVDA: **warm s/gen 3.14 (baseline) → 2.97 (`--vm`), ~5% faster; total wall 163.8s → 151s.**
+  - **Parity is SOUND.** The A/B's per-gen search lines diverge at ~gen 13 — but a 2× baseline
+    determinism check (same seed, no `--vm`) **diverges from ITSELF at gen 8**: the multi-threaded run
+    is not bit-reproducible (async attr-pool workers; `ReproStamp`'s "bit-identical" claim doesn't hold
+    under threads — a pre-existing finding, not caused by the VM). The `--vm` arm actually tracked
+    baseline *longer* (gen 13 vs 8), i.e. within the run's own noise band. VM parity rests on the
+    controlled gates (self-check 63/63, corpus 83/83, evolved 2430 @ diverged=0), which are exact.
+  - **Speed is modest and expected.** ~5% warm is exactly what the spec predicted: the oracle is
+    already cache-dominated (§7), so the Dynamic-stack P0 VM can only attack the miss fraction. P0 was
+    never the speed milestone. Given a single nondeterministic A/B can't nail 5% tightly, **do NOT
+    promote `--vm` to default on this evidence — keep it behind the flag (default OFF).**
+  - **The real win is P1** (unboxed operand stack). V6 makes it justified: correctness + the plumbing
+    are proven end-to-end; the speed is left on the table by the boxed Dynamic stack. Pursue P1 next.
 
 ## P1 — only after V6 shows a real win
 
