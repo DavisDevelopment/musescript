@@ -308,6 +308,10 @@ class CorpusSeed {
 			case ECall(EIdent("evolve"), [inner]):
 				var b = translateBool(inner, bindings, allowed);
 				b != null ? BHole(b) : null;
+			// Author hole `?` / `?Bool` (SPEC_AUTHOR_HOLES) — surface-syntax sibling of evolve(...).
+			// A blank bool hole starts from a neutral always-true inner; the fill loop replaces it.
+			case EMeta("__hole", _, _):
+				BHole(BCmp(">", KConst(1.0), KConst(0.0)));
 			case EBinop("&&", a, b):
 				var ta = translateBool(a, bindings, allowed), tb = translateBool(b, bindings, allowed);
 				(ta != null && tb != null) ? BAnd(ta, tb) : null;
@@ -362,6 +366,9 @@ class CorpusSeed {
 			case ECall(EIdent("evolve"), [inner]):
 				var s = translateScalar(inner, bindings, allowed);
 				s != null ? KHole(s) : null;
+			// Author hole `?` / `?Scalar` — neutral KConst(0) inner; the fill loop replaces it.
+			case EMeta("__hole", _, _):
+				KHole(KConst(0.0));
 			case EConst(CFloat(v)): KConst(v);
 			case EConst(CInt(v)): KConst(v);
 			case EUnop("-", true, EConst(CFloat(v))): KConst(-v);
@@ -649,7 +656,7 @@ class CorpusSeed {
 	 */
 	public static function seedFromEwHostProjection(hostKind:String = "lattice"):Array<StrategyGenome> {
 		var kind = switch (hostKind) {
-			case "mcmc", "regime", "auction": hostKind; // non-lattice host substrates
+			case "mcmc", "regime", "auction", "oracle", "null": hostKind; // non-lattice / control hosts
 			default: "lattice";
 		};
 		var samples = kind == "mcmc" ? 8 : 1;
