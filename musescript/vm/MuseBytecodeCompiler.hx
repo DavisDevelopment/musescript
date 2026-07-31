@@ -53,6 +53,16 @@ class MuseBytecodeCompiler {
 		return refGlobals.exists(name) && Reflect.isFunction(refGlobals.get(name));
 	}
 
+	// series-name for `series[n]` lookback — bar field / ident / parenthesized (matches the
+	// interp's `evalLookback` EBarField|EIdent case, which reads the series buffer by name).
+	static function lookbackSeriesName(series:Expr):Null<String> {
+		return switch (series) {
+			case EBarField(n) | EIdent(n): n;
+			case EParent(inner): lookbackSeriesName(inner);
+			default: null;
+		}
+	}
+
 	static function csCode(name:String):Int {
 		return switch (name) {
 			case "crossover": Op.CS_CROSSOVER;
@@ -113,6 +123,7 @@ class MuseBytecodeCompiler {
 			case EBlock(es): for (x in es) prescanLocalsExpr(x);
 			case ECall(callee, args): prescanLocalsExpr(callee); for (a in args) prescanLocalsExpr(a);
 			case EMeta(_, margs, inner): for (a in margs) prescanLocalsExpr(a); prescanLocalsExpr(inner);
+			case ELookback(series, nExpr): prescanLocalsExpr(series); prescanLocalsExpr(nExpr);
 			default:
 		}
 	}
@@ -248,6 +259,14 @@ class MuseBytecodeCompiler {
 					else expr(args[i]);
 				}
 				emit(Op.CALL_BUILTIN); emit(constIndex(name)); emit(args.length);
+			// `series[n]` — `ELookback`. Interp: `evalLookback(series, Std.int(evalExpr(n)))`, and for
+			// a bar-field/ident series that is `harness.seriesLookback(name, n)`. The `ECall`/offset
+			// series case (`withSeriesOffset` re-entrancy) is deferred ⇒ VmUnsupported.
+			case ELookback(series, nExpr):
+				var sname = lookbackSeriesName(series);
+				if (sname == null) throw new VmUnsupported("lookback of non-series expr");
+				expr(nExpr);
+				emit(Op.LOOKBACK); emit(constIndex(sname));
 			default:
 				throw new VmUnsupported("expression " + exprName(e));
 		}

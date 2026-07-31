@@ -173,6 +173,10 @@ class MuseVm {
 						default: TradeBuiltins.fallingCS(harness, csId, a0[0], Std.int(a0[1]), argc > 2 ? Std.int(a0[2]) : 0);
 					};
 					sp.push(res);
+				case Op.LOOKBACK:
+					var sname:String = consts[code[pc++]];
+					var n = Std.int(sp.pop());
+					sp.push(harness.seriesLookback(sname, n));
 				case Op.POP: sp.pop();
 				case Op.HALT: return;
 				default: throw "MuseVm: bad opcode " + op + " @ " + (pc - 1);

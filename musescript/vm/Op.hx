@@ -31,6 +31,7 @@ enum abstract Op(Int) from Int to Int {
 	var ORDER;        // + Int verb + Int hasArg -> submit(verb, hasArg?pop():null, close, index)
 	var CALL_BUILTIN; // + Int nameConst + Int argc -> push preserveNum(Reflect.callMethod(globals[name], argv))
 	var CROSS;        // + Int csId + Int fnCode + Int argc -> push TradeBuiltins.<fn>CS(harness, csId, ...)
+	var LOOKBACK;     // + Int nameConst -> pop n; push harness.seriesLookback(name, Std.int(n))  (series[n])
 	var POP;                                       // discard top
 	var HALT;
 

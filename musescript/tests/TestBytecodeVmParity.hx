@@ -38,7 +38,10 @@ class TestBytecodeVmParity extends Test {
 		// V3: rising/falling (__cs with an int lookback arg) + a builtin in the size expr
 		"strategy S { onBar {\n  when rising(close, 3): { long(1); }\n  when falling(close, 3): { flat(); }\n} }",
 		// V3: builtin feeding arithmetic feeding an order condition
-		"strategy S { onBar {\n  fast = sma(close, 5)\n  slow = sma(close, 20)\n  when fast > slow: { long(1); }\n  when fast < slow: { flat(); }\n} }"
+		"strategy S { onBar {\n  fast = sma(close, 5)\n  slow = sma(close, 20)\n  when fast > slow: { long(1); }\n  when fast < slow: { flat(); }\n} }",
+		// V3: LOOKBACK — bar-field series[n] (momentum) and a local series[n]
+		"strategy S { onBar {\n  when close > close[1]: { long(1); }\n  when close < close[1]: { flat(); }\n} }",
+		"strategy S { onBar {\n  m = sma(close, 5)\n  when m > m[2]: { long(1); }\n  when m < m[2]: { flat(); }\n} }"
 	];
 
 	public function testInterpVsVmByteParity() {
