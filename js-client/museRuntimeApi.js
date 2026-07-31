@@ -110,6 +110,20 @@ export function createMuseRuntimeApi(MuseRuntime, deps = {}) {
     return MuseRuntime.equityDigest(equity);
   }
 
+  function evaluateLeaderboardEntry(entry, ctx = {}) {
+    if (!runtimeReady() || typeof MuseRuntime.evaluateLeaderboardEntry !== "function") {
+      return { ok: false, error: "muse runtime evaluateLeaderboardEntry API not loaded — rebuild muse-runtime.js" };
+    }
+    return MuseRuntime.evaluateLeaderboardEntry(entry, ctx);
+  }
+
+  function rankLeaderboard(entries, ctx = {}) {
+    if (!runtimeReady() || typeof MuseRuntime.rankLeaderboard !== "function") {
+      return { ok: false, error: "muse runtime rankLeaderboard API not loaded — rebuild muse-runtime.js" };
+    }
+    return MuseRuntime.rankLeaderboard(entries, ctx);
+  }
+
   return {
     MuseRuntime,
     runtimeReady,
@@ -120,5 +134,7 @@ export function createMuseRuntimeApi(MuseRuntime, deps = {}) {
     syncTrialsCount,
     checkStrategy,
     equityDigest,
+    evaluateLeaderboardEntry,
+    rankLeaderboard,
   };
 }

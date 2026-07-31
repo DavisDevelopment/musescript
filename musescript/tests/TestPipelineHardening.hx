@@ -26,6 +26,7 @@ import musescript.evo.rigor.TrialsSession;
 import musescript.evo.rigor.ReportCard;
 import musescript.evo.rigor.HonestLedger;
 import musescript.evo.rigor.LedgerDisposition;
+import musescript.evo.rigor.LeaderboardScore;
 import musescript.evo.BasketFitness;
 import musescript.ew.NullForecastHost;
 import musescript.ew.OracleForecastHost;
@@ -625,5 +626,102 @@ strategy NoParams {
 		Assert.equals(HonestLedger.LIST_SCHEMA, list.schema);
 		Assert.equals(1, list.noGoCount);
 		Assert.equals(0, list.goCount);
+	}
+
+	// ── Honest Leaderboard scoring ────────────────────────────────────────────
+
+	public function testLeaderboardNullIneligible() {
+		var rets = iidReturns(80, 0.0, 0.02, 51);
+		var score = LeaderboardScore.evaluate({
+			returns: rets, trades: 40, pbo: 0.2, id: "null"
+		}, { fieldN: 10, nBoot: 40, minTrades: 20 });
+		Assert.isFalse(score.eligible, 'null must be ineligible: ${score.reason}');
+		Assert.isTrue(
+			score.reason.indexOf("DSR") >= 0
+			|| score.reason.indexOf("CI") >= 0
+			|| score.reason.indexOf("null") >= 0
+			|| score.reason.indexOf("PBO") >= 0,
+			'expected gate reason, got: ${score.reason}'
+		);
+	}
+
+	public function testLeaderboardPlantedEligibleRanks() {
+		var strong = iidReturns(120, 0.003, 0.01, 52);
+		var mild = iidReturns(120, 0.0015, 0.01, 53);
+		var noise = iidReturns(120, 0.0, 0.02, 54);
+		var ranked = LeaderboardScore.rank([
+			{ returns: noise, trades: 50, pbo: 0.2, id: "noise", label: "noise" },
+			{ returns: mild, trades: 50, pbo: 0.2, id: "mild", label: "mild" },
+			{ returns: strong, trades: 50, pbo: 0.15, id: "strong", label: "strong" }
+		], { fieldN: 3, nBoot: 60, minTrades: 20 });
+
+		Assert.isTrue(ranked.failed.length >= 1, "noise should fail the wall");
+		var noiseFailed = false;
+		for (f in ranked.failed) if (f.id == "noise") noiseFailed = true;
+		Assert.isTrue(noiseFailed, "noise must be in failed, not ranked");
+
+		if (ranked.wall.length >= 2) {
+			Assert.equals("strong", ranked.wall[0].score.id,
+				'strong should rank #1 (got ${ranked.wall[0].score.id})');
+			Assert.isTrue(
+				ranked.wall[0].score.rankStat >= ranked.wall[1].score.rankStat,
+				"rankStat must be non-increasing down the wall"
+			);
+		} else {
+			Assert.isTrue(ranked.wall.length >= 1, "at least one planted edge should make the wall");
+			Assert.equals("strong", ranked.wall[0].score.id);
+		}
+	}
+
+	public function testLeaderboardFieldNRaisesBar() {
+		var rets = iidReturns(100, 0.0012, 0.01, 55);
+		var small = LeaderboardScore.evaluate({
+			returns: rets, trades: 40, pbo: 0.2
+		}, { fieldN: 2, nBoot: 50, minTrades: 20 });
+		var large = LeaderboardScore.evaluate({
+			returns: rets, trades: 40, pbo: 0.2
+		}, { fieldN: 500, nBoot: 50, minTrades: 20 });
+		Assert.isTrue(
+			large.dsrDeflated <= small.dsrDeflated + 1e-12,
+			'fieldN up must not increase DSR (small=${small.dsrDeflated} large=${large.dsrDeflated})'
+		);
+		Assert.isTrue(large.nTrials > small.nTrials, "larger field → more trials");
+	}
+
+	public function testLeaderboardPboAndTradesGates() {
+		var rets = iidReturns(100, 0.004, 0.01, 56);
+		var thin = LeaderboardScore.evaluate({
+			returns: rets, trades: 5, pbo: 0.1
+		}, { fieldN: 5, nBoot: 40, minTrades: 20 });
+		Assert.isFalse(thin.eligible);
+		Assert.isTrue(thin.reason.indexOf("trades") >= 0);
+
+		var overfit = LeaderboardScore.evaluate({
+			returns: rets, trades: 40, pbo: 0.8
+		}, { fieldN: 5, nBoot: 40, minTrades: 20 });
+		Assert.isFalse(overfit.eligible);
+		Assert.isTrue(overfit.reason.indexOf("PBO") >= 0);
+
+		var noPbo = LeaderboardScore.evaluate({
+			returns: rets, trades: 40, pbo: null
+		}, { fieldN: 5, nBoot: 40, minTrades: 20 });
+		Assert.isFalse(noPbo.eligible);
+		Assert.isTrue(noPbo.reason.indexOf("PBO") >= 0);
+	}
+
+	public function testLeaderboardAccountTrialsRaiseBar() {
+		Assert.equals(10, LeaderboardScore.effectiveTrials(10, 1));
+		Assert.equals(14, LeaderboardScore.effectiveTrials(10, 5));
+		var rets = iidReturns(90, 0.0015, 0.01, 57);
+		var one = LeaderboardScore.evaluate({
+			returns: rets, trades: 40, pbo: 0.2, accountTrials: 1
+		}, { fieldN: 8, nBoot: 40 });
+		var flood = LeaderboardScore.evaluate({
+			returns: rets, trades: 40, pbo: 0.2, accountTrials: 40
+		}, { fieldN: 8, nBoot: 40 });
+		Assert.isTrue(
+			flood.dsrDeflated <= one.dsrDeflated + 1e-12,
+			"account flood must not improve DSR"
+		);
 	}
 }

@@ -60,6 +60,9 @@ import musescript.builtins.TradeBuiltins;
  *   Instrumented runs also attach `reportCard` (from Truth Report; seed/universe slots pending).
  *   MuseRuntime.buildReportCard(truthReport|payload) / seedRobustnessSweep(source, bars, opts)
  *   MuseRuntime.ledgerEntryFromTruth(truthReport) — serializable Honest Ledger entry
+ *
+ * Honest Leaderboard:
+ *   MuseRuntime.evaluateLeaderboardEntry(entry, ctx) / rankLeaderboard(entries, ctx)
  */
 @:expose("MuseRuntime")
 class MuseRuntime {
@@ -546,6 +549,118 @@ class MuseRuntime {
 		} catch (e:Dynamic) {
 			return err(Std.string(e));
 		}
+	}
+
+	/**
+	 * Honest Leaderboard — evaluate one entry (field-N-deflated DSR, lower-CI, gates).
+	 * `entry`: { returns:[], trades, pbo?, seedCiLos?, accountTrials?, id?, label?, verdict?, author? }
+	 * `ctx`: { fieldN, minTrades?, accountTrials?, nBoot?, bootSeed?, nullValue? }
+	 */
+	public static function evaluateLeaderboardEntry(entry:Dynamic, ?ctx:Dynamic):Dynamic {
+		try {
+			if (entry == null) return err("evaluateLeaderboardEntry requires entry");
+			var parsed = parseLeaderboardEntry(entry);
+			if (parsed == null) return err("evaluateLeaderboardEntry requires returns:[] and trades");
+			var c = parseLeaderboardCtx(ctx);
+			var score = musescript.evo.rigor.LeaderboardScore.evaluate(parsed, c);
+			return { ok: true, score: musescript.evo.rigor.LeaderboardScore.scoreToDyn(score) };
+		} catch (e:Dynamic) {
+			return err(Std.string(e));
+		}
+	}
+
+	/**
+	 * Honest Leaderboard — rank a field. Eligible → wall by rankStat desc;
+	 * ineligible → failed (never vanity-ranked).
+	 * `entries`: array of entry objects (see evaluateLeaderboardEntry).
+	 * `ctx.fieldN` defaults to entries.length when omitted/≤0.
+	 */
+	public static function rankLeaderboard(entries:Dynamic, ?ctx:Dynamic):Dynamic {
+		try {
+			var list:Array<Dynamic> = [];
+			if (entries != null && Std.isOfType(entries, Array)) {
+				for (raw in (entries : Array<Dynamic>)) {
+					var e = parseLeaderboardEntry(raw);
+					if (e != null) list.push(e);
+				}
+			}
+			var c = parseLeaderboardCtx(ctx);
+			var fieldN:Int = Reflect.field(c, "fieldN");
+			if (fieldN < 1) {
+				fieldN = list.length > 0 ? list.length : 1;
+				Reflect.setField(c, "fieldN", fieldN);
+			}
+			var ranked = musescript.evo.rigor.LeaderboardScore.rank(cast list, cast c);
+			return { ok: true, ranked: musescript.evo.rigor.LeaderboardScore.rankToDyn(ranked) };
+		} catch (e:Dynamic) {
+			return err(Std.string(e));
+		}
+	}
+
+	static function parseLeaderboardCtx(ctx:Dynamic):Dynamic {
+		var fieldN = 1;
+		if (ctx != null && Reflect.hasField(ctx, "fieldN") && Reflect.field(ctx, "fieldN") != null)
+			fieldN = Std.int((Reflect.field(ctx, "fieldN") : Float));
+		if (fieldN < 1) fieldN = 1;
+		var out:Dynamic = { fieldN: fieldN };
+		if (ctx == null) return out;
+		if (Reflect.hasField(ctx, "minTrades") && Reflect.field(ctx, "minTrades") != null)
+			Reflect.setField(out, "minTrades", Std.int((Reflect.field(ctx, "minTrades") : Float)));
+		if (Reflect.hasField(ctx, "accountTrials") && Reflect.field(ctx, "accountTrials") != null)
+			Reflect.setField(out, "accountTrials", Std.int((Reflect.field(ctx, "accountTrials") : Float)));
+		if (Reflect.hasField(ctx, "nBoot") && Reflect.field(ctx, "nBoot") != null)
+			Reflect.setField(out, "nBoot", Std.int((Reflect.field(ctx, "nBoot") : Float)));
+		if (Reflect.hasField(ctx, "bootSeed") && Reflect.field(ctx, "bootSeed") != null)
+			Reflect.setField(out, "bootSeed", Std.int((Reflect.field(ctx, "bootSeed") : Float)));
+		if (Reflect.hasField(ctx, "nullValue") && Reflect.field(ctx, "nullValue") != null)
+			Reflect.setField(out, "nullValue", (Reflect.field(ctx, "nullValue") : Float));
+		if (Reflect.hasField(ctx, "seedSet") && Reflect.field(ctx, "seedSet") != null
+			&& Std.isOfType(Reflect.field(ctx, "seedSet"), Array)) {
+			var seeds:Array<Int> = [];
+			for (x in (Reflect.field(ctx, "seedSet") : Array<Dynamic>))
+				seeds.push(Std.int((x : Float)));
+			Reflect.setField(out, "seedSet", seeds);
+		}
+		return out;
+	}
+
+	static function parseLeaderboardEntry(raw:Dynamic):Null<Dynamic> {
+		if (raw == null) return null;
+		var returns:Array<Float> = null;
+		if (Reflect.hasField(raw, "returns") && Reflect.field(raw, "returns") != null)
+			returns = cast Reflect.field(raw, "returns");
+		else if (Reflect.hasField(raw, "equity") && Reflect.field(raw, "equity") != null) {
+			var eq:Array<Float> = cast Reflect.field(raw, "equity");
+			returns = musescript.harness.Metrics.returnsFromEquity(eq);
+		} else if (Reflect.hasField(raw, "oosEquity") && Reflect.field(raw, "oosEquity") != null) {
+			var oos:Array<Float> = cast Reflect.field(raw, "oosEquity");
+			returns = musescript.harness.Metrics.returnsFromEquity(oos);
+		}
+		if (returns == null) return null;
+		var trades = Reflect.hasField(raw, "trades") ? Std.int((Reflect.field(raw, "trades") : Float)) : 0;
+		var e:Dynamic = { returns: returns, trades: trades };
+		if (Reflect.hasField(raw, "pbo")) {
+			var p = Reflect.field(raw, "pbo");
+			Reflect.setField(e, "pbo", p == null ? null : (p : Float));
+		}
+		if (Reflect.hasField(raw, "seedCiLos") && Reflect.field(raw, "seedCiLos") != null
+			&& Std.isOfType(Reflect.field(raw, "seedCiLos"), Array))
+			Reflect.setField(e, "seedCiLos", Reflect.field(raw, "seedCiLos"));
+		if (Reflect.hasField(raw, "accountTrials") && Reflect.field(raw, "accountTrials") != null)
+			Reflect.setField(e, "accountTrials", Std.int((Reflect.field(raw, "accountTrials") : Float)));
+		if (Reflect.hasField(raw, "id") && Reflect.field(raw, "id") != null)
+			Reflect.setField(e, "id", Std.string(Reflect.field(raw, "id")));
+		if (Reflect.hasField(raw, "label") && Reflect.field(raw, "label") != null)
+			Reflect.setField(e, "label", Std.string(Reflect.field(raw, "label")));
+		else if (Reflect.hasField(raw, "strategyLabel") && Reflect.field(raw, "strategyLabel") != null)
+			Reflect.setField(e, "label", Std.string(Reflect.field(raw, "strategyLabel")));
+		if (Reflect.hasField(raw, "verdict") && Reflect.field(raw, "verdict") != null)
+			Reflect.setField(e, "verdict", Std.string(Reflect.field(raw, "verdict")));
+		if (Reflect.hasField(raw, "author") && Reflect.field(raw, "author") != null)
+			Reflect.setField(e, "author", Std.string(Reflect.field(raw, "author")));
+		if (Reflect.hasField(raw, "category") && Reflect.field(raw, "category") != null)
+			Reflect.setField(e, "category", Std.string(Reflect.field(raw, "category")));
+		return e;
 	}
 
 	/**
