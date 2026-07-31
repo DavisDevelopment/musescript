@@ -26,10 +26,11 @@
 
 ## P0 — finish the vertical slice (ordered; do in this order)
 
-- [ ] **V0. Ship the slice.** Commit `musescript/vm/`, `TestBytecodeVmParity.hx`,
-  `build-vm-tests.hxml` + the spec status update so "LANDED" is true relative to HEAD.
-- [ ] **V1. CI gate.** Run the VM parity suite in `.github/workflows/pipeline-hardening.yml`
-  (TestMain already registers `TestBytecodeVmParity`; the workflow currently never builds it).
+- [x] **V0. Ship the slice.** Committed `musescript/vm/`, `TestBytecodeVmParity.hx`,
+  `build-vm-tests.hxml` + spec status (commit `31026c3`).
+- [x] **V1. CI gate.** Added a scoped runner `TestVmMain` + `build-vm-parity.hxml` +
+  `pipeline-hardening.yml` step "Build + run bytecode VM parity gate". Scoped deliberately (not the
+  whole TestMain suite, which the maintainers don't gate on). Green locally (19 asserts, exit 0).
 - [ ] **V2. Parity harness before opcode growth.** Extend `DetParityDump` (or a sibling
   `VmParityDump`) to emit trades/equity f64-bit dumps from the VM tier and diff vs interp on the
   evo corpus — land this *before* V3 so broadening happens against a standing gate, not after.

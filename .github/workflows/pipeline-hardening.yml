@@ -39,6 +39,21 @@ jobs:
           haxe build-auction-tests.hxml
           node build/js/tests-auction.js
 
+      - name: Build + run bytecode VM parity gate (interp↔VM byte-identity)
+        run: |
+          haxe build-vm-parity.hxml
+          node build/js/tests-vm-parity.js
+
+      - name: Seed-restart matrix (bounded multi-CLI --seed)
+        run: bash tools/seed_restart_matrix.sh
+
+      - name: Planted co-evo on real tape (bounded)
+        run: bash tools/planted_coevo.sh
+        env:
+          PLANTED_TAPE: corpus/tapes/spy_oos_2022_2026.csv
+          PLANTED_GENS: "3"
+          PLANTED_POP: "6"
+          PLANTED_MAX_BARS: "900"
   det-parity:
     runs-on: ubuntu-latest
     steps:
@@ -113,4 +128,5 @@ jobs:
       - name: EquityDigest web↔app ↔ golden
         # Full web+mobile accept locally: MUSE_PARITY_STRICT=1 (siblings present).
         # CI locks build digests to testdata golden (siblings usually absent).
+        # Ship-protect obfuscated artifacts must NEVER feed this job — raw only.
         run: bash tools/equity_digest_web_app_parity_ci.sh
