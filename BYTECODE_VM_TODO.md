@@ -40,7 +40,39 @@
 - [ ] **V3. Indicator subset — the real unlock.** `LOOKBACK`, `SERIES id n`, `CROSS id n` mirroring
   interp semantics exactly: callsite-keyed slots via `CallsiteIds` ids, same
   `HarnessContext.seriesBuffers` / `IndicatorInstance.stateFor` / `TradeBuiltins.*CS` state.
-  Until this lands, nearly every real evo genome misses the VM.
+  Until this lands, nearly every real evo genome misses the VM (V2 gate: 80/83 fallback).
+
+  **Design notes (reverse-engineered 2026-07-31, ready to execute against the V2 gate):**
+  - Seed genomes expand to e.g. `when crossover("close", sma("close", 8)): { long(1); }`. Series
+    args render as **string literals** (`"close"`), NOT bar-field idents (`Expand.series` →
+    `'"'+f+'"'`). So `sma`'s series arg arrives as `EConst(CString("close"))`.
+  - **Plain builtin call** (`sma`/`ema`/~400 indicators): interp does `ECall(EIdent(name), args)` →
+    `evalCallArgs` → for arg i, if `BuiltinSigs.wantsSeries(name,i)` pass `seriesNameOf(args[i])`
+    (a NAME string) else `evalExpr(args[i])`; then `callValue(calleeValue(callee), argv)`. The
+    builtin lives in `globals` (`TradeBuiltins.install`) and reads harness series columns.
+    **`evalCallArgs` series-name resolution is STATIC per callsite** (depends on the arg AST, not
+    runtime values) — so the compiler can decide at compile time: series-typed arg ⇒ emit
+    `CONST "<name>"`; else emit the arg's bytecode. New op `CALL_BUILTIN nameConst argc` pops argc,
+    calls the globals builtin. **Runtime-dependent branch of `seriesNameOf`** (`EIdent` that is
+    `harness.isAuxSeries` and unshadowed) is NOT statically decidable ⇒ throw `VmUnsupported`
+    (keep the boundary deterministic; don't guess).
+  - **`__cs` CROSS** (`crossover`/`crossunder`/`rising`/`falling`): interp evaluates args with plain
+    `evalExpr` (NOT series-name resolution), so `crossover("close", …)` passes the STRING "close"
+    and `TradeBuiltins.crossoverCS(harness, csId, a, b)` resolves it internally. New op
+    `CROSS csId fnCode argc` → emit args via normal `expr()`, then call the matching `*CS` with the
+    `CallsiteIds` id as an immediate. Mirror the exact default-arg handling in
+    `MuseInterp.evalExpr`'s `__cs` case (rising/falling have an optional 3rd arg defaulting 0).
+  - **`__scr` SERIES** (`macd`/`bbands`/`stoch`, multi-output): `harness.indCols.scratchObj(scrId)`
+    then `TradeBuiltins.macd/bbands/stoch(harness, …, scrOut)`. Fewer genomes — do after CROSS.
+  - **`LOOKBACK`** (`series[n]` / `ELookback`): `evalLookback` → for `EBarField|EIdent` name →
+    `harness.seriesLookback(name, n)`; for `ECall`/other → `harness.withSeriesOffset(n, () -> eval)`.
+    Bar-field/ident case is easy; the call/offset case needs a VM re-entrancy shim ⇒ can start with
+    the bar-field/ident case and `VmUnsupported` the offset case.
+  - **Order per sub-op:** CROSS (unlocks the seedFromIndicators corpus with CALL_BUILTIN) → then
+    LOOKBACK (bar-field case) → then `__scr` SERIES. Watch V2's `fallback` drop, `diverged` stay 0.
+  - **Parity trap:** `MuseVmOps` is copied from interp privates; any builtin that internally uses
+    `Math.exp`/`log` must already route through `DetMath` on the interp side — the VM calling the
+    SAME builtin inherits that, so no new risk, but verify on the corpus (V2), don't assume.
 - [ ] **V4. Prelude/body coverage, corpus-driven.** Broaden statements/exprs only where corpus
   genomes actually hit `VmUnsupported` (measure the fallback rate; don't chase the full language).
 - [ ] **V5. Oracle flag.** `--vm` / `preferVm` on `Fitness.evaluate`/`evaluateCompiled` (same
