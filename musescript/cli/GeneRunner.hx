@@ -3,6 +3,7 @@ package musescript.cli;
 import musescript.MuseScript;
 import musescript.parse.MuseParser;
 import musescript.compile.MuseCompiler;
+import musescript.vm.MuseVm;
 import musescript.checker.MuseChecker;
 import musescript.harness.HarnessContext;
 import musescript.harness.BarFeed;
@@ -88,6 +89,9 @@ class GeneRunner {
 		var docsMdFlag = argFlag("--docs-md");
 		var strict = argFlag("--strict");
 		var instrument = argFlag("--instrument");
+		// --vm (Graoptimization / .exe-forward): backtest on the native-image-clean Tier-A bytecode
+		// VM (musescript.vm.MuseVm), interp fallback for out-of-subset. See RECURSIVE_SELF_IMPROVEMENT.
+		var useVm = argFlag("--vm");
 		var artifactDir = argVal("--artifact", "");
 		var executionMode = argVal("--execution", "same-close");
 		if (executionMode != "same-close" && executionMode != "next-open") {
@@ -198,7 +202,7 @@ class GeneRunner {
 					// genome's, leaving only the LAST genome's artifact on disk (a real gap found
 					// while wiring MuseGene's fitness loop through KestrGraal's WASM-artifact RPC).
 					var perGenomeDir = artifactDir != "" ? artifactDir + "/" + id : "";
-					var res = runOne(Std.string(obj.source), bars, target, checkOnly, strict, perGenomeDir, executionMode, false, costBps, startCapital, equityFloor);
+					var res = runOne(Std.string(obj.source), bars, target, checkOnly, strict, perGenomeDir, executionMode, false, costBps, startCapital, equityFloor, useVm);
 					Reflect.setField(res, "id", id);
 					emit(res);
 				} catch (e:Dynamic) {
@@ -211,7 +215,7 @@ class GeneRunner {
 		var source = sourcePath != "" ? readFile(sourcePath) : readStdin();
 		var bars = checkOnly ? [] : loadBars(tapePath, symbol, synthN, seed, murmurationConfigPath, murmurationSteps);
 		try {
-			emit(runOne(source, bars, target, checkOnly, strict, artifactDir, executionMode, instrument, costBps, startCapital, equityFloor));
+			emit(runOne(source, bars, target, checkOnly, strict, artifactDir, executionMode, instrument, costBps, startCapital, equityFloor, useVm));
 		} catch (e:Dynamic) {
 			emit({ ok: false, error: Std.string(e) });
 		}
@@ -221,7 +225,8 @@ class GeneRunner {
 	static function runOne(
 		source:String, bars:Array<Bar>, target:String, checkOnly:Bool,
 		strict:Bool, artifactDir:String, executionMode:String, ?instrument:Bool = false,
-		?costBps:Float = 0.0, ?startCapital:Float = 100000, ?equityFloor:Float = 0.0
+		?costBps:Float = 0.0, ?startCapital:Float = 100000, ?equityFloor:Float = 0.0,
+		?useVm:Bool = false
 	):Dynamic {
 		// Expand statement templates before any interpreter seeding. Seeding the
 		// raw AST left bare `TrailingStop(0.05)` calls unresolved ("Cannot call null").
@@ -251,7 +256,6 @@ class GeneRunner {
 		harness.feed = feed;
 		TradeBuiltins.resetCrossState();
 
-		var ex = MuseCompiler.compileEx(prog, { target: target, strict: strict });
 		// StrategyWasmEmitter works from `prog` (the parsed AST) directly -- it has no
 		// dependency on `ex`/`target` at all, so artifact emission doesn't need target=="wasm".
 		// Gating it on target was accidental coupling: it forced callers who want a WASM artifact
@@ -278,15 +282,32 @@ class GeneRunner {
 				}));
 			}
 		}
+		// --vm: run the backtest on the Tier-A bytecode VM (native-image-clean; no Truffle/GraalWasm),
+		// falling back to the compiled/interp path for anything outside the VM's P0 subset. The
+		// resulting metrics struct is byte-identical to the interp's (the VM parity gates guarantee it).
+		var result:Dynamic = null;
+		var backendName:String = target;
+		var emittedFlag:Bool = false;
 		var t0 = haxe.Timer.stamp();
-		var result:Dynamic = ex.fn(harness);
+		if (useVm) {
+			var chunk:Null<musescript.vm.MuseChunk> = null;
+			try { chunk = MuseVm.compileProgram(MuseCompiler.lower(prog)); }
+			catch (_:musescript.vm.MuseBytecodeCompiler.VmUnsupported) {}
+			if (chunk != null) { result = MuseVm.runChunk(harness, chunk, feed); backendName = "vm"; }
+		}
+		if (result == null) {
+			var ex = MuseCompiler.compileEx(prog, { target: target, strict: strict });
+			result = ex.fn(harness);
+			backendName = ex.backend;
+			emittedFlag = ex.emitted;
+		}
 		var runMs = (haxe.Timer.stamp() - t0) * 1000.0;
 
 		var out:Dynamic = {
 			ok: true,
-			backend: ex.backend,
+			backend: backendName,
 			execution: executionMode,
-			emitted: ex.emitted,
+			emitted: emittedFlag,
 			runMs: Math.fround(runMs * 1000) / 1000,
 			barsPerSec: runMs > 0 ? Math.fround(bars.length / (runMs / 1000.0)) : null,
 			bars: bars.length,
@@ -300,7 +321,9 @@ class GeneRunner {
 		// Honesty flag: the requested target couldn't be emitted and the run fell
 		// back to another backend. Callers scoring fitness should treat a
 		// fallback verdict as suspect (or pass --strict to hard-fail instead).
-		if (ex.backend != target)
+		if (useVm && backendName != "vm")
+			Reflect.setField(out, "fallback", true); // VM requested but the strategy fell to interp
+		else if (!useVm && backendName != target)
 			Reflect.setField(out, "fallback", true);
 		// IDE instrumentation payload (--instrument): the chart commands, per-bar
 		// console log, executed fills, and equity curve — all already collected
