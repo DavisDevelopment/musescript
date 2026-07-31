@@ -121,6 +121,13 @@ class CorpusEvoRun {
 		var preregOn = argFlag("--prereg");
 		if (nTrials <= 1 && !preregOn)
 			Sys.println('WARNING: --n-trials=$nTrials disables DSR multi-testing deflation; pass --prereg to acknowledge, or raise --n-trials');
+		// Hard prereg gate: seal threshold NOW; champion OOS below it → non-zero abort (not WARNING-only).
+		var preregThreshold = argFloat("--prereg-threshold", 0.0);
+		var preregGate:Null<musescript.evo.rigor.PreregGate> = preregOn
+			? musescript.evo.rigor.PreregGate.seal(preregThreshold, 5,
+				"champion OOS Sharpe clears sealed --prereg-threshold")
+			: null;
+		var preregAbort = false;
 		// IS selection uses ProbSharpe rank (DSR when nTrials>1) instead of raw Sharpe.
 		var rankDsrOn = !argFlag("--no-rank-dsr");
 		Sys.println('min-trades gate: $minTrades (fitness/OOS INELIGIBLE below this; --min-trades)');
@@ -130,8 +137,9 @@ class CorpusEvoRun {
 		Sys.println(musescript.repro.ReproStamp.make({
 			seed: seed, bootSeed: seed, profile: "CorpusEvoRun", backend: "jvm"
 		}).describe());
-		if (preregOn)
-			Sys.println('prereg: on — multi-testing acknowledged (PreRegistration seal; threshold locked at run start)');
+		if (preregGate != null)
+			Sys.println('prereg: SEALED — ' + preregGate.describe()
+				+ ' (champion OOS below threshold ⇒ ABORT / non-zero exit)');
 		// Soft-cap parsimony: free below the threshold, `parsimonyLambda` sharpe per node past
 		// it. See Fitness.score's doc comment. Threshold=20 is roughly "typical" genome size
 		// observed across this run's own champions so far; tune both from the command line
@@ -313,6 +321,7 @@ class CorpusEvoRun {
 		if (fitnessWindows > 1) Sys.println('ROBUSTNESS FITNESS: on -- $fitnessWindows windows, lambda=$fitnessWindowLambda (WASM+JS; --fitness-windows 1 restores plain whole-tape Sharpe)');
 		// P1c: `--nma` routes Fitness.evaluate through columnar NmaFitness (KFeature falls back to
 		// Expand→compile). Forces JS-fallback pop scoring so WASM doesn't bypass the strangler.
+		var vmOn = argFlag("--vm");
 		var nmaOn = argFlag("--nma");
 		var nmaVerifyOn = argFlag("--nma-verify");
 		var nmaPopMemoOff = argFlag("--no-nma-pop-memo");
@@ -967,6 +976,28 @@ class CorpusEvoRun {
 		var seedPop = tournament.genomes.concat(indicatorSeeds).concat(fibSeeds).concat(fourierSeeds).concat(ewHostSeeds);
 		Sys.println('seeded generation 0: ${seedPop.length} real genomes (${tournament.genomes.length} corpus-derived + ${indicatorSeeds.length} indicator-derived + ${fibSeeds.length} fib-retracement + ${fourierSeeds.length} fourier-projection'
 			+ (ewHostOn ? ' + ${ewHostSeeds.length} ew-host' : "") + ")");
+
+		// `--vm` (BYTECODE_VM_TODO.md V5): route Fitness.evaluate through the Tier-A bytecode VM
+		// (fast path, interp fallback for the out-of-subset tail). Refuses to run unless a JVM-side
+		// parity self-check on the gen-0 seeds is byte-clean vs the interp — a fast tier that lies
+		// must never run. Default OFF; measured against ~4.35 s/gen warm (V6).
+		if (vmOn) {
+			// Sample the in-subset-heavy seeds (indicator crossovers + fib + fourier) so the check
+			// exercises real VM coverage, plus a slice of the complex tournament genomes so the
+			// fallback path is represented too.
+			var checkPool = indicatorSeeds.concat(fibSeeds).concat(fourierSeeds)
+				.concat(tournament.genomes.length > 16 ? tournament.genomes.slice(0, 16) : tournament.genomes);
+			var check = checkPool.length > 64 ? checkPool.slice(0, 64) : checkPool;
+			var pc = Fitness.vmParityCheck(check, isBasket[0], costBps);
+			Sys.println('VM: on -- Tier-A bytecode oracle (--vm). parity self-check: ${pc.identical}/${pc.covered}'
+				+ ' covered gen-0 genomes byte-identical to interp (${pc.fallback} fallback of ${check.length})');
+			if (pc.firstError != null) Sys.println('  first vm-error: ${pc.firstError}');
+			if (pc.firstMismatch != null) {
+				Sys.println('VM PARITY FAILURE -- aborting (a fast tier that lies must not run): ${pc.firstMismatch}');
+				Sys.exit(3);
+			}
+			Fitness.preferVm = true;
+		}
 
 		// Own Variation instance, deliberately independent of `engine`'s internal one -- candidate
 		// generation for a human browsing the population has no business perturbing the main run's
@@ -2908,6 +2939,7 @@ class CorpusEvoRun {
 			var held = 0, checked = 0;
 			var oosMetrics:Array<Float> = [];
 			var pboPerf:Array<Array<Float>> = [];
+			var bestEliteOos = Math.NaN;
 			for (r in ranked) {
 				if (shown >= 10) break;
 				if (r.isFit == Fitness.NEG_INF) break;
@@ -2933,8 +2965,10 @@ class CorpusEvoRun {
 				var oosScore = BasketFitness.scoreAggregate(agg, minTrades);
 				var holdMark = oosScore > 0 ? "HELD" : "did not hold";
 				if (oosScore > 0) held++;
-				if (oosScore != Fitness.NEG_INF && Math.isFinite(oosScore) && agg.trades >= minTrades)
+				if (oosScore != Fitness.NEG_INF && Math.isFinite(oosScore) && agg.trades >= minTrades) {
 					oosMetrics.push(oosScore);
+					if (!Math.isFinite(bestEliteOos) || oosScore > bestEliteOos) bestEliteOos = oosScore;
+				}
 				// PBO slices: window Sharpes on first OOS symbol equity (even # windows).
 				if (!anyErr && oosEquity != null) {
 					var frWin = new FitnessResult(true, agg.sharpe, agg.trades, agg.finalEquity, "js");
@@ -2945,13 +2979,15 @@ class CorpusEvoRun {
 				Sys.println('  ${pad(Std.string(shown), 2)}. IS=${fmt(r.isFit, 4)}  OOS=${!anyErr ? fmt(oosScore, 4) : "n/a"} (trades=${agg.trades})  [$holdMark]  ${r.g.name}');
 			}
 			Sys.println('OOS summary: ${held}/${checked} of the top IS performers held a positive Sharpe out of sample (minTrades=$minTrades).');
+			if (Math.isFinite(bestEliteOos))
+				Sys.println('[rigor champion-oos] metric=${fmt(bestEliteOos, 4)} (best elite OOS score; scrape for seed-matrix)');
 
 			// B4 live: elite-OOS median (not max) — blocks cherry-picking one lucky top-K slot.
-			// Note: this is within-run elite robustness, not multi-`--seed` CLI restarts.
+			// Multi-CLI `--seed` restarts: see SeedRestartMatrixCli / tools/seed_restart_matrix.*.
 			if (oosMetrics.length > 0) {
 				var seedV = SeedRobustness.verdict(oosMetrics, 0.0);
 				Sys.println('[rigor seed-median] n=${seedV.n} median=${fmt(seedV.median, 4)} max=${fmt(seedV.max, 4)}'
-					+ ' => ${seedV.go ? "GO" : "NO-GO"} (elite OOS median must clear 0; multi-seed restarts still soft)');
+					+ ' => ${seedV.go ? "GO" : "NO-GO"} (elite OOS median must clear 0; multi-CLI-seed → SeedRestartMatrixCli)');
 			}
 
 			// B1 live: CSCV PBO on top-K OOS window slices.
@@ -3014,11 +3050,25 @@ class CorpusEvoRun {
 				});
 				Sys.println(musescript.evo.rigor.OosVerdict.formatLine(verdict,
 					'hostInPop=$hostCount bestHost=${bestHostG.name} IS=${fmt(bestHostFit, 4)} OOS=${fmt(hostOos, 4)} buyHold=${fmt(bhOos, 4)}'));
+				Sys.println('[rigor champion-oos] metric=${fmt(host.agg.sharpe, 4)} (best host OOS Sharpe; scrape for seed-matrix)');
 				// B5 live: multi-name basket → universe gate; single-name always flagged.
 				var univ = UniverseRobustness.verdict(host.perSymbol, 0.0);
 				Sys.println('[rigor universe] names=${univ.total} passed=${univ.passed} singleName=${univ.singleName}'
 					+ ' => ${univ.go ? "GO" : "NO-GO"}'
 					+ (univ.singleName ? ' (single-name OOS — not universe-robust)' : ''));
+			}
+			// B3 hard: sealed PreRegistration vs champion OOS — abort (non-zero) if below threshold.
+			if (preregGate != null) {
+				var champMetric = Math.NEGATIVE_INFINITY;
+				if (bestHostG != null) {
+					var hostM = oosFrOf(bestHostG).agg.sharpe;
+					if (Math.isFinite(hostM)) champMetric = hostM;
+				} else if (Math.isFinite(bestEliteOos)) {
+					champMetric = bestEliteOos;
+				}
+				var pv = preregGate.evaluate(champMetric);
+				Sys.println(musescript.evo.rigor.PreregGate.formatLine(pv));
+				if (pv.abort) preregAbort = true;
 			}
 		}
 		#if kestrel
@@ -3083,6 +3133,15 @@ class CorpusEvoRun {
 		host.close();
 		var verify = Fitness.verifySummary();
 		if (verify != null) Sys.println("\n" + verify);
+		if (preregAbort) {
+			Sys.println("\nCORPUS_EVO_PREREG_ABORT");
+			if (dashboard != null) {
+				dashboard.setStatus("prereg ABORT — close this window to exit");
+				Sys.println("[gui] prereg abort — leaving window open; close it to exit");
+				while (dashboard.isOpen()) Sys.sleep(0.25);
+			}
+			Sys.exit(1);
+		}
 		Sys.println("\nCORPUS_EVO_OK");
 		if (dashboard != null) {
 			dashboard.setStatus("run complete — close this window to exit");

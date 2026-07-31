@@ -25,6 +25,37 @@ class MuseCompiler {
 		return compileEx(prog, opts).fn;
 	}
 
+	/**
+	 * The backend-independent lowering/optimization pipeline (everything BEFORE the per-target
+	 * emit): class→decl flattening, template/module expansion, series lowering, generator/tailcall/
+	 * inline passes, ConstFold, CSE, and finally CallsiteIds. Every backend (JS/WASM/interp) runs on
+	 * this exact lowered AST — and so does the Tier-A bytecode VM (`Fitness.evaluateVm`), which MUST
+	 * consume the same lowered program the interp does (e.g. `SeriesLowering` rewrites string-series
+	 * args like `crossover("close", …)` that would otherwise reach a `Float` param and crash on JVM).
+	 * Extracted from `compileEx` so there is ONE pipeline definition, not two that can drift.
+	 */
+	public static function lower(prog:MuseProgram):MuseProgram {
+		// TemplateExpand before ModuleExpand (see the long note this pass ordering carried): a class
+		// rooted at muse.Strat/muse.Indicator flattens to its decl first, then template/module
+		// expansion, then series lowering, then the target-independent optimization passes.
+		prog = ClassStrategyLower.expand(prog);
+		prog = TemplateExpand.expand(prog);
+		prog = ModuleExpand.expand(prog);
+		prog = SeriesLowering.lower(prog);
+		prog = GeneratorLower.lower(prog);
+		prog = TailCallPass.transform(prog);
+		// Inline simple static methods BEFORE CallsiteIds (inlining creates new call sites;
+		// stateful-builtin identity is assigned per POST-inline syntactic site).
+		prog = StaticInlinePass.transform(prog);
+		// ConstFold after inlining (literal default-args splice in, enabling folds), then narrow CSE.
+		prog = ConstFold.transform(prog);
+		prog = CommonSubexprElim.transform(prog);
+		// Static identities for stateful callsites (crossover/rising/...) so conditional evaluation
+		// can't alias state and every backend agrees.
+		prog = CallsiteIds.assign(prog);
+		return prog;
+	}
+
 	public static function compileEx(prog:MuseProgram, ?opts:{?target:String, ?strict:Bool}):CompileEx {
 		var target = opts != null && opts.target != null ? opts.target : "js";
 		var strict = opts != null && opts.strict == true;
@@ -46,32 +77,7 @@ class MuseCompiler {
 		// in class syntax, so flatten it into the declaration it means before any pass that
 		// reasons about declarations. Everything downstream then sees an ordinary
 		// StrategyDecl/IndicatorDecl and needs no knowledge of classes.
-		prog = ClassStrategyLower.expand(prog);
-		prog = TemplateExpand.expand(prog);
-		prog = ModuleExpand.expand(prog);
-		prog = SeriesLowering.lower(prog);
-		prog = GeneratorLower.lower(prog);
-		prog = TailCallPass.transform(prog);
-		// Inline simple (single-expression) static class methods at their call sites — see
-		// StaticInlinePass's doc comment. After TailCallPass (different target), before
-		// CallsiteIds (inlining creates new call sites; stateful-builtin identity is assigned
-		// per POST-inline syntactic site, matching CallsiteIds' own "per helper, not per dynamic
-		// call" semantics for ordinary function calls).
-		prog = StaticInlinePass.transform(prog);
-		// Fold constant sub-expressions and dead branches — see ConstFold's doc comment.
-		// After StaticInlinePass specifically because inlining substitutes literal
-		// default-argument values into call bodies, which routinely turns a `when`/
-		// comparison inside that body into something fold-eligible only AFTER splicing.
-		prog = ConstFold.transform(prog);
-		// Deduplicate a repeated PURE value within the same flat statement list (a duplicate
-		// `when` condition, or an `Assign` recomputing the same thing another local already
-		// holds) — see CommonSubexprElim's doc comment for exactly how narrow "pure" is here
-		// (any call is conservatively impure, so stateful builtins are never touched).
-		prog = CommonSubexprElim.transform(prog);
-		// Static identities for stateful callsites (crossover/rising/...) so
-		// conditional evaluation can't alias state and backends agree. Runs
-		// after template expansion so each instantiation gets its own id.
-		prog = CallsiteIds.assign(prog);
+		prog = lower(prog);
 		var result = switch (target) {
 			case "haxe":
 				var fn = HaxeBackend.compile(prog);

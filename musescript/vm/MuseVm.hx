@@ -48,12 +48,19 @@ class MuseVm {
 	 * top-level statement or handler, which the subset does not yet cover.
 	 */
 	public static function runBacktest(harness:HarnessContext, prog:MuseProgram, feed:BarFeed):BacktestResult {
-		// Same first move as MuseInterp.setupRun: assign stateful-callsite ids so
-		// the lowered AST matches the interp's exactly (idempotent).
+		return runChunk(harness, compileProgram(prog), feed);
+	}
+
+	/**
+	 * Lower a whole program to a `MuseChunk` (or throw `VmUnsupported`). Split out from
+	 * `runBacktest` so callers (e.g. `Fitness`) can cache the compiled chunk by structural key and
+	 * skip re-parse+compile across evaluations — the "bytecode is the cacheable artifact" payoff
+	 * (SPEC §6). Assigns callsite ids and mirrors `MuseInterp.registerStrategyBody` + `execBar`
+	 * ordering: body-level `Assign`s are a PER-BAR prelude run BEFORE the onBar handlers, so the
+	 * per-bar program is `[prelude…, onBarBody1…, onBarBody2…]`.
+	 */
+	public static function compileProgram(prog:MuseProgram):MuseChunk {
 		prog = CallsiteIds.assign(prog);
-		// Mirror MuseInterp.registerStrategyBody + execBar ordering: body-level
-		// Assigns are a PER-BAR prelude that runs BEFORE the onBar handlers, so the
-		// compiled per-bar program is [prelude…, onBarBody1…, onBarBody2…].
 		var prelude:Array<Stmt> = [];
 		var onBarBodies:Array<Array<Stmt>> = [];
 		function collect(body:Array<Stmt>):Void {
@@ -72,7 +79,11 @@ class MuseVm {
 		if (onBarBodies.length == 0) throw new VmUnsupported("no onBar handler");
 		var bodies:Array<Array<Stmt>> = [prelude];
 		for (b in onBarBodies) bodies.push(b);
-		var chunk = MuseBytecodeCompiler.compileOnBar(bodies);
+		return MuseBytecodeCompiler.compileOnBar(bodies);
+	}
+
+	/** Run a pre-compiled chunk against a (caller-configured) harness + feed. */
+	public static function runChunk(harness:HarnessContext, chunk:MuseChunk, feed:BarFeed):BacktestResult {
 		var vm = new MuseVm(harness, chunk);
 		return harness.runBacktest(function(bar) vm.execBar(bar), feed);
 	}

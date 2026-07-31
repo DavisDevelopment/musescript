@@ -9,6 +9,9 @@ import musescript.harness.Bar;
 import musescript.interp.MuseInterp;
 import musescript.builtins.TradeBuiltins;
 import musescript.BarStrategyFn;
+import musescript.vm.MuseVm;
+import musescript.vm.MuseChunk;
+import musescript.vm.MuseBytecodeCompiler.VmUnsupported;
 
 /**
  * Typed fitness evaluation for genomes.
@@ -74,6 +77,21 @@ class Fitness {
 	 * «Διόνυσος ἐλθέ· ναρθηκοφόροι σε δέχονται.»
 	 */
 	public static var preferNma:Bool = false;
+
+	/**
+	 * Tier-A bytecode-VM oracle path (CorpusEvoRun `--vm`, BYTECODE_VM_TODO.md V5). When true,
+	 * `evaluate` tries `evaluateVm` first — parse once, compile to a `MuseChunk` (cached by structural
+	 * key so re-parse+compile is paid once per shape), run the tight VM — and falls back to the
+	 * interp-backed `evaluateCompiled` on `VmUnsupported`/`vm-error` (the ~7% out-of-subset tail; see
+	 * V4). Default OFF; A/B-gated (V6). Parity with the interp is proven byte-identical on the corpus
+	 * (JS gate) and self-checked on the JVM via `vmParityCheck` — a fast tier that lies never runs.
+	 */
+	public static var preferVm:Bool = false;
+	// null value == known-out-of-subset for that structural key (cache the miss; don't retry compile).
+	static var vmChunkCache:Map<String, Null<MuseChunk>> = new Map();
+	static final vmCacheLock = new EvoLock();
+	public static var vmOkCount = 0;
+	public static var vmFallCount = 0;
 
 	/**
 	 * When true with `preferNma`, every successful NMA eval is cross-checked against Expand→compile
@@ -350,7 +368,88 @@ class Fitness {
 			}
 			popMemoStatsLock.release();
 		}
+		if (preferVm) {
+			var vm = evaluateVm(g, bars, costBps, initialCash, equityFloor);
+			if (vm.ok) {
+				popMemoStatsLock.acquire(); vmOkCount++; popMemoStatsLock.release();
+				return vm;
+			}
+			popMemoStatsLock.acquire(); vmFallCount++; popMemoStatsLock.release();
+			// `vm-unsupported` (out of subset) / `vm-error` → interp-backed path below.
+		}
 		return evaluateCompiled(g, bars, target, strict, costBps, initialCash, equityFloor);
+	}
+
+	/**
+	 * Tier-A bytecode-VM evaluation (V5). Same observable contract as `evaluateCompiled` — same
+	 * harness/cost/cash/floor setup, same `FitnessResult` fields — but runs the compiled `MuseChunk`
+	 * on `MuseVm` instead of the tree-walking interp. Returns `ok=false` (backend `vm-unsupported` /
+	 * `vm-error`) for anything outside the P0 subset so the caller falls back; never a wrong number.
+	 * Host-projection genomes fall back (the VM has no projection decorate path yet).
+	 */
+	public static function evaluateVm(g:StrategyGenome, bars:Array<Bar>, ?costBps:Float = 0, ?initialCash:Float = 100000, ?equityFloor:Float = 0.0):FitnessResult {
+		try {
+			if (projectionProvider != null && ProjectionProvider.hostProjRefs(g).length > 0)
+				return new FitnessResult(false, 0, 0, 0, "vm-unsupported");
+			var key = Canonical.structuralKey(g);
+			vmCacheLock.acquire();
+			var hasKey = vmChunkCache.exists(key);
+			var chunk = hasKey ? vmChunkCache.get(key) : null;
+			vmCacheLock.release();
+			if (!hasKey) {
+				// Lower through the SAME pipeline the interp path runs (MuseCompiler.lower — incl.
+				// SeriesLowering), so the VM consumes the identical optimized AST the interp does.
+				var prog = MuseCompiler.lower(new MuseParser().parse(Expand.expand(g), "<evo>"));
+				try {
+					chunk = MuseVm.compileProgram(prog);
+				} catch (u:VmUnsupported) {
+					chunk = null; // cache the miss
+				}
+				vmCacheLock.acquire(); vmChunkCache.set(key, chunk); vmCacheLock.release();
+			}
+			if (chunk == null) return new FitnessResult(false, 0, 0, 0, "vm-unsupported");
+			var harness = new HarnessContext();
+			if (costBps != 0) harness.orders.book.slippageBps = costBps;
+			if (initialCash != 100000) harness.orders.reset(initialCash);
+			if (equityFloor > 0) harness.orders.equityFloor = equityFloor;
+			TradeBuiltins.resetCrossState();
+			var res = MuseVm.runChunk(harness, chunk, new BarFeed(bars));
+			var fr = new FitnessResult(true, res.sharpe, res.trades, res.finalEquity, "vm");
+			fr.fills = res.fills;
+			fr.bankrupt = harness.orders.bankrupt;
+			if (equityCurveNeeded) fr.equity = harness.orders.equity.toArray();
+			return fr;
+		} catch (e:Dynamic) {
+			return new FitnessResult(false, 0, 0, 0, "vm-error", Std.string(e));
+		}
+	}
+
+	/**
+	 * JVM-side parity self-check (V5): evaluate each genome through BOTH `evaluateVm` and the
+	 * interp-backed `evaluateCompiled`, count how many VM-covered genomes are byte-identical on
+	 * trades + finalEquity bits, and return the first mismatch (if any). `--vm` refuses to run unless
+	 * this is clean — the sacred-fitness-path equivalent of the JS `TestVmParityCorpus` gate.
+	 */
+	public static function vmParityCheck(genomes:Array<StrategyGenome>, bars:Array<Bar>, costBps:Float):{covered:Int, identical:Int, fallback:Int, firstMismatch:Null<String>, firstError:Null<String>} {
+		var covered = 0, identical = 0, fallback = 0;
+		var firstMismatch:Null<String> = null;
+		var firstError:Null<String> = null;
+		for (g in genomes) {
+			var vm = evaluateVm(g, bars, costBps);
+			if (!vm.ok) {
+				fallback++;
+				if (vm.backend == "vm-error" && firstError == null) firstError = '${g.name}: ${vm.error}';
+				continue;
+			}
+			covered++;
+			var ref = evaluateCompiled(g, bars, "js", false, costBps);
+			var same = vm.trades == ref.trades
+				&& haxe.io.FPHelper.doubleToI64(vm.finalEquity) == haxe.io.FPHelper.doubleToI64(ref.finalEquity);
+			if (same) identical++;
+			else if (firstMismatch == null)
+				firstMismatch = '${g.name}: VM(trades=${vm.trades} eq=${vm.finalEquity}) vs interp(trades=${ref.trades} eq=${ref.finalEquity})';
+		}
+		return { covered: covered, identical: identical, fallback: fallback, firstMismatch: firstMismatch, firstError: firstError };
 	}
 
 	/**
