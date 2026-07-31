@@ -21,18 +21,24 @@ class VmBenchJs {
 
 	static function main() {
 		var feed = BarFeed.synthetic(5161, 42);
-		var N = 60;
+		var N = 30;
+		var K = 8;
 		for (c in CASES) {
 			var progL = MuseCompiler.lower(new MuseParser().parse(c.src));
 			var chunk = MuseVm.compileProgram(progL);
-			for (_ in 0...12) { new MuseInterp(new HarnessContext()).runBacktest(progL, feed); MuseVm.runChunk(new HarnessContext(), chunk, feed); }
-			var t0 = haxe.Timer.stamp();
-			for (_ in 0...N) new MuseInterp(new HarnessContext()).runBacktest(progL, feed);
-			var iMs = (haxe.Timer.stamp() - t0) / N * 1000;
-			var t1 = haxe.Timer.stamp();
-			for (_ in 0...N) MuseVm.runChunk(new HarnessContext(), chunk, feed);
-			var vMs = (haxe.Timer.stamp() - t1) / N * 1000;
-			Sys.println('JS-BENCH [${c.name}] bars=5161 reps=$N: interp=${Math.round(iMs * 100) / 100}ms vm=${Math.round(vMs * 100) / 100}ms  speedup=${Math.round(iMs / vMs * 100) / 100}x');
+			for (_ in 0...16) { new MuseInterp(new HarnessContext()).runBacktest(progL, feed); MuseVm.runChunk(new HarnessContext(), chunk, feed); }
+			// Min-of-interleaved-blocks (see the JVM bench): stable against JIT-warmup / load noise.
+			var iMs = 1e9;
+			var vMs = 1e9;
+			for (_ in 0...K) {
+				var t0 = haxe.Timer.stamp();
+				for (_ in 0...N) new MuseInterp(new HarnessContext()).runBacktest(progL, feed);
+				var mi = (haxe.Timer.stamp() - t0) / N * 1000; if (mi < iMs) iMs = mi;
+				var t1 = haxe.Timer.stamp();
+				for (_ in 0...N) MuseVm.runChunk(new HarnessContext(), chunk, feed);
+				var mv = (haxe.Timer.stamp() - t1) / N * 1000; if (mv < vMs) vMs = mv;
+			}
+			Sys.println('JS-BENCH [${c.name}] bars=5161 reps=${N}x${K} min: interp=${Math.round(iMs * 100) / 100}ms vm=${Math.round(vMs * 100) / 100}ms  speedup=${Math.round(iMs / vMs * 100) / 100}x');
 		}
 	}
 }

@@ -1009,15 +1009,23 @@ class CorpusEvoRun {
 			for (g in indicatorSeeds.concat(fibSeeds).concat(tournament.genomes))
 				if (Fitness.evaluateVm(g, benchBars, costBps).ok) { benchG = g; break; }
 			if (benchG == null) { Sys.println("vm-bench: no VM-covered genome among the seeds"); Sys.exit(0); }
-			var N = 40;
-			for (_ in 0...8) { Fitness.evaluateCompiled(benchG, benchBars, "js", false, costBps); Fitness.evaluateVm(benchG, benchBars, costBps); }
-			var t0 = haxe.Timer.stamp();
-			for (_ in 0...N) Fitness.evaluateCompiled(benchG, benchBars, "js", false, costBps);
-			var interpMs = (haxe.Timer.stamp() - t0) / N * 1000;
-			var t1 = haxe.Timer.stamp();
-			for (_ in 0...N) Fitness.evaluateVm(benchG, benchBars, costBps);
-			var vmMs = (haxe.Timer.stamp() - t1) / N * 1000;
-			Sys.println('VM-BENCH: genome="${benchG.name}" bars=${benchBars.length} reps=$N (warm/cached)');
+			var N = 25;
+			var K = 8;
+			for (_ in 0...10) { Fitness.evaluateCompiled(benchG, benchBars, "js", false, costBps); Fitness.evaluateVm(benchG, benchBars, costBps); }
+			// Min-of-interleaved-blocks: the minimum reflects the least-contended (truest) per-eval
+			// time; interleaving means both paths see the same machine-load drift. Far more stable
+			// than a single-run mean, which wanders ±15% here (Graal JIT + background load).
+			var interpMs = 1e9;
+			var vmMs = 1e9;
+			for (_ in 0...K) {
+				var t0 = haxe.Timer.stamp();
+				for (_ in 0...N) Fitness.evaluateCompiled(benchG, benchBars, "js", false, costBps);
+				var mi = (haxe.Timer.stamp() - t0) / N * 1000; if (mi < interpMs) interpMs = mi;
+				var t1 = haxe.Timer.stamp();
+				for (_ in 0...N) Fitness.evaluateVm(benchG, benchBars, costBps);
+				var mv = (haxe.Timer.stamp() - t1) / N * 1000; if (mv < vmMs) vmMs = mv;
+			}
+			Sys.println('VM-BENCH: genome="${benchG.name}" bars=${benchBars.length} reps=${N}x${K} min-of-blocks (warm/cached)');
 			Sys.println('  interp(evaluateCompiled) = ${Math.round(interpMs * 1000) / 1000} ms/eval');
 			Sys.println('  vm(evaluateVm)           = ${Math.round(vmMs * 1000) / 1000} ms/eval');
 			Sys.println('  PER-EVAL SPEEDUP         = ${Math.round(interpMs / vmMs * 100) / 100}x');
