@@ -32,7 +32,13 @@ class TestBytecodeVmParity extends Test {
 		// if-expression -> local, drives both sides (strategy surface reserves `?` for holes)
 		"strategy S { onBar {\n  sig = if (close > open) { 1.0 } else { 0.0 - 1.0 }\n  when sig > 0.0: { long(1); }\n  when sig < 0.0: { short(1); }\n} }",
 		// nested arithmetic in the condition
-		"strategy S { onBar {\n  when close > (open + high) / 2.0: { long(1); }\n  when close < (open + low) / 2.0: { flat(); }\n} }"
+		"strategy S { onBar {\n  when close > (open + high) / 2.0: { long(1); }\n  when close < (open + low) / 2.0: { flat(); }\n} }",
+		// V3: __cs CROSS (crossover/crossunder) + CALL_BUILTIN (sma) — real trades, real crosses
+		"strategy S { onBar {\n  when crossover(close, sma(close, 8)): { long(1); }\n  when crossunder(close, sma(close, 8)): { flat(); }\n} }",
+		// V3: rising/falling (__cs with an int lookback arg) + a builtin in the size expr
+		"strategy S { onBar {\n  when rising(close, 3): { long(1); }\n  when falling(close, 3): { flat(); }\n} }",
+		// V3: builtin feeding arithmetic feeding an order condition
+		"strategy S { onBar {\n  fast = sma(close, 5)\n  slow = sma(close, 20)\n  when fast > slow: { long(1); }\n  when fast < slow: { flat(); }\n} }"
 	];
 
 	public function testInterpVsVmByteParity() {
@@ -47,7 +53,8 @@ class TestBytecodeVmParity extends Test {
 	 * throw `VmUnsupported` (deterministic fallback boundary — §8), not silently
 	 * miscompile. */
 	public function testOutOfSubsetThrows() {
-		var src = "strategy S { onBar {\n  when close > sma(close, 5): { long(1); }\n} }";
+		// Array literals are still outside the P0 subset (sma()/crossover() now compile via V3).
+		var src = "strategy S { onBar {\n  xs = [1.0, 2.0, 3.0]\n  when close > 0.0: { long(1); }\n} }";
 		var threw = false;
 		try {
 			MuseVm.runBacktest(new HarnessContext(), new MuseParser().parse(src), BarFeed.synthetic(64, 3));

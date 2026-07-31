@@ -4,6 +4,7 @@ import musescript.ast.Expr;
 import musescript.ast.Stmt;
 import musescript.ast.Const;
 import musescript.ast.OrderKind;
+import musescript.types.BuiltinSigs;
 
 /**
  * Thrown when a program (or subtree) falls outside the P0 VM subset. The subset
@@ -40,6 +41,27 @@ class MuseBytecodeCompiler {
 		"close" => Op.FIELD_CLOSE, "volume" => Op.FIELD_VOLUME, "time" => Op.FIELD_TIME,
 		"bar_index" => Op.FIELD_BAR_INDEX
 	];
+
+	// Lazily-built reference globals (scratch harness) for the compile-time
+	// "is this a plain-function builtin?" check. Same install as the VM runtime
+	// globals, so a name that compiles to CALL_BUILTIN here resolves to a real
+	// function there. Function identity is harness-independent, so a scratch
+	// harness is fine for the capability decision.
+	static var refGlobals:Null<Map<String, Dynamic>> = null;
+	static function isPlainBuiltin(name:String):Bool {
+		if (refGlobals == null) refGlobals = MuseVmBuiltins.scratch();
+		return refGlobals.exists(name) && Reflect.isFunction(refGlobals.get(name));
+	}
+
+	static function csCode(name:String):Int {
+		return switch (name) {
+			case "crossover": Op.CS_CROSSOVER;
+			case "crossunder": Op.CS_CROSSUNDER;
+			case "rising": Op.CS_RISING;
+			case "falling": Op.CS_FALLING;
+			default: -1;
+		}
+	}
 
 	function new() {}
 
@@ -89,6 +111,8 @@ class MuseBytecodeCompiler {
 			case EIf(c, t, el): prescanLocalsExpr(c); prescanLocalsExpr(t); if (el != null) prescanLocalsExpr(el);
 			case ETernary(c, t, el): prescanLocalsExpr(c); prescanLocalsExpr(t); prescanLocalsExpr(el);
 			case EBlock(es): for (x in es) prescanLocalsExpr(x);
+			case ECall(callee, args): prescanLocalsExpr(callee); for (a in args) prescanLocalsExpr(a);
+			case EMeta(_, margs, inner): for (a in margs) prescanLocalsExpr(a); prescanLocalsExpr(inner);
 			default:
 		}
 	}
@@ -199,6 +223,31 @@ class MuseBytecodeCompiler {
 					expr(es[i]);
 					if (i < es.length - 1) emit(Op.POP);
 				}
+			// `__cs` stateful-callsite builtins (crossover/crossunder/rising/falling): args via
+			// plain `expr()` (matching interp's plain `evalExpr` — NOT series-name resolution), then
+			// CROSS with the CallsiteIds id as an immediate. The interp's `__cs` case for a
+			// user-@indicator IndicatorInstance (runtime `globals` check) is NOT handled ⇒ fallback.
+			case EMeta("__cs", [EConst(CInt(csId))], ECall(EIdent(csName), csArgs)) if (csCode(csName) >= 0):
+				if (csName == "crossover" || csName == "crossunder") {
+					if (csArgs.length != 2) throw new VmUnsupported('$csName arity ${csArgs.length}');
+				} else if (csArgs.length < 2 || csArgs.length > 3) {
+					throw new VmUnsupported('$csName arity ${csArgs.length}');
+				}
+				for (a in csArgs) expr(a);
+				emit(Op.CROSS); emit(csId); emit(csCode(csName)); emit(csArgs.length);
+			// Plain builtin call (`sma`/`ema`/registry indicators): STATIC series-name arg
+			// resolution — a series-typed arg whose AST names a bar series (`BuiltinSigs.seriesNameOf`,
+			// a pure function) lowers to `CONST "<name>"`; otherwise the arg's bytecode. Then
+			// CALL_BUILTIN resolves the same function the interp's `callValue` plain-fn path does.
+			// A local shadowing the name, or a non-plain-function global (IndicatorInstance/closure),
+			// is out of subset ⇒ fallback (deterministic).
+			case ECall(EIdent(name), args) if (!localSlots.exists(name) && isPlainBuiltin(name)):
+				for (i in 0...args.length) {
+					var sn = BuiltinSigs.wantsSeries(name, i) ? BuiltinSigs.seriesNameOf(args[i]) : null;
+					if (sn != null) { emit(Op.CONST); emit(constIndex(sn)); }
+					else expr(args[i]);
+				}
+				emit(Op.CALL_BUILTIN); emit(constIndex(name)); emit(args.length);
 			default:
 				throw new VmUnsupported("expression " + exprName(e));
 		}

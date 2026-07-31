@@ -29,6 +29,8 @@ enum abstract Op(Int) from Int to Int {
 	var JZ;           // + Int addr         -> pop v; if !truthy(v) pc = addr
 	var JMP;          // + Int addr         -> pc = addr
 	var ORDER;        // + Int verb + Int hasArg -> submit(verb, hasArg?pop():null, close, index)
+	var CALL_BUILTIN; // + Int nameConst + Int argc -> push preserveNum(Reflect.callMethod(globals[name], argv))
+	var CROSS;        // + Int csId + Int fnCode + Int argc -> push TradeBuiltins.<fn>CS(harness, csId, ...)
 	var POP;                                       // discard top
 	var HALT;
 
@@ -45,4 +47,10 @@ enum abstract Op(Int) from Int to Int {
 	public static inline var VERB_LONG = 0;
 	public static inline var VERB_SHORT = 1;
 	public static inline var VERB_FLAT = 2;
+
+	// CROSS fn codes (the four __cs stateful-callsite builtins).
+	public static inline var CS_CROSSOVER = 0;
+	public static inline var CS_CROSSUNDER = 1;
+	public static inline var CS_RISING = 2;
+	public static inline var CS_FALLING = 3;
 }

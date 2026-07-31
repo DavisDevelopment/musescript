@@ -28,11 +28,16 @@ class MuseVm {
 	final chunk:MuseChunk;
 	final locals:Array<Dynamic>;
 	final stack:Array<Dynamic> = [];
+	// Builtin globals — same install as MuseInterp, so CALL_BUILTIN resolves the
+	// identical function the interp's callValue plain-fn path would (§V3).
+	final globals:Map<String, Dynamic>;
 
 	function new(harness:HarnessContext, chunk:MuseChunk) {
 		this.harness = harness;
 		this.chunk = chunk;
 		this.locals = [for (_ in 0...chunk.localCount()) null];
+		this.globals = new Map();
+		MuseVmBuiltins.install(this.globals, harness);
 	}
 
 	/**
@@ -146,6 +151,28 @@ class MuseVm {
 					};
 					var bar = harness.currentBar;
 					harness.orders.submit(verbStr, arg, bar.close, bar.index);
+				case Op.CALL_BUILTIN:
+					var name:String = consts[code[pc++]];
+					var argc = code[pc++];
+					var argv:Array<Dynamic> = [for (_ in 0...argc) null];
+					var i = argc - 1;
+					while (i >= 0) { argv[i] = sp.pop(); i--; }
+					// Mirror of MuseInterp.callValue's plain-function path (recv = null).
+					sp.push(MuseVmOps.preserveNum(Reflect.callMethod(null, globals.get(name), argv)));
+				case Op.CROSS:
+					var csId = code[pc++];
+					var fnCode = code[pc++];
+					var argc = code[pc++];
+					var a0:Array<Dynamic> = [for (_ in 0...argc) null];
+					var j = argc - 1;
+					while (j >= 0) { a0[j] = sp.pop(); j--; }
+					var res:Bool = switch (fnCode) {
+						case Op.CS_CROSSOVER: TradeBuiltins.crossoverCS(harness, csId, a0[0], a0[1]);
+						case Op.CS_CROSSUNDER: TradeBuiltins.crossunderCS(harness, csId, a0[0], a0[1]);
+						case Op.CS_RISING: TradeBuiltins.risingCS(harness, csId, a0[0], Std.int(a0[1]), argc > 2 ? Std.int(a0[2]) : 0);
+						default: TradeBuiltins.fallingCS(harness, csId, a0[0], Std.int(a0[1]), argc > 2 ? Std.int(a0[2]) : 0);
+					};
+					sp.push(res);
 				case Op.POP: sp.pop();
 				case Op.HALT: return;
 				default: throw "MuseVm: bad opcode " + op + " @ " + (pc - 1);
