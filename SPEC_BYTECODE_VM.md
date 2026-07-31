@@ -1,6 +1,14 @@
 # SPEC — A stack-bytecode IR + VM (and the GraalVM/Truffle force-multiplier)
 
-**Status:** Design spec, 2026-07-31. Replaces the tree-walking `MuseInterp` on the hot path with a
+**Status:** Design spec, 2026-07-31. **Execution checklist lives in `BYTECODE_VM_TODO.md`** (V0–V6
+ordering; this spec stays design/rationale). **P0 vertical slice LANDED (2026-07-31):** `musescript/vm/`
+(`Op`, `MuseChunk`, `MuseVmOps`, `MuseBytecodeCompiler`, `MuseVm`) compiles the no-indicator
+`onBar`/`when`/`order` subset and runs a full backtest byte-identical to the interp — parity gated by
+`TestBytecodeVmParity` (raw-f64-bit trades + equity across 6 programs; out-of-subset ⇒ `VmUnsupported`
+fallback). Full JS suite green (75,068 asserts, 0 fail). Remaining P0 = broaden the subset
+(`SERIES`/`CROSS` callsite state, `LOOKBACK`, prelude coverage) + wire the oracle behind a flag +
+extend `DetParityDump` to the VM tier; P1 = the unboxed fast path (the actual speed). Replaces the
+tree-walking `MuseInterp` on the hot path with a
 compile-once **stack-bytecode IR** run by a tight VM. On GraalVM this is not "a bit faster" — a
 Truffle-hosted bytecode interpreter is **partially evaluated to native code specialized per
 strategy**, which can subsume the hand-emitted WASM tier for the evo oracle *and* open in-process
@@ -42,8 +50,16 @@ Consumers:
 ## 2. Instruction set (grounded in `MuseInterp.evalExpr`/`execStmt`)
 
 - **Values/locals:** `CONST k`, `LOAD_LOCAL i`, `STORE_LOCAL i`, `LOAD_IDENT g`.
-- **Arithmetic/logic (all via `DetMath` for parity):** `ADD SUB MUL DIV MOD NEG`, cmp
-  `LT LE GT GE EQ NE`, `NOT`; `AND`/`OR` via short-circuit jumps.
+- **Arithmetic/logic:** `ADD SUB MUL DIV MOD NEG`, cmp `LT LE GT GE EQ NE`, `NOT`; `AND`/`OR`.
+  Plain `+ - * /` are already byte-identical IEEE across Haxe targets, so only transcendentals route
+  through `DetMath` (`musescript/ew/mcmc/DetMath.hx` — `exp`/`log`); `Math.exp`/`log` are *not*
+  identically-rounded across Graal-JVM and WASM/JS, so any op that touches them must use `DetMath`.
+  **`AND`/`OR` are NOT short-circuit jumps** (P0 parity finding, verified against the interp):
+  `MuseInterp.binop` evaluates *both* operands of `&&`/`||` every bar so stateful builtins tick
+  regardless of the other operand (the short-circuit-parity fix); WASM lowers them to `i32.and`/`or`
+  over both sides too. The VM therefore emits both operand subtrees, then one `AND`/`OR` combining the
+  two already-computed booleans. (An earlier draft of this spec said "short-circuit jumps" — wrong;
+  short-circuiting would desync stateful indicator state and break interp↔VM↔WASM parity.)
 - **Control:** `JUMP`, `JZ`, `JNZ` (covers `EIf`/`EWhile`/`ETernary`/`EFor`).
 - **Calls/closures:** `CALL n`, `CALL_METHOD name n` (class dispatch by `__class`), `CALL_BUILTIN
   id n`, `RET`, `MAKE_CLOSURE k` (captures upvalues → `FnClosure`).
@@ -123,9 +139,32 @@ tier instead of re-parse + 8-pass-compile + tree-walk. Compile-once + PE-to-nati
 win named in `PLAN_EVO_SPEED.md`.
 
 ## 7. Performance targets
+
+> **Denominator caveat (read first).** The often-quoted **22.9s/gen** is *pre-P0 and stale*
+> (`PLAN_EVO_SPEED.md` says so explicitly — P0/P1.1/P2/P3 + NMA credit-cuts have landed since). Do
+> **not** claim a speedup against it. Before this spec's first line of code, re-measure the *current*
+> default-config warm s/gen on the canonical baseline (**pop=80, gens=30, NVDA `data/real/nvda.csv`
+> IS=5161, cost=20bps**, default flags), taking the mean of `wallMs=` over the warm gens (discard the
+> first ~5). That number is the real denominator every Tier-A/Tier-B target below is measured against;
+> record it in this section when the run lands.
+>
+> **MEASURED (2026-07-31), current default config, this exact baseline:** **~4.35 s/gen warm**
+> (mean of `wallMs` over gens 6–30, seed 42; total wall 203.7s/30 gens; gen-0 seed-pop 45.9s; warm
+> gens range **0.4–7.2s**, variance dominated by oracle cache hit-rate, not raw eval cost). So the
+> real denominator is **~4.3 s/gen**, not 22.9 — P0–P3 + NMA credit-cuts already captured the bulk of
+> the historical win. **Consequence for this spec:** the oracle is already largely cache-dominated in
+> warm gens (some as low as 0.4s), so a faster per-eval tier can only attack the *miss* fraction —
+> Tier A must show its win on **wall s/gen against ~4.3**, and the burden of proof that a whole new
+> execution tier beats an already-fast, already-cached path is real. This measurement *strengthens*
+> the case for landing Tier A behind a flag and A/B-ing it honestly before it becomes default.
+
 - Tier A: **3–10×** the tree-walk interp on the backtest hot path (classic tree-walk→bytecode range).
+  Caveat: the oracle's serial interp evals are already largely cache-dominated post-P0, so the
+  *end-to-end* s/gen win is bounded by the residual miss rate — Tier A's headline multiple is on the
+  **per-eval hot path**, not automatically on wall s/gen. Measure both.
 - Tier B: approach the emitted-WASM tier while removing per-genome emit/instantiate overhead; the
-  real target is **warm s/gen** on the `CorpusEvoRun` baseline (the stale 22.9s/gen figure → measure).
+  real target is **warm s/gen** on the `CorpusEvoRun` baseline (against the re-measured figure above,
+  not 22.9).
 - The gains concentrate in: unboxed numeric operand path, superinstructions (fuse `LOAD_LOCAL`+cmp),
   inline caches for method/field dispatch, and (Tier B) PE unrolling the per-bar loop.
 
@@ -134,18 +173,34 @@ win named in `PLAN_EVO_SPEED.md`.
   subset** (the evo hot path): consts, locals, `DetMath` arithmetic, cmp, short-circuit, bar fields,
   lookback, `SERIES`/`CROSS` callsite state, orders, if/ternary. Parity gate vs interp on the corpus.
   Wire the oracle to Tier A behind a flag.
+  - **The real P0 cost is the parity matrix, not the VM.** Extending `DetParityDump` to a *fourth*
+    execution tier (interp ↔ js ↔ wasm ↔ Tier-A-VM) is where the careful time goes — every corpus
+    genome must dump byte-identical from the VM, and the subset-coverage boundary (what Tier A runs
+    vs. what falls back to interp) must itself be deterministic so the gate is meaningful. Budget P0
+    as "small VM + large parity harness," and land the harness *first* so the VM is written against a
+    green gate, not retrofitted to one.
 - **P1** — numeric fast path (unboxed operand stack) + superinstructions + inline caches (the real
   speedup) + oracle bytecode cache (§6).
 - **P2** — **Tier B: Truffle Bytecode DSL interpreter** on the Graal oracle; `@CompilationFinal` PE
-  hygiene; parity golden-file. Measure vs the WASM tier; if it wins, make it the oracle default.
+  hygiene; parity golden-file. Measure vs the WASM tier; make it the oracle default **only if it
+  clears the §9 P2 kill-criterion** — otherwise Tier B stays a research branch and Tier A + WASM ship.
 - **P3** — broaden Tier-A coverage (objects/arrays/classes/match) with interp fallback for the tail;
   generators via interp (Tier A) / continuations (Tier B).
 - **P4** — Polyglot in-process Python/JS interop on Tier B (collapse the Kestrel/ProbCloud process
   bridge); retarget JS/WASM emitters to lower *from* the shared IR (§1).
 
 ## 9. Honest caveats
-- Tier B is Java/Kotlin + Truffle, **GraalVM-only** — a real new component and dependency; it earns
-  its place only on the server oracle, not the portable tiers.
+- Tier B is Java/Kotlin + Truffle, **GraalVM-only** — a real new component and dependency (a *second
+  language* consuming Haxe-emitted bytecode, its own build, and the tier carrying the hardest parity
+  burden: float edge cases through partial evaluation). It earns its place only on the server oracle,
+  not the portable tiers — and it must *earn* it, not be assumed inevitable.
+- **P2 kill-criterion (explicit).** Tier B ships as the oracle default only if, after its parity
+  golden file is byte-identical, its **warm s/gen on the `CorpusEvoRun` baseline beats the WASM tier
+  by a margin that justifies the second-language maintenance load** (propose ≥1.5× warm s/gen, or a
+  decisive removal of the per-genome WAT-emit/instantiate residual measured at P2). If it does not
+  clear that bar, **Tier A + the existing WASM tier ship, and Tier B stays a research branch** — the
+  spec does not commit to Tier B on faith. The whole of §3's "plausibly subsumes" is a hypothesis P2
+  tests, not a conclusion.
 - Graal PE has **warmup**; great for long evo runs (amortized), worse for one-shot short runs — so
   Tier B is for the oracle/batch, Tier A for interactive/browser.
 - The parity gate is non-negotiable and is the gating risk: getting three tiers byte-identical

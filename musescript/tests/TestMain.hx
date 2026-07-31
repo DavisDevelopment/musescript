@@ -140,6 +140,7 @@ class TestMain {
 		runner.addCase(new TestLangClassStrategy());
 		runner.addCase(new TestConstFold());
 		runner.addCase(new TestCommonSubexprElim());
+		runner.addCase(new TestBytecodeVmParity());
 		runner.addCase(new TestVariableFrame());
 		runner.addCase(new TestCapstoneIndicators());
 		runner.addCase(new TestArrayBuffer());

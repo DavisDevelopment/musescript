@@ -1,0 +1,48 @@
+package musescript.vm;
+
+/**
+ * Stack-VM opcodes (SPEC_BYTECODE_VM.md §2), grounded in `MuseInterp.evalExpr`/
+ * `execStmt`. P0 subset only — enough for the strategy `onBar`/`when`/`order`
+ * hot path with NO indicators/lookback/generators (those are P3 / interp
+ * fallback). Encoded as plain `Int`s in `MuseChunk.code`; opcodes that carry an
+ * operand read the next Int(s) inline (documented per op).
+ *
+ * NOTE on `AND`/`OR`: these are NOT short-circuit jumps. `MuseInterp.binop`
+ * deliberately evaluates BOTH operands of `&&`/`||` every bar so stateful
+ * builtins (crossover/rising/…) tick regardless of the other operand's value
+ * (see the short-circuit-parity-fix). The compiler therefore emits both operand
+ * subtrees, then a single `AND`/`OR` that combines the two already-computed
+ * booleans — matching the interp and the WASM `i32.and`/`i32.or` lowering.
+ */
+enum abstract Op(Int) from Int to Int {
+	var CONST;        // + Int constIndex   -> push consts[k]
+	var LOAD_LOCAL;   // + Int slot         -> push locals[slot]
+	var STORE_LOCAL;  // + Int slot         -> locals[slot] = pop (EVar; no series push)
+	var STORE_LOCAL_S;// + Int slot         -> locals[slot] = pop, pushSeries(name) if numeric (Assign stmt)
+	var BAR_FIELD;    // + Int fieldCode    -> push current bar field (see FIELD_* below)
+	var ADD; var SUB; var MUL; var DIV; var MOD;   // pop b, pop a -> push a·b (MuseVmOps numeric; ADD is + with string concat)
+	var LT; var LE; var GT; var GE;                // pop b, pop a -> push Bool (numeric compare)
+	var EQ; var NE;                                // pop b, pop a -> push Bool (Dynamic == / !=)
+	var AND; var OR;                               // pop b, pop a -> push truthy(a)&&truthy(b) / ||  (both pre-evaluated)
+	var NOT;                                       // pop a -> push !truthy(a)
+	var NEG;                                       // pop a -> push -toNum(a)
+	var JZ;           // + Int addr         -> pop v; if !truthy(v) pc = addr
+	var JMP;          // + Int addr         -> pc = addr
+	var ORDER;        // + Int verb + Int hasArg -> submit(verb, hasArg?pop():null, close, index)
+	var POP;                                       // discard top
+	var HALT;
+
+	// BAR_FIELD field codes (parity with MuseInterp.refreshBarGlobals).
+	public static inline var FIELD_OPEN = 0;
+	public static inline var FIELD_HIGH = 1;
+	public static inline var FIELD_LOW = 2;
+	public static inline var FIELD_CLOSE = 3;
+	public static inline var FIELD_VOLUME = 4;
+	public static inline var FIELD_TIME = 5;
+	public static inline var FIELD_BAR_INDEX = 6;
+
+	// ORDER verb codes.
+	public static inline var VERB_LONG = 0;
+	public static inline var VERB_SHORT = 1;
+	public static inline var VERB_FLAT = 2;
+}
