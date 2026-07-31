@@ -31,9 +31,12 @@
 - [x] **V1. CI gate.** Added a scoped runner `TestVmMain` + `build-vm-parity.hxml` +
   `pipeline-hardening.yml` step "Build + run bytecode VM parity gate". Scoped deliberately (not the
   whole TestMain suite, which the maintainers don't gate on). Green locally (19 asserts, exit 0).
-- [ ] **V2. Parity harness before opcode growth.** Extend `DetParityDump` (or a sibling
-  `VmParityDump`) to emit trades/equity f64-bit dumps from the VM tier and diff vs interp on the
-  evo corpus — land this *before* V3 so broadening happens against a standing gate, not after.
+- [x] **V2. Parity harness before opcode growth.** `musescript/vm/VmParityDump.hx` (reusable, pure)
+  classifies each program identical/fallback/interpError/diverged over raw-f64 trades+equity bits.
+  `TestVmParityCorpus` feeds it the REAL evo gen-0 corpus (`seedFromIndicators` over
+  `RegistryPalette.compatibleNames()` + fib + fourier, as `CorpusEvoRun` seeds) + the subset programs.
+  Invariant `diverged==0` now gates in CI. Current coverage: 83 progs → identical=3, fallback=80,
+  diverged=0 — `fallback` shrinks as V3 lands, each newly-covered genome byte-checked for free.
 - [ ] **V3. Indicator subset — the real unlock.** `LOOKBACK`, `SERIES id n`, `CROSS id n` mirroring
   interp semantics exactly: callsite-keyed slots via `CallsiteIds` ids, same
   `HarnessContext.seriesBuffers` / `IndicatorInstance.stateFor` / `TradeBuiltins.*CS` state.

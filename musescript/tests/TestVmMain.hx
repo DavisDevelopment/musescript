@@ -10,6 +10,7 @@ class TestVmMain {
 	static function main() {
 		var runner = new Runner();
 		runner.addCase(new TestBytecodeVmParity());
+		runner.addCase(new TestVmParityCorpus());
 		Report.create(runner);
 		runner.run();
 	}
