@@ -72,6 +72,30 @@ class MuseFill {
 		return r;
 	}
 
+	/**
+	 * Momentum tape — a GENUINE, learnable edge: AR(1)-persistent returns (trends that continue),
+	 * so a fill that times the trend has real, non-spurious skill the honest gate should ACCEPT.
+	 */
+	public static function momentumTape(n:Int, seed:Int):Array<Bar> {
+		var rng = new Rand(seed);
+		var bars:Array<Bar> = [];
+		var prev = 100.0;
+		var ret = 0.0;
+		for (i in 0...n) {
+			var eps = (rng.float() * 2 - 1) * 0.006;
+			ret = 0.6 * ret + eps + 0.0002; // persistent momentum + faint drift
+			var close = prev * (1 + ret);
+			bars.push({
+				open: prev,
+				high: Math.max(prev, close) * 1.001,
+				low: Math.min(prev, close) * 0.999,
+				close: close, volume: 1000.0, time: i, index: i
+			});
+			prev = close;
+		}
+		return bars;
+	}
+
 	/** Driftless seeded random walk — the honest null tape (no edge to find). */
 	public static function driftlessTape(n:Int, seed:Int):Array<Bar> {
 		var rng = new Rand(seed);
@@ -117,6 +141,22 @@ class MuseFill {
 		}
 		Sys.println("\nExpect: DSR@N collapses toward 0 as N grows (best-of-N noise deflated),");
 		Sys.println("and the verdict stays Coin-flip — a noise sketch cannot be filled into an edge.");
+
+		Sys.println("\n-- POSITIVE control: the SAME sketch on a MOMENTUM tape (a real, learnable edge) --");
+		var edgeTape = momentumTape(400, 424242);
+		var edgeSketch = "strategy Mom {\n  onBar {\n    when ?Bool: { long(1) }\n    when ?Bool: { flat() }\n  }\n}";
+		Sys.println(edgeSketch);
+		for (budget in [500, 3000]) {
+			var r = run(edgeSketch, budget, 99, edgeTape);
+			if (!r.ok) { Sys.println("budget " + budget + ": " + r.reason); continue; }
+			Sys.println("budget=" + budget + "  nEval=" + r.nEval
+				+ "  bestSharpe=" + fmt(r.sharpe, 3) + "  trades=" + r.trades
+				+ "  DSR@1=" + fmt(r.dsrRaw) + "  DSR@N=" + fmt(r.dsrDeflated)
+				+ "  => " + r.verdict);
+		}
+		Sys.println("\nExpect: on a genuinely-structured tape the best fill clears the DEFLATED bar");
+		Sys.println("(enough trades + DSR@N > 0.5) => Robust. The gate says YES when the edge is real,");
+		Sys.println("NO when it isn't — that's the whole point. (P0 scores full-sample; OOS is P1.)");
 	}
 }
 
