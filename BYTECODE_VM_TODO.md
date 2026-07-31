@@ -90,8 +90,15 @@
   V5 oracle flag will usefully hit the fast path. The 5.3% fallback = genomes that grow out-of-subset
   constructs (loops/match/objects/user-@indicators/offset-lookback); chase those later only if V6
   shows the residual interp cost matters. No further broadening needed before V5.
-- [ ] **V5. Oracle flag.** `--vm` / `preferVm` on `Fitness.evaluate`/`evaluateCompiled` (same
-  try-fast-tier/fallback pattern as `preferNma`), threaded from `CorpusEvoRun.evalFn`. Default OFF.
+- [x] **V5. Oracle flag. DONE** (`2f709f1`). `Fitness.preferVm` routes `evaluate()` through the
+  bytecode VM (`evaluateVm`, `MuseChunk` cached by structural key) with interp fallback on the
+  out-of-subset tail. `CorpusEvoRun --vm` enables it AFTER a startup `vmParityCheck` that evaluates
+  gen-0 seeds through BOTH tiers and ABORTS on any trades/finalEquity-bit mismatch. **Correctness
+  crux:** extracted `MuseCompiler.lower()` (the shared class/template/module/series-lowering +
+  ConstFold/CSE/CallsiteIds pipeline) so `evaluateVm` consumes the SAME lowered AST the interp does —
+  without it the VM saw raw `crossover("close", …)` string args (crash on JVM, divergence on JS).
+  Self-check on real gen-0 seeds: **63/63 covered byte-identical to interp**, 1 fallback (invalid-param
+  genome that errors in interp too). Full JS suite green (75,093).
 - [ ] **V6. Measure, then decide.** (a) per-eval Tier A vs tree-walk interp on cache misses;
   (b) end-to-end warm s/gen A/B vs ~4.35 on the canonical baseline (pop=80, gens=30, NVDA,
   IS=5161, 20 bps, seed 42, warm gens 6–30). Record both here. Promote to default or park —
