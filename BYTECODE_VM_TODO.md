@@ -83,8 +83,13 @@
   - **Parity trap:** `MuseVmOps` is copied from interp privates; any builtin that internally uses
     `Math.exp`/`log` must already route through `DetMath` on the interp side — the VM calling the
     SAME builtin inherits that, so no new risk, but verify on the corpus (V2), don't assume.
-- [ ] **V4. Prelude/body coverage, corpus-driven.** Broaden statements/exprs only where corpus
-  genomes actually hit `VmUnsupported` (measure the fallback rate; don't chase the full language).
+- [x] **V4. Coverage measured on an EVOLVED population** (`TestVmParityCorpus.testEvolvedGenomesNeverDiverge`).
+  4 rounds of `Variation.pointMutate`/`subtreeCrossover`/`mutate` from real seeds → **2430 evolved
+  genomes: identical=2257 (92.9%), fallback=128 (5.3%), interpError=45, diverged=0.** So the VM already
+  covers ~93% of a realistically-evolving population with ZERO divergence under mutation stress — the
+  V5 oracle flag will usefully hit the fast path. The 5.3% fallback = genomes that grow out-of-subset
+  constructs (loops/match/objects/user-@indicators/offset-lookback); chase those later only if V6
+  shows the residual interp cost matters. No further broadening needed before V5.
 - [ ] **V5. Oracle flag.** `--vm` / `preferVm` on `Fitness.evaluate`/`evaluateCompiled` (same
   try-fast-tier/fallback pattern as `preferNma`), threaded from `CorpusEvoRun.evalFn`. Default OFF.
 - [ ] **V6. Measure, then decide.** (a) per-eval Tier A vs tree-walk interp on cache misses;

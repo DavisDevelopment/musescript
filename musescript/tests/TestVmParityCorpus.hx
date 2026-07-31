@@ -7,6 +7,7 @@ import musescript.evo.CorpusSeed;
 import musescript.evo.Expand;
 import musescript.evo.RegistryPalette;
 import musescript.evo.StrategyGenome;
+import musescript.evo.Variation;
 import musescript.vm.VmParityDump;
 
 /**
@@ -48,5 +49,44 @@ class TestVmParityCorpus extends Test {
 		trace(VmParityDump.format(rep));
 		Assert.equals(0, rep.diverged.length, "interp/VM divergence:\n" + VmParityDump.format(rep));
 		Assert.isTrue(rep.identical > 0, "expected the P0 subset programs to run on the VM (identical > 0)");
+	}
+
+	/**
+	 * V4 measurement + stress: EVOLVED genomes (not just gen-0 seeds). Several rounds of
+	 * `Variation.pointMutate`/`subtreeCrossover`/`mutate` grow the full node vocabulary the VM must
+	 * handle; each is run interp-vs-VM. The invariant is the same — `diverged == 0` (a VM miscompile
+	 * or a VM crash where the interp ran BOTH surface as `diverged`) — while `fallback` measures the
+	 * VM's real coverage of an actually-evolving population, informing whether the V5 oracle flag will
+	 * usefully hit the VM. Evolved genomes MAY legitimately fall back (grow out-of-subset constructs);
+	 * that is not a failure, silent divergence is.
+	 */
+	public function testEvolvedGenomesNeverDiverge() {
+		var pool = RegistryPalette.compatibleNames();
+		var v = new Variation(1234, pool);
+		var pop:Array<StrategyGenome> = CorpusSeed.seedFromIndicators(pool.length > 16 ? pool.slice(0, 16) : pool)
+			.concat(CorpusSeed.seedFromFibRetracement());
+		var evolved:Array<StrategyGenome> = [];
+		// A few rounds of variation to reach genomes gen-0 seeding never produces directly.
+		for (round in 0...4) {
+			var next:Array<StrategyGenome> = [];
+			for (i in 0...pop.length) {
+				var m = try v.pointMutate(pop[i]) catch (_:Dynamic) null;
+				if (m != null) { evolved.push(m); next.push(m); }
+				var x = try v.subtreeCrossover(pop[i], pop[(i + 1) % pop.length]) catch (_:Dynamic) null;
+				if (x != null) { evolved.push(x); next.push(x); }
+				var mm = try v.mutate(pop[i]) catch (_:Dynamic) null;
+				if (mm != null) evolved.push(mm);
+			}
+			pop = next.length > 0 ? next : pop;
+		}
+		var items:Array<VmParityItem> = [];
+		for (g in evolved) {
+			var src = try Expand.expand(g) catch (_:Dynamic) null;
+			if (src != null) items.push({ name: g.name, src: src });
+		}
+		var rep = VmParityDump.run(items, BarFeed.synthetic(300, 7));
+		trace("[evolved] " + VmParityDump.format(rep));
+		Assert.equals(0, rep.diverged.length, "evolved-genome interp/VM divergence:\n" + VmParityDump.format(rep));
+		Assert.isTrue(rep.total > 50, "expected a substantial evolved batch to stress the VM");
 	}
 }
