@@ -999,6 +999,31 @@ class CorpusEvoRun {
 			Fitness.preferVm = true;
 		}
 
+		// `--vm-bench`: isolate the WARM per-eval speedup of the Tier-A VM vs the interp-backed
+		// compiled path on the real IS tape (both cache-hot: fnCache for interp, vmChunkCache for VM,
+		// so this times run-loop cost, not compile). Answers "how fast is the VM per backtest" —
+		// the number the end-to-end s/gen dilutes (oracle cache hits + WASM pop scoring). Exits after.
+		if (argFlag("--vm-bench")) {
+			var benchBars = isBasket[0];
+			var benchG:StrategyGenome = null;
+			for (g in indicatorSeeds.concat(fibSeeds).concat(tournament.genomes))
+				if (Fitness.evaluateVm(g, benchBars, costBps).ok) { benchG = g; break; }
+			if (benchG == null) { Sys.println("vm-bench: no VM-covered genome among the seeds"); Sys.exit(0); }
+			var N = 40;
+			for (_ in 0...8) { Fitness.evaluateCompiled(benchG, benchBars, "js", false, costBps); Fitness.evaluateVm(benchG, benchBars, costBps); }
+			var t0 = haxe.Timer.stamp();
+			for (_ in 0...N) Fitness.evaluateCompiled(benchG, benchBars, "js", false, costBps);
+			var interpMs = (haxe.Timer.stamp() - t0) / N * 1000;
+			var t1 = haxe.Timer.stamp();
+			for (_ in 0...N) Fitness.evaluateVm(benchG, benchBars, costBps);
+			var vmMs = (haxe.Timer.stamp() - t1) / N * 1000;
+			Sys.println('VM-BENCH: genome="${benchG.name}" bars=${benchBars.length} reps=$N (warm/cached)');
+			Sys.println('  interp(evaluateCompiled) = ${Math.round(interpMs * 1000) / 1000} ms/eval');
+			Sys.println('  vm(evaluateVm)           = ${Math.round(vmMs * 1000) / 1000} ms/eval');
+			Sys.println('  PER-EVAL SPEEDUP         = ${Math.round(interpMs / vmMs * 100) / 100}x');
+			Sys.exit(0);
+		}
+
 		// Own Variation instance, deliberately independent of `engine`'s internal one -- candidate
 		// generation for a human browsing the population has no business perturbing the main run's
 		// RNG stream/reproducibility. `seed + 5000` just needs to not collide with any other seed

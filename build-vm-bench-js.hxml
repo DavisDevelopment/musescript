@@ -1,0 +1,6 @@
+extraParams.hxml
+-main musescript.tests.VmBenchJs
+-lib hxnodejs
+-D node
+-D js_es=6
+-js build/js/vm-bench.js
