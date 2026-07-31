@@ -188,3 +188,71 @@ domains (add `EHole` handling to `Expand.expand`'s printer and to `CorpusSeed`'s
 - Whether named holes across *different* types are allowed (spec: no — a name binds one type).
 - Interaction with `LearnedLibrary` motif reach-in (holes could draw fills from learned motifs — a
   natural P1+ enhancement: fill from *proven* subtrees, still deflated).
+
+---
+
+## 14. Deep-dive — the `muse fill` search loop (how fill + deflation actually wire)
+
+Filling a sketch is a **constrained evolutionary search over the hole-vector only** — the frozen
+skeleton never mutates. It reuses `EvolutionEngine`/`Variation`/`Fitness`/`EvoCache` wholesale;
+the only new machinery is site collection, domain-aware sampling, and the effective-N wire.
+
+**Step 1 — collect the sites.** Extend the existing detectors (`Variation.boolHasHole`/
+`scalarHasHole`, which already recurse the 5 slots) into a *collector*:
+```
+collectHoleSites(g) -> Array<{ path:GPath, ty:HoleType, domain:HoleDomain, name:Null<String> }>
+```
+`path` reuses `TreeSurgery.GPath` (the same addressing `swapScore`/`replaceBool` use), so a fill is
+just a `TreeSurgery.replace{Bool,Scalar,Series}(skeleton, path, inner)`. Named sites are grouped:
+one logical unknown, N physical paths, filled with one shared draw.
+
+**Step 2 — the domain-aware sampler** (this is all that's genuinely new in `Variation`):
+```
+sampleFill(ty, domain, rng) -> BoolNode | ScalarNode | SeriesNode
+  DIntRange(lo,hi)     -> KConst( rng.int(lo, hi) )                  // scalar
+  DRealInterval(lo,hi) -> KConst( lo + rng.float()*(hi-lo) )
+  DFamily(["sma",...]) -> SInd( rng.pick(names), close, sampledLen ) // series
+  DFamily(["cross"])   -> BCross(rng.pick(over|under), lhsHole, rhsHole)
+  null (untyped)       -> draw from the full grammar for ty (today's Variation behavior)
+```
+Mutation of a filled site perturbs *within* its domain (a `DIntRange` len does ±k clamped to
+`[lo,hi]`; never leaves the box). This is the one behavioral change to `Variation`: when the site
+being mutated is a hole with a domain, route through the domain sampler instead of the free grammar.
+
+**Step 3 — the search.** Seed a population by sampling every site; evolve with **hole-only**
+variation (the skeleton is immutable — the existing `armed = !isTemplated` boundary already makes
+`Variation` treat non-hole subtrees as frozen, so this mostly falls out). Score with `Fitness`
+against the tape; `EvoCache` dedupes identical fill-vectors by structural key. Budget = `pop×gens`
+(or a flat sample count) = **N_eval**, the count of *distinct fill candidates actually evaluated*
+(cache hits don't re-count — a hit is the same trial, not a new one).
+
+**Step 4 — the effective-N deflation (the honest heart).** The winner's verdict is computed at
+`nTrials = N_eval` (distinct candidates), fed exactly where the leaderboard feeds field size:
+```
+best   = argmax_fill Fitness.score(evaluate(fill), minTrades)
+dsr    = ProbSharpe.dsr(best.returns, N_eval)          // deflated by the search
+verdict = OosVerdict(best, dsr, pbo, ciLo, ...)         // same gate as everywhere
+```
+So a 1-hole sketch searched 30 ways clears an easy bar; a 10-hole sketch searched 5,000 ways must
+beat `expectedMax`-of-5000 under the null (`sr0 = expectedMaxSr(5000, …)`). The monotone
+`ProbSharpe.dsr` deflation I audited (N↑ ⇒ bar↑) *is* the anti-gaming here — no new math, just the
+search size wired into the existing trials term. Report the **deflated** verdict, never the raw best.
+
+**Step 5 — emit.** Replace each hole with its winning inner (`TreeSurgery.replace…` down the frozen
+skeleton) → an untemplated genome → `Expand.expand` → filled source. Bundle
+`{ filledSource, seed, tapeId, N_eval, verdict, equityDigest }` as a `runShare` receipt.
+
+**Determinism.** One `DetRng` seeds sampler + evolution; `EvoCache` is structural; so
+`(sketch, seed, budget)` ⇒ the identical fill and the identical deflated verdict, reproducible on
+`/verify`.
+
+**The negative control (DoD §12).** Run a pure-noise sketch (all `?`) on a driftless tape: the best
+fill of N *must* come back **Coin-flip** because `dsr(noise, N)` collapses as N grows. If a noise
+sketch ever fills to Robust, `N_eval` isn't reaching the trials term — a P0 leak, identical in kind
+to the leaderboard's "noise flood tops the board" P0.
+
+**CLI shape:**
+```
+muse fill sketch.ms --tape data.csv --budget 2000 --seed 1337
+# -> filled.ms  +  { verdict: "Coin-flip", dsr@2000: 0.03, pbo: 0.41, nEval: 2000, ciLo: -0.4 }
+```

@@ -159,3 +159,75 @@ win named in `PLAN_EVO_SPEED.md`.
   s/gen — the WASM tier stays for the browser regardless; the question is only the *server oracle*.
 - **Shared-IR retargeting** (JS/WASM lower from the bytecode IR) — attractive unification, but sequence
   it after Tier A proves the IR; don't destabilize the audited WASM parity to get it.
+
+---
+
+## 11. Deep-dive — the Truffle Bytecode-DSL node design (Tier B)
+
+The whole point: structure the interpreter so Graal's partial evaluator constant-folds the *program*
+out of the *interpreter*. Three things make or break that — the numeric specialization, the
+callsite-slot state as PE constants, and DetMath staying inline-able. Sketch (Java-side):
+
+**11.1 — The bytecode root.**
+```java
+@GenerateBytecode(languageClass = MuseLang.class,
+                  enableYield = true,          // continuations -> generators/MuseIter (§2)
+                  enableTagInstrumentation = true) // stepping/breakpoints (§5)
+public abstract static class MuseBytecodeRoot extends RootNode implements BytecodeRootNode { … }
+```
+`enableYield` + `enableTagInstrumentation` are *why* Tier B gets generators and the debugger for
+free — the two hard parts of §2/§5 become DSL flags.
+
+**11.2 — The numeric specialization (the hot path).** Arithmetic and comparisons specialize to
+`double`; the rare boxed/NaN-branch deopts so it never pollutes the compiled hot code:
+```java
+@Operation static final class Add {
+  @Specialization static double doD(double a, double b) { return DetMath.add(a, b); }
+  @Fallback     static Object doGeneric(Object a, Object b) {
+    CompilerDirectives.transferToInterpreter();      // rare path, kept out of hot code
+    return MuseOps.addDynamic(a, b);
+  }
+}
+```
+Quickening rewrites the op to `doD` after it sees doubles; PE then compiles a monomorphic
+double pipeline. **Every numeric op routes through `DetMath`** (not `Math`) — DetMath's
+IEEE-only `exp`/`log`/etc. PE-inline to native while staying byte-identical to the interp (§4). No
+`strictfp` surprises: Graal honors IEEE-754.
+
+**11.3 — Callsite-slot state as PE constants (the parity crux, made fast).** Indicator/cross state
+lives in per-callsite slots keyed by the `CallsiteIds` id. In bytecode that id is an **immediate**,
+so it's a partial-evaluation constant:
+```java
+@Operation static final class SeriesCall {
+  @Specialization static double doIt(VirtualFrame f,
+      @Cached("csId") int id,                         // PE-constant: fixed slot offset
+      @Cached IndicatorUpdateNode upd) {              // @Child: the ring-buffer tick inlines
+    IndicatorSlot s = MuseContext.get(f).slots[id];   // slots[] is @CompilationFinal
+    return upd.execute(s, f);
+  }
+}
+```
+Because `id` is `partialEvaluationConstant`, `slots[id]` folds to a constant address and the
+indicator's per-bar ring-buffer update **inlines into the strategy body** — the exact stateful
+behavior the interp has, now straight-line. `LOOKBACK` is the same story: a `@CompilationFinal`-length
+ring; the index arithmetic constant-folds.
+
+**11.4 — Frame & bar.** Locals live in the `VirtualFrame` (frame slots) — escape-analyzed away by
+PE, so "locals" cost nothing after compile. `BAR_FIELD` reads a constant field offset off the bar
+object (a small `@CompilationFinal` layout, or an interop object for Polyglot).
+
+**11.5 — The context.** `MuseContext` holds `@CompilationFinal IndicatorSlot[] slots`, the
+`OrderSim`, and the `DetRng` — all treated as PE constants for the duration of a compiled backtest,
+so the whole per-bar loop specializes to one strategy on one tape.
+
+**11.6 — Determinism obligations (non-negotiable, §4).** Every `@Specialization` numeric result ==
+the interp bit-for-bit: route through DetMath, forbid host fast-math, mirror NaN/inf/`-0.0`
+exactly, keep integer narrowing identical. `transferToInterpreter` on the *rare* paths only — never
+smuggle a semantically-different fast path. The `DetParityDump` golden file is extended to dump from
+Tier B and diffed against the interp in CI; **Tier B does not ship until that diff is empty.**
+
+**11.7 — What this buys, concretely.** PE turns "interpret bytecode of strategy S over N bars" into
+native code for S: the dispatch loop unrolls, indicator state inlines, numerics are unboxed, locals
+vanish. That is the same shape the hand-written WASM emitter produces — but obtained by *writing an
+interpreter*, with continuations + instrumentation + Polyglot thrown in, and without emitting +
+instantiating a WASM module per genome (§3).
