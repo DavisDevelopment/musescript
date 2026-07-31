@@ -17,3 +17,4 @@ Columns:
 |---|---|---|---|---|---|
 | 2026-07-31 | `2c9a0ec` | P0 baseline (V0–V6, `--vm`) | **1.05×** (15.9→15.2ms) | **1.6× / 1.88×** | fib_retr_100 · OOS 0.617 · hold 9/10 · **GO** · PBO 0.83 ⚠ |
 | 2026-07-31 | `74d4442` | P1a inline-cache builtins | 1.19x (17.05→14.275ms) | 1.65x / 1.65x | fib_retracement_100_breakout · OOS 0.6167 · hold 9/10 · GO · PBO 0.8333 |
+| 2026-07-31 | `026f8f4` | P1b CMP_JZ superinstruction | 1.01x (18.2→18ms) | 1.46x / 2.01x | fib_retracement_100_breakout · OOS 0.6167 · hold 9/10 · GO · PBO 0.8333 |

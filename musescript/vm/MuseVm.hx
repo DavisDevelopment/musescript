@@ -156,6 +156,20 @@ class MuseVm {
 				case Op.NEG: sp.push(MuseVmOps.preserveNum(-MuseVmOps.toNum(sp.pop())));
 				case Op.JZ: var addr = code[pc++]; if (!MuseVmOps.truthy(sp.pop())) pc = addr;
 				case Op.JMP: pc = code[pc++];
+				case Op.CMP_JZ:
+					// Fused `cmp; JZ`: compute the SAME bool the standalone cmp would, jump if false.
+					var cmpOp = code[pc++];
+					var addr = code[pc++];
+					var b = sp.pop(); var a = sp.pop();
+					var r = switch (cmpOp) {
+						case Op.LT: MuseVmOps.toNum(a) < MuseVmOps.toNum(b);
+						case Op.LE: MuseVmOps.toNum(a) <= MuseVmOps.toNum(b);
+						case Op.GT: MuseVmOps.toNum(a) > MuseVmOps.toNum(b);
+						case Op.GE: MuseVmOps.toNum(a) >= MuseVmOps.toNum(b);
+						case Op.EQ: a == b;
+						default: a != b; // NE
+					};
+					if (!r) pc = addr;
 				case Op.ORDER:
 					var verb = code[pc++];
 					var hasArg = code[pc++];

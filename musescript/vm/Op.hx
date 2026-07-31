@@ -28,6 +28,7 @@ enum abstract Op(Int) from Int to Int {
 	var NEG;                                       // pop a -> push -toNum(a)
 	var JZ;           // + Int addr         -> pop v; if !truthy(v) pc = addr
 	var JMP;          // + Int addr         -> pc = addr
+	var CMP_JZ;       // + Int cmpOp + Int addr -> pop b,a; if !(a <cmp> b) pc = addr  (fused cmp;JZ)
 	var ORDER;        // + Int verb + Int hasArg -> submit(verb, hasArg?pop():null, close, index)
 	var CALL_BUILTIN; // + Int nameConst + Int argc -> push preserveNum(Reflect.callMethod(globals[name], argv))
 	var CROSS;        // + Int csId + Int fnCode + Int argc -> push TradeBuiltins.<fn>CS(harness, csId, ...)

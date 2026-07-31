@@ -148,6 +148,30 @@ class MuseBytecodeCompiler {
 		return i;
 	}
 
+	// P1b superinstruction: emit "jump-if-condition-false" for a JUST-compiled `cond`, fusing a
+	// trailing comparison into CMP_JZ (`cmp; JZ` ≡ `CMP_JZ cmp` — byte-identical). Decided from the
+	// AST, never by peeking the last bytecode Int (an operand could numerically equal a cmp opcode):
+	// if `cond` is `EBinop(<cmp>, …)` (mod EParent), its last emitted op is provably that cmp, so
+	// popping it is safe. Returns the jump-target operand index to backpatch.
+	function emitCondJZ(cond:Expr):Int {
+		var cmp = condCmpCode(cond);
+		if (cmp >= 0) { code.pop(); emit(Op.CMP_JZ); emit(cmp); }
+		else emit(Op.JZ);
+		var patch = code.length; emit(0);
+		return patch;
+	}
+
+	static function condCmpCode(cond:Expr):Int {
+		return switch (cond) {
+			case EParent(inner): condCmpCode(inner);
+			case EBinop(op, _, _): switch (op) {
+				case "<": Op.LT; case "<=": Op.LE; case ">": Op.GT; case ">=": Op.GE; case "==": Op.EQ; case "!=": Op.NE;
+				default: -1;
+			};
+			default: -1;
+		}
+	}
+
 	// ---- statements ----
 
 	function stmt(s:Stmt):Void {
@@ -172,8 +196,7 @@ class MuseBytecodeCompiler {
 				emit(hasArg ? 1 : 0);
 			case When(cond, body):
 				expr(cond);
-				emit(Op.JZ);
-				var patch = code.length; emit(0);
+				var patch = emitCondJZ(cond);
 				for (st in body) stmt(st);
 				code[patch] = code.length;
 			case Block(inner):
@@ -224,7 +247,7 @@ class MuseBytecodeCompiler {
 				throw new VmUnsupported('unary "$op"');
 			case EIf(cond, eif, eelse):
 				expr(cond);
-				emit(Op.JZ); var toElse = code.length; emit(0);
+				var toElse = emitCondJZ(cond);
 				expr(eif);
 				emit(Op.JMP); var toEnd = code.length; emit(0);
 				code[toElse] = code.length;
@@ -232,7 +255,7 @@ class MuseBytecodeCompiler {
 				code[toEnd] = code.length;
 			case ETernary(cond, eif, eelse):
 				expr(cond);
-				emit(Op.JZ); var toElse = code.length; emit(0);
+				var toElse = emitCondJZ(cond);
 				expr(eif);
 				emit(Op.JMP); var toEnd = code.length; emit(0);
 				code[toElse] = code.length;
