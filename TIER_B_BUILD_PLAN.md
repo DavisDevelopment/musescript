@@ -28,6 +28,15 @@ committing to the Truffle component** — TB0 might make Tier B unnecessary for 
 
 ## TB0 — Lower indicators to primitive bytecode (target-agnostic, THE ceiling-breaker) ⭐
 
+**STATUS (2026-08-01): LANDED — via `IND` static dispatch, deliberately NOT ring ops.** The Tier-A
+implementation lowers fully-static indicator callsites to an `IND` op that direct-calls the same
+`TradeBuiltins` static the interp reaches (no `Reflect`, no argv boxing, no math duplication ⇒ no
+new parity surface). Measured: JVM per-eval **1.2× → 1.58×** on lowered genomes; opaque control
+1.31×; JS sma-cross 1.62× → 1.77×; all parity gates green (`VM_PERF_TRAIL.md`). The ring-op design
+below is retained as the **Truffle-tier** lowering (PE can only specialize a numeric body it can
+see); port it in TB3 if TB1+ is ever green-lit. Residual opaque ceiling now covers only registry
+indicators — widening `IND` coverage is the cheaper next lever before any Truffle work.
+
 The real work, and the highest ROI. No Java, no Truffle — pure Haxe, helps every tier.
 
 - **Add stateful primitive ops + a callsite ring-buffer slot** to the bytecode IR: `RING_PUSH slot`,

@@ -31,6 +31,11 @@ enum abstract Op(Int) from Int to Int {
 	var CMP_JZ;       // + Int cmpOp + Int addr -> pop b,a; if !(a <cmp> b) pc = addr  (fused cmp;JZ)
 	var ORDER;        // + Int verb + Int hasArg -> submit(verb, hasArg?pop():null, close, index)
 	var CALL_BUILTIN; // + Int nameConst + Int argc -> push preserveNum(Reflect.callMethod(globals[name], argv))
+	var IND;          // + Int indCode + Int nameConst + Int nParams (+ Int param…) -> push preserveNum(TradeBuiltins.<ind>(harness, name, …))
+	                  //   TB0 (TIER_B_BUILD_PLAN.md): statically-dispatched indicator callsite. Only emitted when the
+	                  //   series arg resolves to a compile-time NAME and every param is an Int literal, so the exact
+	                  //   values the generic CALL_BUILTIN would pass are baked as immediates — the same TradeBuiltins
+	                  //   static runs, minus Reflect/argv boxing (no math duplicated ⇒ parity by construction).
 	var CROSS;        // + Int csId + Int fnCode + Int argc -> push TradeBuiltins.<fn>CS(harness, csId, ...)
 	var LOOKBACK;     // + Int nameConst -> pop n; push harness.seriesLookback(name, Std.int(n))  (series[n])
 	var GET_FIELD;    // + Int fieldConst -> pop o; push o==null ? null : Reflect.getProperty(o, field)  (obj.field)
@@ -62,4 +67,20 @@ enum abstract Op(Int) from Int to Int {
 	public static inline var SCR_MACD = 0;
 	public static inline var SCR_BBANDS = 1;
 	public static inline var SCR_STOCH = 2;
+
+	// IND indicator codes (TB0) — each maps 1:1 to a `TradeBuiltins` static
+	// registered under the same name in `TradeBuiltins.install`.
+	public static inline var IND_SMA = 0;
+	public static inline var IND_EMA = 1;
+	public static inline var IND_RSI = 2;
+	public static inline var IND_ATR = 3;
+	public static inline var IND_HIGHEST = 4;
+	public static inline var IND_LOWEST = 5;
+	public static inline var IND_STDEV = 6;
+	public static inline var IND_WMA = 7;
+	public static inline var IND_RMA = 8;
+	public static inline var IND_ROC = 9;
+	public static inline var IND_MOM = 10;
+	public static inline var IND_CHANGE = 11;
+	public static inline var IND_PCT_CHANGE = 12;
 }

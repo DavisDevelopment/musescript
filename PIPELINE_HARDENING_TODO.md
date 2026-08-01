@@ -11,11 +11,12 @@ is trustworthy.
 co-evolution/benchmark pipeline, with special weight on (a) **theoretical robustness** and (b)
 **hardening the measurement so a false positive is nearly impossible.**
 
-**Progress (2026-07-28 evening — firming pass):** Soft spots from the critical audit closed where
-feasible. J2 e2e standing test green; live PBO / elite-median / universe prints on CorpusEvoRun OOS;
-IS `rankScoreFacts` default; `--n-trials` default 50; TapeLinter on primary loads; GitHub Actions
-workflow added. Multi-CLI-seed restarts and full CorpusEvoRun host co-evo on long tapes remain soft
-(bounded CLI re-runs document honest NO-GOs).
+**Progress (2026-07-30 — soft-spot close):** Multi-CLI `--seed` restart matrix
+(`SeedRestartMatrixCli` / `PlantedCoEvo.seedMatrix` → `SeedRobustness.verdict`), bounded
+multi-gen planted co-evo on real tapes (`PlantedCoEvoCli` + tools), and `--prereg` hard
+champion abort (`PreregGate` + CorpusEvoRun non-zero exit) are wired. Standing tests cover
+abort vs pass, multi-seed median, and planted multi-gen GO / null NO-GO. Universe GO on
+single-name research tapes remains correctly soft (need `--tapes`).
 
 ---
 
@@ -69,13 +70,15 @@ New: `evo/rigor/` — pure, unit-tested statistics.
   (skips honestly when <2 strategies).
 - [x] **B2. Purge & embargo around the IS/OOS split.** `evo/rigor/PurgeEmbargo.hx` + tests. CorpusEvoRun
   already had `--embargo`; helper documents / enforces lookback-aware legality.
-- [x] **B3. Minimum-effect-size + pre-registration harness.** `evo/rigor/PreRegistration.hx` + tests.
-  CorpusEvoRun `--prereg` acknowledges multi-testing when `--n-trials 1`. Full sealed-threshold
-  enforcement against champion metric still library-thin (helper + flag; not a hard abort gate).
+- [x] **B3. Minimum-effect-size + pre-registration harness.** `evo/rigor/PreRegistration.hx` +
+  `PreregGate.hx`. CorpusEvoRun `--prereg` **seals** `--prereg-threshold` (default 0) at start;
+  after champion OOS, `evaluate` → **ABORT / Sys.exit(1)** if below threshold (not WARNING-only).
+  Tests: `testPreregGateAbortsBelowThreshold`, `testPreregGatePassVsAbortLabels`.
 - [x] **B4. Seed-robustness aggregator.** `evo/rigor/SeedRobustness.hx` — GO requires median, not max.
   **Live:** CorpusEvoRun prints `[rigor seed-median]` over top-K OOS Sharpes; `AuctionHardenedOosCli`
-  medians across host seeds. **Still soft:** true multi-`--seed` CLI restart aggregator not wired
-  (would need an outer loop / job matrix).
+  medians across host seeds. **Multi-CLI `--seed` restarts:** `SeedRestartMatrixCli` /
+  `PlantedCoEvo.seedMatrix` + `tools/seed_restart_matrix.{ps1,sh}` (CI job). Machine line
+  `[rigor champion-oos]` on CorpusEvoRun for outer-loop scrapes.
 - [x] **B5. Universe-robustness.** `evo/rigor/UniverseRobustness.hx` — single-name flagged.
   **Live:** CorpusEvoRun `[rigor universe]` on `--tapes` basket for best host; single-`--tape` always
   NO-GO on universe gate (honest). Hardened OOS CLI flags single-tape runs.
@@ -176,12 +179,14 @@ These make false positives nearly impossible by validating the instrument itself
   Also asserted inside `testJ2PlantedEdgeEvoOosGoWhileNullNoGo`.
 - [x] **J2. POSITIVE CONTROL (must PASS).** `ew/OracleForecastHost.hx` — signal monotone skill test
   **plus** standing e2e DoD: planted-edge genome → IS `rankScore` selection vs null → hardened OOS
-  → **GO** (`testJ2PlantedEdgeEvoOosGoWhileNullNoGo`). Full multi-gen CorpusEvoRun planted co-evo on
-  a long real tape is still a heavier optional live check (not required for the standing gate).
+  → **GO** (`testJ2PlantedEdgeEvoOosGoWhileNullNoGo`). **Multi-gen planted co-evo:**
+  `PlantedCoEvo` / `PlantedCoEvoCli` + `tools/planted_coevo.{ps1,sh}` on real tape
+  (`spy_oos_2022_2026` / `data/real/tsla.csv`); standing `testPlantedCoEvoMultiGenOosGoWhileNullNoGo`;
+  CI job on bounded spy OOS tape. `--ew-host oracle|null` bind path in `ProjectionProvider`.
 - [x] **J3. Label-shuffle test.** Shuffle collapses rank-IC (~0). In `TestPipelineHardening`.
 - [x] **J4. Standing CI gate.** `TestPipelineHardening` registered in `TestMain` +
   `TestProjectionHostMain`. **Automated:** `.github/workflows/pipeline-hardening.yml` runs
-  projection-host + auction suites + `tools/det_parity_ci.sh`.
+  projection-host + auction suites + `tools/det_parity_ci.sh` + seed-restart matrix + planted co-evo.
 
 ---
 
@@ -199,10 +204,11 @@ hardened instrument reproduces the honest NO-GOs (no resurrected false pulses). 
 
 | Soft spot | Status |
 |-----------|--------|
-| Multi-CLI-seed restart matrix (`--seed` grid → SeedRobustness) | Not wired — elite/host-seed median is live instead |
-| Full CorpusEvoRun multi-gen planted-edge co-evo on real tape | Standing test covers minimal evo path; full JVM run optional |
-| `--prereg` hard abort vs champion | Flag + WARNING only; PreRegistration helper remains library-grade |
+| Multi-CLI-seed restart matrix (`--seed` grid → SeedRobustness) | **Closed** — `SeedRestartMatrixCli` / `PlantedCoEvo.seedMatrix` + CI script |
+| Full CorpusEvoRun multi-gen planted-edge co-evo on real tape | **Closed (bounded)** — `PlantedCoEvoCli` + standing test; full JVM CorpusEvoRun `--ew-host oracle` still optional for longer wall-clock |
+| `--prereg` hard abort vs champion | **Closed** — `PreregGate` seals threshold; CorpusEvoRun `Sys.exit(1)` / `CORPUS_EVO_PREREG_ABORT` |
 | Universe GO on single-name research tapes | Correctly NO-GO; need `--tapes` multi-name for universe GO |
+| Full-pop CorpusEvoRun outer seed-matrix (hours) | Optional — scrape `[rigor champion-oos]` across `tools/seed_restart_matrix` / manual JVM loops |
 
 ---
 
@@ -210,15 +216,16 @@ hardened instrument reproduces the honest NO-GOs (no resurrected false pulses). 
 
 | Area | Path |
 |------|------|
-| Rigor | `musescript/evo/rigor/{NormApprox,ProbSharpe,BlockBootstrap,Pbo,PurgeEmbargo,PreRegistration,SeedRobustness,UniverseRobustness,OosVerdict,TruthReport,TruthVerdict,TrialsSession}.hx` |
-| Controls | `musescript/ew/{NullForecastHost,OracleForecastHost,HostLeakageProbe,HostWarmup,BenchmarkHarness}.hx` |
+| Rigor | `musescript/evo/rigor/{NormApprox,ProbSharpe,BlockBootstrap,Pbo,PurgeEmbargo,PreRegistration,PreregGate,SeedRobustness,UniverseRobustness,OosVerdict,TruthReport,TruthVerdict,TrialsSession,PlantedCoEvo}.hx` |
+| Controls | `musescript/ew/{NullForecastHost,OracleForecastHost,HostLeakageProbe,HostWarmup,BenchmarkHarness,SeedRestartMatrixCli,PlantedCoEvoCli}.hx` |
 | Gate | `musescript/evo/Fitness.hx` (`defaultMinTrades`, `scoreNullBaseline`, `rankScore`, `rankScoreFacts`) |
-| OOS | `musescript/evo/graal/CorpusEvoRun.hx` (`--min-trades`, `--n-trials` default 50, `--no-rank-dsr`, `--prereg`, TapeLinter, live PBO/seed-median/universe) |
+| OOS | `musescript/evo/graal/CorpusEvoRun.hx` (`--min-trades`, `--n-trials` default 50, `--no-rank-dsr`, `--prereg` + `--prereg-threshold` hard abort, TapeLinter, live PBO/seed-median/universe, `[rigor champion-oos]`) |
 | PIT | `musescript/ew/RegimeForecastHost.hx` (t-causal closes); `*BenchmarkCli` → `HostWarmup` / `BenchmarkHarness` |
 | MCMC | `musescript/ew/mcmc/RegimeMcmc.hx` (ESS / mixingOk); `DetParityDump` + `testdata/det-parity.golden.txt` + `tools/det_parity_ci.*` |
 | Drains | `HostDrainGuard`, `RivalryArena`, `NmaSemanticRdo`, `NmaNodeEvalPool.assertWorkerJsonSafe`, `CorpusSeed` |
-| Metrics | `musescript/evo/ProjectionScore.hx` (`minSample=10`) |
+| Metrics | `musescript/evo/ProjectionScore.hx` (`minSample=10`); `ProjectionProvider` `oracle`/`null` bind |
 | Auction | `VolumeProfile.histogram`; `AuctionHardenedOosCli` (`--host-kind`, seed-median, universe flag) |
 | Data | `musescript/harness/TapeLinter.hx` (H1–H3); CorpusEvoRun + BenchmarkHarness lint on load |
-| CI | `.github/workflows/pipeline-hardening.yml` |
+| CI | `.github/workflows/pipeline-hardening.yml` (+ seed-restart matrix + planted co-evo) |
+| Tools | `tools/seed_restart_matrix.{ps1,sh}`, `tools/planted_coevo.{ps1,sh}`; `build-seed-restart-matrix.hxml`, `build-planted-coevo.hxml` |
 | Tests | `musescript/tests/{TestPipelineHardening,TestPitDiscipline,TestP1Hardening,TestFrostAdversarial,TestDetParity,TestTapeLinter}.hx` |

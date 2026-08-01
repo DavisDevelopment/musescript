@@ -1,0 +1,6 @@
+extraParams.hxml
+-main musescript.ew.PlantedCoEvoCli
+-lib hxnodejs
+-D node
+-D js_es=6
+-js build/js/planted-coevo.js

@@ -123,13 +123,20 @@
 
 ## P2+ — gated, not scheduled
 
-- [ ] **P2 → see `TIER_B_BUILD_PLAN.md`** (scoped 2026-07-31). Key reframe from the P1 measurement:
-  the ~1.2× ceiling is because the VM does opaque `CALL_BUILTIN`; the WASM tier already beats it by
-  **lowering indicators to primitives** (`StrategyWasmEmitter`), and that logic is reusable. So the
-  ceiling-breaker is **TB0: lower indicators to primitive bytecode** (target-agnostic, pure Haxe,
-  helps every tier, prerequisite for PE) — do it FIRST and measure; Tier B's Truffle component
-  (TB1–TB5, GraalVM-only) is gated on TB0's numbers + the §9 ≥1.5× kill-criterion. Truffle runtime is
-  already on the classpath.
+- [x] **TB0 LANDED (2026-08-01) — as `IND` static dispatch, not ring ops.** Honest deviation from
+  the plan doc: instead of porting `StrategyWasmEmitter`'s ring recurrences (duplicated math =
+  standing parity risk), the compiler lowers fully-static indicator callsites (series arg resolves to
+  a compile-time NAME + Int-literal params) to a single `IND` op that calls the SAME `TradeBuiltins`
+  static the interp reaches — kills `Reflect`/argv boxing (the actual JVM overhead) with zero math
+  duplication. 13 indicators covered; everything else stays `CALL_BUILTIN`. **Measured: JVM per-eval
+  1.2× → 1.58× on IND-lowered genomes (sma_8_cross); opaque control 1.31× (ulcer). JS sma-cross
+  1.62× → 1.77×.** Parity: corpus 83/83, evolved 2430 diverged=0, full suite 75,093 green, champion
+  quality unchanged. Ring-buffer primitive ops remain the *Truffle-tier* design (PE needs a body it
+  can see) — port them there if TB1+ is ever green-lit.
+- [ ] **P2 → see `TIER_B_BUILD_PLAN.md`** (scoped 2026-07-31). Post-TB0 status: the residual opaque
+  ceiling (~1.3×) now applies only to registry indicators (TaToolbelt et al). Before any Truffle
+  work, the cheaper lever is widening `IND` coverage to uniform-shape registry indicators. Tier B
+  (TB1–TB5, GraalVM-only) stays gated on the §9 ≥1.5× kill-criterion vs the WASM tier.
 - [ ] **P3** Long-tail coverage (objects/arrays/classes/match; generators stay interp on Tier A).
 - [ ] **P4** Retarget JS/WASM emitters from the shared IR — do not destabilize audited WASM parity
   before Tier A has earned default status.

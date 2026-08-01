@@ -724,4 +724,64 @@ strategy NoParams {
 			"account flood must not improve DSR"
 		);
 	}
+
+	// ── Soft-spot closures: prereg hard abort / multi-seed matrix / planted co-evo ──
+
+	public function testPreregGateAbortsBelowThreshold() {
+		var gate = musescript.evo.rigor.PreregGate.seal(0.5, 5);
+		Assert.isTrue(gate.describe().indexOf("0.5") >= 0);
+		var fail = gate.evaluate(0.1);
+		Assert.isFalse(fail.go);
+		Assert.isTrue(fail.abort);
+		Assert.isTrue(fail.label.indexOf("ABORT") >= 0);
+		var pass = gate.evaluate(0.9);
+		Assert.isTrue(pass.go);
+		Assert.isFalse(pass.abort);
+		Assert.isTrue(pass.label.indexOf("PASS") >= 0);
+	}
+
+	public function testPreregGatePassVsAbortLabels() {
+		var gate = musescript.evo.rigor.PreregGate.seal(0.0);
+		var lineFail = musescript.evo.rigor.PreregGate.formatLine(gate.evaluate(-1.0));
+		Assert.isTrue(lineFail.indexOf("ABORT") >= 0 || lineFail.indexOf("NO-GO") >= 0);
+		var linePass = musescript.evo.rigor.PreregGate.formatLine(gate.evaluate(1.0));
+		Assert.isTrue(linePass.indexOf("PASS") >= 0 || linePass.indexOf("GO") >= 0);
+	}
+
+	public function testMultiSeedRestartMatrixUsesMedian() {
+		// Synthetic: max clears 0 but median does not — same contract as SeedRobustness,
+		// exercised through PlantedCoEvo.seedMatrix's aggregator path with canned metrics.
+		var cherry = SeedRobustness.verdict([-0.4, -0.2, 1.5], 0.0);
+		Assert.isFalse(cherry.go, "median must reject single-seed cherry-pick");
+		Assert.isTrue(cherry.max > 0);
+
+		Fitness.defaultMinTrades = 20;
+		Fitness.equityCurveNeeded = true;
+		var all = bars(420, 61);
+		var matrix = musescript.evo.rigor.PlantedCoEvo.seedMatrix(all, [11, 22, 33], {
+			pop: 4, gens: 1, minTrades: 20, nTrials: 3, threshold: 0.0
+		});
+		Assert.equals(3, matrix.runs.length);
+		Assert.isTrue(matrix.metrics.length >= 1, "expected finite OOS metrics from planted restarts");
+		Assert.equals(matrix.metrics.length, matrix.verdict.n);
+		// Null control on every restart must stay NO-GO.
+		for (r in matrix.runs) {
+			Assert.isFalse(Reflect.field(r.nullOos, "go") == true,
+				'null host must stay NO-GO on seed=${r.seed}');
+		}
+	}
+
+	public function testPlantedCoEvoMultiGenOosGoWhileNullNoGo() {
+		Fitness.defaultMinTrades = 20;
+		Fitness.equityCurveNeeded = true;
+		var all = bars(480, 19);
+		var r = musescript.evo.rigor.PlantedCoEvo.runOnce(all, {
+			seed: 77, pop: 6, gens: 2, minTrades: 20, nTrials: 3, nBoot: 60, psrGate: 0.90
+		});
+		Assert.isTrue(r.gens >= 2);
+		Assert.isTrue(r.championTrades >= 20,
+			'planted multi-gen must clear minTrades, got ${r.championTrades}');
+		Assert.isTrue(r.go, 'planted multi-gen must GO OOS: ${Reflect.field(r.oos, "label")} ${Reflect.field(r.oos, "reason")}');
+		Assert.isFalse(Reflect.field(r.nullOos, "go") == true, "null control must stay NO-GO");
+	}
 }

@@ -1,0 +1,14 @@
+{
+  "name": "musescript-tools",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Local tooling for MuseScript ship-protect (minify + obfuscate). Not published.",
+  "scripts": {
+    "ship-js": "node tools/ship-js.mjs",
+    "ship-ab": "node tools/ship-protect-ab.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "javascript-obfuscator": "^4.1.1"
+  }
+}

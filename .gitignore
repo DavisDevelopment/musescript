@@ -7,7 +7,9 @@ build/wasm/
 build/graal/
 build/jvm/
 build/kestrel/
+build/ship/
 build/*.json
+node_modules/
 dump/
 graal/target/
 .pytest_cache/
@@ -41,3 +43,5 @@ build-*murmuration*.hxml
 
 # Organic Pine harvest clones — regenerable via tools/pine_corpus_harvest.py
 corpus/pine-organic/
+/build/randuni
+/build/broaduni

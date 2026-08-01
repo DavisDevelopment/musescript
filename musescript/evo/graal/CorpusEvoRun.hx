@@ -1005,9 +1005,15 @@ class CorpusEvoRun {
 		// the number the end-to-end s/gen dilutes (oracle cache hits + WASM pop scoring). Exits after.
 		if (argFlag("--vm-bench")) {
 			var benchBars = isBasket[0];
+			// `--vm-bench-name <substr>`: pin the benched genome by name substring (default: first
+			// VM-covered seed) — lets a checkpoint bench e.g. an IND-lowered sma genome vs an
+			// opaque-CALL_BUILTIN one and see the difference between the two callsite paths.
+			var nameFilter = argStr("--vm-bench-name", null);
 			var benchG:StrategyGenome = null;
-			for (g in indicatorSeeds.concat(fibSeeds).concat(tournament.genomes))
+			for (g in indicatorSeeds.concat(fibSeeds).concat(tournament.genomes)) {
+				if (nameFilter != null && g.name.indexOf(nameFilter) < 0) continue;
 				if (Fitness.evaluateVm(g, benchBars, costBps).ok) { benchG = g; break; }
+			}
 			if (benchG == null) { Sys.println("vm-bench: no VM-covered genome among the seeds"); Sys.exit(0); }
 			var N = 25;
 			var K = 8;

@@ -192,6 +192,35 @@ class MuseVm {
 					if (fn == null) { fn = globals.get(consts[nameIdx]); builtinIC[nameIdx] = fn; }
 					// Mirror of MuseInterp.callValue's plain-function path (recv = null).
 					sp.push(MuseVmOps.preserveNum(Reflect.callMethod(null, fn, argv)));
+				case Op.IND:
+					// TB0: statically-dispatched indicator — the SAME TradeBuiltins static the
+					// interp's dynamic call reaches, minus Reflect dispatch + argv/arg boxing.
+					// All operands are compile-time immediates (compiler guarantees), so the
+					// callee sees bit-identical inputs to the generic CALL_BUILTIN path.
+					var ind = code[pc++];
+					var nameIdx = code[pc++];
+					var np = code[pc++];
+					var p1 = 0;
+					if (np > 0) p1 = code[pc++];
+					var sname:String = consts[nameIdx];
+					var r:Float = switch (ind) {
+						case Op.IND_SMA: TradeBuiltins.sma(harness, sname, p1);
+						case Op.IND_EMA: TradeBuiltins.ema(harness, sname, p1);
+						case Op.IND_RSI: TradeBuiltins.rsi(harness, sname, p1);
+						case Op.IND_ATR: TradeBuiltins.atr(harness, sname, p1);
+						case Op.IND_HIGHEST: TradeBuiltins.highest(harness, sname, p1);
+						case Op.IND_LOWEST: TradeBuiltins.lowest(harness, sname, p1);
+						case Op.IND_STDEV: TradeBuiltins.stdev(harness, sname, p1);
+						case Op.IND_WMA: TradeBuiltins.wma(harness, sname, p1);
+						case Op.IND_RMA: TradeBuiltins.rma(harness, sname, p1);
+						case Op.IND_ROC: TradeBuiltins.roc(harness, sname, p1);
+						case Op.IND_MOM: TradeBuiltins.mom(harness, sname, p1);
+						case Op.IND_CHANGE:
+							np > 0 ? TradeBuiltins.change(harness, sname, p1) : TradeBuiltins.change(harness, sname);
+						default: // IND_PCT_CHANGE
+							np > 0 ? TradeBuiltins.pctChange(harness, sname, p1) : TradeBuiltins.pctChange(harness, sname);
+					};
+					sp.push(MuseVmOps.preserveNum(r));
 				case Op.CROSS:
 					var csId = code[pc++];
 					var fnCode = code[pc++];

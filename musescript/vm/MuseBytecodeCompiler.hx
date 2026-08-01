@@ -82,6 +82,20 @@ class MuseBytecodeCompiler {
 		}
 	}
 
+	// TB0: indicators eligible for static IND dispatch — exactly the
+	// `TradeBuiltins` statics `install` registers under these names. NOT `hma`
+	// (registered elsewhere) and NOT the __cs/__scr callsite-stateful ones.
+	static final IND_CODES:Map<String, Int> = [
+		"sma" => Op.IND_SMA, "ema" => Op.IND_EMA, "rsi" => Op.IND_RSI, "atr" => Op.IND_ATR,
+		"highest" => Op.IND_HIGHEST, "lowest" => Op.IND_LOWEST, "stdev" => Op.IND_STDEV,
+		"wma" => Op.IND_WMA, "rma" => Op.IND_RMA, "roc" => Op.IND_ROC, "mom" => Op.IND_MOM,
+		"change" => Op.IND_CHANGE, "pct_change" => Op.IND_PCT_CHANGE
+	];
+
+	static function unwrapParent(e:Expr):Expr {
+		return switch (e) { case EParent(x): unwrapParent(x); default: e; }
+	}
+
 	function new() {}
 
 	/**
@@ -170,6 +184,54 @@ class MuseBytecodeCompiler {
 			};
 			default: -1;
 		}
+	}
+
+	// ---- TB0: static indicator lowering ----
+
+	// The series NAME an IND callsite would pass, IFF it is exactly what the
+	// generic CALL_BUILTIN path passes for this arg: a series-typed bar-field
+	// ident resolves via `BuiltinSigs.seriesNameOf` (the same call the generic
+	// path makes); a string literal is the same string under either path. A
+	// bar-field ident in a NON-series-typed position must NOT lower (the
+	// generic path would pass the current-bar float, not the name) ⇒ null.
+	static function indSeriesConst(name:String, i:Int, arg:Expr):Null<String> {
+		if (BuiltinSigs.wantsSeries(name, i)) {
+			var sn = BuiltinSigs.seriesNameOf(arg);
+			if (sn != null) return sn;
+		}
+		return switch (unwrapParent(arg)) {
+			case EConst(CString(s)): s;
+			default: null;
+		}
+	}
+
+	// Emit `IND` for a fully-static indicator callsite: series arg resolves to a
+	// compile-time name AND the (optional) length/offset param is an Int literal.
+	// Anything else — dynamic params, raw-array series, weird arities — returns
+	// false and stays on the generic CALL_BUILTIN path, so lowering can never
+	// change which values reach the builtin (parity by construction).
+	function tryLowerInd(name:String, args:Array<Expr>):Bool {
+		var ind = IND_CODES.get(name);
+		if (ind == null) return false;
+		var optionalParam = (ind == Op.IND_CHANGE || ind == Op.IND_PCT_CHANGE);
+		if (optionalParam) {
+			if (args.length < 1 || args.length > 2) return false;
+		} else if (args.length != 2) {
+			return false;
+		}
+		var sname = indSeriesConst(name, 0, args[0]);
+		if (sname == null) return false;
+		var p1:Null<Int> = null;
+		if (args.length == 2) {
+			if (BuiltinSigs.wantsSeries(name, 1)) return false;
+			switch (unwrapParent(args[1])) {
+				case EConst(CInt(k)): p1 = k;
+				default: return false;
+			}
+		}
+		emit(Op.IND); emit(ind); emit(constIndex(sname));
+		if (p1 != null) { emit(1); emit(p1); } else emit(0);
+		return true;
 	}
 
 	// ---- statements ----
@@ -286,6 +348,9 @@ class MuseBytecodeCompiler {
 			// A local shadowing the name, or a non-plain-function global (IndicatorInstance/closure),
 			// is out of subset ⇒ fallback (deterministic).
 			case ECall(EIdent(name), args) if (!localSlots.exists(name) && isPlainBuiltin(name)):
+				// TB0 fast path: fully-static indicator callsite → single IND op with immediates.
+				// Falls through to the generic CALL_BUILTIN when the shape doesn't qualify.
+				if (tryLowerInd(name, args)) return;
 				for (i in 0...args.length) {
 					var sn = BuiltinSigs.wantsSeries(name, i) ? BuiltinSigs.seriesNameOf(args[i]) : null;
 					if (sn != null) { emit(Op.CONST); emit(constIndex(sn)); }

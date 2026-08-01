@@ -211,8 +211,19 @@ class ProjectionProvider {
 		var key = declDigest(decl) + ":" + bars.length + ":" + t0 + ":" + t1;
 		if (key == lastBindKey && host != null && clouds != null && boundBars == bars)
 			return;
-		var stack = new SwingGraphStack(0.02, 0.05, 16);
-		host = hostForDecl(decl, null, stack);
+		var kind = switch (decl.sampler) {
+			case PSHost(k): k;
+			default: "?";
+		};
+		// J1/J2 control hosts need the full tape at construction (oracle) or a seed (null).
+		if (kind == "oracle") {
+			host = musescript.ew.OracleForecastHost.fromBars(bars, 1.0, decl.horizon < 1 ? 5 : decl.horizon, decl.seed);
+		} else if (kind == "null") {
+			host = new musescript.ew.NullForecastHost(decl.seed, decl.horizon < 1 ? 5 : decl.horizon);
+		} else {
+			var stack = new SwingGraphStack(0.02, 0.05, 16);
+			host = hostForDecl(decl, null, stack);
+		}
 		lastBindKey = key;
 		invalidate();
 	}
