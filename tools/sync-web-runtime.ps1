@@ -15,10 +15,12 @@ param(
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot\..
 
-Write-Host "Building muse-runtime + pine2muse-web..."
+Write-Host "Building muse-runtime + pine2muse-web + forecast-host-runtime..."
 haxe build-runtime.hxml
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 haxe build-pine-web.hxml
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+haxe build-forecast-host-runtime.hxml
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $webRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..\..\..\mederos-web")
@@ -40,11 +42,21 @@ if ($Ship) {
   if (-not (Test-Path $runtimeSrc) -or -not (Test-Path $pineSrc)) {
     Write-Error "Missing ship artifacts under build/ship/$usePreset — run npm run ship-js first"
   }
+  # forecast-host isn't in the ship pipeline yet; fall back to the raw build with a warning.
+  $forecastSrc = Join-Path $PSScriptRoot "..\build\ship\$usePreset\forecast-host-runtime.js"
+  if (-not (Test-Path $forecastSrc)) {
+    $forecastSrc = Join-Path $PSScriptRoot "..\build\js\forecast-host-runtime.js"
+    Write-Warning "No ship artifact build/ship/$usePreset/forecast-host-runtime.js — falling back to raw build/js output (add the target to npm run ship-js to fix)"
+  }
   Write-Host "Ship sync preset=$usePreset"
 } else {
   $usePreset = "raw"
   $runtimeSrc = Join-Path $PSScriptRoot "..\build\js\muse-runtime.js"
   $pineSrc = Join-Path $PSScriptRoot "..\build\js\pine2muse-web.js"
+  $forecastSrc = Join-Path $PSScriptRoot "..\build\js\forecast-host-runtime.js"
+}
+if (-not (Test-Path $forecastSrc)) {
+  Write-Error "Missing forecast-host artifact: $forecastSrc — did haxe build-forecast-host-runtime.hxml fail?"
 }
 
 function Get-ShortHash([string]$path) {
@@ -54,23 +66,29 @@ function Get-ShortHash([string]$path) {
 
 $rtHash = Get-ShortHash $runtimeSrc
 $pineHash = Get-ShortHash $pineSrc
+$fcHash = Get-ShortHash $forecastSrc
 
 $rtName = "muse-runtime.$rtHash.js"
 $pineName = "pine2muse-web.$pineHash.js"
+$fcName = "forecast-host-runtime.$fcHash.js"
 
 Copy-Item $runtimeSrc (Join-Path $publicDir $rtName) -Force
 Copy-Item $pineSrc (Join-Path $publicDir $pineName) -Force
+Copy-Item $forecastSrc (Join-Path $publicDir $fcName) -Force
 # Unhashed aliases (short-cache / bookmarks) — same bytes as hashed ship/raw copy.
 Copy-Item $runtimeSrc (Join-Path $publicDir "muse-runtime.js") -Force
 Copy-Item $pineSrc (Join-Path $publicDir "pine2muse-web.js") -Force
+Copy-Item $forecastSrc (Join-Path $publicDir "forecast-host-runtime.js") -Force
 
 $revJson = Join-Path $publicDir "engine-rev.json"
 $payload = @{
   preset       = $usePreset
   museRuntime  = "/$rtName"
   pineConvert  = "/$pineName"
+  forecastHost = "/$fcName"
   museRuntimeHash = $rtHash
   pineConvertHash = $pineHash
+  forecastHostHash = $fcHash
   generatedAt  = (Get-Date).ToUniversalTime().ToString("o")
 } | ConvertTo-Json
 Set-Content -Path $revJson -Value $payload -Encoding utf8
@@ -80,12 +98,15 @@ $ts = @"
 export const ENGINE_PRESET = $(ConvertTo-Json $usePreset);
 export const MUSE_RUNTIME_REV = $(ConvertTo-Json $rtHash);
 export const PINE_CONVERT_REV = $(ConvertTo-Json $pineHash);
+export const FORECAST_HOST_REV = $(ConvertTo-Json $fcHash);
 export const MUSE_RUNTIME_URL = $(ConvertTo-Json "/$rtName");
 export const PINE_CONVERT_URL = $(ConvertTo-Json "/$pineName");
+export const FORECAST_HOST_URL = $(ConvertTo-Json "/$fcName");
 "@
 Set-Content -Path $revTs -Value $ts -Encoding utf8
 
 Write-Host "Synced web engines:"
 Write-Host "  $rtName ($([math]::Round((Get-Item $runtimeSrc).Length/1KB)) KB)"
 Write-Host "  $pineName ($([math]::Round((Get-Item $pineSrc).Length/1KB)) KB)"
+Write-Host "  $fcName ($([math]::Round((Get-Item $forecastSrc).Length/1KB)) KB)"
 Write-Host "  rev → $revTs"
