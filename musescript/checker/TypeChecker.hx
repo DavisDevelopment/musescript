@@ -65,6 +65,7 @@ class TypeChecker {
 			{name: "get", ty: TFun([TString], TUnknown)}
 		]));
 		env.set("Math", TObject(mathHostFields()));
+		env.set("muse", TObject(museHostFields()));
 		env.set("true", TBool);
 		env.set("false", TBool);
 		env.set("null", TUnknown);
@@ -91,6 +92,22 @@ class TypeChecker {
 			{name: "NEGATIVE_INFINITY", ty: TScalar},
 			{name: "POSITIVE_INFINITY", ty: TScalar}
 		];
+	}
+
+	/** `muse.orders` / `muse.fund` / … namespaces — method types mirror flat BuiltinSigs. */
+	static function museHostFields():Array<{name:String, ty:MuseType}> {
+		var ns:Array<{name:String, ty:MuseType}> = [];
+		for (name in musescript.builtins.MuseHost.namespaces()) {
+			var methods:Array<{name:String, ty:MuseType}> = [];
+			for (method in musescript.builtins.MuseHost.methodsOf(name)) {
+				var flat = musescript.builtins.MuseHost.resolveFlat(name, method);
+				var sig = flat != null ? BuiltinSigs.get(flat) : null;
+				var ty:MuseType = sig != null ? TFun(sig.args, sig.ret) : TUnknown;
+				methods.push({ name: method, ty: ty });
+			}
+			ns.push({ name: name, ty: TObject(methods) });
+		}
+		return ns;
 	}
 
 	/** Host bindings installed by MuseInterp.bindTick / JsBackend.bindTick. */

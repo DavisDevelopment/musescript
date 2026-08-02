@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.IndicatorCache;
 import musescript.types.MuseType;
 
@@ -22,23 +23,22 @@ import musescript.types.MuseType;
  */
 class HangingMan implements MuseIndicator<Bar, Float> {
 	var contextPeriod:Int;
-	var closeWindow:Array<Float>;
+	var closeWindow:RingBuffer<Float>;
 
 	public function new(contextPeriod:Int = 5) {
 		if (contextPeriod <= 0) throw "HangingMan: contextPeriod must be > 0";
 		this.contextPeriod = contextPeriod;
-		closeWindow = [];
+		closeWindow = new RingBuffer(contextPeriod);
 	}
 
 	public function update(bar:Bar):Null<Float> {
 		var result = 0.0;
 		if (closeWindow.length == contextPeriod) {
-			var highestClose = closeWindow[0];
+			var highestClose = closeWindow.oldest(0);
 			for (v in closeWindow) if (v > highestClose) highestClose = v;
 			if (isHangingManShape(bar) && bar.high > highestClose) result = -1.0;
 		}
 
-		if (closeWindow.length == contextPeriod) closeWindow.shift();
 		closeWindow.push(bar.close);
 
 		return result;
@@ -56,7 +56,7 @@ class HangingMan implements MuseIndicator<Bar, Float> {
 	}
 
 	public function reset():Void {
-		closeWindow = [];
+		closeWindow = new RingBuffer(contextPeriod);
 	}
 
 	public function warmupPeriod():Int return contextPeriod + 1;

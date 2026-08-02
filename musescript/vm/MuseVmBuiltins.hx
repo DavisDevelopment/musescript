@@ -5,6 +5,7 @@ import musescript.builtins.TradeBuiltins;
 import musescript.builtins.macro.MacroBuiltins;
 import musescript.builtins.WickraBuiltins;
 import musescript.builtins.TaToolbelt;
+import musescript.builtins.MuseHost;
 import musescript.interp.MuseExtensions;
 
 /**
@@ -33,6 +34,7 @@ class MuseVmBuiltins {
 		MacroBuiltins.install(globals, harness);
 		WickraBuiltins.install(globals, harness);
 		TaToolbelt.install(globals, harness);
+		MuseHost.install(globals, harness);
 		MuseExtensions.installAll(globals, harness);
 		globals.set("Math", {
 			abs: Math.abs, min: Math.min, max: Math.max, sqrt: Math.sqrt, pow: Math.pow,

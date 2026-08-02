@@ -2013,8 +2013,9 @@ class CorpusEvoRun {
 				// engine that doesn't check it. Force every genome down fallback rather than
 				// silently letting WASM-routed genomes skip the solvency gate.
 				if (forceFallback) { fallbackMiss.push(key); continue; }
-				// PSHost genomes need ProjectionProvider.decorateBars (aux Bar.data) — WASM has no
-				// host cloud path, so route them to JS fallback whenever `--ew-host` is on.
+				// PSHost genomes need ProjectionProvider.decorateBars before the tape is packed.
+				// WASM can read pre-joined Bar.data aux natively, but the Graal worker does not
+				// run decorateBars — keep ew-host PSHost genomes on the JS decorate path.
 				if (ewHostOn && ProjectionProvider.hostProjRefs(g).length > 0) {
 					fallbackMiss.push(key);
 					continue;

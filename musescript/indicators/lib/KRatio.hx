@@ -2,6 +2,7 @@ package musescript.indicators.lib;
 
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.IndicatorCache;
 import musescript.types.MuseType;
 
@@ -23,18 +24,17 @@ import musescript.types.MuseType;
  */
 class KRatio implements MuseIndicator<Float, Float> {
 	var period:Int;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 
 	public function new(period:Int) {
 		if (period < 3) throw "KRatio: period must be >= 3";
 		this.period = period;
-		window = [];
+		window = new RingBuffer(period);
 	}
 
 	public function update(equity:Float):Null<Float> {
 		if (!Math.isFinite(equity) || equity <= 0.0) return null;
 		var y = Math.log(equity);
-		if (window.length == period) window.shift();
 		window.push(y);
 		if (window.length < period) return null;
 
@@ -49,7 +49,7 @@ class KRatio implements MuseIndicator<Float, Float> {
 		for (i in 0...n) {
 			var dx = i - meanX;
 			sxx += dx * dx;
-			sxy += dx * (window[i] - meanY);
+			sxy += dx * (window.oldest(i) - meanY);
 		}
 		if (sxx == 0.0) return 0.0;
 		var slope = sxy / sxx;
@@ -57,7 +57,7 @@ class KRatio implements MuseIndicator<Float, Float> {
 		var sse = 0.0;
 		for (i in 0...n) {
 			var fitted = meanY + slope * (i - meanX);
-			var resid = window[i] - fitted;
+			var resid = window.oldest(i) - fitted;
 			sse += resid * resid;
 		}
 		if (n <= 2) return 0.0;
@@ -68,7 +68,7 @@ class KRatio implements MuseIndicator<Float, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 	}
 
 	public function warmupPeriod():Int return period;

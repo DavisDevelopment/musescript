@@ -2,6 +2,7 @@ package musescript.indicators.lib;
 
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.IndicatorCache;
 import musescript.types.MuseType;
 
@@ -18,7 +19,7 @@ import musescript.types.MuseType;
  */
 class Cfo implements MuseIndicator<Float, Float> {
 	var period:Int;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 
 	public function new(period:Int) {
 		if (period < 2) throw "Cfo: period must be >= 2";
@@ -28,7 +29,6 @@ class Cfo implements MuseIndicator<Float, Float> {
 
 	public function update(price:Float):Null<Float> {
 		if (!Math.isFinite(price)) return null;
-		if (window.length == period) window.shift();
 		window.push(price);
 		if (window.length < period) return null;
 
@@ -42,7 +42,7 @@ class Cfo implements MuseIndicator<Float, Float> {
 		var den = 0.0;
 		for (i in 0...n) {
 			var dx = i - meanX;
-			num += dx * (window[i] - meanY);
+			num += dx * (window.oldest(i) - meanY);
 			den += dx * dx;
 		}
 		if (den == 0.0) return 0.0;
@@ -55,7 +55,7 @@ class Cfo implements MuseIndicator<Float, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 	}
 
 	public function warmupPeriod():Int return period;

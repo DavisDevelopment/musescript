@@ -2,6 +2,7 @@ package musescript.indicators.lib;
 
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.IndicatorCache;
 import musescript.types.MuseType;
 
@@ -21,14 +22,14 @@ import musescript.types.MuseType;
 class OmegaRatio implements MuseIndicator<Float, Float> {
 	var period:Int;
 	var threshold:Float;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var lastPrice:Null<Float>;
 
 	public function new(period:Int, threshold:Float = 0.0) {
 		if (period <= 0) throw "OmegaRatio: period must be > 0";
 		this.period = period;
 		this.threshold = threshold;
-		window = [];
+		window = new RingBuffer(period);
 		lastPrice = null;
 	}
 
@@ -41,7 +42,6 @@ class OmegaRatio implements MuseIndicator<Float, Float> {
 		var ret = lastPrice != 0.0 ? (price - lastPrice) / lastPrice : 0.0;
 		lastPrice = price;
 
-		if (window.length == period) window.shift();
 		window.push(ret);
 		if (window.length < period) return null;
 
@@ -56,7 +56,7 @@ class OmegaRatio implements MuseIndicator<Float, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 		lastPrice = null;
 	}
 

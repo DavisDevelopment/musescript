@@ -93,6 +93,7 @@ class CorpusSeed {
 				// Flatten `class X extends muse.Strat` corpus seeds to StrategyDecl before
 				// template/module passes (no-op for plain `strategy {}` seeds).
 				prog = musescript.compile.ClassStrategyLower.expand(prog);
+				prog = musescript.compile.MuseHostLower.lower(prog);
 				prog = TemplateExpand.expand(prog);
 				prog = ModuleExpand.expand(prog);
 				var g = translateProgram(prog, allowedIndicators);
@@ -120,6 +121,7 @@ class CorpusSeed {
 			var src = sys.io.File.getContent(path);
 			var prog = new MuseParser().parse(src, path);
 			prog = musescript.compile.ClassStrategyLower.expand(prog);
+			prog = musescript.compile.MuseHostLower.lower(prog);
 			prog = TemplateExpand.expand(prog);
 			prog = ModuleExpand.expand(prog);
 			var g = translateProgram(prog, allowedIndicators);
@@ -142,6 +144,7 @@ class CorpusSeed {
 		try {
 			var prog = new MuseParser().parse(src, "<human-edit>");
 			prog = musescript.compile.ClassStrategyLower.expand(prog);
+			prog = musescript.compile.MuseHostLower.lower(prog);
 			prog = TemplateExpand.expand(prog);
 			prog = ModuleExpand.expand(prog);
 			var g = translateProgram(prog, allowedIndicators);

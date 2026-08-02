@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.IndicatorCache;
 import musescript.indicators.lib.Cci;
 import musescript.types.MuseType;
@@ -24,23 +25,22 @@ class StochasticCci implements MuseIndicator<Bar, Float> {
 	var period:Int;
 	var cci:Cci;
 	/** The last `period` CCI values. */
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 
 	public function new(period:Int) {
 		if (period <= 0) throw "StochasticCci: period must be > 0";
 		this.period = period;
 		cci = new Cci(period);
-		window = [];
+		window = new RingBuffer(period);
 	}
 
 	public function update(bar:Bar):Null<Float> {
 		var c = cci.update(bar);
 		if (c == null) return null;
-		if (window.length == period) window.shift();
 		window.push(c);
 		if (window.length < period) return null;
-		var lo = window[0];
-		var hi = window[0];
+		var lo = window.oldest(0);
+		var hi = window.oldest(0);
 		for (v in window) {
 			if (v < lo) lo = v;
 			if (v > hi) hi = v;
@@ -53,7 +53,7 @@ class StochasticCci implements MuseIndicator<Bar, Float> {
 
 	public function reset():Void {
 		cci.reset();
-		window = [];
+		window = new RingBuffer(period);
 	}
 
 	public function warmupPeriod():Int {

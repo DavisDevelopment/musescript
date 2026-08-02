@@ -2,6 +2,7 @@ package musescript.indicators.lib;
 
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.IndicatorCache;
 import musescript.types.MuseType;
 
@@ -13,22 +14,21 @@ import musescript.types.MuseType;
  */
 class MidPoint implements MuseIndicator<Float, Float> {
 	var period:Int;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 
 	public function new(period:Int) {
 		if (period <= 0) throw "MidPoint: period must be > 0";
 		this.period = period;
-		window = [];
+		window = new RingBuffer(period);
 	}
 
 	public function update(price:Float):Null<Float> {
 		if (!Math.isFinite(price)) return null;
-		if (window.length == period) window.shift();
 		window.push(price);
 		if (window.length < period) return null;
 
-		var hi = window[0];
-		var lo = window[0];
+		var hi = window.oldest(0);
+		var lo = window.oldest(0);
 		for (v in window) {
 			if (v > hi) hi = v;
 			if (v < lo) lo = v;
@@ -37,7 +37,7 @@ class MidPoint implements MuseIndicator<Float, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 	}
 
 	public function warmupPeriod():Int return period;

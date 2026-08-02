@@ -1,0 +1,9 @@
+# Exact-output snapshot of every registered indicator — see musescript/tools/IndicatorGolden.hx.
+# Used to prove the Array.shift() -> RingBuffer migration (ALGORITHM_AUDIT.md §2) is
+# numerically neutral: snapshot before, migrate, snapshot after, diff must be empty.
+extraParams.hxml
+-main musescript.tools.IndicatorGolden
+-lib hxnodejs
+-D node
+-D js_es=6
+-js build/js/indicator-golden.js

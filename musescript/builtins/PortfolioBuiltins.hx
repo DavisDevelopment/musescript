@@ -99,7 +99,7 @@ class PortfolioBuiltins {
 		});
 	}
 
-	static function lookback(harness:HarnessContext, field:String, sym:String, n:Null<Int>):Float {
+	public static function lookback(harness:HarnessContext, field:String, sym:String, n:Null<Int>):Float {
 		// `n` is declared Null<Int> (not plain Int) specifically because these builtins are
 		// invoked through dynamic/reflective dispatch (vars.set(...) closures called by the
 		// interpreter) where a caller can genuinely supply undefined/null at runtime despite

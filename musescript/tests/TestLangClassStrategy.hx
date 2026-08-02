@@ -167,11 +167,14 @@ class TestLangClassStrategy extends Test {
 			+ '  function onBar() { when crossover(sma(close, 10), sma(close, 30)): long() }\n'
 			+ '}');
 		var momentum = null;
+		var riskBaseEmitted = false;
 		for (d in prog.decls) switch (d) {
 			case StrategyDecl("Momentum", body): momentum = body;
+			case StrategyDecl("RiskBase", _): riskBaseEmitted = true;
 			default:
 		}
 		Assert.notNull(momentum, "Momentum lowered to a strategy");
+		Assert.isFalse(riskBaseEmitted, "non-leaf RiskBase must not emit its own StrategyDecl");
 		var kinds = [for (s in momentum) switch (s) {
 			case OnBar(_): "bar"; case OnPosition(_): "pos"; default: "other";
 		}];

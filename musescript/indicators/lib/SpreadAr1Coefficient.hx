@@ -2,6 +2,7 @@ package musescript.indicators.lib;
 
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.IndicatorCache;
 import musescript.types.MuseType;
 
@@ -23,19 +24,18 @@ import musescript.types.MuseType;
  */
 class SpreadAr1Coefficient implements MuseIndicator<SpreadAr1Pair, Float> {
 	var period:Int;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 
 	public function new(period:Int) {
 		if (period < 3) throw "SpreadAr1Coefficient: period must be >= 3";
 		this.period = period;
-		window = [];
+		window = new RingBuffer(period);
 	}
 
 	public function update(input:SpreadAr1Pair):Null<Float> {
 		var a = input.a;
 		var b = input.b;
 		if (!Math.isFinite(a) || !Math.isFinite(b)) return null;
-		if (window.length == period) window.shift();
 		window.push(a - b);
 		if (window.length < period) return null;
 		// OLS slope ρ of the level on its own lag over the window.
@@ -45,8 +45,8 @@ class SpreadAr1Coefficient implements MuseIndicator<SpreadAr1Pair, Float> {
 		var sumLl = 0.0;
 		var sumLn = 0.0;
 		for (i in 0...window.length - 1) {
-			var level = window[i];
-			var next = window[i + 1];
+			var level = window.oldest(i);
+			var next = window.oldest(i + 1);
 			sumLevel += level;
 			sumNext += next;
 			sumLl += level * level;
@@ -64,7 +64,7 @@ class SpreadAr1Coefficient implements MuseIndicator<SpreadAr1Pair, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 	}
 
 	public function warmupPeriod():Int return period;

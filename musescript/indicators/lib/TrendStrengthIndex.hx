@@ -2,6 +2,7 @@ package musescript.indicators.lib;
 
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.IndicatorCache;
 import musescript.types.MuseType;
 
@@ -21,7 +22,7 @@ import musescript.types.MuseType;
  */
 class TrendStrengthIndex implements MuseIndicator<Float, Float> {
 	var period:Int;
-	var buf:Array<Float>;
+	var buf:RingBuffer<Float>;
 
 	public function new(period:Int) {
 		if (period == 0) throw "TrendStrengthIndex: period must be > 0";
@@ -33,7 +34,6 @@ class TrendStrengthIndex implements MuseIndicator<Float, Float> {
 	public function update(price:Float):Null<Float> {
 		if (!Math.isFinite(price)) return null;
 		buf.push(price);
-		if (buf.length > period) buf.shift();
 		if (buf.length < period) return null;
 
 		var count = period;
@@ -44,7 +44,7 @@ class TrendStrengthIndex implements MuseIndicator<Float, Float> {
 		var sumXy = 0.0;
 		for (idx in 0...buf.length) {
 			var x = idx;
-			var p = buf[idx];
+			var p = buf.oldest(idx);
 			sumX += x;
 			sumXx += x * x;
 			sumY += p;
@@ -61,7 +61,7 @@ class TrendStrengthIndex implements MuseIndicator<Float, Float> {
 	}
 
 	public function reset():Void {
-		buf = [];
+		buf = new RingBuffer(period);
 	}
 
 	public function warmupPeriod():Int return period;

@@ -37,10 +37,11 @@ $seamFiles = @(
   "kestrel\equitiesFeed.js",        # CapacitorHttp Yahoo fetch — web goes via /api/market/bars; synthetic stays deterministic
   # Phase 4 seams (Library / Marketplace / Economy):
   "auth.js",                        # Capacitor auth + import.meta.env — web reads the mederos.session localStorage token
+  "social\social.js",               # Decision 6: auth-aware durable publish/fork/rate (web _shims/social.ts)
   "kestrel\llmClient.js",           # dataserver Ollama proxy — web returns the canned note verbatim (source: "note")
   "lab\onDeviceExplain.js",         # on-device LLM (deferred, Decision 5) — honest unavailable stub
   "components\SignInSheet.jsx",     # Capacitor/Google/Apple sign-in sheet — web auth card (magic-link session via /login)
-  "iap\IapPaywall.jsx",             # RevenueCat credit packs — honest "web billing at /billing; packs need Decision 6" card
+  "iap\IapPaywall.jsx",             # RevenueCat credit packs — web billing; server wallet via Decision 6 dual store
   # Phase 5 seams (Swarm / Home / Explore):
   "kestrel\notifications.js",       # Capacitor LocalNotifications — web Notification API foreground best-effort, honest false
   "kestrel\onDeviceLlm.js",         # native OnDeviceLlm plugin (LiteRT) — honest ineligible/unavailable stub on web

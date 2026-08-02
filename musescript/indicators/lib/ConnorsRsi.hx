@@ -2,6 +2,7 @@ package musescript.indicators.lib;
 
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.IndicatorCache;
 import musescript.indicators.prim.Rsi;
 import musescript.types.MuseType;
@@ -26,7 +27,7 @@ class ConnorsRsi implements MuseIndicator<Float, Float> {
 	var priceRsi:Rsi;
 	var streakRsi:Rsi;
 	var rankPeriod:Int;
-	var returns:Array<Float>;
+	var returns:RingBuffer<Float>;
 	var lastPrice:Null<Float>;
 	var streak:Float;
 
@@ -35,7 +36,7 @@ class ConnorsRsi implements MuseIndicator<Float, Float> {
 		priceRsi = new Rsi(rsiPeriod);
 		streakRsi = new Rsi(streakPeriod);
 		this.rankPeriod = rankPeriod;
-		returns = [];
+		returns = new RingBuffer(rankPeriod);
 		lastPrice = null;
 		streak = 0.0;
 	}
@@ -59,7 +60,6 @@ class ConnorsRsi implements MuseIndicator<Float, Float> {
 		var pctRank:Null<Float> = null;
 		if (lastPrice != null && lastPrice != 0.0) {
 			var ret = (price - lastPrice) / lastPrice;
-			if (returns.length == rankPeriod) returns.shift();
 			returns.push(ret);
 			if (returns.length == rankPeriod) {
 				var below = 0;
@@ -76,7 +76,7 @@ class ConnorsRsi implements MuseIndicator<Float, Float> {
 	public function reset():Void {
 		priceRsi.reset();
 		streakRsi.reset();
-		returns = [];
+		returns = new RingBuffer(rankPeriod);
 		lastPrice = null;
 		streak = 0.0;
 	}

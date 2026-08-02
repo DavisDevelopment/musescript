@@ -11,6 +11,7 @@ import musescript.harness.ParamRegistry;
 import musescript.harness.Metrics;
 import musescript.harness.BacktestResult;
 import musescript.compile.StrategyWasmRuntimeWat;
+import musescript.compile.StrategyWasmBackend;
 import musescript.compile.StrategyWasmEmitter;
 import musescript.interp.MuseInterp;
 import musescript.parse.MuseParser;
@@ -48,6 +49,8 @@ class StrategyGraalRunner {
 	var curBar:Bar;
 
 	var packedN:Int = -1;
+	var packedFeatureCount:Int = 0;
+	var featureBase:Int = 0;
 	var bases:Array<Int>;
 	var defaultParams:Map<String, Float>;
 
@@ -94,6 +97,21 @@ class StrategyGraalRunner {
 			harness.orders.flat(curBar.close, curBar.index);
 			return null;
 		}));
+		members.set("buy", new HostFn(function(a:NativeArray<Value>):Dynamic {
+			var sid = a[0].asInt();
+			var qty = a.length > 1 ? a[1].asDouble() : 1.0;
+			var sym = sid >= 0 && sid < this.strings.length ? this.strings[sid] : "";
+			var px = harness.panelPrice(sym);
+			harness.portfolio.buy(sym, px, qty, curBar.index);
+			return null;
+		}));
+		members.set("sell_all", new HostFn(function(a:NativeArray<Value>):Dynamic {
+			var sid = a[0].asInt();
+			var sym = sid >= 0 && sid < this.strings.length ? this.strings[sid] : "";
+			var px = harness.panelPrice(sym);
+			harness.portfolio.sellAll(sym, px, curBar.index);
+			return null;
+		}));
 		members.set("exp", new HostFn(function(a:NativeArray<Value>):Dynamic return Math.exp(a[0].asDouble())));
 		members.set("get_position", new HostFn(function(a:NativeArray<Value>):Dynamic return harness.orders.positionSize()));
 		members.set("get_entry_price", new HostFn(function(a:NativeArray<Value>):Dynamic return harness.orders.entryPrice));
@@ -138,8 +156,10 @@ class StrategyGraalRunner {
 	function pack(bars:Array<Bar>):Void {
 		var n = bars.length;
 		if (n <= 0) n = 1;
+		var featureTapes = StrategyWasmBackend.featureTapesFromCtx(null, strings, bars);
+		var featureCount = featureTapes.length;
 		var stateBytes = StrategyWasmRuntimeWat.STATE_BYTES;
-		var bytesNeeded = stateBytes + n * 7 * 8;
+		var bytesNeeded = stateBytes + n * (7 + featureCount) * 8;
 		exports.getMember("ensure_capacity").execute(GraalWasmHost.objArr([bytesNeeded]));
 
 		var memory = exports.getMember("memory");
@@ -155,6 +175,15 @@ class StrategyGraalRunner {
 			memory.writeBufferDouble(le, haxe.Int64.ofInt(bases[4] + off), b.volume);
 			memory.writeBufferDouble(le, haxe.Int64.ofInt(bases[5] + off), b.time);
 			memory.writeBufferDouble(le, haxe.Int64.ofInt(bases[6] + off), b.index);
+		}
+		featureBase = stateBytes + n * 7 * 8;
+		packedFeatureCount = featureCount;
+		for (fid in 0...featureCount) {
+			var tape = featureTapes[fid];
+			for (i in 0...bars.length) {
+				var v = i < tape.length ? tape[i] : Math.NaN;
+				memory.writeBufferDouble(le, haxe.Int64.ofInt(featureBase + (fid * n + i) * 8), v);
+			}
 		}
 		packedN = n;
 	}
@@ -173,11 +202,17 @@ class StrategyGraalRunner {
 		for (k in params.keys()) harness.params.set(k, params.get(k));
 		harness.orders = new OrderSim();
 		var wantN = Std.int(Math.max(1, bars.length));
-		if (packedN != wantN) pack(bars);
+		var wantFeatures = StrategyWasmBackend.featureSlotCount(strings);
+		if (packedN != wantN || packedFeatureCount != wantFeatures) pack(bars);
 
 		configure.execute(GraalWasmHost.objArr([
 			bases[0], bases[1], bases[2], bases[3], bases[4], bases[5], bases[6], packedN
 		]));
+		if (exports.hasMember("configure_features"))
+			exports.getMember("configure_features").execute(GraalWasmHost.objArr([
+				wantFeatures > 0 ? featureBase : 0,
+				wantFeatures
+			]));
 
 		var arg:NativeArray<Dynamic> = new NativeArray(1);
 		for (i in 0...bars.length) {

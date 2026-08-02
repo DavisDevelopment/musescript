@@ -1,0 +1,22 @@
+{
+  "liquid10": {
+    "description": "Tournament liquid equity set (official 3m universe)",
+    "symbols": ["SPY", "QQQ", "IWM", "AAPL", "MSFT", "NVDA", "AMD", "META", "AMZN", "GOOGL"]
+  },
+  "mega7": {
+    "description": "Mega-cap growth sleeve",
+    "symbols": ["AAPL", "MSFT", "NVDA", "META", "AMZN", "GOOGL", "TSLA"]
+  },
+  "index3": {
+    "description": "Broad index proxies only",
+    "symbols": ["SPY", "QQQ", "IWM"]
+  },
+  "chip2": {
+    "description": "Semiconductor stress sleeve",
+    "symbols": ["NVDA", "AMD"]
+  },
+  "available": {
+    "description": "Every symbol present in data/real/tape.csv that the harness can slice",
+    "symbols": ["SPY", "QQQ", "IWM", "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "JPM", "XOM", "TSLA", "AMD", "BAC", "WMT"]
+  }
+}

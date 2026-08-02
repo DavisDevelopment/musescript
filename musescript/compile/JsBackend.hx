@@ -494,6 +494,7 @@ class JsBackend {
 		// Match MuseInterp `ta` toolbelt global (same object-with-callable-fields
 		// shape as Math, built from the same IndicatorRegistry the flat builtins use).
 		frames[0].set("ta", musescript.builtins.TaToolbelt.build(harness));
+		frames[0].set("muse", musescript.builtins.MuseHost.build(harness));
 		Reflect.setField(api, "__locals", frames[0]);
 		return api;
 	}

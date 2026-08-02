@@ -2,6 +2,7 @@ package musescript.indicators.lib;
 
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.IndicatorCache;
 import musescript.types.MuseType;
 
@@ -20,17 +21,16 @@ import musescript.types.MuseType;
  */
 class RollingPercentileRank implements MuseIndicator<Float, Float> {
 	var period:Int;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 
 	public function new(period:Int) {
 		if (period <= 0) throw "RollingPercentileRank: period must be > 0";
 		this.period = period;
-		window = [];
+		window = new RingBuffer(period);
 	}
 
 	public function update(value:Float):Null<Float> {
 		if (!Math.isFinite(value)) return null;
-		if (window.length == period) window.shift();
 		window.push(value);
 		if (window.length < period) return null;
 		var below = 0;
@@ -43,7 +43,7 @@ class RollingPercentileRank implements MuseIndicator<Float, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 	}
 
 	public function warmupPeriod():Int return period;

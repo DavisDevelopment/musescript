@@ -633,7 +633,7 @@ strategy NoParams {
 	public function testLeaderboardNullIneligible() {
 		var rets = iidReturns(80, 0.0, 0.02, 51);
 		var score = LeaderboardScore.evaluate({
-			returns: rets, trades: 40, pbo: 0.2, id: "null"
+			returns: rets, trades: 80, pbo: 0.2, id: "null"
 		}, { fieldN: 10, nBoot: 40, minTrades: 20 });
 		Assert.isFalse(score.eligible, 'null must be ineligible: ${score.reason}');
 		Assert.isTrue(
@@ -676,16 +676,48 @@ strategy NoParams {
 	public function testLeaderboardFieldNRaisesBar() {
 		var rets = iidReturns(100, 0.0012, 0.01, 55);
 		var small = LeaderboardScore.evaluate({
-			returns: rets, trades: 40, pbo: 0.2
+			returns: rets, trades: 80, pbo: 0.2
 		}, { fieldN: 2, nBoot: 50, minTrades: 20 });
 		var large = LeaderboardScore.evaluate({
-			returns: rets, trades: 40, pbo: 0.2
+			returns: rets, trades: 80, pbo: 0.2
 		}, { fieldN: 500, nBoot: 50, minTrades: 20 });
 		Assert.isTrue(
 			large.dsrDeflated <= small.dsrDeflated + 1e-12,
 			'fieldN up must not increase DSR (small=${small.dsrDeflated} large=${large.dsrDeflated})'
 		);
 		Assert.isTrue(large.nTrials > small.nTrials, "larger field → more trials");
+	}
+
+	// Verified 2026-08-01 (LeakAudit-style anti-irony gate): the OLD `dsr > 0` gate never
+	// hard-excluded a marginal-but-positive entry, however large the field grew, because dsr
+	// only asymptotes toward (never reaches) 0. Probed directly: dsrDeflated 0.97 -> 0.0025
+	// across fieldN 1 -> 1e6, eligible=true throughout. Now gated by dsrMinConfidence (default
+	// 0.5) so a marginal entry genuinely drops off the wall as the field grows.
+	public function testLeaderboardFieldNCanExcludeMarginalEntry() {
+		// Per-period Sharpe ~= mean (std=1.0), matching the empirical probe against this exact
+		// gate (mean=0.25, n=40, pbo=0.2 -> dsrDeflated 0.97@N1, 0.63@N10, 0.27@N100).
+		var rets = iidReturns(80, 0.2, 1.0, 52);
+		var small = LeaderboardScore.evaluate({
+			returns: rets, trades: 80, pbo: 0.2
+		}, { fieldN: 1, nBoot: 80, minTrades: 20 });
+		Assert.isTrue(small.eligible, 'marginal entry should clear a tiny field: ${small.reason}');
+
+		var large = LeaderboardScore.evaluate({
+			returns: rets, trades: 80, pbo: 0.2
+		}, { fieldN: 100, nBoot: 80, minTrades: 20 });
+		Assert.isFalse(large.eligible,
+			'marginal entry must be EXCLUDED once the field is large enough (dsrDeflated=${large.dsrDeflated}) — ' +
+			'the moat requires eligibility, not just the DSR statistic, to respond to field size');
+		Assert.isTrue(large.reason.indexOf("DSR") >= 0, 'expected a DSR gate reason, got: ${large.reason}');
+
+		// A genuinely strong edge must still survive the same large field — the gate must not
+		// be so strict it empties the wall for real robustness (probe: mean=0.6,n=120,pbo=0.1
+		// held dsrDeflated ~0.98-1.0 through fieldN=100000).
+		var strongRets = iidReturns(120, 0.6, 1.0, 53);
+		var strong = LeaderboardScore.evaluate({
+			returns: strongRets, trades: 120, pbo: 0.1
+		}, { fieldN: 100, nBoot: 80, minTrades: 20 });
+		Assert.isTrue(strong.eligible, 'a genuinely strong edge must survive a large field: ${strong.reason}');
 	}
 
 	public function testLeaderboardPboAndTradesGates() {
@@ -714,10 +746,10 @@ strategy NoParams {
 		Assert.equals(14, LeaderboardScore.effectiveTrials(10, 5));
 		var rets = iidReturns(90, 0.0015, 0.01, 57);
 		var one = LeaderboardScore.evaluate({
-			returns: rets, trades: 40, pbo: 0.2, accountTrials: 1
+			returns: rets, trades: 80, pbo: 0.2, accountTrials: 1
 		}, { fieldN: 8, nBoot: 40 });
 		var flood = LeaderboardScore.evaluate({
-			returns: rets, trades: 40, pbo: 0.2, accountTrials: 40
+			returns: rets, trades: 80, pbo: 0.2, accountTrials: 40
 		}, { fieldN: 8, nBoot: 40 });
 		Assert.isTrue(
 			flood.dsrDeflated <= one.dsrDeflated + 1e-12,

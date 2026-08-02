@@ -2,6 +2,7 @@ package musescript.indicators.lib;
 
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.IndicatorCache;
 import musescript.types.MuseType;
 
@@ -21,7 +22,7 @@ import musescript.types.MuseType;
  */
 class TrendLabel implements MuseIndicator<Float, Float> {
 	var period:Int;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 
 	public function new(period:Int) {
 		if (period < 2) throw "TrendLabel: trend label needs period >= 2";
@@ -31,7 +32,6 @@ class TrendLabel implements MuseIndicator<Float, Float> {
 
 	public function update(value:Float):Null<Float> {
 		if (!Math.isFinite(value)) return null;
-		if (window.length == period) window.shift();
 		window.push(value);
 		if (window.length < period) return null;
 		var count = period;
@@ -43,13 +43,13 @@ class TrendLabel implements MuseIndicator<Float, Float> {
 		// so the slope sign equals the numerator sign.
 		var numerator = 0.0;
 		for (t in 0...window.length) {
-			numerator += (t - meanT) * (window[t] - meanX);
+			numerator += (t - meanT) * (window.oldest(t) - meanX);
 		}
 		return numerator > 0.0 ? 1.0 : (numerator < 0.0 ? -1.0 : 0.0);
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 	}
 
 	public function warmupPeriod():Int return period;

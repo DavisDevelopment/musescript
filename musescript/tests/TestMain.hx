@@ -65,7 +65,9 @@ class TestMain {
 		runner.addCase(new TestBuiltinDocs());
 		runner.addCase(new TestWalkForwardPipeline());
 		runner.addCase(new TestIndicatorPorts());
+		runner.addCase(new TestRingBuffer());
 		runner.addCase(new TestTaToolbelt());
+		runner.addCase(new TestMuseHost());
 		runner.addCase(new TestIndicatorCallsiteState());
 		runner.addCase(new TestNativeIndicatorParity());
 		runner.addCase(new TestRegistryPalette());
@@ -152,6 +154,7 @@ class TestMain {
 		runner.addCase(new TestClassStructLowering());
 		// TestProbCloud moved to musescript-kestrel/musescript/tests/ (Kestrel package, not core).
 		runner.addCase(new TestHybridWasm());
+		runner.addCase(new TestPanelWasmParity());
 		runner.addCase(new TestCompiler());
 		runner.addCase(new TestGenerator());
 		runner.addCase(new TestGeneratorLower());

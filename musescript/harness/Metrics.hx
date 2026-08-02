@@ -1,7 +1,53 @@
 package musescript.harness;
 
 class Metrics {
-	public static function sharpe(returns:Array<Float>, rf:Float):Float {
+	/**
+	 * Trading days per year — the annualization factor for DAILY bars, and the default
+	 * everywhere so existing daily results are unchanged.
+	 *
+	 * ⚠️ It is only correct for daily data. A 15-minute strategy annualized at `sqrt(252)`
+	 * understates its annualized Sharpe by roughly `sqrt(26)`, so Sharpes computed at
+	 * different resolutions are NOT on a common scale and must not be ranked against each
+	 * other. Use `periodsPerYearFromBarSeconds` to get the right factor for sub-daily tapes.
+	 * (The indicator library already parameterizes this — see `HistoricalVolatility`'s
+	 * `annualizationFactor` and `Parkinson`/`RogersSatchell`/`YangZhang`'s `trading_periods`;
+	 * this brings the fitness path in line with that.)
+	 */
+	public static inline var DAILY_PERIODS_PER_YEAR:Float = 252.0;
+
+	/**
+	 * Annualization factor for a tape whose bars are `barSeconds` apart, assuming a
+	 * continuously-traded market (crypto/FX: 365×24h). For session-based markets scale by the
+	 * session length instead — e.g. a 6.5h equity session at 15m bars is `252 * 26`, which is
+	 * `periodsPerYearFromBarSeconds(900, 6.5 * 3600, 252)`.
+	 *
+	 * @param barSeconds     seconds between consecutive bars (900 for 15m, 86400 for daily)
+	 * @param sessionSeconds tradable seconds per session (default 24h — continuous markets)
+	 * @param sessionsPerYear sessions per year (default 365 — continuous markets)
+	 */
+	public static function periodsPerYearFromBarSeconds(barSeconds:Float,
+			sessionSeconds:Float = 86400.0, sessionsPerYear:Float = 365.0):Float {
+		if (!(barSeconds > 0) || !(sessionSeconds > 0) || !(sessionsPerYear > 0)) return DAILY_PERIODS_PER_YEAR;
+		return (sessionSeconds / barSeconds) * sessionsPerYear;
+	}
+
+	/**
+	 * Annualized sample Sharpe. `periodsPerYear` defaults to 252 (daily bars).
+	 *
+	 * ⚠️ **Two other implementations of this exact algorithm exist on purpose** —
+	 * `OrderSim.sharpeOnline` and `NmaFitness.sharpeOfEquity` — as allocation-free variants
+	 * that avoid materializing the equity/returns arrays in hot paths. Both are documented
+	 * as bit-exact with this one, and `Fitness.assertNmaParity` compares the NMA and compiled
+	 * paths at 1e-9, so **any change to the arithmetic here must be made identically in all
+	 * three**. `TestEvoVariation.testSharpeImplementationsAgreeBitExactly` enforces that.
+	 *
+	 * Deliberately NOT switched to Welford/Kahan: the two-pass form below is already the
+	 * numerically sound one (strictly better than the naive `E[x²]−E[x]²`), the accuracy
+	 * difference on realistic return series is sub-ULP, and changing it would silently break
+	 * the bit-exactness contract above for no measurable gain.
+	 */
+	public static function sharpe(returns:Array<Float>, rf:Float,
+			periodsPerYear:Float = DAILY_PERIODS_PER_YEAR):Float {
 		if (returns.length < 2) return 0;
 		var mean = 0.0;
 		for (r in returns) mean += r;
@@ -14,15 +60,22 @@ class Metrics {
 		var_ /= returns.length - 1;
 		var std = Math.sqrt(var_);
 		if (std == 0) return 0;
-		return ((mean - rf) / std) * Math.sqrt(252);
+		return ((mean - rf) / std) * Math.sqrt(periodsPerYear);
 	}
 
 	/**
-	 * Sortino ratio: excess mean return over downside deviation of returns
-	 * below `rf`, annualized like `sharpe` (`* sqrt(252)`). Returns 0 when
-	 * the sample is too short or downside deviation is zero.
+	 * Sortino ratio: excess mean return over downside deviation of returns below `rf`,
+	 * annualized like `sharpe` (`periodsPerYear` defaults to 252 = daily bars).
+	 * Returns 0 when the sample is too short or downside deviation is zero.
+	 *
+	 * Note the denominator convention: the squared downside deviations are divided by the
+	 * FULL sample size, not by the count of downside observations. That is the standard
+	 * target-semideviation definition (upside observations contribute a deviation of zero),
+	 * and it is intentional — stated here because the alternative convention is common
+	 * enough that the `/ returns.length` next to an `nDown` counter reads like a bug.
 	 */
-	public static function sortino(returns:Array<Float>, rf:Float):Float {
+	public static function sortino(returns:Array<Float>, rf:Float,
+			periodsPerYear:Float = DAILY_PERIODS_PER_YEAR):Float {
 		if (returns.length < 2) return 0;
 		var mean = 0.0;
 		for (r in returns) mean += r;
@@ -39,7 +92,7 @@ class Metrics {
 		if (nDown == 0) return 0;
 		var downside = Math.sqrt(down / returns.length);
 		if (downside == 0) return 0;
-		return ((mean - rf) / downside) * Math.sqrt(252);
+		return ((mean - rf) / downside) * Math.sqrt(periodsPerYear);
 	}
 
 	public static function maxDrawdown(equity:Array<Float>):Float {

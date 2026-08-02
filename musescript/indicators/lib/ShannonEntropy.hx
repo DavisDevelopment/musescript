@@ -2,6 +2,7 @@ package musescript.indicators.lib;
 
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.IndicatorCache;
 import musescript.types.MuseType;
 
@@ -25,7 +26,7 @@ class ShannonEntropy implements MuseIndicator<Float, Float> {
 
 	var period:Int;
 	var bins:Int;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var last:Null<Float>;
 
 	public function new(period:Int, bins:Int) {
@@ -33,13 +34,12 @@ class ShannonEntropy implements MuseIndicator<Float, Float> {
 		if (bins < 2) throw "ShannonEntropy: bins must be >= 2";
 		this.period = period;
 		this.bins = bins;
-		window = [];
+		window = new RingBuffer(period);
 		last = null;
 	}
 
 	public function update(input:Float):Null<Float> {
 		if (!Math.isFinite(input)) return last;
-		if (window.length == period) window.shift();
 		window.push(input);
 		if (window.length < period) return null;
 
@@ -76,7 +76,7 @@ class ShannonEntropy implements MuseIndicator<Float, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 		last = null;
 	}
 

@@ -114,10 +114,18 @@ class ProbSharpe {
 		return Math.isFinite(z) ? z : Math.NEGATIVE_INFINITY;
 	}
 
-	/** Convert annualized Sharpe (√252) + observation count into a PSR-style rank score without the full series. */
-	public static function rankFromAnnualized(annSharpe:Float, nObs:Int, skew:Float = 0, excessKurt:Float = 0, nTrials:Int = 1):Float {
+	/**
+	 * Convert an annualized Sharpe + observation count into a PSR-style rank score without the
+	 * full series.
+	 *
+	 * `periodsPerYear` MUST be the same factor `annSharpe` was annualized with (default 252 =
+	 * daily, matching `Metrics.DAILY_PERIODS_PER_YEAR`) — this un-annualizes back to
+	 * per-period, so a mismatch silently rescales `sr` and therefore the whole rank.
+	 */
+	public static function rankFromAnnualized(annSharpe:Float, nObs:Int, skew:Float = 0, excessKurt:Float = 0, nTrials:Int = 1,
+			periodsPerYear:Float = musescript.harness.Metrics.DAILY_PERIODS_PER_YEAR):Float {
 		if (nObs < 3 || !Math.isFinite(annSharpe)) return Math.NEGATIVE_INFINITY;
-		var sr = annSharpe / Math.sqrt(252); // back to per-period
+		var sr = annSharpe / Math.sqrt(periodsPerYear); // back to per-period
 		var denom = Math.sqrt(1.0 - skew * sr + ((excessKurt + 2.0) / 4.0) * sr * sr);
 		if (!(denom > 0)) return Math.NEGATIVE_INFINITY;
 		var srStar = 0.0;

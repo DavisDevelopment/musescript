@@ -1,0 +1,22 @@
+{
+  "tournament_legacy": {
+    "description": "Equity tournament historical default (same-bar fill, zero cost)",
+    "execution": "same-close",
+    "cost_bps": 0
+  },
+  "causal_cheap": {
+    "description": "Causal next-open fills, light costs",
+    "execution": "next-open",
+    "cost_bps": 5
+  },
+  "causal_realistic": {
+    "description": "Causal next-open fills, realistic retail-ish costs",
+    "execution": "next-open",
+    "cost_bps": 10
+  },
+  "causal_harsh": {
+    "description": "Causal next-open fills, unforgiving costs",
+    "execution": "next-open",
+    "cost_bps": 20
+  }
+}

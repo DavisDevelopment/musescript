@@ -342,8 +342,12 @@ class OrderSim {
 	/**
 	 * Sample Sharpe of `markReturns` — identical algorithm to `Metrics.sharpe(_, 0)`, so
 	 * `!trackCurve` stays bit-exact with the equity → returns → sharpe path.
+	 *
+	 * `periodsPerYear` mirrors `Metrics.sharpe`'s (252 = daily bars). If you change the
+	 * arithmetic here, change `Metrics.sharpe` and `NmaFitness.sharpeOfEquity` identically —
+	 * `TestEvoVariation.testSharpeImplementationsAgreeBitExactly` asserts all three match.
 	 */
-	public function sharpeOnline():Float {
+	public function sharpeOnline(periodsPerYear:Float = Metrics.DAILY_PERIODS_PER_YEAR):Float {
 		var rets = markReturns;
 		if (rets == null) return 0;
 		var n = rets.length;
@@ -365,7 +369,7 @@ class OrderSim {
 		var_ /= n - 1;
 		var std = Math.sqrt(var_);
 		if (std == 0) return 0;
-		return (mean / std) * Math.sqrt(252);
+		return (mean / std) * Math.sqrt(periodsPerYear);
 	}
 
 	public function reset(?initialCash:Float = 100000):Void {

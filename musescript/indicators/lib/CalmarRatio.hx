@@ -2,6 +2,7 @@ package musescript.indicators.lib;
 
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.IndicatorCache;
 import musescript.types.MuseType;
 
@@ -17,7 +18,7 @@ import musescript.types.MuseType;
  */
 class CalmarRatio implements MuseIndicator<Float, Float> {
 	var period:Int;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 
 	public function new(period:Int) {
 		if (period < 2) throw "CalmarRatio: period must be >= 2";
@@ -27,17 +28,16 @@ class CalmarRatio implements MuseIndicator<Float, Float> {
 
 	public function update(equity:Float):Null<Float> {
 		if (!Math.isFinite(equity)) return null;
-		if (window.length == period) window.shift();
 		window.push(equity);
 		if (window.length < period) return null;
 
-		var peak = window[0];
+		var peak = window.oldest(0);
 		var maxDd = 0.0;
 		var sumReturn = 0.0;
 		var returnCount = 0;
 		for (i in 1...window.length) {
-			var prev = window[i - 1];
-			var cur = window[i];
+			var prev = window.oldest(i - 1);
+			var cur = window.oldest(i);
 			if (prev != 0.0) {
 				sumReturn += (cur - prev) / prev;
 				returnCount++;
@@ -54,7 +54,7 @@ class CalmarRatio implements MuseIndicator<Float, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 	}
 
 	public function warmupPeriod():Int return period;

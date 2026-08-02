@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.IndicatorCache;
 import musescript.types.MuseType;
 
@@ -32,7 +33,7 @@ typedef TdLinesOutput = {
 class TdLines implements MuseIndicator<Bar, TdLinesOutput> {
 	var lookback:Int;
 	var target:Int;
-	var closes:Array<Float>;
+	var closes:RingBuffer<Float>;
 	var buyCount:Int;
 	var sellCount:Int;
 	/** Highest high observed during the current buy-setup run. */
@@ -57,12 +58,11 @@ class TdLines implements MuseIndicator<Bar, TdLinesOutput> {
 	public function params():{lookback:Int, target:Int} return {lookback: lookback, target: target};
 
 	public function update(bar:Bar):Null<TdLinesOutput> {
-		if (closes.length > lookback) closes.shift();
 		if (closes.length < lookback) {
 			closes.push(bar.close);
 			return null;
 		}
-		var reference = closes[0];
+		var reference = closes.oldest(0);
 		closes.push(bar.close);
 
 		if (bar.close < reference) {
@@ -94,7 +94,7 @@ class TdLines implements MuseIndicator<Bar, TdLinesOutput> {
 	}
 
 	public function reset():Void {
-		closes = [];
+		closes = new RingBuffer(lookback);
 		buyCount = 0;
 		sellCount = 0;
 		buyRunMaxHigh = Math.NEGATIVE_INFINITY;

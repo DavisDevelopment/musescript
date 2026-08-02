@@ -2,6 +2,7 @@ package musescript.indicators.lib;
 
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.IndicatorCache;
 import musescript.types.MuseType;
 
@@ -21,7 +22,7 @@ class BipowerVariation implements MuseIndicator<Float, Float> {
 
 	var period:Int;
 	var lastPrice:Null<Float>;
-	var returns:Array<Float>;
+	var returns:RingBuffer<Float>;
 
 	public function new(period:Int) {
 		if (period < 2) throw "BipowerVariation: period must be >= 2";
@@ -38,19 +39,18 @@ class BipowerVariation implements MuseIndicator<Float, Float> {
 		var r = Math.log(price / lastPrice);
 		lastPrice = price;
 
-		if (returns.length == period) returns.shift();
 		returns.push(r);
 
 		if (returns.length < period) return null;
 
 		var sum = 0.0;
-		for (i in 1...returns.length) sum += Math.abs(returns[i]) * Math.abs(returns[i - 1]);
+		for (i in 1...returns.length) sum += Math.abs(returns.oldest(i)) * Math.abs(returns.oldest(i - 1));
 		return HALF_PI * sum;
 	}
 
 	public function reset():Void {
 		lastPrice = null;
-		returns = [];
+		returns = new RingBuffer(period);
 	}
 
 	public function warmupPeriod():Int return period + 1;

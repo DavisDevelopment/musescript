@@ -2,6 +2,7 @@ package musescript.indicators.lib;
 
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.IndicatorCache;
 import musescript.types.MuseType;
 
@@ -17,7 +18,7 @@ import musescript.types.MuseType;
  */
 class CenterOfGravity implements MuseIndicator<Float, Float> {
 	var period:Int;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 
 	public function new(period:Int) {
 		if (period < 2) throw "CenterOfGravity: period must be >= 2";
@@ -27,7 +28,6 @@ class CenterOfGravity implements MuseIndicator<Float, Float> {
 
 	public function update(input:Float):Null<Float> {
 		if (!Math.isFinite(input)) return null;
-		if (window.length == period) window.shift();
 		window.push(input);
 		if (window.length < period) return null;
 
@@ -35,17 +35,17 @@ class CenterOfGravity implements MuseIndicator<Float, Float> {
 		var weightedSum = 0.0;
 		var sum = 0.0;
 		for (i in 0...n) {
-			// window[n-1] is newest (weight 1); window[0] is oldest (weight n).
+			// window.oldest(n-1) is newest (weight 1); window.oldest(0) is oldest (weight n).
 			var weight = (n - i);
-			weightedSum += weight * window[i];
-			sum += window[i];
+			weightedSum += weight * window.oldest(i);
+			sum += window.oldest(i);
 		}
 		if (sum == 0.0) return 0.0;
 		return -weightedSum / sum;
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 	}
 
 	public function warmupPeriod():Int return period;

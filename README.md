@@ -198,6 +198,40 @@ indicators also ship a `nativeSource()` — a genuine, forkable MuseScript reimp
 indicator's own computation (not just a demo that calls the Haxe builtin), parity-verified
 bar-for-bar against the Haxe port by `TestNativeIndicatorParity.hx`.
 
+## `muse` host — namespaced orders / fund / data / portfolio / chart
+
+Alongside the flat builtins (`long()`, `fund_of(...)`, …), strategies can call the same
+deterministic host through a namespaced object — same install shape as `ta` / `Math`:
+
+```muse
+muse.orders.long()
+muse.orders.position()
+muse.fund.of("AAPL", "revenue")   // PIT aux on Bar.data / panel — no live network
+muse.data.close_of("AAPL")
+muse.portfolio.buy("AAPL", 1)
+muse.chart.plot(close, "c")
+```
+
+`MuseHostLower` rewrites `muse.<ns>.<fn>(...)` to the flat builtin before JS/WASM emit, so the
+fast HostABI path stays intact. On `class … extends muse.Strat`, `this.orders.long()` (and the
+other host namespaces) lower the same way in `ClassStrategyLower`. Evolution genomes stay on the
+OHLCV `Palette` plus gated `AUX_FIELDS` when the eval tape carries matching `Bar.data` keys —
+host modules are for authored strategies, not Expand.
+
+**Offline PIT aux (not live EDGAR):** fundamentals / extras arrive as pre-joined `Bar.data`
+columns (CSV extras, panel join, or a loader). Single-symbol strategies read them as bare
+idents (`revenue`, `pe`, …) on interp/JS/WASM — WASM packs those columns into the feature-tape
+region next to OHLCV. Live network/EDGAR fetch is intentionally out of strategy runtime.
+
+**Panel WASM v1:** literal-symbol cross-section reads (`close_of` / `mom_of` / `sma_of` /
+`sym_available` / `fund_of` / OHLCV `*_of`) lower natively onto dense feature slots keyed
+`field@SYM`, packed from a calendar-aligned `PanelFeed` (missing bars → NaN; PIT join stays
+host-side). Drive with `ctx.panel`. **Escape list** (host_eval or whole-module fallback —
+same honest failure class as today): bags, computed bags, graph bags, `symbols()`,
+`scan_top`/`scan_bottom`, `rebalance_equal`/`target_weight`, portfolio queries
+(`pos`/`holdings`/…), `ema_of`/`rsi_of`. Literal `buy`/`sell_all` are HostABI
+imports (not host_eval). See `StrategyWasmEmitter.PANEL_HOST_ESCAPE`.
+
 ## `musescript.evo` — typed genetic-programming engine
 
 `musescript/evo/` is a Haxe port of the sibling `musegene` Python GP harness: a closed, typed

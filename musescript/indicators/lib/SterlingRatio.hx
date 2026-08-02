@@ -2,6 +2,7 @@ package musescript.indicators.lib;
 
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.IndicatorCache;
 import musescript.types.MuseType;
 
@@ -22,7 +23,7 @@ import musescript.types.MuseType;
  */
 class SterlingRatio implements MuseIndicator<Float, Float> {
 	var period:Int;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 
 	public function new(period:Int) {
 		if (period < 2) throw "SterlingRatio: sterling ratio needs period >= 2";
@@ -48,14 +49,13 @@ class SterlingRatio implements MuseIndicator<Float, Float> {
 
 	public function update(ret:Float):Null<Float> {
 		if (!Math.isFinite(ret)) return null;
-		if (window.length == period) window.shift();
 		window.push(ret);
 		if (window.length < period) return null;
 		return compute();
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 	}
 
 	public function warmupPeriod():Int return period;

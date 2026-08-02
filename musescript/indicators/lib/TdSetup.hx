@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.IndicatorCache;
 import musescript.types.MuseType;
 
@@ -19,7 +20,7 @@ import musescript.types.MuseType;
 class TdSetup implements MuseIndicator<Bar, Float> {
 	var lookback:Int;
 	var target:Int;
-	var closes:Array<Float>;
+	var closes:RingBuffer<Float>;
 	var buyCount:Int;
 	var sellCount:Int;
 	var lastValue:Null<Float>;
@@ -28,7 +29,7 @@ class TdSetup implements MuseIndicator<Bar, Float> {
 		if (lookback <= 0 || target <= 0) throw "TdSetup: lookback and target must be > 0";
 		this.lookback = lookback;
 		this.target = target;
-		closes = [];
+		closes = new RingBuffer(lookback);
 		buyCount = 0;
 		sellCount = 0;
 		lastValue = null;
@@ -52,14 +53,13 @@ class TdSetup implements MuseIndicator<Bar, Float> {
 	public function update(bar:Bar):Null<Float> {
 		// Maintain a rolling window of the last `lookback + 1` closes so the
 		// oldest entry (front) is exactly the close `lookback` bars ago.
-		if (closes.length > lookback) closes.shift();
 		if (closes.length < lookback) {
 			closes.push(bar.close);
 			return null;
 		}
 		// We now have exactly `lookback` historical closes buffered; the
 		// oldest is the comparison reference.
-		var reference = closes[0];
+		var reference = closes.oldest(0);
 		closes.push(bar.close);
 
 		if (bar.close < reference) {
@@ -84,7 +84,7 @@ class TdSetup implements MuseIndicator<Bar, Float> {
 	}
 
 	public function reset():Void {
-		closes = [];
+		closes = new RingBuffer(lookback);
 		buyCount = 0;
 		sellCount = 0;
 		lastValue = null;

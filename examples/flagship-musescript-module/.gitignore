@@ -1,0 +1,4 @@
+tapes/
+results/
+*.pyc
+__pycache__/

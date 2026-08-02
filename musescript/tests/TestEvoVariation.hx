@@ -1006,6 +1006,62 @@ class TestEvoVariation extends Test {
 		Assert.isTrue(repeats > 0, "int(4) never repeats a value -- low-bit cycle regressed");
 	}
 
+	// ── Sharpe: three implementations, one contract ──────────────────────────────────────────
+	// `Metrics.sharpe`, `OrderSim.sharpeOnline` and `NmaFitness.sharpeOfEquity` are deliberately
+	// separate (the latter two avoid materializing equity/returns arrays in hot paths) and are
+	// documented as bit-exact with each other. `Fitness.assertNmaParity` compares NMA vs compiled
+	// at 1e-9, so a drift between them corrupts fitness silently. These turn that documented
+	// convention into an enforced one.
+
+	public function testSharpeImplementationsAgreeBitExactly() {
+		// Drive a real OrderSim so its streamed `markReturns` path (trackCurve=false) is compared
+		// against the materialized equity -> returns -> sharpe path on identical inputs.
+		// Position stays 0, so `mark` records equity == `cash`; setting cash per bar is the
+		// simplest way to replay an arbitrary curve through the real code path.
+		// (NmaFitness.sharpeOfEquity is the third variant but is private; it stays covered at
+		// runtime by Fitness.assertNmaParity's 1e-9 NMA-vs-compiled comparison.)
+		var equity = [100000.0];
+		var r = new Rand(4242);
+		for (_ in 0...400) {
+			var prev = equity[equity.length - 1];
+			equity.push(prev * (1.0 + (r.float() - 0.5) * 0.03));
+		}
+		var viaMetrics = Metrics.sharpe(Metrics.returnsFromEquity(equity), 0);
+
+		var sim = new musescript.harness.OrderSim(equity[0]);
+		sim.trackCurve = false;
+		// Mark EVERY point including the first: the first mark only seeds `markPrev`, so this
+		// yields exactly n-1 returns, matching `returnsFromEquity`.
+		for (e in equity) { sim.cash = e; sim.mark(0); }
+		var viaOnline = sim.sharpeOnline();
+
+		Assert.isTrue(viaMetrics != 0, "test setup produced a degenerate zero Sharpe");
+		Assert.floatEquals(viaMetrics, viaOnline, 1e-12,
+			'Metrics.sharpe and OrderSim.sharpeOnline diverged ($viaMetrics vs $viaOnline) — '
+			+ 'they are documented as bit-exact and Fitness.assertNmaParity compares at 1e-9');
+	}
+
+	public function testSharpeAnnualizationIsConfigurable() {
+		var rets = [for (i in 0...200) (i % 7 - 3) * 0.001 + 0.0004];
+		var daily = Metrics.sharpe(rets, 0);
+		var quarterly = Metrics.sharpe(rets, 0, 4);
+		// Same per-period ratio, different annualization -> ratio of the sqrt factors.
+		Assert.floatEquals(daily / quarterly, Math.sqrt(252.0 / 4.0), 1e-9);
+		// The default must remain the daily convention so existing results are unchanged.
+		Assert.floatEquals(daily, Metrics.sharpe(rets, 0, Metrics.DAILY_PERIODS_PER_YEAR), 1e-15);
+	}
+
+	public function testPeriodsPerYearFromBarSeconds() {
+		// 15-minute bars on a continuous (24/7) market.
+		Assert.floatEquals(Metrics.periodsPerYearFromBarSeconds(900), 96 * 365, 1e-9);
+		// Daily bars on a continuous market == 365, not 252 (252 is the SESSION convention).
+		Assert.floatEquals(Metrics.periodsPerYearFromBarSeconds(86400), 365, 1e-9);
+		// 15-minute bars on a 6.5h equity session, 252 sessions -> 26 bars/session.
+		Assert.floatEquals(Metrics.periodsPerYearFromBarSeconds(900, 6.5 * 3600, 252), 26 * 252, 1e-9);
+		// Degenerate inputs fall back to the daily default rather than returning 0/Infinity.
+		Assert.floatEquals(Metrics.periodsPerYearFromBarSeconds(0), Metrics.DAILY_PERIODS_PER_YEAR, 1e-15);
+	}
+
 	public function testSymbolSelectorCrossoverExploresMoreThanOneMask() {
 		// The real-world consequence of the old bug: uniform crossover collapsed to the single
 		// fixed mask a[0],b[1],a[2],b[3],... Distinct seeds must yield distinct masks.

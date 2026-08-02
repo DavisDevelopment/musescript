@@ -2,6 +2,7 @@ package musescript.indicators.lib;
 
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.IndicatorCache;
 import musescript.types.MuseType;
 
@@ -18,17 +19,16 @@ import musescript.types.MuseType;
  */
 class Kurtosis implements MuseIndicator<Float, Float> {
 	var period:Int;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 
 	public function new(period:Int) {
 		if (period < 4) throw "Kurtosis: period must be >= 4";
 		this.period = period;
-		window = [];
+		window = new RingBuffer(period);
 	}
 
 	public function update(input:Float):Null<Float> {
 		if (!Math.isFinite(input)) return null;
-		if (window.length == period) window.shift();
 		window.push(input);
 		if (window.length < period) return null;
 
@@ -50,7 +50,7 @@ class Kurtosis implements MuseIndicator<Float, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 	}
 
 	public function warmupPeriod():Int return period;

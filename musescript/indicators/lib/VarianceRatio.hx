@@ -2,6 +2,7 @@ package musescript.indicators.lib;
 
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.IndicatorCache;
 import musescript.types.MuseType;
 
@@ -24,25 +25,24 @@ import musescript.types.MuseType;
 class VarianceRatio implements MuseIndicator<VarianceRatioPair, Float> {
 	var period:Int;
 	var q:Int;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 
 	public function new(period:Int, q:Int) {
 		if (q < 2) throw "VarianceRatio: q must be >= 2";
 		if (period < q + 2) throw "VarianceRatio: period must be >= q + 2";
 		this.period = period;
 		this.q = q;
-		window = [];
+		window = new RingBuffer(period);
 	}
 
 	public function update(input:VarianceRatioPair):Null<Float> {
 		var a = input.a;
 		var b = input.b;
 		if (!Math.isFinite(a) || !Math.isFinite(b)) return null;
-		if (window.length == period) window.shift();
 		window.push(a - b);
 		if (window.length < period) return null;
 		// One-step changes.
-		var returns = [for (i in 1...window.length) window[i] - window[i - 1]];
+		var returns = [for (i in 1...window.length) window.oldest(i) - window.oldest(i - 1)];
 		var m:Float = returns.length;
 		var mean = 0.0;
 		for (r in returns) mean += r;
@@ -68,7 +68,7 @@ class VarianceRatio implements MuseIndicator<VarianceRatioPair, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 	}
 
 	public function warmupPeriod():Int return period;

@@ -224,31 +224,37 @@ class JsEmitter {
 				default:
 			}
 		}
+		function ingestStrategyBody(body:Array<Stmt>) {
+			for (s in body) switch (s) {
+				// Construct-once bindings (`c = new Counter()`) are
+				// instantiated exactly once via the seed interp
+				// (JsBackend.installUserFns bridges the resulting
+				// instance into `api`) — NOT re-emitted into the
+				// per-bar on-bar body, or the class would silently
+				// reconstruct (and reset) itself every bar.
+				case Assign(_, _) if (ConstructOnce.isConstructOnceAssign(s)):
+				case Assign(_, _): prelude.push(s);
+				case OnBar(onBody): onBarBody = onBarBody.concat(onBody);
+				case OnPosition(onBody): onPositionBody = onPositionBody.concat(onBody);
+				case Block(block):
+					for (nested in block) switch (nested) {
+						case Assign(_, _) if (ConstructOnce.isConstructOnceAssign(nested)):
+						case Assign(_, _): prelude.push(nested);
+						case OnBar(onBody): onBarBody = onBarBody.concat(onBody);
+						case OnPosition(onBody): onPositionBody = onPositionBody.concat(onBody);
+						default:
+					}
+				default:
+			}
+		}
+		// Last StrategyDecl wins. Earlier ones (e.g. an orphaned muse.Strat base
+		// stitched into the same file) must not merge onPosition/onBar hooks.
+		var lastStrategy:Null<Array<Stmt>> = null;
 		for (d in prog.decls) switch (d) {
-			case StrategyDecl(_, body):
-				for (s in body) switch (s) {
-					// Construct-once bindings (`c = new Counter()`) are
-					// instantiated exactly once via the seed interp
-					// (JsBackend.installUserFns bridges the resulting
-					// instance into `api`) — NOT re-emitted into the
-					// per-bar on-bar body, or the class would silently
-					// reconstruct (and reset) itself every bar.
-					case Assign(_, _) if (ConstructOnce.isConstructOnceAssign(s)):
-					case Assign(_, _): prelude.push(s);
-					case OnBar(onBody): onBarBody = onBarBody.concat(onBody);
-					case OnPosition(onBody): onPositionBody = onPositionBody.concat(onBody);
-					case Block(block):
-						for (nested in block) switch (nested) {
-							case Assign(_, _) if (ConstructOnce.isConstructOnceAssign(nested)):
-							case Assign(_, _): prelude.push(nested);
-							case OnBar(onBody): onBarBody = onBarBody.concat(onBody);
-							case OnPosition(onBody): onPositionBody = onPositionBody.concat(onBody);
-							default:
-						}
-					default:
-				}
+			case StrategyDecl(_, body): lastStrategy = body;
 			default:
 		}
+		if (lastStrategy != null) ingestStrategyBody(lastStrategy);
 		walkStmts(prog.stmts);
 		return { prelude: prelude, onBar: onBarBody, onPosition: onPositionBody };
 	}

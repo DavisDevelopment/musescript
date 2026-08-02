@@ -2,6 +2,7 @@ package musescript.indicators.lib;
 
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.IndicatorCache;
 import musescript.indicators.prim.Rsi;
 import musescript.types.MuseType;
@@ -24,7 +25,7 @@ class StochRsi implements MuseIndicator<Float, Float> {
 	var stochPeriod:Int;
 	var rsi:Rsi;
 	/** Rolling window of the last `stochPeriod` RSI values. */
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var last:Null<Float>;
 
 	public function new(rsiPeriod:Int, stochPeriod:Int) {
@@ -32,7 +33,7 @@ class StochRsi implements MuseIndicator<Float, Float> {
 		this.rsiPeriod = rsiPeriod;
 		this.stochPeriod = stochPeriod;
 		rsi = new Rsi(rsiPeriod);
-		window = [];
+		window = new RingBuffer(stochPeriod);
 		last = null;
 	}
 
@@ -47,12 +48,11 @@ class StochRsi implements MuseIndicator<Float, Float> {
 		var rsiValue = rsi.update(input);
 		if (rsiValue == null) return null;
 
-		if (window.length == stochPeriod) window.shift();
 		window.push(rsiValue);
 		if (window.length < stochPeriod) return null;
 
-		var max = window[0];
-		var min = window[0];
+		var max = window.oldest(0);
+		var min = window.oldest(0);
 		for (v in window) {
 			if (v > max) max = v;
 			if (v < min) min = v;
@@ -66,7 +66,7 @@ class StochRsi implements MuseIndicator<Float, Float> {
 
 	public function reset():Void {
 		rsi.reset();
-		window = [];
+		window = new RingBuffer(stochPeriod);
 		last = null;
 	}
 

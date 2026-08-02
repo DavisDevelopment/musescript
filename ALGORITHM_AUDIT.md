@@ -26,11 +26,11 @@ Two things worth saying up front, because they shape everything else:
 |---|---|---|
 | §1 | `Rand.bool()` alternation **+ `int(n)` even-modulus defect** | ✅ **FIXED** 2026-07-26, 6 regression tests added |
 | M1 | Duplicate indicator-name detection | ✅ **FIXED** 2026-07-26 (build-time macro + runtime guard, failure verified) |
-| §2 | RingBuffer migration (201 files) | open |
+| §2 | RingBuffer migration | 🟡 **40 of 201 done** 2026-08-02, golden-verified bit-identical; found + fixed a reversed-index trap |
 | §3 | 15 window-re-sorting indicators | open |
-| §4 | Sharpe triplication + hardcoded `sqrt(252)` | open |
-| §5 | Fitness path bypassing `StatsBuiltins` numerics | open |
-| §6 | Two median definitions | open |
+| §4 | Sharpe hardcoded `sqrt(252)` | ✅ **FIXED** 2026-08-02 — parameterized at all 5 sites + 3 tests |
+| §5 | Fitness path bypassing `StatsBuiltins` numerics | ⛔ **WITHDRAWN** — see §5, the original recommendation was wrong |
+| §6 | Two median definitions | ✅ **FIXED** 2026-08-02 |
 | §7 | `MurmurationRng` word size + JS/JVM overflow | open |
 | M2–M5 | Further macro guardrails | open |
 
@@ -142,7 +142,75 @@ class of test that was missing, since every marginal check passed throughout:
 
 ---
 
-## 2. 🔴 `RingBuffer` was built to kill `Array.shift()`, then adopted in 9 of ~210 indicators
+## 2. 🟡 PARTLY DONE — `RingBuffer` was built to kill `Array.shift()`, then adopted in 9 of ~210 indicators
+
+### What shipped 2026-08-02 — and the trap that had to be fixed first
+
+Adoption went **9 → 49**; `.shift()` call sites **201 → 154**. Every one of the 452 indicators
+produces **bit-identical output** before and after, proven by a new snapshot tool rather than
+asserted (see below).
+
+**The first attempt was wrong, and silently so** — which is almost certainly why this migration
+stalled at 9 files in the first place. `RingBuffer` indexes **newest-first**
+(`at(0)` = most recent push) while the `Array` window it replaces indexes **oldest-first**
+(`window[0]` = oldest). `@:arrayAccess` maps `buf[i]` onto `at(i)`, so a mechanical
+`Array<Float>` → `RingBuffer<Float>` swap keeps compiling and reads the window **backwards in
+time**. Worse, the two access paths within `RingBuffer` disagree with each other — verified by
+probe, pushing 1..6 into a capacity-4 buffer:
+
+```
+at(i) / buf[i] :  [6, 5, 4, 3]   ← newest-first
+for (v in buf) :  [3, 4, 5, 6]   ← oldest-first (matches Array)
+```
+
+That first pass changed **16 indicators' output**, ranging from sub-ULP summation-order noise
+(`bipower_variation`) up to wholesale sign flips in running-peak drawdown ratios
+(`burke_ratio` went `0, 0, 0, 3.33…` → `-0.185, -0.173, -0.168…`). All 16 were caught by the
+golden diff, and the whole batch was reverted to a verified-identical baseline before retrying.
+
+**Fixes applied so the migration is now safe by construction:**
+- Added `RingBuffer.oldest(i)` — explicit oldest-first accessor, identical indexing to the
+  `Array` window being replaced. Implemented purely in the abstract (`at(length-1-i)`), so
+  neither the Float fast path nor the generic impl needed touching.
+- Documented the reversal loudly on both `at()` and the class docstring, which previously
+  claimed usage "matches the plain-`Array<T>` … pattern as closely as practical" without
+  flagging the one place it emphatically does not.
+- New `TestRingBuffer` (10 tests) pins **both** orders, their exact-reverse relationship,
+  `push` eviction, the partially-filled warmup case, and that the generic impl matches the
+  Float one — so nobody "fixes" one direction and breaks the other.
+
+**New tool: `musescript/tools/IndicatorGolden.hx` + `golden.hxml`.** Dumps every registered
+indicator's full per-bar output over a fixed synthetic tape, one line each, full float
+precision. `diff` before/after is the acceptance test for any change claiming numerical
+neutrality:
+
+```bash
+haxe golden.hxml && node build/js/indicator-golden.js > /tmp/before.txt
+# ...change...
+haxe golden.hxml && node build/js/indicator-golden.js > /tmp/after.txt
+diff /tmp/before.txt /tmp/after.txt      # must be empty
+```
+452 indicators, 440 exercised (12 reject the synthetic args on constructor constraints —
+stable, so still diffable).
+
+### The remaining 154
+
+The migration script deliberately refuses anything it can't prove mechanical, and the compiler
+caught a category the script missed (windows *passed* to `Array<Float>`-typed helpers, e.g.
+`FourierMath.spectrum(buf)` / `LinReg`). Remaining blockers, by class:
+
+| blocker | count | note |
+|---|---|---|
+| field isn't `Array<Float>` (candlestick/profile structs) | ~14 | needs the generic impl + per-file review |
+| passed to an `Array<Float>` helper | ~9 | either overload the helper or materialize |
+| array-only API (`.copy()`, `.slice()`, `.sort()`) | ~7 | mostly the §3 re-sorting set — fix together with §3 |
+| multi-array / return-value-consuming shifts | ~120 | not mechanical; individually cheap but needs eyes |
+
+Recommend finishing in that order, re-running the golden diff each batch. **M3** (a build-time
+lint banning `.shift()` in `indicators/lib/`) should land once the count reaches zero, or it
+will regress one new indicator at a time.
+
+### Original finding
 
 `musescript/indicators/RingBuffer.hx` — its own docstring:
 
@@ -214,7 +282,51 @@ single candidate for the two-heap treatment.
 
 ---
 
-## 4. 🟠 Sharpe is implemented three times, each hardcoding `sqrt(252)`
+## 4. ✅ FIXED — Sharpe hardcoded `sqrt(252)` in every fitness path
+
+### What shipped 2026-08-02 — and a correction to (b) below
+
+**The annualization half was real and is fixed.** `Metrics.sharpe` / `Metrics.sortino`,
+`OrderSim.sharpeOnline`, `NmaFitness.sharpeOfEquity`, `BlockBootstrap.annSharpe` and
+`ProbSharpe.rankFromAnnualized` all now take `periodsPerYear`, defaulting to a shared
+`Metrics.DAILY_PERIODS_PER_YEAR` — so existing daily results are byte-for-byte unchanged while
+sub-daily tapes can finally be annualized correctly. Added
+`Metrics.periodsPerYearFromBarSeconds(barSeconds, sessionSeconds, sessionsPerYear)` so callers
+get a tested conversion instead of hand-rolling one (15m continuous → `96 × 365`; 15m on a 6.5h
+equity session → `26 × 252`; degenerate input falls back to the daily default rather than
+returning 0/∞).
+
+`BlockBootstrap.annSharpe` and `ProbSharpe.rankFromAnnualized` are a **round-trip pair** (one
+multiplies by √N, the other divides to recover per-period), so both were parameterized together
+with a comment on each saying the factors must match — a mismatch there would silently rescale
+the PSR/DSR rank.
+
+### ⚠️ Correction — "(a) Triplication" was a misread
+
+The audit called the three implementations a standing divergence risk to be deduplicated. Reading
+them properly during implementation shows the duplication is **deliberate and load-bearing**:
+`OrderSim.sharpeOnline` and `NmaFitness.sharpeOfEquity` are allocation-free variants that avoid
+materializing the equity/returns arrays on hot paths, and both document themselves as bit-exact
+with `Metrics.sharpe` (`"…so !trackCurve stays bit-exact with the equity → returns → sharpe
+path"`). `Fitness.assertNmaParity` compares NMA vs compiled at **1e-9**. Merging them would
+undo a real optimization; changing one in isolation would break a documented contract.
+
+So the right fix wasn't deduplication — it was **enforcement**. Added
+`testSharpeImplementationsAgreeBitExactly`, which drives a real `OrderSim` through its streamed
+`markReturns` path and asserts it matches the materialized `equity → returns → sharpe` path to
+1e-12 on the same 400-bar curve. Plus `testSharpeAnnualizationIsConfigurable` and
+`testPeriodsPerYearFromBarSeconds`. The convention is now a test, not a comment.
+
+*(`NmaFitness.sharpeOfEquity` is private, so the test covers the two reachable
+implementations; the third stays covered at runtime by `assertNmaParity`. Stated here rather
+than letting the test name imply more coverage than it has.)*
+
+**Still open:** the parameter exists but nothing yet *passes* a non-default value — wiring real
+bar resolution through the harness touches 20+ call sites and needs a decision on where
+resolution lives (`BarFeed`? inferred from bar spacing?). The fix makes the correct behaviour
+expressible; making it automatic is a separate change.
+
+### Original finding
 
 | Location | annualization |
 |---|---|
@@ -246,7 +358,31 @@ default so existing daily results are unchanged.
 
 ---
 
-## 5. 🟡 The fitness path hand-rolls numerics that `StatsBuiltins` already does better
+## 5. ⛔ WITHDRAWN — "the fitness path should use `StatsBuiltins`' Kahan/Welford"
+
+**I got this one wrong and am retracting it rather than quietly leaving it on the list.**
+
+The original recommendation (below) was to have the Sharpe path call
+`StatsBuiltins.compensatedSum` / `sampleStandardDeviation`. Implementing §4 surfaced why that's
+a bad trade here:
+
+1. **It would break a real contract.** The three Sharpe implementations are documented as
+   bit-exact with each other and are compared at 1e-9 by `assertNmaParity`. Welford and the
+   current two-pass form do not produce identical floats. Changing all three identically is
+   possible, but it buys nothing (see 2) while risking the parity gate the whole NMA path
+   depends on.
+2. **The accuracy gain is illusory at this scale.** The existing code is *already* two-pass
+   (mean, then sum of squared deviations) — the numerically sound form, strictly better than the
+   naive `E[x²] − E[x]²` that this recommendation was really guarding against. Swapping to
+   Welford changes the last bit or two on realistic return series. Kahan on the mean is a
+   sub-ULP effect on a few hundred similar-magnitude values.
+
+The original point stands only as an observation that `StatsBuiltins` is the better library for
+*new* code. It is not a defect in the fitness path, and "modernize it" would have been change
+for its own sake against a live bit-exactness guarantee. Documented in `Metrics.sharpe`'s
+docstring so the next reader doesn't re-propose it.
+
+### Original finding (kept for the record)
 
 `StatsBuiltins` has:
 - `compensatedSum` (Kahan/Neumaier) — used by its `mean`
@@ -265,7 +401,16 @@ all four call sites inherit it.
 
 ---
 
-## 6. 🟡 Two different medians, and the fitness-critical one is the biased variant
+## 6. ✅ FIXED — Two different medians, and the fitness-critical one was the biased variant
+
+`EvolutionEngine.mad()` now delegates both medians to `StatsBuiltins.median`, so the codebase
+has one definition again and ε-lexicase's threshold loses its small even-`n` upward bias. The
+"raw vs 1.4826-scaled" ambiguity is resolved in the docstring rather than the code: it states
+explicitly that raw (unscaled) MAD is intended, because ε-lexicase uses it as a relative
+dispersion threshold and not as a σ-estimate — so the next person needing a σ-scaled threshold
+knows to apply the constant themselves instead of assuming it's already there.
+
+### Original finding
 
 `EvolutionEngine.mad()` (used as a selection-scale estimate):
 

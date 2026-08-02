@@ -35,6 +35,7 @@ import musescript.murmuration.MurmurationTape;
  *
  *   node build/js/gene-runner.js --source strat.ms --tape data/real/tape.csv --symbol SPY
  *   node build/js/gene-runner.js --check --source strat.ms
+ *   node build/js/gene-runner.js --optimize --source strat.ms --tape tape.csv
  *   echo "<src>" | node build/js/gene-runner.js --target wasm
  */
 class GeneRunner {
@@ -82,6 +83,7 @@ class GeneRunner {
 		var equityFloor = Std.parseFloat(argVal("--equity-floor", "0"));
 		if (Math.isNaN(equityFloor)) equityFloor = 0;
 		var checkOnly = argFlag("--check");
+		var optimizeFlag = argFlag("--optimize");
 		var extractCond = argFlag("--extract-cond");
 		var astJson = argFlag("--ast-json");
 		var emitWatFlag = argFlag("--emit-wat");
@@ -98,6 +100,9 @@ class GeneRunner {
 			emit({ ok: false, error: 'unknown --execution mode: $executionMode' });
 			return;
 		}
+		var metric = argVal("--metric", "sharpe");
+		var method = argVal("--method", "grid");
+		var minTrades = intArg("--min-trades", 1);
 
 		var batchPath = argVal("--batch", "");
 
@@ -213,8 +218,29 @@ class GeneRunner {
 		}
 
 		var source = sourcePath != "" ? readFile(sourcePath) : readStdin();
-		var bars = checkOnly ? [] : loadBars(tapePath, symbol, synthN, seed, murmurationConfigPath, murmurationSteps);
+		var bars = (checkOnly && !optimizeFlag)
+			? []
+			: loadBars(tapePath, symbol, synthN, seed, murmurationConfigPath, murmurationSteps);
 		try {
+			if (optimizeFlag) {
+				// Honesty-gated param search over @param / pipeline tune+optimize holes
+				// (and synthesized ranges from param { min, max, step, tune }).
+				var optRes = musescript.harness.HonestOptimize.search(source, bars, {
+					seed: seed,
+					metric: metric,
+					method: method,
+					tier: target == "interp" ? "interp" : "js",
+					initialCash: startCapital,
+					minTrades: minTrades,
+					profile: "gene-runner-optimize"
+				});
+				Reflect.setField(optRes, "execution", executionMode);
+				Reflect.setField(optRes, "costBps", costBps);
+				Reflect.setField(optRes, "bars", bars.length);
+				if (symbol != "") Reflect.setField(optRes, "symbol", symbol);
+				emit(optRes);
+				return;
+			}
 			emit(runOne(source, bars, target, checkOnly, strict, artifactDir, executionMode, instrument, costBps, startCapital, equityFloor, useVm));
 		} catch (e:Dynamic) {
 			emit({ ok: false, error: Std.string(e) });
@@ -236,6 +262,7 @@ class GeneRunner {
 		// can't see into TemplateDecl bodies, so this order is required for a
 		// `use` call written inside a template to ever get expanded.
 		prog = musescript.compile.ClassStrategyLower.expand(prog); // class X extends muse.Strat -> StrategyDecl (no-op otherwise)
+		prog = musescript.compile.MuseHostLower.lower(prog);
 			prog = musescript.compile.TemplateExpand.expand(prog);
 		prog = musescript.compile.ModuleExpand.expand(prog);
 

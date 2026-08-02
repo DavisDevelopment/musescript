@@ -2,6 +2,7 @@ package musescript.indicators.lib;
 
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.IndicatorCache;
 import musescript.types.MuseType;
 
@@ -20,13 +21,13 @@ import musescript.types.MuseType;
  */
 class JarqueBera implements MuseIndicator<Float, Float> {
 	var period:Int;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var lastPrice:Null<Float>;
 
 	public function new(period:Int) {
 		if (period < 4) throw "JarqueBera: period must be >= 4";
 		this.period = period;
-		window = [];
+		window = new RingBuffer(period);
 		lastPrice = null;
 	}
 
@@ -39,7 +40,6 @@ class JarqueBera implements MuseIndicator<Float, Float> {
 		var ret = price - lastPrice;
 		lastPrice = price;
 
-		if (window.length == period) window.shift();
 		window.push(ret);
 		if (window.length < period) return null;
 
@@ -65,7 +65,7 @@ class JarqueBera implements MuseIndicator<Float, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 		lastPrice = null;
 	}
 

@@ -55,6 +55,12 @@ class Variation {
 	 * shape -- see RegistryPalette's doc comment.
 	 */
 	var indicatorPool:Array<String>;
+	/**
+	 * Series-field pool `growSeries` draws from. Defaults to `Palette.FIELDS` (OHLCV).
+	 * Call `setFieldPool(Palette.fieldsFor(Palette.auxPresentOn(bars)))` when the eval tape
+	 * carries fund/aux `Bar.data` columns so genomes may reference those series.
+	 */
+	var fieldPool:Array<String>;
 	/** Adaptive node-type-choice weights (see GrowthWeights.hx). Defaults to a fresh instance
 	 * seeded with this file's ORIGINAL literal probabilities, so a caller that never wires a
 	 * shared tuner (or never triggers its reward loop) sees zero behavior change from before this
@@ -97,6 +103,7 @@ class Variation {
 	 */
 	var memoLock = new EvoLock();
 	var indicatorPoolRef:Array<String>;
+	var fieldPoolRef:Array<String>;
 	var baseSeed:Int;
 	/**
 	 * Bumped every `beginGeneration`. Instance catalogs on `StrategyGenome` compare against this
@@ -104,12 +111,28 @@ class Variation {
 	 */
 	var cacheGen:Int = 0;
 
-	public function new(seed:Int, ?indicatorPool:Array<String>, ?tuner:GrowthWeights) {
+	public function new(seed:Int, ?indicatorPool:Array<String>, ?tuner:GrowthWeights, ?fieldPool:Array<String>) {
 		rng = new Rand(seed);
 		this.baseSeed = seed;
 		this.indicatorPool = indicatorPool != null ? indicatorPool : Palette.INDS;
 		this.indicatorPoolRef = this.indicatorPool;
+		this.fieldPool = fieldPool != null && fieldPool.length > 0 ? fieldPool : Palette.FIELDS;
+		this.fieldPoolRef = this.fieldPool;
 		this.tuner = tuner != null ? tuner : new GrowthWeights();
+	}
+
+	/** Replace the series-field pool (OHLCV ± gated aux). Empty/null resets to `Palette.FIELDS`. */
+	public function setFieldPool(?pool:Array<String>):Void {
+		this.fieldPool = pool != null && pool.length > 0 ? pool : Palette.FIELDS;
+		this.fieldPoolRef = this.fieldPool;
+	}
+
+	/**
+	 * Gate aux fields from a tape's `Bar.data` into the growth pool (idempotent for OHLCV-only).
+	 * Same offline PIT columns WASM packs via configure_features — no live EDGAR.
+	 */
+	public function configureForTape(bars:Array<musescript.harness.Bar>):Void {
+		setFieldPool(Palette.fieldsFor(Palette.auxPresentOn(bars)));
 	}
 
 	/**
@@ -119,7 +142,7 @@ class Variation {
 	 * `seed + VARIATION_PARALLEL + slot * 100003`.
 	 */
 	public function forkForSlot(slot:Int):Variation {
-		var v = new Variation(baseSeed + RngStreams.VARIATION_PARALLEL + slot * 100003, indicatorPoolRef, tuner);
+		var v = new Variation(baseSeed + RngStreams.VARIATION_PARALLEL + slot * 100003, indicatorPoolRef, tuner, fieldPoolRef);
 		v.siteDeltaMemo = siteDeltaMemo;
 		v.donorScoreMemo = donorScoreMemo;
 		v.boolCatalogMemo = boolCatalogMemo;
@@ -136,7 +159,7 @@ class Variation {
 	 * parallelism is across demes, not inside them.
 	 */
 	public function forkDeme(deme:Int):Variation {
-		var v = new Variation(baseSeed + RngStreams.VARIATION_PARALLEL + 900000 + deme * 100003, indicatorPoolRef, tuner);
+		var v = new Variation(baseSeed + RngStreams.VARIATION_PARALLEL + 900000 + deme * 100003, indicatorPoolRef, tuner, fieldPoolRef);
 		v.cacheGen = cacheGen;
 		return v;
 	}
@@ -160,8 +183,8 @@ class Variation {
 
 	function growSeries(depth:Int):SeriesNode {
 		if (depth <= 0 || rng.float() < 0.4)
-			return SPrice(rng.pick(Palette.FIELDS));
-		return SInd(rng.pick(indicatorPool), rng.pick(Palette.FIELDS), rng.pick(Palette.WINDOWS), null);
+			return SPrice(rng.pick(fieldPool));
+		return SInd(rng.pick(indicatorPool), rng.pick(fieldPool), rng.pick(Palette.WINDOWS), null);
 	}
 
 	/**

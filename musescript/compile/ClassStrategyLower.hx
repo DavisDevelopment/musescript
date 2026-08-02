@@ -6,6 +6,7 @@ import musescript.ast.Stmt;
 import musescript.ast.Expr;
 import musescript.ast.MatchArm;
 import musescript.ast.FnKind;
+import musescript.builtins.MuseHost;
 
 /**
  * Lowers class-shaped strategies and indicators into the declaration forms the rest of the
@@ -69,13 +70,26 @@ class ClassStrategyLower {
 		}
 		if (!Lambda.exists(classes, c -> rootOf(c, classes) != null)) return prog;
 
+		// Bases that other Strat/Indicator classes extend are flattened into those
+		// leaves — emitting them as their own StrategyDecl would merge orphan
+		// onPosition/onBar hooks into every later strategy in the same file
+		// (JsEmitter concatenates all StrategyDecls; the flagship harness stitches
+		// FlagshipRisk ahead of FlagshipV2 / probe strategies).
+		var usedAsParent = new Map<String, Bool>();
+		for (c in classes) {
+			if (c.parent != null && !isBuiltinRoot(c.parent) && classes.exists(c.parent))
+				usedAsParent.set(c.parent, true);
+		}
+
 		var out:Array<Decl> = [];
 		for (d in prog.decls) switch (d) {
 			case ClassDecl(name, _, _, _, _):
 				var info = classes.get(name);
 				var root = rootOf(info, classes);
 				if (root == null) out.push(d); // an ordinary class — untouched
-				else if (root == STRAT_ROOT) out.push(lowerStrategy(info, classes));
+				else if (usedAsParent.exists(name)) {
+					// Non-leaf Strat/Indicator: consumed by subclass lowering only.
+				} else if (root == STRAT_ROOT) out.push(lowerStrategy(info, classes));
 				else out.push(lowerIndicator(info, classes));
 			default:
 				out.push(d);
@@ -231,6 +245,16 @@ class ClassStrategyLower {
 				callInto(supers.get(m), args, methods, supers, depth, owner, 'super.$m');
 			case ESuper(m, args) if (m != null):
 				callInto(supers.get(m), args, methods, supers, depth, owner, 'super.$m');
+			// Host sugar: `this.orders.long()` / `this.math.abs(x)` — same rewrite
+			// MuseHostLower applies to `muse.<ns>.*`.
+			case ECall(EField(EField(EThis, ns), method), args)
+				if (MuseHost.resolveObjectReceiver(ns) != null || MuseHost.resolveFlat(ns, method) != null):
+				var recv = MuseHost.resolveObjectReceiver(ns);
+				var loweredArgs = [for (a in args) inlineExpr(a, methods, supers, depth, owner)];
+				if (recv != null)
+					ECall(EField(EIdent(recv), method), loweredArgs);
+				else
+					ECall(EIdent(MuseHost.resolveFlat(ns, method)), loweredArgs);
 			// `this.m(args)` and bare `m(args)` — the flattened winner.
 			case ECall(EField(EThis, m), args) if (methods.exists(m)):
 				callInto(methods.get(m), args, methods, supers, depth, owner, 'this.$m');

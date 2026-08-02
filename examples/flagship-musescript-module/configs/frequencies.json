@@ -1,0 +1,37 @@
+{
+  "idle": {
+    "description": "Almost no trading — cash farming / dead strategy",
+    "min_trades": 0,
+    "max_trades": 1,
+    "min_trades_per_bar": 0.0,
+    "max_trades_per_bar": 0.02
+  },
+  "position": {
+    "description": "Few holds — swing / position style on daily bars",
+    "min_trades": 2,
+    "max_trades": 8,
+    "min_trades_per_bar": 0.02,
+    "max_trades_per_bar": 0.15
+  },
+  "swing": {
+    "description": "Active swing — several round-trips per quarter",
+    "min_trades": 6,
+    "max_trades": 24,
+    "min_trades_per_bar": 0.08,
+    "max_trades_per_bar": 0.40
+  },
+  "active": {
+    "description": "High turnover on daily — many entries",
+    "min_trades": 16,
+    "max_trades": 9999,
+    "min_trades_per_bar": 0.25,
+    "max_trades_per_bar": 2.0
+  },
+  "any": {
+    "description": "No frequency gate — report only",
+    "min_trades": 0,
+    "max_trades": 9999,
+    "min_trades_per_bar": 0.0,
+    "max_trades_per_bar": 99.0
+  }
+}

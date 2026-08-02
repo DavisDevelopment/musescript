@@ -123,8 +123,11 @@ Richer order semantics compose as **rules on the sim side**, not new AST verbs
 - **Next**: wire the assembler into `StrategyWasmBackend.compile`'s Node path
   too (currently still shells to `tools/wat2wasm_cli.py` via wasmtime there;
   could unify on one assembler everywhere and drop that subprocess+Python
-  dependency entirely); panel/portfolio WASM support is still out of scope
-  (same boundary as the JS tier today).
+  dependency entirely). Panel linear-memory v1 lands literal-symbol
+  `close_of`/`mom_of`/`sma_of`/`sym_available`/`fund_of` on the feature tape
+  (`field@SYM` slots from `PanelFeed`); bags/rebalance/portfolio apply remain
+  host_eval — see `StrategyWasmEmitter.PANEL_HOST_ESCAPE` and
+  `TestPanelWasmParity`.
 
 ## 5. Macro-specialized numeric kernels
 

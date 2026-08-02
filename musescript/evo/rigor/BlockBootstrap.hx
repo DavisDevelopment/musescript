@@ -54,9 +54,13 @@ class BlockBootstrap {
 		return Math.isFinite(ci.lo) && ci.lo > nullValue;
 	}
 
-	static function annSharpe(returns:Array<Float>):Float {
+	/** Annualized Sharpe of `returns`. `periodsPerYear` must MATCH whatever
+	 *  `ProbSharpe.rankFromAnnualized` is later given to un-annualize with — they are a
+	 *  round-trip pair, and a mismatch silently rescales the PSR/DSR rank. */
+	static function annSharpe(returns:Array<Float>,
+			periodsPerYear:Float = musescript.harness.Metrics.DAILY_PERIODS_PER_YEAR):Float {
 		var m = ProbSharpe.moments(returns);
 		if (m.n < 2 || m.std <= 0) return 0;
-		return (m.mean / m.std) * Math.sqrt(252);
+		return (m.mean / m.std) * Math.sqrt(periodsPerYear);
 	}
 }

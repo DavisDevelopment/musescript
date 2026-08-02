@@ -25,7 +25,22 @@ typedef LeaderboardCtx = {
 	?nBoot:Int,
 	?bootSeed:Int,
 	/** CI must exclude this on the positive side (default 0). */
-	?nullValue:Float
+	?nullValue:Float,
+	/**
+	 * Minimum DSR (a probability in [0,1] — P(true SR beats the field-N-deflated
+	 * null benchmark)) required to be eligible. Default 0.5: "more likely than
+	 * not you clear the multiple-testing bar" — meaningful, not merely nonzero.
+	 *
+	 * Verified 2026-08-01: the prior gate was `dsr > 0`. Because `dsr` is a
+	 * confidence probability that only asymptotes toward (never reaches) 0 as
+	 * fieldN grows for a genuinely positive edge, `dsr > 0` let ANY
+	 * positive-mean entry stay eligible forever regardless of field size —
+	 * the deflated statistic shrank (0.97 → 0.0025 across fieldN 1→1e6, probed
+	 * directly against this file) but membership never flipped. Raise toward
+	 * 0.95 (the Bailey/López de Prado PSR-significance convention) for a
+	 * stricter wall once real submission volume argues for it.
+	 */
+	?dsrMinConfidence:Float
 }
 
 typedef LeaderboardEntryIn = {
@@ -98,6 +113,7 @@ class LeaderboardScore {
 		var nBoot = ctx.nBoot != null ? ctx.nBoot : 200;
 		var bootSeed = ctx.bootSeed != null ? ctx.bootSeed : musescript.repro.ReproStamp.DEFAULT_SEED;
 		var nullValue = ctx.nullValue != null ? ctx.nullValue : 0.0;
+		var dsrMinConfidence = ctx.dsrMinConfidence != null ? ctx.dsrMinConfidence : 0.5;
 		var acct = entry.accountTrials != null
 			? entry.accountTrials
 			: (ctx.accountTrials != null ? ctx.accountTrials : 1);
@@ -132,9 +148,9 @@ class LeaderboardScore {
 		if (trades < minTrades) {
 			eligible = false;
 			reason = 'trades=$trades < minTrades=$minTrades';
-		} else if (!(dsr > 0)) {
+		} else if (!(dsr > dsrMinConfidence)) {
 			eligible = false;
-			reason = 'DSR(fieldN=${ctx.fieldN},acct=$acct)=${fmt(dsr)} ≤ 0';
+			reason = 'DSR(fieldN=${ctx.fieldN},acct=$acct)=${fmt(dsr)} <= minConfidence=${fmt(dsrMinConfidence)}';
 		} else if (!Math.isFinite(pbo)) {
 			eligible = false;
 			reason = "PBO unavailable — can't claim non-overfit";

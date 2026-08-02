@@ -2,6 +2,7 @@ package musescript.indicators.lib;
 
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.IndicatorCache;
 import musescript.types.MuseType;
 
@@ -18,7 +19,7 @@ import musescript.types.MuseType;
  */
 class SineWeightedMa implements MuseIndicator<Float, Float> {
 	var period:Int;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	/** Sine weights for positions `0..period` (oldest to newest), constant in `period`. */
 	var weights:Array<Float>;
 	var weightsTotal:Float;
@@ -30,7 +31,7 @@ class SineWeightedMa implements MuseIndicator<Float, Float> {
 		weights = [for (i in 0...period) Math.sin(Math.PI * (i + 1.0) / denom)];
 		weightsTotal = 0.0;
 		for (w in weights) weightsTotal += w;
-		window = [];
+		window = new RingBuffer(period);
 	}
 
 	/** Configured period. */
@@ -40,7 +41,7 @@ class SineWeightedMa implements MuseIndicator<Float, Float> {
 	public function value():Null<Float> {
 		if (window.length == period) {
 			var dot = 0.0;
-			for (i in 0...period) dot += window[i] * weights[i];
+			for (i in 0...period) dot += window.oldest(i) * weights[i];
 			return dot / weightsTotal;
 		}
 		return null;
@@ -48,13 +49,12 @@ class SineWeightedMa implements MuseIndicator<Float, Float> {
 
 	public function update(input:Float):Null<Float> {
 		if (!Math.isFinite(input)) return value();
-		if (window.length == period) window.shift();
 		window.push(input);
 		return value();
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 	}
 
 	public function warmupPeriod():Int return period;

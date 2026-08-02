@@ -653,6 +653,10 @@ class MuseParser {
 	function isBarField(id:String):Bool {
 		return switch (id) {
 			case "open" | "high" | "low" | "close" | "volume" | "time" | "bar_index": true;
+			// Gated PIT aux / fund columns (Palette.AUX_FIELDS) — same bare-ident /
+			// lookback surface as OHLCV once present on Bar.data.
+			case "revenue" | "pe" | "eps" | "sentiment" | "market_cap" | "book_value"
+			   | "dividend_yield": true;
 			default: false;
 		};
 	}

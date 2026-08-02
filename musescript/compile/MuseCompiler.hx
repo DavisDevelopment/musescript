@@ -39,6 +39,7 @@ class MuseCompiler {
 		// rooted at muse.Strat/muse.Indicator flattens to its decl first, then template/module
 		// expansion, then series lowering, then the target-independent optimization passes.
 		prog = ClassStrategyLower.expand(prog);
+		prog = MuseHostLower.lower(prog);
 		prog = TemplateExpand.expand(prog);
 		prog = ModuleExpand.expand(prog);
 		prog = SeriesLowering.lower(prog);

@@ -85,11 +85,11 @@ class EvolutionEngine {
 	public var tuner(get, never):GrowthWeights;
 	function get_tuner():GrowthWeights return variation.tuner;
 
-	public function new(seed:Int, ?popSize:Int = 8, ?elite:Int = 2, ?tournament:Int = 3, ?indicatorPool:Array<String>, ?tuner:GrowthWeights) {
+	public function new(seed:Int, ?popSize:Int = 8, ?elite:Int = 2, ?tournament:Int = 3, ?indicatorPool:Array<String>, ?tuner:GrowthWeights, ?fieldPool:Array<String>) {
 		this.popSize = popSize;
 		this.elite = elite;
 		this.tournament = tournament;
-		this.variation = new Variation(seed, indicatorPool, tuner);
+		this.variation = new Variation(seed, indicatorPool, tuner, fieldPool);
 		this.selectionRng = RngStreams.stream(seed, RngStreams.SELECTION);
 		this.crossoverChoiceRng = RngStreams.stream(seed, RngStreams.CROSSOVER_CHOICE);
 		this.mutateChoiceRng = RngStreams.stream(seed, RngStreams.MUTATE_CHOICE);
@@ -98,6 +98,11 @@ class EvolutionEngine {
 		this.lexicaseRng = RngStreams.stream(seed, RngStreams.LEXICASE);
 		this.migrateRng = RngStreams.stream(seed, RngStreams.DEME_MIGRATE);
 		this.cloneChoiceRng = RngStreams.stream(seed, RngStreams.CLONE_CHOICE);
+	}
+
+	/** Gate fund/aux series into genome growth from a tape's `Bar.data` (OHLCV-only when absent). */
+	public function configureForTape(bars:Array<musescript.harness.Bar>):Void {
+		variation.configureForTape(bars);
 	}
 
 	public function seedPopulation(depth:Int = 3):Array<StrategyGenome> {
@@ -480,15 +485,22 @@ class EvolutionEngine {
 		return pool[lexicaseRng.int(pool.length)].g;
 	}
 
-	/** Median absolute deviation of `xs` (population MAD); 0 when degenerate. */
+	/**
+	 * Median absolute deviation of `xs` — RAW (population) MAD, i.e. NOT scaled by the 1.4826
+	 * consistency constant that would make it a σ-estimate for normal data. That is deliberate:
+	 * ε-lexicase uses this as a relative dispersion threshold on each case's scores, not as a
+	 * standard deviation, so the unscaled statistic is the intended one. Returns 0 when empty.
+	 *
+	 * Delegates both medians to `StatsBuiltins.median`. It previously took
+	 * `sorted[Std.int(len / 2)]` — the UPPER of the two central values for even-length input,
+	 * rather than their mean — which put a small systematic upward bias into the ε threshold
+	 * and meant the codebase carried two different definitions of "median", with the less
+	 * correct one sitting in the selection path.
+	 */
 	static function mad(xs:Array<Float>):Float {
 		if (xs.length == 0) return 0.0;
-		var sorted = xs.copy();
-		sorted.sort((a, b) -> a < b ? -1 : (a > b ? 1 : 0));
-		var med = sorted[Std.int(sorted.length / 2)];
-		var devs = [for (x in sorted) Math.abs(x - med)];
-		devs.sort((a, b) -> a < b ? -1 : (a > b ? 1 : 0));
-		return devs[Std.int(devs.length / 2)];
+		var med = musescript.builtins.StatsBuiltins.median(xs);
+		return musescript.builtins.StatsBuiltins.median([for (x in xs) Math.abs(x - med)]);
 	}
 }
 

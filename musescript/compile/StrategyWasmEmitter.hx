@@ -10,6 +10,7 @@ import musescript.ast.ConstructOnce;
 import musescript.types.BuiltinSigs;
 import musescript.builtins.MlBuiltins;
 import musescript.builtins.StatsBuiltins;
+import musescript.evo.Palette;
 
 /**
  * Emit on-bar strategies as WAT with exported linear memory.
@@ -22,6 +23,15 @@ import musescript.builtins.StatsBuiltins;
  *   get_param(i32)->f64, long/short(f64), flat(), plot/plotshape/hline/bgcolor
  *
  * Indicators, OHLCV lookbacks, and cross/rising/falling state are internalized.
+ * Single-symbol aux / fund columns (`Bar.data`, `Palette.AUX_FIELDS`, bare
+ * idents like `revenue`) lower onto feature-tape series ids (sid >= 7) — the
+ * host packs those columns from the tape at configure time.
+ *
+ * Panel v1 (fixed-universe literal symbols): `close_of` / `mom_of` / `sma_of` /
+ * `sym_available` / `fund_of` / OHLCV `*_of` reserve dense feature slots keyed
+ * `field@SYM` (same as `PortfolioBuiltins.seriesKey`) — calendar-aligned panel
+ * columns packed by the host from `PanelFeed`. Bags / computed bags / graph bags
+ * / `symbols()` / portfolio apply stay `host_eval` or whole-module fallback.
  */
 class StrategyWasmEmitter {
 	var locals:Map<String, String> = new Map();
@@ -29,6 +39,8 @@ class StrategyWasmEmitter {
 	var imports:Map<String, String> = new Map();
 	var strings:Array<String> = [];
 	var featureKeys:Array<String> = [];
+	/** ParamDecl / strategy-arg names — bare idents resolve via get_param, not aux. */
+	var paramNames:Map<String, Bool> = new Map();
 	var nextTmp:Int = 0;
 	var nextCrossSlot:Int = 0;
 	var nextRiseSlot:Int = 0;
@@ -125,6 +137,7 @@ class StrategyWasmEmitter {
 			imports = new Map();
 			strings = [];
 			featureKeys = [];
+			paramNames = new Map();
 			nextTmp = 0;
 			nextCrossSlot = 0;
 			nextRiseSlot = 0;
@@ -138,6 +151,8 @@ class StrategyWasmEmitter {
 			for (d in prog.decls) switch (d) {
 				case EnumDecl(_, variants):
 					for (v in variants) enumVariantNames.set(v.name, true);
+				case ParamDecl(name, _, _):
+					paramNames.set(name, true);
 				default:
 			}
 			// Softmax/sigmoid helpers call host exp; always provide the import.
@@ -323,7 +338,7 @@ class StrategyWasmEmitter {
 		if (!imports.exists(name)) imports.set(name, sig);
 	}
 
-	function seriesSid(name:String):Null<Int> {
+	function seriesSidOhlcv(name:String):Null<Int> {
 		return switch (name) {
 			case "open": 0;
 			case "high": 1;
@@ -334,6 +349,36 @@ class StrategyWasmEmitter {
 			case "index" | "bar_index": 6;
 			default: null;
 		};
+	}
+
+	/**
+	 * OHLCV ids 0–6, or feature/aux slot as sid = 7 + fid.
+	 * Soft: only known aux catalog / already-reserved feature keys.
+	 * Use `seriesSidForce` for series-arg / EBarField / lookback positions
+	 * where any non-OHLCV name is a tape column.
+	 */
+	function seriesSid(name:String):Null<Int> {
+		var ohlcv = seriesSidOhlcv(name);
+		if (ohlcv != null) return ohlcv;
+		if (!isAuxFieldName(name)) return null;
+		return 7 + featureSlot(name);
+	}
+
+	function seriesSidForce(name:String):Int {
+		var ohlcv = seriesSidOhlcv(name);
+		if (ohlcv != null) return ohlcv;
+		return 7 + featureSlot(name);
+	}
+
+	function isAuxFieldName(name:String):Bool {
+		if (featureKeys.indexOf(name) >= 0) return true;
+		return Palette.AUX_FIELDS.indexOf(name) >= 0;
+	}
+
+	/** Current-bar series read: OHLCV via cur_* globals; aux via lookback(sid, 0). */
+	function emitSeriesCurrent(sid:Int):String {
+		if (sid < 7) return "global.get $" + "cur_" + seriesCurName(sid);
+		return "i32.const " + sid + "\n    i32.const 0\n    call $lookback_ohlcv";
 	}
 
 	/**
@@ -992,7 +1037,7 @@ class StrategyWasmEmitter {
 				} else {
 					var sid = seriesSid(n);
 					if (sid != null) {
-						"global.get $" + "cur_" + seriesCurName(sid);
+						emitSeriesCurrent(sid);
 					} else if (BuiltinSigs.isNullaryScalar(n)) {
 						// A bare nullary scalar builtin (`bars_in_trade`, `equity`, ...) is a CALL,
 						// not a name read -- see MuseInterp.identValue. This used to fall through to
@@ -1001,15 +1046,19 @@ class StrategyWasmEmitter {
 						// The interp had the mirror-image bug (it read back the installed closure), so
 						// the two backends agreed on the wrong answer and parity tests passed.
 						emitCall(EIdent(n), []);
+					} else if (paramNames.exists(n)) {
+						needImport("get_param", "(param i32) (result f64)");
+						"i32.const " + strId(n) + "\n    call $get_param";
 					} else {
+						// Unbound bare idents stay on get_param (0 when unset). Aux catalog
+						// names already hit seriesSid above (Palette.AUX_FIELDS / feature keys).
 						needImport("get_param", "(param i32) (result f64)");
 						"i32.const " + strId(n) + "\n    call $get_param";
 					}
 				}
 			case EBarField(n):
-				var sid = seriesSid(n);
-				if (sid == null) throw new EmitUnsupported();
-				"global.get $" + "cur_" + seriesCurName(sid);
+				// Any non-OHLCV bar field is a single-symbol aux column on Bar.data.
+				emitSeriesCurrent(seriesSidForce(n));
 			case EVar(n, init) if (methodCtx != null && !locals.exists(n) && methodCtx.fieldOffsets.exists(n)):
 				var off = methodCtx.fieldOffsets.get(n);
 				var valueWat = init != null ? coerceF64(init) : "f64.const 0";
@@ -1104,6 +1153,10 @@ class StrategyWasmEmitter {
 				emitLookback(series, n);
 			case EArray(EIdent(name), idx) if (vectorLocals.exists(name)):
 				emitVectorIndex(name, idx);
+			case EArray(EIdent(name), idx) if (seriesSidOhlcv(name) != null || isAuxFieldName(name)):
+				// Aux catalog idents that the annotation parser left as EArray
+				// (not ELookback) still mean series lookback on the WASM path.
+				emitLookback(EIdent(name), idx);
 			case EArray(_, _):
 				throw new EmitUnsupported();
 			default:
@@ -1128,13 +1181,9 @@ class StrategyWasmEmitter {
 			case EParent(inner):
 				emitLookback(inner, n);
 			case EBarField(name) | EIdent(name):
-				var sid = seriesSid(name);
-				if (sid == null) throw new EmitUnsupported();
-				"i32.const " + sid + "\n    " + asI32(n) + "\n    call $lookback_ohlcv";
+				"i32.const " + seriesSidForce(name) + "\n    " + asI32(n) + "\n    call $lookback_ohlcv";
 			case EConst(CString(s)):
-				var sid = seriesSid(s);
-				if (sid == null) throw new EmitUnsupported();
-				"i32.const " + sid + "\n    " + asI32(n) + "\n    call $lookback_ohlcv";
+				"i32.const " + seriesSidForce(s) + "\n    " + asI32(n) + "\n    call $lookback_ohlcv";
 			default:
 				throw new EmitUnsupported();
 		};
@@ -1143,13 +1192,12 @@ class StrategyWasmEmitter {
 	function seriesArgSid(e:Expr):Int {
 		return switch (e) {
 			case EConst(CString(s)):
-				var sid = seriesSid(s);
-				if (sid == null) throw new EmitUnsupported();
-				sid;
+				seriesSidForce(s);
 			case EBarField(n) | EIdent(n):
-				var sid = seriesSid(n);
-				if (sid == null) throw new EmitUnsupported();
-				sid;
+				// Params are scalars, not series — keep get_param path for bare param idents elsewhere.
+				if (paramNames.exists(n) && seriesSidOhlcv(n) == null && !isAuxFieldName(n))
+					throw new EmitUnsupported();
+				seriesSidForce(n);
 			default: throw new EmitUnsupported();
 		};
 	}
@@ -1170,6 +1218,18 @@ class StrategyWasmEmitter {
 			case "flat" | "close":
 				needImport("flat", "");
 				"call $flat\n    f64.const 0";
+			case "buy":
+				// Panel portfolio ABI — keeps surrounding if/when native so close_of/mom_of
+				// don't get swallowed by a host_eval of the whole statement.
+				if (args.length < 1) throw new EmitUnsupported();
+				needImport("buy", "(param i32 f64)");
+				"i32.const " + strId(stringKey(args[0])) + "\n    "
+					+ (args.length > 1 ? coerceF64(args[1]) : "f64.const 1")
+					+ "\n    call $buy\n    f64.const 0";
+			case "sell_all":
+				if (args.length < 1) throw new EmitUnsupported();
+				needImport("sell_all", "(param i32)");
+				"i32.const " + strId(stringKey(args[0])) + "\n    call $sell_all\n    f64.const 0";
 			case "position":
 				needPositionImports();
 				"call $get_position";
@@ -1188,6 +1248,12 @@ class StrategyWasmEmitter {
 			case "unrealized_pnl":
 				needPositionImports();
 				"call $get_unrealized_pnl";
+			case "orders_pending":
+				needImport("orders_pending", "(result f64)");
+				"call $orders_pending";
+			case "orders_cancel_all":
+				needImport("orders_cancel_all", "(result f64)");
+				"call $orders_cancel_all";
 			case "unrealized_pnl_pct":
 				// Direction-normalized: pnl / (|position| * entry_price), 0 when flat or entry is
 				// somehow 0 -- see TradeBuiltins.hx's registration for the full rationale (same
@@ -1226,6 +1292,32 @@ class StrategyWasmEmitter {
 			case "feature":
 				if (args.length < 1) throw new EmitUnsupported();
 				"i32.const " + featureSlot(stringKey(args[0])) + "\n    call $feature_at";
+			// Panel linear-memory v1: literal-symbol cross-section reads → feature slots
+			// `field@SYM`. Dynamic symbols / bags / rebalance stay unsupported here.
+			case "close_of":
+				emitPanelOf("close", args);
+			case "open_of":
+				emitPanelOf("open", args);
+			case "high_of":
+				emitPanelOf("high", args);
+			case "low_of":
+				emitPanelOf("low", args);
+			case "volume_of":
+				emitPanelOf("volume", args);
+			case "fund_of":
+				if (args.length < 2) throw new EmitUnsupported();
+				emitPanelOf(stringKey(args[1]), [args[0]].concat(args.length > 2 ? [args[2]] : []));
+			case "mom_of":
+				if (args.length < 2) throw new EmitUnsupported();
+				usedIndicators.set("mom", true);
+				"i32.const " + panelSeriesSid("close", args[0]) + "\n    " + asI32(args[1]) + "\n    call $mom";
+			case "sma_of":
+				if (args.length < 2) throw new EmitUnsupported();
+				usedIndicators.set("sma", true);
+				"i32.const " + panelSeriesSid("close", args[0]) + "\n    " + asI32(args[1]) + "\n    call $sma";
+			case "sym_available":
+				if (args.length < 1) throw new EmitUnsupported();
+				emitSymAvailable(args[0]);
 			case "hl2":
 				"global.get $" + "cur_high\n    global.get $" + "cur_low\n    f64.add\n    f64.const 2\n    f64.div";
 			case "hlc3":
@@ -1379,12 +1471,53 @@ class StrategyWasmEmitter {
 	 * the out-of-tree Kestrel WASM-artifact reader, which mirrors this constant on its side). */
 	public static inline var FEATURE_SLOT_PREFIX = "feature-slot:";
 
+	/**
+	 * WASM panel escape list (v1): these stay host_eval / whole-module fallback.
+	 * Native subset is literal-symbol `*_of` / `mom_of` / `sma_of` / `sym_available` / `fund_of`.
+	 */
+	public static final PANEL_HOST_ESCAPE:Array<String> = [
+		"symbols", "bag_new", "bag_set", "bag_get", "bag_has", "bag_delete", "bag_name",
+		"bag_rename", "bag_symbols", "bag_size", "bag_mode", "bag_is_static", "bag_is_computed",
+		"bag_equal", "bag_pair", "bag_from_dict", "bag_from_scan", "bag_to_dict", "bag_computed",
+		"bag_resolve", "bag_rank_mom", "bag_rank_rsi", "bag_rank_field", "bag_graph",
+		"bag_add", "bag_sub", "bag_mask", "bag_scale", "bag_norm",
+		"rebalance_equal", "target_weight", "scan_top", "scan_bottom",
+		"pos", "entry_of", "weight_of", "holdings",
+		"portfolio_equity", "portfolio_cash", "portfolio_unrealized",
+		"ema_of", "rsi_of"
+		// buy / sell_all: native HostABI imports (literal sym), not host_eval
+	];
+
 	function featureSlot(key:String):Int {
 		var i = featureKeys.indexOf(key);
 		if (i >= 0) return i;
 		featureKeys.push(key);
 		strId(FEATURE_SLOT_PREFIX + key); // sidecar metadata only; not the dense feature id
 		return featureKeys.length - 1;
+	}
+
+	/** Feature sid for panel column `field@sym` (literal sym only). */
+	function panelSeriesSid(field:String, symExpr:Expr):Int {
+		return 7 + featureSlot(field + "@" + stringKey(symExpr));
+	}
+
+	function emitPanelOf(field:String, args:Array<Expr>):String {
+		if (args.length < 1) throw new EmitUnsupported();
+		var nExpr = args.length > 1 ? args[1] : EConst(CInt(0));
+		return "i32.const " + panelSeriesSid(field, args[0]) + "\n    " + asI32(nExpr)
+			+ "\n    call $lookback_ohlcv";
+	}
+
+	/** `sym_available(sym)` ≡ close@sym is finite and > 0 (matches PortfolioBuiltins). */
+	function emitSymAvailable(symExpr:Expr):String {
+		var tx = "_symav_" + (nextTmp++);
+		ensureLocal(tx);
+		return "i32.const " + panelSeriesSid("close", symExpr) + "\n    i32.const 0\n    call $lookback_ohlcv"
+			+ "\n    local.set $" + tx
+			+ "\n    f64.const 1\n    f64.const 0"
+			+ "\n    local.get $" + tx + "\n    local.get $" + tx + "\n    f64.eq"
+			+ "\n    local.get $" + tx + "\n    f64.const 0\n    f64.gt\n    i32.and"
+			+ "\n    select";
 	}
 
 	function stringKey(e:Expr):String {

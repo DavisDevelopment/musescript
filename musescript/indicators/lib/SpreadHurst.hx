@@ -2,6 +2,7 @@ package musescript.indicators.lib;
 
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.IndicatorCache;
 import musescript.types.MuseType;
 
@@ -24,21 +25,20 @@ import musescript.types.MuseType;
 class SpreadHurst implements MuseIndicator<SpreadHurstPair, Float> {
 	var period:Int;
 	var maxLag:Int;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 
 	public function new(period:Int) {
 		if (period < 8) throw "SpreadHurst: period must be >= 8";
 		this.period = period;
 		var ml = Std.int(period / 4);
 		maxLag = ml > 2 ? ml : 2;
-		window = [];
+		window = new RingBuffer(period);
 	}
 
 	public function update(input:SpreadHurstPair):Null<Float> {
 		var a = input.a;
 		var b = input.b;
 		if (!Math.isFinite(a) || !Math.isFinite(b)) return null;
-		if (window.length == period) window.shift();
 		window.push(a - b);
 		if (window.length < period) return null;
 		// Collect (log τ, log V(τ)) for every lag whose variance is positive.
@@ -48,7 +48,7 @@ class SpreadHurst implements MuseIndicator<SpreadHurstPair, Float> {
 			var sumSq = 0.0;
 			var count = 0.0;
 			for (i in 0...window.length - lag) {
-				var diff = window[i + lag] - window[i];
+				var diff = window.oldest(i + lag) - window.oldest(i);
 				sumSq += diff * diff;
 				count += 1.0;
 			}
@@ -83,7 +83,7 @@ class SpreadHurst implements MuseIndicator<SpreadHurstPair, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 	}
 
 	public function warmupPeriod():Int return period;

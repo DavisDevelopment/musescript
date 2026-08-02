@@ -106,6 +106,9 @@ class NmaFitness {
 		var n = bars.length;
 		var open = new Array<Float>(), high = new Array<Float>(), low = new Array<Float>();
 		var close = new Array<Float>(), volume = new Array<Float>(), times = new Array<Float>();
+		// Aux / fund columns from pre-joined `Bar.data` (PIT: missing bars → NaN). Discovered
+		// on the fly so OHLCV-only tapes pay nothing beyond the null check.
+		var auxCols = new Map<String, Array<Float>>();
 		// The same pass fills the unboxed OHLC + index columns the sim loop reads, so each bar's
 		// fields are pulled through `Jvm.readField` once here rather than once per genome per bar
 		// (see `NmaBarColumns`). Indexed, and each field read into a local first, because on the
@@ -121,10 +124,26 @@ class NmaFitness {
 			volume.push(b.volume); times.push(b.time);
 			openV[bi] = bo; highV[bi] = bh; lowV[bi] = bl; closeV[bi] = bc;
 			indexV[bi] = b.index;
+			if (b.data != null) {
+				for (k => v in b.data) {
+					var col = auxCols.get(k);
+					if (col == null) {
+						col = [for (_ in 0...n) Math.NaN];
+						auxCols.set(k, col);
+					}
+					col[bi] = v;
+				}
+			}
 			bi++;
 		}
 		var barCols = new NmaBarColumns(bars, n, openV, highV, lowV, closeV, indexV);
-		var key = tapeDigest(close);
+		var fields:Map<String, Array<Float>> = [
+			"open" => open, "high" => high, "low" => low, "close" => close, "volume" => volume
+		];
+		var auxNames:Array<String> = [for (k in auxCols.keys()) k];
+		auxNames.sort(Reflect.compare);
+		for (k in auxNames) fields.set(k, auxCols.get(k));
+		var key = tapeDigest(close, auxNames, auxCols);
 
 		// A distinct array object holding an identical tape keeps its columns: the signature, not
 		// the pointer, is what a memo is valid under. Check both slots.
@@ -132,15 +151,13 @@ class NmaFitness {
 		if (snap != null && snap.key == key.hex && snap.n == n) shareFrom = snap;
 		else if (alt != null && alt.key == key.hex && alt.n == n) shareFrom = alt;
 		if (shareFrom != null) {
-			var rebound = new NmaTapeState(bars, n, key.hex, key.a, key.b,
-				["open" => open, "high" => high, "low" => low, "close" => close, "volume" => volume],
+			var rebound = new NmaTapeState(bars, n, key.hex, key.a, key.b, fields,
 				times, barCols, shareFrom.columns);
 			publishTape(rebound, snap);
 			return rebound;
 		}
 
-		var fresh = new NmaTapeState(bars, n, key.hex, key.a, key.b,
-			["open" => open, "high" => high, "low" => low, "close" => close, "volume" => volume],
+		var fresh = new NmaTapeState(bars, n, key.hex, key.a, key.b, fields,
 			times, barCols, new NmaColumnCache());
 		publishTape(fresh, snap);
 		return fresh;
@@ -489,7 +506,8 @@ class NmaFitness {
 
 	/** `Metrics.sharpe(Metrics.returnsFromEquity(eq.toArray()), 0)` without materializing either
 	 * array. Two streaming passes over the curve; same guards, same annualization. */
-	static function sharpeOfEquity(eq:GrowableVec<Float>):Float {
+	static function sharpeOfEquity(eq:GrowableVec<Float>,
+			periodsPerYear:Float = musescript.harness.Metrics.DAILY_PERIODS_PER_YEAR):Float {
 		var n = eq.length;
 		var cnt = n - 1;
 		if (cnt < 2) return 0;
@@ -512,7 +530,7 @@ class NmaFitness {
 		var_ /= cnt - 1;
 		var std = Math.sqrt(var_);
 		if (std == 0) return 0;
-		return (mean / std) * Math.sqrt(252);
+		return (mean / std) * Math.sqrt(periodsPerYear);
 	}
 
 	/** A bool root's column, or `null` when it reads simulator state — warming its pure operands. */
@@ -554,14 +572,16 @@ class NmaFitness {
 		return false;
 	}
 
-	/** Stable content signature of the tape (all signal columns derive from OHLCV; close carries the
-	 * shape). Two avalanched FNV lanes so the pop-memo can key without a String; the hex form is
+	/** Stable content signature of the tape. Close carries the OHLCV shape; sorted aux names +
+	 * columns (when present) keep fund-aware tapes from sharing a memo with OHLCV-only peers.
+	 * Two avalanched FNV lanes so the pop-memo can key without a String; the hex form is
 	 * kept for epoch interning and dirty-spine tape guards. Indexed scan — `for..in` over
 	 * `Array<Float>` boxes on the JVM target (JIT_AUTHORING_GUIDE.md §3.3).
 	 *
 	 * «ἄναξ ταυρόκερως, εὐαστήρ, πυρίσπορε.»
 	 */
-	static function tapeDigest(close:Array<Float>):{hex:String, a:Int, b:Int} {
+	static function tapeDigest(close:Array<Float>, ?auxNames:Array<String>,
+			?auxCols:Map<String, Array<Float>>):{hex:String, a:Int, b:Int} {
 		var d = new musescript.evo.StructuralDigest();
 		d.tag("T".code);
 		d.int(close.length);
@@ -569,6 +589,20 @@ class NmaFitness {
 		while (i < close.length) {
 			d.float(close[i]);
 			i++;
+		}
+		if (auxNames != null && auxNames.length > 0 && auxCols != null) {
+			d.tag("A".code);
+			d.int(auxNames.length);
+			for (name in auxNames) {
+				d.str(name);
+				var col = auxCols.get(name);
+				if (col == null) continue;
+				var j = 0;
+				while (j < col.length) {
+					d.float(col[j]);
+					j++;
+				}
+			}
 		}
 		d.finishWords();
 		return { hex: musescript.evo.StructuralDigest.hexWords(d.outA, d.outB), a: d.outA, b: d.outB };

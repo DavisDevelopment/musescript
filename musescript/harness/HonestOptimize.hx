@@ -324,6 +324,7 @@ class HonestOptimize {
 	static function parseSource(source:String):MuseProgram {
 		var prog = new musescript.parse.MuseParser().parse(source, "<optimize>");
 		prog = musescript.compile.ClassStrategyLower.expand(prog);
+		prog = musescript.compile.MuseHostLower.lower(prog);
 		prog = musescript.compile.TemplateExpand.expand(prog);
 		prog = musescript.compile.ModuleExpand.expand(prog);
 		return prog;

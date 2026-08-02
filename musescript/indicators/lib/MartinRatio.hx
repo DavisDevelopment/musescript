@@ -2,6 +2,7 @@ package musescript.indicators.lib;
 
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.IndicatorCache;
 import musescript.types.MuseType;
 
@@ -22,33 +23,32 @@ import musescript.types.MuseType;
  */
 class MartinRatio implements MuseIndicator<Float, Float> {
 	var period:Int;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 
 	public function new(period:Int) {
 		if (period < 2) throw "MartinRatio: period must be >= 2";
 		this.period = period;
-		window = [];
+		window = new RingBuffer(period);
 	}
 
 	public function update(equity:Float):Null<Float> {
 		if (!Math.isFinite(equity)) return null;
-		if (window.length == period) window.shift();
 		window.push(equity);
 		if (window.length < period) return null;
 
-		var peak = window[0];
+		var peak = window.oldest(0);
 		var sumSqDd = 0.0;
 		var ddCount = 0;
 		var sumReturn = 0.0;
 		var returnCount = 0;
 		for (i in 0...window.length) {
-			var v = window[i];
+			var v = window.oldest(i);
 			if (v > peak) peak = v;
 			var dd = peak > 0.0 ? (peak - v) / peak * 100.0 : 0.0;
 			sumSqDd += dd * dd;
 			ddCount++;
 			if (i > 0) {
-				var prev = window[i - 1];
+				var prev = window.oldest(i - 1);
 				if (prev != 0.0) { sumReturn += (v - prev) / prev; returnCount++; }
 			}
 		}
@@ -58,7 +58,7 @@ class MartinRatio implements MuseIndicator<Float, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 	}
 
 	public function warmupPeriod():Int return period;

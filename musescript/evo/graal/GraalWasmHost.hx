@@ -8,6 +8,7 @@ import musescript.harness.OrderSim;
 import musescript.harness.Metrics;
 import musescript.harness.BacktestResult;
 import musescript.compile.StrategyWasmRuntimeWat;
+import musescript.compile.StrategyWasmBackend;
 
 /**
  * GraalWasm host for MuseScript strategy modules (memory ABI, preloaded mode).
@@ -159,7 +160,7 @@ class StrategyInstance {
 		members.set("exp", new HostFn(function(a:NativeArray<Value>):Dynamic {
 			return Math.exp(a[0].asDouble());
 		}));
-		for (noop in ["plot", "plotshape", "hline", "bgcolor"])
+		for (noop in ["plot", "plotshape", "hline", "bgcolor", "buy", "sell_all"])
 			members.set(noop, new HostFn(function(a:NativeArray<Value>):Dynamic return null));
 
 		var importRoot = new Map<String, Dynamic>();
@@ -174,6 +175,11 @@ class StrategyInstance {
 	function pack(bars:Array<Bar>, ?featureTapes:Array<Array<Float>>):Void {
 		var n = bars.length;
 		if (n <= 0) n = 1;
+		// Fill reserved feature/aux slots from Bar.data when the caller didn't supply tapes
+		// (offline PIT aux path — same as StrategyWasmBackend.featureTapesFromCtx).
+		if (featureTapes == null) {
+			featureTapes = StrategyWasmBackend.featureTapesFromCtx(null, strings, bars);
+		}
 		var featureCount = featureTapes != null ? featureTapes.length : 0;
 		var stateBytes = StrategyWasmRuntimeWat.STATE_BYTES;
 		var bytesNeeded = stateBytes + n * (7 + featureCount) * 8;
@@ -221,16 +227,20 @@ class StrategyInstance {
 		this.sim = new OrderSim();
 		if (costBps != 0) this.sim.book.slippageBps = costBps;
 		var wantN = Std.int(Math.max(1, bars.length));
-		var wantFeatures = featureTapes != null ? featureTapes.length : 0;
-		if (packedN != wantN || packedFeatureCount != wantFeatures || featureTapes != null) pack(bars, featureTapes);
+		var resolved = featureTapes != null
+			? featureTapes
+			: StrategyWasmBackend.featureTapesFromCtx(null, strings, bars);
+		var wantFeatures = resolved != null ? resolved.length : 0;
+		if (packedN != wantN || packedFeatureCount != wantFeatures || featureTapes != null || wantFeatures > 0)
+			pack(bars, resolved);
 
 		configure.execute(GraalWasmHost.objArr([
 			bases[0], bases[1], bases[2], bases[3], bases[4], bases[5], bases[6], packedN
 		]));
 		if (exports.hasMember("configure_features"))
 			exports.getMember("configure_features").execute(GraalWasmHost.objArr([
-				featureTapes != null ? featureBase : 0,
-				featureTapes != null ? packedFeatureCount : 0
+				wantFeatures > 0 ? featureBase : 0,
+				wantFeatures
 			]));
 
 		var arg:NativeArray<Dynamic> = new NativeArray(1);

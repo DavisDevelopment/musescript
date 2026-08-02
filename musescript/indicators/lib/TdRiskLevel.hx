@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.IndicatorCache;
 import musescript.types.MuseType;
 
@@ -32,7 +33,7 @@ typedef TdRiskLevelOutput = {
 class TdRiskLevel implements MuseIndicator<Bar, TdRiskLevelOutput> {
 	var lookback:Int;
 	var target:Int;
-	var closes:Array<Float>;
+	var closes:RingBuffer<Float>;
 	var prev:Null<Bar>;
 	var buyCount:Int;
 	var sellCount:Int;
@@ -69,13 +70,12 @@ class TdRiskLevel implements MuseIndicator<Bar, TdRiskLevelOutput> {
 
 	public function update(bar:Bar):Null<TdRiskLevelOutput> {
 		var tr = trueRange(bar, prev);
-		if (closes.length > lookback) closes.shift();
 		if (closes.length < lookback) {
 			closes.push(bar.close);
 			prev = bar;
 			return null;
 		}
-		var reference = closes[0];
+		var reference = closes.oldest(0);
 		closes.push(bar.close);
 
 		if (bar.close < reference) {
@@ -113,7 +113,7 @@ class TdRiskLevel implements MuseIndicator<Bar, TdRiskLevelOutput> {
 	}
 
 	public function reset():Void {
-		closes = [];
+		closes = new RingBuffer(lookback);
 		prev = null;
 		buyCount = 0;
 		sellCount = 0;

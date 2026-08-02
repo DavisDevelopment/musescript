@@ -34,6 +34,16 @@ package musescript.indicators;
  * newest, matching `for (v in plainArray)`), plus `window[i]` array-index sugar and `.length`
  * that a plain `Array<T>` field already had.
  *
+ * ⚠️ **THE ONE PLACE IT DOES NOT MATCH: index order.** `window[i]` / `at(i)` count
+ * NEWEST-first (`at(0)` is the most recent push), whereas an `Array` window's `window[0]` is
+ * the OLDEST sample. `iterator()` is oldest-first, so indexed access and iteration run in
+ * OPPOSITE directions within this very type. A mechanical `Array<Float>` -> `RingBuffer<Float>`
+ * swap that leaves `window[i]` untouched therefore still compiles and silently reads the window
+ * backwards in time -- which is exactly what happened on the first attempt at the bulk
+ * migration (ALGORITHM_AUDIT.md §2): 16 indicators changed output, from sub-ULP summation-order
+ * noise up to wholesale sign flips in running-peak drawdown ratios. **Use `oldest(i)` when
+ * porting an `Array` window.**
+ *
  * CAVEAT for hot scan loops (e.g. a min/max pass over the whole window every update -- the
  * single most common shape in this indicator library): `for (v in window)` boxes every element
  * regardless of T, EVEN for the Float fast path. Verified by decompilation: Haxe's `for..in`
@@ -57,9 +67,38 @@ abstract RingBuffer<T>(IRingBuffer<T>) {
 	 */
 	public inline function push(v:T):Null<T> return this.push(v);
 
-	/** Value `i` slots back from the most recently pushed (0 = newest, length-1 = oldest). */
+	/**
+	 * Value `i` slots back from the most recently pushed (0 = newest, length-1 = oldest).
+	 *
+	 * ⚠️ **This is the REVERSE of the `Array<T>` window it replaces**, where `window[0]` is the
+	 * OLDEST sample. Because `@:arrayAccess` maps `buf[i]` here too, a migration that mechanically
+	 * swaps `Array<Float>` for `RingBuffer<Float>` and leaves `window[i]` alone keeps compiling
+	 * and silently reads the window BACKWARDS IN TIME. Note also that `iterator()` is
+	 * oldest-first (it deliberately matches `Array`), so within this one type indexed access and
+	 * iteration run in opposite directions — code that mixes them will disagree with itself.
+	 *
+	 * Verified empirically: pushing 1..6 into a capacity-4 buffer gives `at(i)`/`buf[i]` =
+	 * `[6,5,4,3]` while `for (v in buf)` = `[3,4,5,6]`.
+	 *
+	 * When porting an existing `Array` window, use `oldest(i)` — it is the index order that
+	 * pattern already assumes. Only reach for `at(i)` when you actually want "n bars ago"
+	 * (which is usually what NEW code wants, hence this being the default).
+	 */
 	@:arrayAccess
 	public inline function at(i:Int):T return this.at(i);
+
+	/**
+	 * Value at logical position `i` counting OLDEST-first — `oldest(0)` is the oldest retained
+	 * sample, `oldest(length-1)` the newest. Identical indexing to the plain `Array<T>` +
+	 * `shift()` window this type replaces, and to `iterator()`'s order.
+	 *
+	 * Exists so migrating an `Array` window is a mechanical `window[i]` → `window.oldest(i)`
+	 * rather than a per-file reasoning exercise about whether that particular statistic happens
+	 * to be order-invariant. (Some are — an R/S range over mean-centred deviations is unchanged
+	 * by reversal — but most position-weighted ones, linear regressions, and running-peak
+	 * drawdown scans are not, and the failure is silent.)
+	 */
+	public inline function oldest(i:Int):T return this.at(this.getLength() - 1 - i);
 
 	public var length(get, never):Int;
 	inline function get_length():Int return this.getLength();

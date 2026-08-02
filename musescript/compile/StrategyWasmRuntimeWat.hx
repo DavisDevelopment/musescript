@@ -19,9 +19,14 @@ package musescript.compile;
  *     FIXED compile-time offset (no runtime allocator: the set of
  *     construct-once instances is fully known at compile time, so this is
  *     static offset assignment exactly like FRAME_BASE, not a bump heap)
- *   [STATE_BYTES, …) — streaming OHLCV series (7 contiguous f64 arrays) when reset() is used
+ *   [STATE_BYTES, …) — streaming OHLCV series (7 contiguous f64 arrays) when reset() is used;
+ *     preloaded mode may append feature/aux tapes after the 7 OHLCV columns (see
+ *     configure_features). Aux / fund columns from `Bar.data` reuse that feature region.
+ *     Panel v1 packs calendar-aligned `field@SYM` columns into the same feature
+ *     region (dense slots; logical layout ≈ sym × (OHLCV + aux) via key order).
  *
- * Series ids: 0=open 1=high 2=low 3=close 4=volume 5=time 6=index
+ * Series ids: 0=open 1=high 2=low 3=close 4=volume 5=time 6=index;
+ *   sid >= 7 → feature/aux/panel slot (sid - 7), same layout as `feature_at`
  */
 class StrategyWasmRuntimeWat {
 	public static inline var CROSS_SLOTS = 64;
@@ -85,22 +90,38 @@ class StrategyWasmRuntimeWat {
   )
 
   (func $$series_base (param $$sid i32) (result i32)
-    (if (result i32) (i32.eq (local.get $$sid) (i32.const 0))
-      (then (global.get $$open_base))
-      (else (if (result i32) (i32.eq (local.get $$sid) (i32.const 1))
-        (then (global.get $$high_base))
-        (else (if (result i32) (i32.eq (local.get $$sid) (i32.const 2))
-          (then (global.get $$low_base))
-          (else (if (result i32) (i32.eq (local.get $$sid) (i32.const 3))
-            (then (global.get $$close_base))
-            (else (if (result i32) (i32.eq (local.get $$sid) (i32.const 4))
-              (then (global.get $$volume_base))
-              (else (if (result i32) (i32.eq (local.get $$sid) (i32.const 5))
-                (then (global.get $$time_base))
-                (else (global.get $$index_base)))))))))))))
+    (if (result i32) (i32.ge_s (local.get $$sid) (i32.const 7))
+      (then
+        (i32.add (global.get $$feature_base)
+          (i32.shl
+            (i32.mul (i32.sub (local.get $$sid) (i32.const 7)) (global.get $$capacity))
+            (i32.const 3))))
+      (else (if (result i32) (i32.eq (local.get $$sid) (i32.const 0))
+        (then (global.get $$open_base))
+        (else (if (result i32) (i32.eq (local.get $$sid) (i32.const 1))
+          (then (global.get $$high_base))
+          (else (if (result i32) (i32.eq (local.get $$sid) (i32.const 2))
+            (then (global.get $$low_base))
+            (else (if (result i32) (i32.eq (local.get $$sid) (i32.const 3))
+              (then (global.get $$close_base))
+              (else (if (result i32) (i32.eq (local.get $$sid) (i32.const 4))
+                (then (global.get $$volume_base))
+                (else (if (result i32) (i32.eq (local.get $$sid) (i32.const 5))
+                  (then (global.get $$time_base))
+                  (else (global.get $$index_base)))))))))))))))
   )
 
   (func $$series_at (param $$sid i32) (param $$idx i32) (result f64)
+    (if (i32.and
+          (i32.ge_s (local.get $$sid) (i32.const 7))
+          (i32.ge_s (i32.sub (local.get $$sid) (i32.const 7)) (global.get $$feature_count)))
+      (then (return (f64.const nan))))
+    (if (i32.and
+          (i32.ge_s (local.get $$sid) (i32.const 7))
+          (i32.or
+            (i32.lt_s (local.get $$idx) (i32.const 0))
+            (i32.ge_s (local.get $$idx) (global.get $$capacity))))
+      (then (return (f64.const nan))))
     (f64.load (i32.add (call $$series_base (local.get $$sid))
       (i32.shl (local.get $$idx) (i32.const 3))))
   )

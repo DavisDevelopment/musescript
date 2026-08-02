@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.IndicatorCache;
 import musescript.types.MuseType;
 
@@ -22,14 +23,14 @@ import musescript.types.MuseType;
  */
 class ThreeLineBreak implements MuseIndicator<Bar, Float> {
 	var linesCount:Int;
-	var lineValues:Array<Float>;
+	var lineValues:RingBuffer<Float>;
 	var dir:Int;
 	var last:Null<Float>;
 
 	public function new(lines:Int) {
 		if (lines <= 0) throw "ThreeLineBreak: lines must be > 0";
 		this.linesCount = lines;
-		lineValues = [];
+		lineValues = new RingBuffer(linesCount);
 		dir = 0;
 		last = null;
 	}
@@ -43,7 +44,6 @@ class ThreeLineBreak implements MuseIndicator<Bar, Float> {
 	function pushLine(close:Float, newDir:Int):Void {
 		dir = newDir;
 		lineValues.push(close);
-		if (lineValues.length > linesCount) lineValues.shift();
 	}
 
 	public function update(candle:Bar):Null<Float> {
@@ -53,7 +53,7 @@ class ThreeLineBreak implements MuseIndicator<Bar, Float> {
 			lineValues.push(close);
 			return null;
 		}
-		var prior = lineValues[lineValues.length - 1];
+		var prior = lineValues.oldest(lineValues.length - 1);
 		if (dir >= 0) {
 			if (close > prior) {
 				pushLine(close, 1);
@@ -76,7 +76,7 @@ class ThreeLineBreak implements MuseIndicator<Bar, Float> {
 	}
 
 	public function reset():Void {
-		lineValues = [];
+		lineValues = new RingBuffer(linesCount);
 		dir = 0;
 		last = null;
 	}

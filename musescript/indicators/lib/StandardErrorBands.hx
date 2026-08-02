@@ -2,6 +2,7 @@ package musescript.indicators.lib;
 
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.IndicatorCache;
 import musescript.types.MuseType;
 
@@ -32,7 +33,7 @@ typedef StandardErrorBandsOutput = {
 class StandardErrorBands implements MuseIndicator<Float, StandardErrorBandsOutput> {
 	var period:Int;
 	var multiplier:Float;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var sumX:Float;
 	var sumXx:Float;
 
@@ -45,12 +46,11 @@ class StandardErrorBands implements MuseIndicator<Float, StandardErrorBandsOutpu
 		var n:Float = period;
 		sumX = n * (n - 1.0) / 2.0;
 		sumXx = (n - 1.0) * n * (2.0 * n - 1.0) / 6.0;
-		window = [];
+		window = new RingBuffer(period);
 	}
 
 	public function update(value:Float):Null<StandardErrorBandsOutput> {
 		if (!Math.isFinite(value)) return null;
-		if (window.length == period) window.shift();
 		window.push(value);
 		if (window.length < period) return null;
 		var n:Float = period;
@@ -58,8 +58,8 @@ class StandardErrorBands implements MuseIndicator<Float, StandardErrorBandsOutpu
 		var sumXy = 0.0;
 		for (i in 0...window.length) {
 			var x:Float = i;
-			sumY += window[i];
-			sumXy += x * window[i];
+			sumY += window.oldest(i);
+			sumXy += x * window.oldest(i);
 		}
 		var denom = n * sumXx - sumX * sumX;
 		var slope = (n * sumXy - sumX * sumY) / denom;
@@ -68,7 +68,7 @@ class StandardErrorBands implements MuseIndicator<Float, StandardErrorBandsOutpu
 		var sse = 0.0;
 		for (i in 0...window.length) {
 			var fitted = intercept + slope * i;
-			var r = window[i] - fitted;
+			var r = window.oldest(i) - fitted;
 			sse += r * r;
 		}
 		// OLS standard error with n − 2 degrees of freedom; n − 2 >= 1
@@ -83,7 +83,7 @@ class StandardErrorBands implements MuseIndicator<Float, StandardErrorBandsOutpu
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 	}
 
 	public function warmupPeriod():Int return period;

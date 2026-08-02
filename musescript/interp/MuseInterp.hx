@@ -143,6 +143,9 @@ class MuseInterp {
 		// generated MuseScript sources (ta.source/sig/doc/names) — a plain
 		// object global like `Math`, so no new dispatch surface.
 		musescript.builtins.TaToolbelt.install(globals, harness);
+		// Namespaced host stdlib (`muse.orders` / `muse.fund` / …) — same plain
+		// object-of-callables shape as `ta` / `Math`.
+		musescript.builtins.MuseHost.install(globals, harness);
 		musescript.interp.MuseExtensions.installAll(globals, harness);
 		globals.set("Math", {
 			abs: Math.abs,
@@ -340,7 +343,14 @@ class MuseInterp {
 	function registerDecl(d:Decl):Void {
 		switch (d) {
 			case StrategyDecl(name, body):
+				// Last StrategyDecl wins — clear any hooks/prelude from an earlier
+				// strategy in the same program (orphaned muse.Strat bases, stitched libs).
 				strategyName = name;
+				onBarHandlers = [];
+				onPositionHandlers = [];
+				onTickHandlers = [];
+				onEventHandlers = [];
+				preludeStmts = [];
 				registerStrategyBody(body);
 
 			case ParamDecl(name, def, opts):

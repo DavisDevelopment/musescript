@@ -203,6 +203,7 @@ class MuseDebugSession {
 		// template/module passes (no-op without class-strategy roots); then TemplateExpand
 		// before ModuleExpand — the reverse can't see `use` inside templates.
 		prog = musescript.compile.ClassStrategyLower.expand(prog);
+		prog = musescript.compile.MuseHostLower.lower(prog);
 		prog = TemplateExpand.expand(prog);
 		prog = ModuleExpand.expand(prog);
 		return prog;

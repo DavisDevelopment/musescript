@@ -993,7 +993,10 @@ class StrategyParser {
 
 	function isBarField(n:String):Bool {
 		return n == "open" || n == "high" || n == "low" || n == "close" || n == "volume"
-			|| n == "time" || n == "bar_index" || n == "hl2" || n == "hlc3" || n == "ohlc4";
+			|| n == "time" || n == "bar_index" || n == "hl2" || n == "hlc3" || n == "ohlc4"
+			// Palette.AUX_FIELDS — offline PIT aux / fund columns on Bar.data
+			|| n == "revenue" || n == "pe" || n == "eps" || n == "sentiment"
+			|| n == "market_cap" || n == "book_value" || n == "dividend_yield";
 	}
 
 	/**
