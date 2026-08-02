@@ -38,6 +38,8 @@ import musescript.builtins.TradeBuiltins;
  * JS API (after `haxe build-runtime.hxml`):
  *   MuseRuntime.run(sourceString, barsArray, { tier, instrument, initialCash, seed })
  *   MuseRuntime.check(sourceString)   // structured diagnostics, no run
+ *   MuseRuntime.checkWidget(source, { kind }) / MuseRuntime.runWidget(source, bars, { kind })
+ *   MuseRuntime.pluginKinds()         // capability table JSON (widget/plugin gate)
  *   MuseRuntime.proveDeterminism(source, bars, { seed, engines })  // Initiative 4.1
  *   MuseRuntime.equityDigest(equity) / foundationDigest()           // proof helpers
  *
@@ -758,6 +760,69 @@ class MuseRuntime {
 		} catch (e:Dynamic) {
 			return err(Std.string(e));
 		}
+	}
+
+	/**
+	 * Plugin/widget capability table (kinds × builtin classes). Hosts should
+	 * call this instead of maintaining a regex denylist for order verbs.
+	 */
+	public static function pluginKinds():Dynamic {
+		return musescript.types.PluginCapabilities.tableJson();
+	}
+
+	/**
+	 * Parse + MuseHost-lower + audit `source` under plugin kind
+	 * (`opts.kind`, default `"panel"` — FlexLayout widgets need plot + log).
+	 * Never throws across the JS boundary.
+	 */
+	public static function checkWidget(source:String, ?opts:Dynamic):Dynamic {
+		try {
+			var kind = resolvePluginKind(opts);
+			var prog = parse(source);
+			var audit = musescript.types.PluginCapabilities.audit(prog, kind);
+			if (audit.ok == true)
+				return { ok: true, kind: kind.label(), violations: [] };
+			return {
+				ok: false,
+				kind: kind.label(),
+				error: Reflect.field(audit, "error"),
+				violations: Reflect.field(audit, "violations")
+			};
+		} catch (e:Dynamic) {
+			return err(Std.string(e));
+		}
+	}
+
+	/**
+	 * Run a widget / plugin program under a declared kind. Audits capabilities
+	 * first, then delegates to `run` with Truth Report skipped by default
+	 * (widgets are display compute, not honest-backtest entries).
+	 *
+	 * `opts.kind`: `"compute"` | `"chart"` | `"panel"` (default) | `"scanner"`.
+	 * Pass the same bars/params shape as `run`. Mobile should replace its
+	 * host-side order-verb regex with `checkWidget` / `runWidget`.
+	 */
+	public static function runWidget(source:String, ?bars:Array<Dynamic>, ?opts:Dynamic):Dynamic {
+		var gate = checkWidget(source, opts);
+		if (gate.ok != true) return gate;
+		var runOpts:Dynamic = {};
+		if (opts != null) {
+			for (k in Reflect.fields(opts))
+				Reflect.setField(runOpts, k, Reflect.field(opts, k));
+		}
+		if (!Reflect.hasField(runOpts, "skipTruthReport"))
+			Reflect.setField(runOpts, "skipTruthReport", true);
+		if (!Reflect.hasField(runOpts, "instrument"))
+			Reflect.setField(runOpts, "instrument", true);
+		var out = run(source, bars, runOpts);
+		if (out != null && Reflect.hasField(out, "ok") && out.ok == true)
+			Reflect.setField(out, "kind", Reflect.field(gate, "kind"));
+		return out;
+	}
+
+	static function resolvePluginKind(opts:Dynamic):musescript.types.PluginKind {
+		var raw = optStr(opts, "kind", "panel");
+		return musescript.types.PluginKind.parse(raw);
 	}
 
 	// --- internals ------------------------------------------------------------

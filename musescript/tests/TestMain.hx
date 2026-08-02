@@ -68,6 +68,7 @@ class TestMain {
 		runner.addCase(new TestRingBuffer());
 		runner.addCase(new TestTaToolbelt());
 		runner.addCase(new TestMuseHost());
+		runner.addCase(new TestPluginKinds());
 		runner.addCase(new TestIndicatorCallsiteState());
 		runner.addCase(new TestNativeIndicatorParity());
 		runner.addCase(new TestRegistryPalette());

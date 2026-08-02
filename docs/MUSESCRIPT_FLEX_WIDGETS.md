@@ -7,6 +7,7 @@ User-authored **panel** and **on-chart** widgets.
 - Design brainstorm: [`production_terminal_inspo/MUSESCRIPT_FLEX_WIDGETS.md`](../../../production_terminal_inspo/MUSESCRIPT_FLEX_WIDGETS.md)
 - **Live authoring guide:** `kalshai/mobile/src/terminal/widgets/MUSESCRIPT_WIDGETS.md`
 - Registry / runtime / New Widget UX: `kalshai/mobile/src/terminal/widgets/`
+- Session bridge (Charts ↔ Terminal): `kalshai/mobile/src/terminal/session/`
 - Examples:
   - [`../examples/widgets/hello_flex_widget.ms`](../examples/widgets/hello_flex_widget.ms) — standalone panel
   - [`../examples/widgets/hello_chart_widget.ms`](../examples/widgets/hello_chart_widget.ms) — on-chart SMA
@@ -19,9 +20,17 @@ User-authored **panel** and **on-chart** widgets.
 | `chart` | Advanced chart indicator menu (`MSW_<ID>`) only |
 | `both` | Panel + chart |
 
-## Marketplace
+## Surfaces
+
+`pre` · `table` · `sparkline` · `html-safe` (allowlist sanitizer) · `canvas` (host 2d plot series)
+
+## Marketplace + integrity v0
 
 Publishing reuses Decision 6 durable `/social/publish` with `artifactKind: "widget"`.
-Installing from the feed registers the manifest into the local widget library.
+Installing from the feed registers the manifest into the local widget library after **SHA-256 content-hash** verify (optional author signature fields are provenance until a trusted key directory exists). See trust model in `MUSESCRIPT_WIDGETS.md`.
+
+## Charts ↔ Terminal
+
+`terminalRunSession` publishes Studio/Terminal run snapshots; Charts `SessionBoundPanel` mounts the same Truth/Evolve/Ledger/… modules against that store. MuseRuntime is preloaded from the Charts widget palette / panel host.
 
 FlexLayout persistence key: `mederos.terminal.layout.v2` (bridges from `v1`).

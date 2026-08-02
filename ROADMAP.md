@@ -148,11 +148,15 @@ uses) — always-allowed read-only compute (bars/series/params/stats/ML/graph
 query), opt-in chart-kind (`plot`/`chart` commands), opt-in scanner-kind
 (universe/panel reads, no order verbs); order verbs (`long`/`short`/`flat`/
 `portfolio_*`) and anything not already in the language (network,
-filesystem, raw Reflect/eval) stay out entirely — start with just the two
-simplest kinds and only add scanner/order kinds if a real plugin author
-hits the wall. Not yet built — no consumer exists yet (nothing in the app
-loads/executes a "plugin" today), so building the capability table now would
-be exactly the KestrGraal mistake below: infrastructure ahead of any real use.
+filesystem, raw Reflect/eval) stay out entirely.
+
+**Status (2026-08-02):** engine capability table shipped —
+`PluginKind` / `PluginCapabilities`, `MuseRuntime.checkWidget` /
+`runWidget` / `pluginKinds()`, `MuseInterp.executePlugin`, docs in
+`docs/PLUGIN_KINDS.md`, tests in `TestPluginKinds`. Kinds: `compute`
+(default), `chart`, `panel`; `scanner` reserved (scan builtins still
+denied). Mobile still has a host regex gate — switch to `runWidget` after
+runtime rebuild + sync. No marketplace / scanner-kind consumer yet.
 
 ## 7. KestrGraal (Java/GraalVM WASM host) parity audit
 

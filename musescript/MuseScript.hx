@@ -98,6 +98,11 @@ class MuseScript {
 		return musescript.types.BuiltinSigs.toPaletteJson();
 	}
 
+	/** Plugin / widget kind × capability table (`docs/PLUGIN_KINDS.md`). */
+	public static function pluginKinds():Dynamic {
+		return musescript.types.PluginCapabilities.tableJson();
+	}
+
 	/** Palette JSON from every registered out-of-tree extension (e.g. Kestrel, when present),
 	 * one entry per package in registration order. Core names no specific package here. */
 	public static function extensionPalettes():Array<Dynamic> {

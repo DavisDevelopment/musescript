@@ -173,10 +173,10 @@ class MuseInterp {
 	 * stay runnable with no data wired up; every real caller (GeneRunner,
 	 * MuseRuntime, PlanRunner, …) attaches its feed first.
 	 *
-	 * Scope note (was a TODO): general non-strategy programs already execute
-	 * here — decls + arbitrary statements with no @on(bar) simply return the
-	 * last evaluated value. App-plugin support needs a capability surface
-	 * (what a plugin may touch) before it needs anything from this method.
+	 * General non-strategy programs already execute here — decls + arbitrary
+	 * statements with no @on(bar) simply return the last evaluated value.
+	 * Widget/plugin hosts that need capability gating should call
+	 * `executePlugin` (or `MuseRuntime.runWidget`) instead of this entry.
 	 */
 	public function executeProgram(prog:MuseProgram):Dynamic {
 		for (d in prog.decls)
@@ -189,6 +189,19 @@ class MuseInterp {
 			return harness.runBacktest(function(bar) execBar(bar), feed);
 		}
 		return lastValue;
+	}
+
+	/**
+	 * Run a program under a declared plugin *kind* (`compute` / `chart` /
+	 * `panel` / reserved `scanner`). Audits the AST against
+	 * `PluginCapabilities` and throws an honest error on the first violation
+	 * — order verbs and permanently denied surfaces never pass.
+	 */
+	public function executePlugin(prog:MuseProgram, kind:musescript.types.PluginKind):Dynamic {
+		var audit = musescript.types.PluginCapabilities.audit(prog, kind);
+		if (audit.ok != true)
+			throw Std.string(Reflect.field(audit, "error"));
+		return executeProgram(prog);
 	}
 
 	public function runBacktest(prog:MuseProgram, feed:BarFeed):Dynamic {
