@@ -24,10 +24,10 @@ User-authored **panel** and **on-chart** widgets.
 
 `pre` · `table` · `sparkline` · `html-safe` (allowlist sanitizer) · `canvas` (host 2d plot series)
 
-## Marketplace + integrity v0
+## Marketplace + integrity
 
 Publishing reuses Decision 6 durable `/social/publish` with `artifactKind: "widget"`.
-Installing from the feed registers the manifest into the local widget library after **SHA-256 content-hash** verify (optional author signature fields are provenance until a trusted key directory exists). See trust model in `MUSESCRIPT_WIDGETS.md`.
+Installing from the feed registers the manifest into the local widget library after **SHA-256 content-hash** verify plus optional **ed25519** signature verify against the package's embedded `publicKey` (invalid signatures refused; allowlist can mark `trusted`). See trust model in `MUSESCRIPT_WIDGETS.md`.
 
 ## Charts ↔ Terminal
 
