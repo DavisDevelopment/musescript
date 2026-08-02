@@ -1,22 +1,29 @@
-# Hello FlexLayout widget — MuseScript side (scaffold)
+# Hello FlexLayout widget — MuseScript panel (executable)
 #
-# Documents the *intent* of a user-authored terminal panel.
-# Instrument Terminal mounts it today as an honesty-gated `pre` stub
-# (FlexLayout component id `ms:hello`). A future runtime will execute
-# panel compute and push a typed view-model — not raw JSX.
-#
-# Manifest (host): kalshai/mobile/src/terminal/widgets/museScriptWidgets.js
-# Design: production_terminal_inspo/MUSESCRIPT_FLEX_WIDGETS.md
+# Host: kalshai/mobile/src/terminal/widgets/
+# Docs: mobile/src/terminal/widgets/MUSESCRIPT_WIDGETS.md
 #
 # @widget id=hello
-# @surface pre
-# @bindings symbol, truth.verdict
+# @surface table
+# @placement panel
+# @bindings symbol, bars, truth.verdict
 # @honestyGated true
 #
-# Pseudocode contract (not executed by the stub host):
-#   panel view:
-#     title: "Hello MuseScript"
-#     lines: symbol, verdict (or "—")
-#     gate: require truth.verdict before any metric paint
-#
-# Prefer declaring bindings + honesty gates over inventing confidence chrome.
+# Contract: plot() → series / last values; log("key=value") → table rows.
+
+{
+  @indicator("sma") function(len) {
+    if (bar_index + 1 < len) return null;
+    var s = 0.0; var i = 0;
+    while (i < len) { s = s + close[i]; i = i + 1; }
+    return s / len;
+  }
+  @strategy("hello_panel") @param("n", 20)
+  @on(bar) {
+    var m = sma(n);
+    plot(close, "close");
+    plot(m, "sma");
+    log("close=" + close);
+    if (m != null) { log("sma=" + m); }
+  }
+}
