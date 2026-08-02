@@ -8,10 +8,14 @@
 > `forecast-host-runtime`) and `tools/sync-mobile-views.ps1`.
 >
 > **Still open:**
-> - **Decision 6** — durable server persistence for social/economy (and related
->   `.data/*` / localStorage single-device limits). Not solved by Phase 7.
 > - **Decision 5** — on-device LLM analogue remains **deferred** (manual Autoresearch /
 >   assist mode; honest stubs).
+>
+> **Decision 6 (resolved):** dual Firestore + mederos-relay redundancy for social writes,
+> economy wallet, and cross-device paper broker — see `mederos-web/DURABLE_STORE.md`.
+> Relay `/durable/{health,mutate,query}` implemented in `kalshi-ai-advisor/relay/`.
+> **To go live:** deploy that relay revision, then set web `RELAY_DURABLE_ENABLED=1`
+> plus `FIREBASE_PROJECT_ID` + App Hosting/ADC (or `FIREBASE_SERVICE_ACCOUNT_JSON` locally).
 >
 > Sections below remain the original plan record (matrix, phase DoDs, decisions). Some
 > "verified facts" near the top describe the pre-implementation baseline and are kept
@@ -134,7 +138,7 @@ Effort: S ≤ 1 day · M = 2–4 days · L = 1–2+ weeks. Class: **A** portable
 | 31 | Minigames (duel) | `src/minigames/**` (catalog, duel, grader, vignettes) | `/app/games` or marketing wedge | vendor (self-contained + engine) | A | 6 | M |
 | 32 | Background runner (scheduled scans) | `src/kestrel/backgroundRunner.js` (@capacitor/background-runner) | — | **C**: closest analogues = relay-side scheduled jobs (recommended) or Service Worker + Periodic Background Sync (Chromium-only) | C | 7 | M–L |
 | 33 | Notifications / signal alerts | `src/kestrel/signalAlerts.js`, `notifications.js` | — | **C**: Web Push via service worker + relay push fan-out; in-tab toasts as fallback | C | 7 | M |
-| 34 | Paper broker | `src/kestrel/brokerLocal.js` | — | **C**: localStorage paper broker works as-is for single-device; durable/cross-device version lives on relay | C | 7 | M |
+| 34 | Paper broker | `src/kestrel/brokerLocal.js` | — | **C**: localStorage L1 + dual durable sync (`/api/broker/paper`); `durable:true` after sync | C | 7 | M |
 | 35 | Live feeds (Kraken/LAN) | `src/kestrel/kraken.js`, `equitiesFeed.js`, `dataserver.js` | — | **C/D-has**: crypto via Kraken public REST/WS from browser (CORS-open); equities/forex already flow via relay+mesh `/api/market/bars` | C | 7 | M |
 | 36 | Device mesh sync | `src/sync/deviceMesh.js`, `kestrelSync.js` | — | **C**: relay is the web's mesh; web already pairs to home machines through it (charts page "via mesh") | C | 7 | L |
 | 37 | On-device LLM | `src/kestrel/onDeviceLlm.js`, `llmClient.js`, `llmIteration.js` | — | **C**: WebLLM/WebGPU or server LLM via relay; defer (Decision 5) | C | 7 | L |
@@ -398,16 +402,27 @@ Proposed policy, per package, adopt-when-phase-needs-it:
 **Status:** still deferred. Phase 7 shipped without an LLM analogue; shims stay honest
 `ineligible`/`unavailable`, Autoresearch/Forge assist remain manual.
 
-### Decision 6 (flag, not a table) — Server persistence for social/economy
-`.data/*` filesystem JSON works in dev but is per-instance/ephemeral on Firebase App Hosting.
-Before Phase 4's write-heavy social/economy endpoints, choose: extend **mederos-relay**
-(Cloud Run, already the auth+market backend — natural home) vs adding a datastore to the Next
-app (Firestore, given the Firebase hosting). Leaderboard submissions share this risk today, so
-whatever is chosen should absorb `.data/leaderboard` too. Needs your call on where durable
-state should live; the phases above assume "relay grows the endpoints."
+### Decision 6 — Dual relay + Firestore redundancy (resolved)
 
-**Status:** still open (blocker for durable cross-device social/economy/wallet/paper-broker).
-Phases 4–7 shipped with honest local/ephemeral stores; do not pretend they are durable.
+**Choice:** BOTH. Durable mutations for social (publish/fork/rate), economy wallet, and
+cross-device paper broker **dual-write** to Firestore and mederos-relay.
+
+| Role | Backend | Policy |
+|------|---------|--------|
+| Read primary | **Firestore** | Structured docs; Admin SDK on App Hosting |
+| Write replica / auth home | **mederos-relay** | JWT identity already lives here; `/durable/*` replica when `RELAY_DURABLE_ENABLED=1` |
+| Conflict | Last-writer-wins by `updatedAt` + stable `mutationId` | Fail only if both backends reject; degraded-ok if one accepts |
+| Forbidden | Ephemeral `.data/` for social/economy/broker | Leaderboard JSONL remains separate until absorbed |
+
+Web implementation: `mederos-web/src/lib/durableStore/` + `DURABLE_STORE.md`. Product
+surfaces: `/api/social/*`, `/api/wallet`, `/api/economy/event`, `/api/broker/paper`.
+
+**Status:** decided + web dual layer shipped + relay `/durable/*` implemented
+(`kalshi-ai-advisor/relay/{routes_durable,durable_store}.py`, Firestore-backed,
+JWT auth, mutationId idempotency). **Deploy gate:** ship relay revision, then set
+`RELAY_DURABLE_ENABLED=1` on web with `FIREBASE_PROJECT_ID` + credentials (see
+`mederos-web/DURABLE_STORE.md`). Until then web degrades to Firestore-only /
+memory-fallback.
 
 ---
 
