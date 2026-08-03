@@ -189,7 +189,7 @@ Clones live under `C:\Users\epiki\Documents\Development\kalshai\inspiration_repo
 | Dual-lane scrub timeline | MiroFish **B** (AGPL) | feed ↔ fan scrub | P0 | **No** |
 | Fail-fast + failed-wins poll | MiroFish **G/H** (AGPL) | simulate status | P0 reliability | **No** |
 | Fabricated-tool strip | MiroFish **J** (AGPL) | Muse Light / Truth | P0 honesty | **No** |
-| Multi-scenario overlay + error bands | **spkmc** (MIT) | Causal Sim fan bands | **P0 viz** | Ideas OK; rewrite |
+| Multi-scenario overlay + error bands | **spkmc** (MIT) | Causal Sim fan bands | **P0 viz** | Ideas OK; rewrite — **landed** Desktop World (`jormungandrUncertaintyBands.js` + sim dock spark + map halo; reimplemented MIT concept) |
 | Scenario A/B comparison + cascade depth/width | **Prophet** (MIT) | fan compare / contagion metrics | **P0 analytics UX** | Ideas OK |
 | Timeline sparkline + emergent event pins | **Prophet** TimelinePanel (MIT) | `tDays` scrub + event markers | P1 | Ideas OK |
 | Live WebSocket sim store | **Prophet** `useSimulationSocket` (MIT) | Desktop poll → push optional | P2 | Ideas OK |

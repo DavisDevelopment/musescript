@@ -11,7 +11,7 @@ Schema freeze for P0 Desktop bridge. Built client-side from a ran `/world/simula
 | `runId` | Optional `/world/simulate/runs/{id}` |
 | `eventIds` / `simSeeds` | Shock provenance |
 | `seriesMeta` | horizon_days, n_steps, dt, fields |
-| `fan.tDays` / `fan.nodes[]` | Activation means (+ optional p50/p90/pExceed), length-aligned |
+| `fan.tDays` / `fan.nodes[]` | Activation means (+ optional p10/p50/p90/pExceed), length-aligned |
 | `controls` | seed, nRuns, counterfactual, remediation, magnitudeMultiplier |
 | `generatedAt` | ISO-8601 |
 
@@ -57,5 +57,6 @@ Muse runs **Desktop/browser-only** via `museRuntimeClient` / `runUnderWorld` / `
 - Strategy Studio binds `tapeMode: "world"`, re-runs with the same seed / short-tape opts, and shows a **digests match** chip when Lab receipts equal World.
 - Claim **reliability curve** (predicted p vs observed) lives on the World Muse/Truth workbench — never a P&L leaderboard tile.
 - Desktop layout triad: **Map · Split · Muse** (MiroFish interaction pattern only — no AGPL code).
+- **Uncertainty bands (spkmc MIT concept, reimplemented):** Causal Sim dock spark shows p10–p90 (+ p50/mean) over scrubbed T; optional dual baseline/CF overlay; choropleth confidence halo scales with band width. Honest empty when series or quantiles missing — never invent envelopes from peaks.
 
 See `JORMUNGANDR_MUSESCRIPT_INTEGRATION_PLAN.md`.
