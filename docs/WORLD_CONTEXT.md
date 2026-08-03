@@ -38,8 +38,16 @@ Peak-only runs (no `nodes[].series`) **cannot** build a WorldContext — no fake
 - Pre-commit slider scores P(real edge) vs Truth verdict after Light Muse.
 - Ledger / leaderboard entries carry `scenarioKey`; cross-scenario rank is refused.
 
+## Evolution under regimes (P2)
+
+- `evolveUnderWorld` / `evolveUnderRegimePacks` — HonestOptimize on a **train** WorldContext, then an embargoed **holdout** scenario gate (`gateChampionOnHoldout`). Train-only winners → honest `holdout_failed` / NO-GO.
+- Regime library (`worldRegimePacks.js`): **conflict** · **outbreak** · **fx** · disaster — feed categories → mock contexts.
+- Champions stamp `repro.world` (`schemaVersion: 1`): train/holdout scenarioKeys, pack ids, Field-N `nTrials`, alignment.
+- Search metric may guide the grid, but **`finalEquity` is coerced to sharpe** — Truth gates unchanged; never P&L vanity ranks.
+- Wasm evo search deferred (HonestOptimize is js/interp); D1 stays Desktop/browser-only (no dual worker / no strategy upload). `POST /world/muse/context` still optional / deferred.
+
 ## Execution (D1)
 
-Muse runs **Desktop/browser-only** via `museRuntimeClient` / `runUnderWorld` (+ `forecastFieldsUnderWorld` adapter onto ForecastHost `regime|auction|lattice`). Strategy source never uploads to `/world/*`.
+Muse runs **Desktop/browser-only** via `museRuntimeClient` / `runUnderWorld` / `evolveUnderWorld` (+ `forecastFieldsUnderWorld` adapter onto ForecastHost `regime|auction|lattice`). Strategy source never uploads to `/world/*`.
 
 See `JORMUNGANDR_MUSESCRIPT_INTEGRATION_PLAN.md`.

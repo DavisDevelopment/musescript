@@ -1,6 +1,6 @@
 # Jormungandr ↔ MuseScript Integration Plan
 
-*Status: P1 landed (2026-08-03). D1 locked = Desktop/browser-only Muse execution.*
+*Status: P2 landed (2026-08-03). D1 locked = Desktop/browser-only Muse execution.*
 *Home: muse-script (brain). Body lives in `kalshi-ai-advisor/python/worldfeed` + Desktop `mobile/src/world` + muse_fincog Causal Sim. Cross-link: `kalshi-ai-advisor/python/WORLD_DATA_PLATFORM.md` §11.*
 
 ---
@@ -248,17 +248,19 @@ Rank **within scenario field** first; cross-scenario vanity ranks are forbidden.
 
 | Work | Notes |
 | --- | --- |
-| `evolveUnderWorld` multi-context holdout | At least 1 train scenario + 1 embargoed scenario |
-| Regime library: conflict / outbreak / fx-shock seed packs | From feed categories |
-| Wasm path optional for hot `on_bar` during long evo | Client or worker |
-| Stamp `repro.world` on every champion | Schema versioned |
-| Optional `POST /world/muse/context` if Lab/web needs server-built tapes | Still no strategy upload |
+| `evolveUnderWorld` multi-context holdout | At least 1 train scenario + 1 embargoed scenario ✓ |
+| Regime library: conflict / outbreak / fx-shock seed packs | From feed categories ✓ (`worldRegimePacks.js`) |
+| Wasm path optional for hot `on_bar` during long evo | Deferred — HonestOptimize js/interp; D1 no dual worker |
+| Stamp `repro.world` on every champion | Schema versioned ✓ |
+| Optional `POST /world/muse/context` if Lab/web needs server-built tapes | Deferred — D1 client builders suffice |
 
 **DoD**
 
-- [ ] Champion that wins only on train scenario fails holdout scenario gate (honest NO-GO).
-- [ ] Field-N / trials session still deflate (no World special-case cheating).
-- [ ] Evo never ranks on finalEquity alone — Truth gates unchanged.
+- [x] Champion that wins only on train scenario fails holdout scenario gate (honest NO-GO).
+- [x] Field-N / trials session still deflate (no World special-case cheating).
+- [x] Evo never ranks on finalEquity alone — Truth gates unchanged.
+
+**Landed (2026-08-03):** Desktop `evolveUnderWorld` + regime packs (conflict/outbreak/fx), holdout gate, `repro.world` stamp, WorldSimPanel **Evolve under world**, selftest `worldRegimeEvo.selftest.js`, Playwright evo path. Wasm evo + `/world/muse/context` deferred to P3 / revisiting D1-C.
 
 ### P3 — Dual-surface truth (map + lab)
 
@@ -283,8 +285,8 @@ Rank **within scenario field** first; cross-scenario vanity ranks are forbidden.
 
 1. **Select shock(s)** on the map or feed (existing).
 2. **Propagate** — existing Sim panel (intensity, n_runs, remediation, counterfactual).
-3. **Brain awaken** — new primary control: **Light Muse** / **Run under world**.
-   - Status row: `propagating…` → `ran` → `muse: GO|CAUTION|NO-GO`.
+3. **Brain awaken** — primary controls: **Light Muse** / **Evolve under world**.
+   - Status row: `propagating…` → `ran` → `muse: GO|CAUTION|NO-GO` (evo adds holdout NO-GO chip).
 4. **Scrub shared clock** — moving the contagion scrubber updates Muse aux “now”; optional live re-signal.
 5. **Overlay legend** — “Jormungandr · Muse”: signal heat, forecast cone opacity = p, click node → claim + Brier if resolved.
 6. **Open in Lab** — ships the `WorldContext` + bars + source binding into Terminal/Studio session (P3; P0 can copy scenarioKey only).
@@ -320,6 +322,8 @@ Tone: merciless honesty. If bridge skipped, Muse button disabled with the humani
 
 **Resolved (P0):** **A — Desktop/browser only.**
 
+**P2 note:** Client evo remains on Desktop/browser (`evolveUnderWorld`). Dual worker (C) and Wasm HonestOptimize still deferred — P2 does not wall the client enough to justify a second pipe.
+
 ### D2 — Time alignment of market bars ↔ activation(t)
 
 | Option | Pros | Cons |
@@ -352,30 +356,32 @@ Tone: merciless honesty. If bridge skipped, Muse button disabled with the humani
 
 ---
 
-## Implementation sketch (P1 landed on Desktop)
+## Implementation sketch (P2 landed on Desktop)
 
 ```
 muse-script/
-  JORMUNGANDR_MUSESCRIPT_INTEGRATION_PLAN.md     ✓ P1 DoD
+  JORMUNGANDR_MUSESCRIPT_INTEGRATION_PLAN.md     ✓ P2 DoD
   examples/world/shock_gated_trend.ms            ✓
-  docs/WORLD_CONTEXT.md                          ✓ (+ P1 tape / calibration notes)
+  examples/world/shock_gated_trend_evolve.ms     ✓ P2
+  docs/WORLD_CONTEXT.md                          ✓ (+ P2 evo / holdout / repro.world)
 
 mobile/src/world/
   worldContext.js                                ✓
   worldTapeBuilder.js                            ✓
   worldMarketTape.js                             ✓ SPY calendar + degrade badge
   worldCalibration.js                            ✓ claim Brier + precommit score
-  worldMuseBridge.js                             ✓ run / forecast / prove / ledger
+  worldRegimePacks.js                            ✓ conflict / outbreak / fx (+ disaster)
+  worldMuseBridge.js                             ✓ run / forecast / evolveUnderWorld / repro.world
   jormungandrMuseOverlay.js                      ✓ signals + forecasts layers
-  WorldSimPanel.jsx                              ✓ Light Muse + Brier chips + precommit
-  WorldView.jsx                                  ✓ muse-signals + muse-forecasts
+  WorldSimPanel.jsx                              ✓ Light Muse + Evolve under world + Brier
+  WorldView.jsx                                  ✓ muse-signals + muse-forecasts + evo
 
 mobile/src/lab/
   honestLedger.js                                ✓ scenarioKey / worldRunId
   honestLeaderboard.js                           ✓ scenario field filter; cross-rank refused
 
 kalshi-ai-advisor/python/worldfeed/
-  routes.py                                      (POST /world/muse/context → P2 optional)
+  routes.py                                      (POST /world/muse/context → P3 optional)
   WORLD_DATA_PLATFORM.md                         (one-paragraph cross-link)
 
 muse_fincog/docs/WORLD_SIM_BRIDGE.md             (cross-link only — fans remain source of truth)
