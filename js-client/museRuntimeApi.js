@@ -136,5 +136,28 @@ export function createMuseRuntimeApi(MuseRuntime, deps = {}) {
     equityDigest,
     evaluateLeaderboardEntry,
     rankLeaderboard,
+    onEvent: (type, handler) =>
+      runtimeReady() && typeof MuseRuntime.on === "function" ? MuseRuntime.on(type, handler) : null,
+    offEvent: (type, handler) =>
+      runtimeReady() && typeof MuseRuntime.off === "function" ? MuseRuntime.off(type, handler) : false,
+    onceEvent: (type, handler) =>
+      runtimeReady() && typeof MuseRuntime.once === "function" ? MuseRuntime.once(type, handler) : null,
+    pumpHostEvent: (a, b) => {
+      if (!runtimeReady() || typeof MuseRuntime.pumpHostEvent !== "function") {
+        return { ok: false, error: "muse runtime pumpHostEvent API not loaded — rebuild muse-runtime.js" };
+      }
+      return b !== undefined ? MuseRuntime.pumpHostEvent(a, b) : MuseRuntime.pumpHostEvent(a);
+    },
+    eventsCatalog: () =>
+      runtimeReady() && typeof MuseRuntime.eventsCatalog === "function"
+        ? MuseRuntime.eventsCatalog()
+        : { ok: false, error: "muse runtime eventsCatalog API not loaded — rebuild muse-runtime.js" },
+    eventsClear: () => {
+      if (runtimeReady() && typeof MuseRuntime.eventsClear === "function") MuseRuntime.eventsClear();
+    },
+    eventsSetMode: (mode) =>
+      runtimeReady() && typeof MuseRuntime.eventsSetMode === "function"
+        ? MuseRuntime.eventsSetMode(mode)
+        : mode,
   };
 }

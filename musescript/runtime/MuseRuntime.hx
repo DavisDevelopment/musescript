@@ -40,8 +40,10 @@ import musescript.builtins.TradeBuiltins;
  *   MuseRuntime.check(sourceString)   // structured diagnostics, no run
  *   MuseRuntime.checkWidget(source, { kind }) / MuseRuntime.runWidget(source, bars, { kind })
  *   MuseRuntime.pluginKinds()         // capability table JSON (widget/plugin gate)
+ *   MuseRuntime.resolveIoGrants(opts) / requireIoGrant(op, opts)  // IO grant stubs (default null)
  *   MuseRuntime.proveDeterminism(source, bars, { seed, engines })  // Initiative 4.1
  *   MuseRuntime.equityDigest(equity) / foundationDigest()           // proof helpers
+ *   MuseRuntime.on/off/once/emit/pumpHostEvent / eventsCatalog     // event bus (MuseEvents)
  *
  * Successful runs attach `repro: { schemaVersion, seed, bootSeed, profile, backend }`
  * plus `equityDigest` / `fillDigest` when instrumented (Initiative 4.2 seed stamp).
@@ -81,6 +83,9 @@ class MuseRuntime {
 	 * or { ok:false, error } on failure (never throws across the JS boundary).
 	 */
 	public static function run(source:String, ?bars:Array<Dynamic>, ?opts:Dynamic):Dynamic {
+		var emitLc = optBool(opts, "emitLifecycle", true);
+		var runId = optStr(opts, "runId", null);
+		if (emitLc) lifecycleEmit("lifecycle.start", { runId: runId, kind: "run" });
 		try {
 			var tier = optStr(opts, "tier", "js");
 			var instrument = optBool(opts, "instrument", true);
@@ -117,13 +122,18 @@ class MuseRuntime {
 				// no wabt.js dependency. Falls back to an honest error for
 				// strategies outside the WASM on_bar subset (same as before).
 				var emittedWat = musescript.compile.StrategyWasmBackend.emitOnBar(prog);
-				if (emittedWat == null)
-					return err('strategy is outside the WASM on_bar subset; use tier "js" or "interp"');
+				if (emittedWat == null) {
+					var miss = err('strategy is outside the WASM on_bar subset; use tier "js" or "interp"');
+					if (emitLc) lifecycleEmit("lifecycle.error", { runId: runId, error: Reflect.field(miss, "error") });
+					return miss;
+				}
 				var wasmBytes:Dynamic;
 				try {
 					wasmBytes = musescript.compile.WatAssembler.assemble(emittedWat.wat).getData();
 				} catch (ex:Dynamic) {
-					return err('wasm assembly failed: ${Std.string(ex)}');
+					var werr = err('wasm assembly failed: ${Std.string(ex)}');
+					if (emitLc) lifecycleEmit("lifecycle.error", { runId: runId, error: Reflect.field(werr, "error") });
+					return werr;
 				}
 				var seed = new MuseInterp(harness);
 				for (d in prog.decls)
@@ -158,10 +168,13 @@ class MuseRuntime {
 					kind: "single", source: source, bars: barsForOos, bySym: null
 				});
 			}
+			if (emitLc) lifecycleEmit("lifecycle.stop", { runId: runId, ok: true, backend: backend, bars: feed.length() });
 			return out;
 		} 
 		catch (e:Dynamic) {
-			return err(Std.string(e));
+			var msg = Std.string(e);
+			if (emitLc) lifecycleEmit("lifecycle.error", { runId: runId, error: msg });
+			return err(msg);
 		}
 	}
 
@@ -765,10 +778,75 @@ class MuseRuntime {
 			var strict = optBool(opts, "strict", false);
 			var checker = new MuseChecker({ strict: strict });
 			var diags = checker.checkEx(prog);
-			return { ok: true, diagnostics: [for (d in diags) musescript.checker.Diagnostics.toJson(d)] };
+			var json = [for (d in diags) musescript.checker.Diagnostics.toJson(d)];
+			if (optBool(opts, "emitDiagnostics", true))
+				MuseEvents.emit({
+					type: "meta.diagnostics",
+					diagnostics: json,
+					source: "runtime.check"
+				});
+			return { ok: true, diagnostics: json };
 		} catch (e:Dynamic) {
 			return err(Std.string(e));
 		}
+	}
+
+	// --- Event bus facades (see MuseEvents / docs/MUSE_EVENTS.md) --------------
+
+	/** Subscribe to a bus event type (`order.fill`, `order.*`, `*`, …). */
+	public static function on(type:String, handler:Dynamic):Dynamic {
+		return MuseEvents.on(type, handler);
+	}
+
+	/** Remove a previously registered handler. */
+	public static function off(type:String, handler:Dynamic):Bool {
+		return MuseEvents.off(type, handler);
+	}
+
+	/** Subscribe for a single delivery. */
+	public static function once(type:String, handler:Dynamic):Dynamic {
+		return MuseEvents.once(type, handler);
+	}
+
+	/** Emit a fully formed envelope `{ type, ... }`. */
+	public static function emit(event:Dynamic):Dynamic {
+		return MuseEvents.emit(event);
+	}
+
+	/**
+	 * Host bridge — Lab / broker / UI / world pump events into the bus.
+	 * `pumpHostEvent({ type, ... })` or `pumpHostEvent(type, payload)`.
+	 */
+	public static function pumpHostEvent(a:Dynamic, ?b:Dynamic):Dynamic {
+		return MuseEvents.pumpHostEvent(a, b);
+	}
+
+	/** Event catalog JSON (`musescript.events/1`). */
+	public static function eventsCatalog():Dynamic {
+		return MuseEvents.catalog();
+	}
+
+	/** Clear all listeners + history (Lab session reset). */
+	public static function eventsClear():Void {
+		MuseEvents.clear();
+	}
+
+	/** `"live"` (default) | `"truth"` — truth refuses non-det host/ui emits. */
+	public static function eventsSetMode(mode:String):String {
+		return MuseEvents.setMode(mode);
+	}
+
+	public static function eventsGetMode():String {
+		return MuseEvents.getMode();
+	}
+
+	static function lifecycleEmit(type:String, fields:Dynamic):Void {
+		try {
+			var e:Dynamic = fields != null ? fields : {};
+			Reflect.setField(e, "type", type);
+			Reflect.setField(e, "source", "runtime");
+			MuseEvents.emit(e);
+		} catch (_:Dynamic) {}
 	}
 
 	/**
@@ -777,6 +855,25 @@ class MuseRuntime {
 	 */
 	public static function pluginKinds():Dynamic {
 		return musescript.types.PluginCapabilities.tableJson();
+	}
+
+	/**
+	 * Resolve host IO grants from run opts. Default **null** — gated
+	 * `fs_*` / `http_*` / `db_*` must throw {@link musescript.io.IoDenied}.
+	 * Real FsGrant / NetGrant enforcement lands with M1+.
+	 */
+	public static function resolveIoGrants(?opts:Dynamic):Null<musescript.io.IoGrant> {
+		if (opts == null || !Reflect.hasField(opts, "grants")) return null;
+		return Reflect.field(opts, "grants");
+	}
+
+	/**
+	 * Stub gate for future `muse.fs` / `muse.http` / `muse.db`. Throws
+	 * {@link musescript.io.IoDenied} when grants are absent (the fitness /
+	 * offline-backtest default).
+	 */
+	public static function requireIoGrant(op:String, ?opts:Dynamic):musescript.io.IoGrant {
+		return musescript.io.IoDenied.require(op, resolveIoGrants(opts));
 	}
 
 	/**
