@@ -61,6 +61,7 @@ class TreeSurgery {
 				path.push(StepA); collectBool(a, path, out, armed); path.pop();
 			case BHole(inner):
 				path.push(StepA); collectBool(inner, path, out, true); path.pop();
+			case BFeature(_): // opaque leaf: recorded as a whole-leaf site above, no children to recurse
 		}
 	}
 
@@ -78,6 +79,7 @@ class TreeSurgery {
 				path.push(StepA); collectScalarInBool(a, path, out, armed); path.pop();
 			case BHole(inner):
 				path.push(StepA); collectScalarInBool(inner, path, out, true); path.pop();
+			case BFeature(_): // opaque leaf: no scalar children
 		}
 	}
 
@@ -98,6 +100,7 @@ class TreeSurgery {
 				path.push(StepA); collectSeriesInBool(a, path, out, armed); path.pop();
 			case BHole(inner):
 				path.push(StepA); collectSeriesInBool(inner, path, out, true); path.pop();
+			case BFeature(_): // opaque leaf: no series children
 		}
 	}
 
@@ -171,7 +174,7 @@ class TreeSurgery {
 				getBoolAt(a, path, idx + 1);
 			case BHole(inner):
 				getBoolAt(inner, path, idx + 1);
-			case BCross(_, _, _) | BCmp(_, _, _) | BTrend(_, _, _):
+			case BCross(_, _, _) | BCmp(_, _, _) | BTrend(_, _, _) | BFeature(_):
 				throw "TreeSurgery.getBool: path ran past a leaf-of-bool-kind node";
 		};
 	}
@@ -180,7 +183,7 @@ class TreeSurgery {
 		if (idx >= path.length) return repl;
 		var step = path[idx];
 		return switch (n) {
-			case BCross(_, _, _) | BCmp(_, _, _) | BTrend(_, _, _):
+			case BCross(_, _, _) | BCmp(_, _, _) | BTrend(_, _, _) | BFeature(_):
 				throw "TreeSurgery.replaceBoolWithBool: path ran past a leaf-of-bool-kind node";
 			case BAnd(a, b):
 				step == StepA ? BAnd(replaceBoolWithBoolAt(a, path, repl, idx + 1), b) : BAnd(a, replaceBoolWithBoolAt(b, path, repl, idx + 1));
@@ -199,7 +202,7 @@ class TreeSurgery {
 	static function replaceBoolWithScalarAt(n:BoolNode, path:GPath, repl:ScalarNode, idx:Int):BoolNode {
 		var step = path[idx];
 		return switch (n) {
-			case BCross(_, _, _) | BTrend(_, _, _):
+			case BCross(_, _, _) | BTrend(_, _, _) | BFeature(_):
 				throw "TreeSurgery.replaceBoolWithScalar: no scalar child here";
 			case BCmp(op, a, b):
 				step == StepA ? BCmp(op, replaceScalarWithScalarAt(a, path, repl, idx + 1), b) : BCmp(op, a, replaceScalarWithScalarAt(b, path, repl, idx + 1));
@@ -234,6 +237,8 @@ class TreeSurgery {
 				BNot(replaceBoolWithSeriesAt(a, path, repl, idx + 1));
 			case BHole(inner):
 				BHole(replaceBoolWithSeriesAt(inner, path, repl, idx + 1));
+			case BFeature(_):
+				throw "TreeSurgery.replaceBoolWithSeries: no series child here";
 		};
 	}
 

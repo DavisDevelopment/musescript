@@ -9,6 +9,7 @@ import musescript.ast.OrderKind;
 import musescript.parse.MuseParser;
 import musescript.compile.TemplateExpand;
 import musescript.compile.ModuleExpand;
+import musescript.compile.MusePrinter;
 
 /**
  * Reverse-compiles REAL MuseScript strategy source (the tournament corpus, or any hand-written
@@ -27,10 +28,17 @@ import musescript.compile.ModuleExpand;
  * strategy composed from named boolean templates translates exactly as if it had been written
  * inline.
  *
- * `translateProgram` returns `null` (not a best-effort guess) the moment it hits something
- * outside that grammar -- a genome silently misrepresenting what the source strategy actually
- * does would be worse than not seeding from it at all. Callers get an honest per-file
- * success/skip tally, never a silently-wrong translation.
+ * FAIL-OPEN (not fail-closed): a boolean sub-expression the closed grammar can't STRUCTURE is no
+ * longer thrown away -- `translateBool` carries it as an opaque `BFeature` leaf holding the verbatim,
+ * fully-inlined source (see `opaqueBool` / `BoolNode.BFeature`). This is faithful, not a guess: the
+ * emitted source runs exactly as written (the strategy parser + every fitness backend accept it;
+ * only THIS reverse-translator ever refused it), so a seeded strategy trades its real logic and
+ * evolution varies the structured scaffolding around the frozen leaf. Structured shapes still
+ * translate to structured, mutable nodes exactly as before -- opaque is strictly the last resort,
+ * so no previously-structured genome changes. `translateProgram` still returns `null` only for a
+ * genuine STRUCTURAL mismatch -- no strategy body, or a guard whose body isn't pure order calls
+ * (multi-statement bodies are Fix-2 territory) -- never for an unrecognized expression. Callers get
+ * an honest per-file success/skip tally, and a translation is faithful-or-absent, never silently wrong.
  */
 typedef SeedResult = {
 	var genomes:Array<StrategyGenome>;
@@ -299,6 +307,57 @@ class CorpusSeed {
 		};
 	}
 
+	/** Shared, stateless printer used only to render opaque fail-open leaves back to source text. */
+	static var opaquePrinter = new MusePrinter();
+
+	/**
+	 * FULLY inline every prelude binding into `e`, recursively, so the result is a self-contained
+	 * expression that references only price fields + builtins -- never a bound local like `m` or
+	 * `slow` (the genome carries no prelude, so a `KFeature`/`BFeature` leaf that mentioned one would
+	 * reference an undefined name at runtime). `resolve()` only substitutes a bare top-level ident;
+	 * this walks the whole tree. Unhandled node shapes pass through untouched -- worst case a
+	 * binding stays un-inlined and the leaf fails closed at Fitness.evaluate's try/catch (scored,
+	 * not crashed), the same net every other unsupported shape already relies on.
+	 */
+	static function deepInline(e:Expr, bindings:Map<String, Expr>):Expr {
+		return switch (e) {
+			case EIdent(n) if (bindings.exists(n) && !isPriceField(n)): deepInline(bindings.get(n), bindings);
+			case EParent(inner): EParent(deepInline(inner, bindings));
+			case EBinop(op, a, b): EBinop(op, deepInline(a, bindings), deepInline(b, bindings));
+			case EUnop(op, pre, x): EUnop(op, pre, deepInline(x, bindings));
+			case ECall(f, args): ECall(deepInline(f, bindings), [for (a in args) deepInline(a, bindings)]);
+			case EField(o, f): EField(deepInline(o, bindings), f);
+			case ELookback(s, n): ELookback(deepInline(s, bindings), deepInline(n, bindings));
+			case ETernary(c, a, b): ETernary(deepInline(c, bindings), deepInline(a, bindings), deepInline(b, bindings));
+			case EArray(a, i): EArray(deepInline(a, bindings), deepInline(i, bindings));
+			case EArrayDecl(vs): EArrayDecl([for (v in vs) deepInline(v, bindings)]);
+			case EObject(fs): EObject([for (fld in fs) {name: fld.name, e: deepInline(fld.e, bindings)}]);
+			case EIf(c, t, el): EIf(deepInline(c, bindings), deepInline(t, bindings), el == null ? null : deepInline(el, bindings));
+			default: e;
+		};
+	}
+
+	/**
+	 * Fail-open fallback: render an otherwise-untranslatable boolean sub-expression as a verbatim,
+	 * fully-inlined `BFeature` leaf (see BoolNode.BFeature). This is faithful, NOT a guess -- the
+	 * emitted source runs exactly as written (proven: the strategy parser + every fitness backend
+	 * accept these; only this reverse-translator ever refused them). Evolution treats the leaf as a
+	 * frozen boundary and varies the structured scaffolding around it. Used for shapes the closed
+	 * grammar can't structure: a multi-output field fed to a trend builtin (`rising(m.hist, 3)`),
+	 * the 3-arg `falling(x, n, minBars)` form, or anything else novel.
+	 */
+	static function opaqueBool(e:Expr, bindings:Map<String, Expr>):BoolNode {
+		return BFeature(opaquePrinter.printExpr(deepInline(e, bindings)));
+	}
+
+	/** `translateBool` but total: an untranslatable sub-expression becomes an opaque `BFeature`
+	 * leaf instead of failing the whole strategy. Structured children stay structured (and mutable);
+	 * only the irreducible part is frozen. */
+	static function translateBoolOpen(e:Expr, bindings:Map<String, Expr>, allowed:Map<String, Bool>):BoolNode {
+		var b = translateBool(e, bindings, allowed);
+		return b != null ? b : opaqueBool(e, bindings);
+	}
+
 	public static function translateBool(e0:Expr, bindings:Map<String, Expr>, allowed:Map<String, Bool>):Null<BoolNode> {
 		var e = resolve(e0, bindings);
 		return switch (e) {
@@ -315,33 +374,37 @@ class CorpusSeed {
 			// A blank bool hole starts from a neutral always-true inner; the fill loop replaces it.
 			case EMeta("__hole", _, _):
 				BHole(BCmp(">", KConst(1.0), KConst(0.0)));
+			// Compositional arms fail OPEN per-child: a translatable side stays structured (and
+			// mutable), an untranslatable side becomes a frozen opaque leaf -- so a condition like
+			// `(fast>slow || rising(m.hist,3))` keeps the `fast>slow` BCmp and only opaque-wraps the
+			// multi-output `rising(m.hist,3)`, preserving maximum evolvability.
 			case EBinop("&&", a, b):
-				var ta = translateBool(a, bindings, allowed), tb = translateBool(b, bindings, allowed);
-				(ta != null && tb != null) ? BAnd(ta, tb) : null;
+				BAnd(translateBoolOpen(a, bindings, allowed), translateBoolOpen(b, bindings, allowed));
 			case EBinop("||", a, b):
-				var ta = translateBool(a, bindings, allowed), tb = translateBool(b, bindings, allowed);
-				(ta != null && tb != null) ? BOr(ta, tb) : null;
+				BOr(translateBoolOpen(a, bindings, allowed), translateBoolOpen(b, bindings, allowed));
 			case EUnop("!", true, a):
-				var ta = translateBool(a, bindings, allowed);
-				ta != null ? BNot(ta) : null;
+				BNot(translateBoolOpen(a, bindings, allowed));
 			case EParent(inner):
 				translateBool(inner, bindings, allowed);
 			case ECall(EIdent("crossover"), [a, b]):
 				var sa = translateSeries(a, bindings, allowed), sb = translateSeries(b, bindings, allowed);
-				(sa != null && sb != null) ? BCross("over", sa, sb) : null;
+				(sa != null && sb != null) ? BCross("over", sa, sb) : opaqueBool(e, bindings);
 			case ECall(EIdent("crossunder"), [a, b]):
 				var sa = translateSeries(a, bindings, allowed), sb = translateSeries(b, bindings, allowed);
-				(sa != null && sb != null) ? BCross("under", sa, sb) : null;
+				(sa != null && sb != null) ? BCross("under", sa, sb) : opaqueBool(e, bindings);
 			case ECall(EIdent("rising"), [a, n]):
 				var sa = translateSeries(a, bindings, allowed), w = constInt(n);
-				(sa != null && w != null) ? BTrend("over", sa, w) : null;
+				(sa != null && w != null) ? BTrend("over", sa, w) : opaqueBool(e, bindings);
 			case ECall(EIdent("falling"), [a, n]):
 				var sa = translateSeries(a, bindings, allowed), w = constInt(n);
-				(sa != null && w != null) ? BTrend("under", sa, w) : null;
+				(sa != null && w != null) ? BTrend("under", sa, w) : opaqueBool(e, bindings);
 			case EBinop(op, a, b) if (op == ">" || op == "<" || op == ">=" || op == "<="):
 				var ka = translateScalar(a, bindings, allowed), kb = translateScalar(b, bindings, allowed);
-				(ka != null && kb != null) ? BCmp(op, ka, kb) : null;
-			default: null;
+				(ka != null && kb != null) ? BCmp(op, ka, kb) : opaqueBool(e, bindings);
+			// Everything else (a multi-output trend like `rising(m.hist,3)`, the 3-arg
+			// `falling(x,n,minBars)` form, any novel builtin) is faithfully carried as an opaque
+			// leaf rather than failing the whole strategy -- see opaqueBool / BoolNode.BFeature.
+			default: opaqueBool(e, bindings);
 		};
 	}
 

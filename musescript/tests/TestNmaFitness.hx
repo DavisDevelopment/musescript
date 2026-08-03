@@ -231,6 +231,7 @@ class TestNmaFitness extends Test {
 			case BTrend(_, s, _): seriesHasFeature(s);
 			case BAnd(a, b) | BOr(a, b): boolHasFeature(a) || boolHasFeature(b);
 			case BNot(a) | BHole(a): boolHasFeature(a);
+			case BFeature(_): true; // opaque leaf IS a feature (nma-unsupported, like KFeature)
 		};
 	}
 

@@ -35,7 +35,8 @@ class GenomeFeatures {
 	static function boolCoupled(n:BoolNode):Bool {
 		return switch (n) {
 			// BCross/BTrend take series, and no series can be coupled — hence the constant false.
-			case BCross(_, _, _) | BTrend(_, _, _): false;
+			// BFeature is an opaque leaf: conservatively not treated as coupled here.
+			case BCross(_, _, _) | BTrend(_, _, _) | BFeature(_): false;
 			case BCmp(_, a, b): scalarCoupled(a) || scalarCoupled(b);
 			case BAnd(a, b) | BOr(a, b): boolCoupled(a) || boolCoupled(b);
 			case BNot(a) | BHole(a): boolCoupled(a);
@@ -104,6 +105,9 @@ class GenomeFeatures {
 			case BCmp(_, a, b):
 				collectScalar(a, cond, all, fed);
 				collectScalar(b, cond, all, fed);
+			case BFeature(_):
+				// Opaque leaf: its indicators are computed inline on the Expand→compile path this
+				// genome routes to (never the columnar feed this walk optimizes), so nothing to track.
 		}
 	}
 

@@ -107,6 +107,7 @@ class LearnedLibrary {
 			case BOr(a, b): BOr(cloneBool(a), cloneBool(b));
 			case BNot(a): BNot(cloneBool(a));
 			case BHole(inner): BHole(cloneBool(inner));
+			case BFeature(src): BFeature(src); // opaque leaf: immutable string, safe to share
 		};
 	}
 

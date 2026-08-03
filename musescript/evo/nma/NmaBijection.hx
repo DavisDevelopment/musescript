@@ -69,6 +69,11 @@ class NmaBijection {
 			case BOr(a, b): new NmaBOr(boolFromEnum(a), boolFromEnum(b));
 			case BNot(a): new NmaBNot(boolFromEnum(a));
 			case BHole(inner): new NmaBHole(boolFromEnum(inner));
+			case BFeature(_):
+				// Columnar NMA can't evaluate arbitrary MuseScript source. Mirrors seriesFromEnum's
+				// SProj throw: detected upstream (Fitness dispatch routes `nma-unsupported`/`nma-error`
+				// to the Expand→compile/VM fallback), so this is the defensive net, not the live path.
+				throw "NmaBijection.boolFromEnum: BFeature opaque leaf is not columnar-NMA supported (nma-unsupported)";
 		};
 		// §6b shape prior: seed local credit from durable bank so working copies aren't cold-start.
 		//

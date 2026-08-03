@@ -338,6 +338,7 @@ class ProjectionScore {
 			case BAnd(a, b) | BOr(a, b): wb(a); wb(b);
 			case BNot(a): wb(a);
 			case BHole(inner): wb(inner);
+				case BFeature(_): // opaque leaf: no structured series/scalar children to walk
 		}
 		wb(g.entryLong);
 		wb(g.entryShort);

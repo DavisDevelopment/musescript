@@ -319,6 +319,7 @@ class ProjectionProvider {
 				case BAnd(a, bb) | BOr(a, bb): addBool(a); addBool(bb);
 				case BNot(a): addBool(a);
 				case BHole(inner): addBool(inner);
+					case BFeature(_): // opaque leaf: no structured children referencing projections
 			}
 		}
 		addBool(g.entryLong); addBool(g.entryShort); addBool(g.exitLong); addBool(g.exitShort);

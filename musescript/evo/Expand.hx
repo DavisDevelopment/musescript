@@ -168,6 +168,7 @@ class Expand {
 				case BAnd(a, bb) | BOr(a, bb): addBool(a); addBool(bb);
 				case BNot(a): addBool(a);
 				case BHole(inner): addBool(inner);
+					case BFeature(_): // opaque leaf: no structured series/scalar children to collect
 			}
 		}
 		addBool(g.entryLong); addBool(g.entryShort); addBool(g.exitLong); addBool(g.exitShort);
@@ -236,6 +237,7 @@ class Expand {
 			case BOr(a, b): '(${bool(a, params)} || ${bool(b, params)})';
 			case BNot(a): '(!${bool(a, params)})';
 			case BHole(inner): bool(inner, params); // see scalar's KHole case
+			case BFeature(src): '($src)'; // opaque boolean: verbatim source, already boolean-typed
 		};
 	}
 }

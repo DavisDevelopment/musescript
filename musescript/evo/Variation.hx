@@ -386,7 +386,7 @@ class Variation {
 			case BAnd(a, b) | BOr(a, b): boolHasHole(a) || boolHasHole(b);
 			case BNot(a): boolHasHole(a);
 			case BCmp(_, a, b): scalarHasHole(a) || scalarHasHole(b);
-			case BCross(_, _, _) | BTrend(_, _, _): false;
+			case BCross(_, _, _) | BTrend(_, _, _) | BFeature(_): false;
 		};
 	}
 
@@ -429,7 +429,7 @@ class Variation {
 			case BOr(a, b): BOr(refillBool(a), refillBool(b));
 			case BNot(a): BNot(refillBool(a));
 			case BCmp(op, a, b): BCmp(op, refillScalar(a), refillScalar(b));
-			case BCross(_, _, _) | BTrend(_, _, _): n; // series holes are P1 (no SHole yet)
+			case BCross(_, _, _) | BTrend(_, _, _) | BFeature(_): n; // series holes are P1 (no SHole yet); opaque leaf has none
 		};
 	}
 
@@ -993,7 +993,7 @@ class Variation {
 
 	static function paramRefsInBool(n:BoolNode, out:Array<Int>):Void {
 		switch (n) {
-			case BCross(_, _, _) | BTrend(_, _, _):
+			case BCross(_, _, _) | BTrend(_, _, _) | BFeature(_):
 			case BCmp(_, a, b): paramRefsInScalar(a, out); paramRefsInScalar(b, out);
 			case BAnd(a, b) | BOr(a, b): paramRefsInBool(a, out); paramRefsInBool(b, out);
 			case BNot(a): paramRefsInBool(a, out);
@@ -1022,6 +1022,7 @@ class Variation {
 			case BOr(a, b): BOr(remapBool(a, mapping), remapBool(b, mapping));
 			case BNot(a): BNot(remapBool(a, mapping));
 			case BHole(inner): BHole(remapBool(inner, mapping));
+			case BFeature(src): BFeature(src); // opaque leaf: no params to remap
 		};
 	}
 

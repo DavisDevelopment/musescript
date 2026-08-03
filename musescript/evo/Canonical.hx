@@ -167,6 +167,7 @@ class Canonical {
 			case BAnd(a, b) | BOr(a, b): wb(a); wb(b);
 			case BNot(a): wb(a);
 			case BHole(inner): wb(inner);
+				case BFeature(_): // opaque leaf: no structured children to walk
 		}
 		wb(g.entryLong);
 		wb(g.entryShort);
@@ -254,6 +255,9 @@ class Canonical {
 				digestBool(d, a);
 			case BHole(inner):
 				digestBool(d, inner); // see digestScalar's KHole case
+			case BFeature(src):
+				d.tag("F".code);
+				d.str(src);
 		}
 	}
 
@@ -306,6 +310,7 @@ class Canonical {
 			case BOr(a, b): ["|", keyBool(a), keyBool(b)];
 			case BNot(a): ["!", keyBool(a)];
 			case BHole(inner): keyBool(inner); // see keyScalar's KHole case
+			case BFeature(src): ["F", src]; // opaque leaf keyed by verbatim source
 		};
 	}
 
@@ -347,6 +352,7 @@ class Canonical {
 			case BAnd(a, b) | BOr(a, b): 1 + countBool(a) + countBool(b);
 			case BNot(a): 1 + countBool(a);
 			case BHole(inner): countBool(inner); // see countScalar's KHole case
+			case BFeature(_): 1; // opaque leaf: one atomic node
 		};
 	}
 
@@ -403,6 +409,7 @@ class Canonical {
 				case BOr(a, b): bump(K_BOR); walkBool(a); walkBool(b);
 				case BNot(a): bump(K_BNOT); walkBool(a);
 				case BHole(inner): bump(K_BHOLE); walkBool(inner);
+				case BFeature(_): bump(K_BFEATURE);
 			}
 		}
 		walkBool(g.entryLong);
@@ -449,7 +456,8 @@ class Canonical {
 
 	/** Fixed declared order for `shapeVector`/`shapeFeatures`. */
 	static var SHAPE_KINDS = ["BCross", "BCmp", "BTrend", "BAnd", "BOr", "BNot", "BHole",
-		"KConst", "KParam", "KArith", "KSeries", "KLookback", "KFeature", "KHole", "SPrice", "SInd", "SProj"];
+		"KConst", "KParam", "KArith", "KSeries", "KLookback", "KFeature", "KHole", "SPrice", "SInd", "SProj",
+		"BFeature"];
 
 	static inline var K_BCROSS = 0;
 	static inline var K_BCMP = 1;
@@ -468,6 +476,7 @@ class Canonical {
 	static inline var K_SPRICE = 14;
 	static inline var K_SIND = 15;
 	static inline var K_SPROJ = 16;
+	static inline var K_BFEATURE = 17; // appended last so existing shapeVector indices stay stable
 
 	/**
 	 * `shapeSignature` turned into a fixed-length, SCALE-INVARIANT numeric feature vector, for

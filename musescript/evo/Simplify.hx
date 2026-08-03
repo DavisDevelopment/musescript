@@ -191,6 +191,7 @@ class Simplify {
 			// `default: false` arm -- so a frozen skeleton sibling is never erased on account of a
 			// hole's current, transient content).
 			case BHole(inner): BHole(simplifyBool(inner));
+			case BFeature(src): BFeature(src); // opaque leaf: atomic, nothing to simplify
 		};
 	}
 

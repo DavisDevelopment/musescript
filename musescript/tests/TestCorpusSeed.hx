@@ -164,7 +164,11 @@ class TestCorpusSeed extends Test {
 		}
 	}
 
-	public function testMultiOutputWithNonLiteralArgFailsClosed() {
+	public function testMultiOutputWithNonLiteralArgFailsOpenToOpaqueLeaf() {
+		// Fail-OPEN (deliberately changed from the old fail-closed): a multi-output field on a
+		// non-literal series arg can't be STRUCTURED (renderLiteralCall only accepts literal/price
+		// args), so instead of skipping the whole strategy it is carried verbatim as an opaque
+		// BFeature leaf -- faithful, not a guess (the emitted source runs exactly as written).
 		var g = translate('
 			strategy NonLiteralTest {
 				smoothed = sma(close, 5)
@@ -173,6 +177,13 @@ class TestCorpusSeed extends Test {
 				}
 			}
 		');
-		Assert.isNull(g, "expected translation to skip a non-literal macd() series argument, not guess");
+		Assert.notNull(g, "fail-open: a non-literal macd() arg should translate to an opaque leaf, not skip");
+		var src = Expand.expand(g);
+		// The prelude binding MUST be fully inlined into the opaque leaf -- the genome carries no
+		// prelude, so a leaf still mentioning the local `smoothed` would reference an undefined name.
+		Assert.isTrue(StringTools.contains(src, "sma(close, 5)") || StringTools.contains(src, "sma(close,5)"),
+			'expected the prelude binding inlined into the opaque leaf: $src');
+		Assert.isFalse(StringTools.contains(src, "smoothed"),
+			'opaque leaf must not reference the undefined prelude local: $src');
 	}
 }
