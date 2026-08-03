@@ -108,8 +108,9 @@
 
 **Steal first pick:** Layout triad remapped to **Map · Split · Muse/Truth**.
 
-**Optional tiny spike (&lt;1h):** Desktop-only mode toggle on WorldView (Map / Split / Muse) mirroring MiroFish’s graph/split/workbench — no new packages, no AGPL code.
+**Shipped (Desktop, 2026-08-03):** `worldLayout.js` + WorldView mode toggle · workbench hosts Causal Sim / Light Muse / Evolve / Truth / Brier / reliability · Playwright `world-layout-*` · no default-landing change · no AGPL code.
 
+**Optional tiny spike (&lt;1h):** ~~Desktop-only mode toggle on WorldView (Map / Split / Muse) mirroring MiroFish’s graph/split/workbench — no new packages, no AGPL code.~~ → **done**.
 ---
 
 ## 4. Explicit non-ports

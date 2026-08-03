@@ -1,6 +1,6 @@
 # Jormungandr ↔ MuseScript Integration Plan
 
-*Status: P2 landed (2026-08-03). D1 locked = Desktop/browser-only Muse execution.*
+*Status: P3 landed (2026-08-03). D1 locked = Desktop/browser-only Muse execution.*
 *Home: muse-script (brain). Body lives in `kalshi-ai-advisor/python/worldfeed` + Desktop `mobile/src/world` + muse_fincog Causal Sim. Cross-link: `kalshi-ai-advisor/python/WORLD_DATA_PLATFORM.md` §11.*
 
 ---
@@ -268,16 +268,18 @@ Rank **within scenario field** first; cross-scenario vanity ranks are forbidden.
 
 | Work | Notes |
 | --- | --- |
-| Deep-link `mederos://world/scenario/{scenarioKey}` ↔ Studio tape binder | Mobile terminal session |
-| Web parity via `WEB_SURFACE_PARITY_PLAN` ForecastHost + Muse sync | mederos-web |
-| Shared “World Lab” panel: scrubber + chart + Truth + Brier curve | Product surface |
-| Insight unlock path for world-calibration streaks | Constitution Insight — non-cashable |
+| Deep-link `mederos://world/scenario/{scenarioKey}` ↔ Studio tape binder | Desktop `worldLabNav` + `worldLabSession` · `?panel=studio&worldScenario=` ✓ |
+| Web parity via `WEB_SURFACE_PARITY_PLAN` ForecastHost + Muse sync | Deferred — Desktop binder ships first |
+| Shared “World Lab” panel: scrubber + chart + Truth + Brier curve | World workbench layout triad (Map\|Split\|Muse) + reliability curve ✓ |
+| Insight unlock path for world-calibration streaks | Deferred — Constitution Insight surface later |
 
 **DoD**
 
-- [ ] equityDigest + fillDigest match across World and Lab for the same repro blob.
-- [ ] Published claims show reliability curve; no P&L leaderboard tile on World.
-- [ ] Privacy: strategy source never uploaded to `/world/*`.
+- [x] equityDigest + fillDigest match across World and Lab for the same repro blob.
+- [x] Published claims show reliability curve; no P&L leaderboard tile on World.
+- [x] Privacy: strategy source never uploaded to `/world/*`.
+
+**Landed (2026-08-03):** Desktop Map\|Split\|Muse layout triad (MiroFish-inspired chrome only), `worldLabSession` artifact (`scenarioKey` + bars + source + digests + `repro.world`), Open in Lab → Strategy Studio world tape binder with digest parity chip, claim reliability curve on WorldSimPanel. D1 unchanged (client-only; no dual worker / no `/world/muse/context`).
 
 ---
 
@@ -289,8 +291,10 @@ Rank **within scenario field** first; cross-scenario vanity ranks are forbidden.
    - Status row: `propagating…` → `ran` → `muse: GO|CAUTION|NO-GO` (evo adds holdout NO-GO chip).
 4. **Scrub shared clock** — moving the contagion scrubber updates Muse aux “now”; optional live re-signal.
 5. **Overlay legend** — “Jormungandr · Muse”: signal heat, forecast cone opacity = p, click node → claim + Brier if resolved.
-6. **Open in Lab** — ships the `WorldContext` + bars + source binding into Terminal/Studio session (P3; P0 can copy scenarioKey only).
+6. **Open in Lab** — ships the `WorldContext` + bars + source binding into Terminal/Studio session (P3 ✓ via `worldLabSession` + digest parity).
 7. **History** — sim history entries show whether a Muse run was attached; re-apply restores both fan and last Muse overlay.
+
+**Desktop chrome:** Map · Split · Muse/Truth layout triad on the World workbench (default remains Split; World is not the app landing).
 
 Tone: merciless honesty. If bridge skipped, Muse button disabled with the humanized skip reason — never a decorative fake brain glow.
 
@@ -356,32 +360,37 @@ Tone: merciless honesty. If bridge skipped, Muse button disabled with the humani
 
 ---
 
-## Implementation sketch (P2 landed on Desktop)
+## Implementation sketch (P3 landed on Desktop)
 
 ```
 muse-script/
-  JORMUNGANDR_MUSESCRIPT_INTEGRATION_PLAN.md     ✓ P2 DoD
+  JORMUNGANDR_MUSESCRIPT_INTEGRATION_PLAN.md     ✓ P3 DoD
+  JORMUNGANDR_MIROFISH_INSPIRATION.md            ✓ steal-first layout triad
   examples/world/shock_gated_trend.ms            ✓
   examples/world/shock_gated_trend_evolve.ms     ✓ P2
-  docs/WORLD_CONTEXT.md                          ✓ (+ P2 evo / holdout / repro.world)
+  docs/WORLD_CONTEXT.md                          ✓ (+ P3 Lab session / digests)
 
 mobile/src/world/
   worldContext.js                                ✓
   worldTapeBuilder.js                            ✓
   worldMarketTape.js                             ✓ SPY calendar + degrade badge
-  worldCalibration.js                            ✓ claim Brier + precommit score
+  worldCalibration.js                            ✓ claim Brier + reliability curve
   worldRegimePacks.js                            ✓ conflict / outbreak / fx (+ disaster)
   worldMuseBridge.js                             ✓ run / forecast / evolveUnderWorld / repro.world
+  worldLabSession.js                             ✓ P3 artifact + digest parity
+  worldLabNav.js                                 ✓ deep-link + Open in Lab channel
+  worldLayout.js                                 ✓ Map | Split | Muse modes
   jormungandrMuseOverlay.js                      ✓ signals + forecasts layers
-  WorldSimPanel.jsx                              ✓ Light Muse + Evolve under world + Brier
-  WorldView.jsx                                  ✓ muse-signals + muse-forecasts + evo
+  WorldSimPanel.jsx                              ✓ Light Muse + Evolve + Open in Lab + Brier/reliability
+  WorldView.jsx                                  ✓ layout triad + workbench
 
 mobile/src/lab/
+  StrategyStudio.jsx                             ✓ world tape binder + digest match
   honestLedger.js                                ✓ scenarioKey / worldRunId
   honestLeaderboard.js                           ✓ scenario field filter; cross-rank refused
 
 kalshi-ai-advisor/python/worldfeed/
-  routes.py                                      (POST /world/muse/context → P3 optional)
+  routes.py                                      (POST /world/muse/context → still optional / deferred)
   WORLD_DATA_PLATFORM.md                         (one-paragraph cross-link)
 
 muse_fincog/docs/WORLD_SIM_BRIDGE.md             (cross-link only — fans remain source of truth)

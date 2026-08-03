@@ -50,4 +50,12 @@ Peak-only runs (no `nodes[].series`) **cannot** build a WorldContext — no fake
 
 Muse runs **Desktop/browser-only** via `museRuntimeClient` / `runUnderWorld` / `evolveUnderWorld` (+ `forecastFieldsUnderWorld` adapter onto ForecastHost `regime|auction|lattice`). Strategy source never uploads to `/world/*`.
 
+## Dual-surface Lab (P3)
+
+- **Open in Lab** persists a client-only `worldLabSession` artifact: `scenarioKey`, bars, source, `equityDigest` / `fillDigest`, and `repro.world`.
+- Deep-links: `?panel=studio&worldScenario={key}`, `#/world/scenario/{key}`, `mederos://world/scenario/{key}`.
+- Strategy Studio binds `tapeMode: "world"`, re-runs with the same seed / short-tape opts, and shows a **digests match** chip when Lab receipts equal World.
+- Claim **reliability curve** (predicted p vs observed) lives on the World Muse/Truth workbench — never a P&L leaderboard tile.
+- Desktop layout triad: **Map · Split · Muse** (MiroFish interaction pattern only — no AGPL code).
+
 See `JORMUNGANDR_MUSESCRIPT_INTEGRATION_PLAN.md`.
