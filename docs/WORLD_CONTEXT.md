@@ -28,11 +28,18 @@ Peak-only runs (no `nodes[].series`) **cannot** build a WorldContext — no fake
 
 ## Alignment
 
-- **calendar** (default when market bars provided): as-of join — fan sample with `t ≤ barSimDay` only (no lookahead).
+- **calendar** (default when market bars provided): as-of join — fan sample with `t ≤ barSimDay` only (no lookahead). Desktop loads SPY via `worldMarketTape` (dataserver `/market/bars` + localStorage cache) and degrades to timestep with an honest tape badge when unreachable.
 - **timestep**: one Muse bar per `tDays[k]`; synthetic OHLCV labeled in tape meta.
+
+## Calibration (P1)
+
+- Fan **forecast claims** resolve against peak `|activation|` → Brier chips on WorldSimPanel (never P&L).
+- Unmapped nodes surface `observable_unmapped` / skip — no invented fans.
+- Pre-commit slider scores P(real edge) vs Truth verdict after Light Muse.
+- Ledger / leaderboard entries carry `scenarioKey`; cross-scenario rank is refused.
 
 ## Execution (D1)
 
-Muse runs **Desktop/browser-only** via `museRuntimeClient` / `runUnderWorld`. Strategy source never uploads to `/world/*`.
+Muse runs **Desktop/browser-only** via `museRuntimeClient` / `runUnderWorld` (+ `forecastFieldsUnderWorld` adapter onto ForecastHost `regime|auction|lattice`). Strategy source never uploads to `/world/*`.
 
 See `JORMUNGANDR_MUSESCRIPT_INTEGRATION_PLAN.md`.

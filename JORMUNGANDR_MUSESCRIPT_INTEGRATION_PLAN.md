@@ -1,6 +1,6 @@
 # Jormungandr ↔ MuseScript Integration Plan
 
-*Status: P0 landed (2026-08-02). D1 locked = Desktop/browser-only Muse execution.*
+*Status: P1 landed (2026-08-03). D1 locked = Desktop/browser-only Muse execution.*
 *Home: muse-script (brain). Body lives in `kalshi-ai-advisor/python/worldfeed` + Desktop `mobile/src/world` + muse_fincog Causal Sim. Cross-link: `kalshi-ai-advisor/python/WORLD_DATA_PLATFORM.md` §11.*
 
 ---
@@ -228,17 +228,19 @@ Rank **within scenario field** first; cross-scenario vanity ranks are forbidden.
 
 | Work | Notes |
 | --- | --- |
-| Persist `scenarioKey` on Honest Ledger entries | Lab + World |
-| Wire ForecastHost on world tape; paint p-clouds on map nodes | Desktop |
-| Optional `POST /world/muse/context` | Python worldfeed |
-| Pre-commitment calibration beat on World (expected verdict before Run) | Constitution habit |
-| Resolve fincog Forecast claims → Brier rollup surfaced next to contagion panel | Desktop + fincog Calibration |
+| Persist `scenarioKey` on Honest Ledger entries | Lab + World ✓ |
+| Wire ForecastHost on world tape; paint p-clouds on map nodes | Desktop ✓ (adapter regime/auction + fan claim cones) |
+| Optional `POST /world/muse/context` | Deferred — D1 client-only builders suffice for P1 |
+| Pre-commitment calibration beat on World (expected verdict before Run) | Desktop ✓ |
+| Resolve fincog Forecast claims → Brier rollup surfaced next to contagion panel | Desktop ✓ |
 
 **DoD**
 
-- [ ] Same `scenarioKey` + seed → bit-identical Muse equityDigest (proveDeterminism).
-- [ ] Leaderboard evaluate filters by `scenarioKey`; cross-field rank disabled.
-- [ ] Skip reasons (`observable_unmapped`, …) still visible — Muse does not invent fans.
+- [x] Same `scenarioKey` + seed → bit-identical Muse equityDigest (proveDeterminism).
+- [x] Leaderboard evaluate filters by `scenarioKey`; cross-field rank disabled.
+- [x] Skip reasons (`observable_unmapped`, …) still visible — Muse does not invent fans.
+
+**Landed (2026-08-03):** Desktop `worldMarketTape` (SPY calendar join + honest synth badge), `worldCalibration` Brier chips, `forecastFieldsUnderWorld` + `jormungandr-muse-forecasts` layer, ledger/leaderboard `scenarioKey`, plan D1 unchanged (no Python Muse execute).
 
 ### P2 — Evolution / search under Jormungandr regimes
 
@@ -250,6 +252,7 @@ Rank **within scenario field** first; cross-scenario vanity ranks are forbidden.
 | Regime library: conflict / outbreak / fx-shock seed packs | From feed categories |
 | Wasm path optional for hot `on_bar` during long evo | Client or worker |
 | Stamp `repro.world` on every champion | Schema versioned |
+| Optional `POST /world/muse/context` if Lab/web needs server-built tapes | Still no strategy upload |
 
 **DoD**
 
@@ -349,24 +352,30 @@ Tone: merciless honesty. If bridge skipped, Muse button disabled with the humani
 
 ---
 
-## Implementation sketch (P0 landed on Desktop)
+## Implementation sketch (P1 landed on Desktop)
 
 ```
 muse-script/
-  JORMUNGANDR_MUSESCRIPT_INTEGRATION_PLAN.md
+  JORMUNGANDR_MUSESCRIPT_INTEGRATION_PLAN.md     ✓ P1 DoD
   examples/world/shock_gated_trend.ms            ✓
-  docs/WORLD_CONTEXT.md                          ✓
+  docs/WORLD_CONTEXT.md                          ✓ (+ P1 tape / calibration notes)
 
 mobile/src/world/
   worldContext.js                                ✓
   worldTapeBuilder.js                            ✓
-  worldMuseBridge.js                             ✓ (runUnderWorld / lightMuseFromSim)
-  jormungandrMuseOverlay.js                      ✓
-  WorldSimPanel.jsx                              ✓ Light Muse + truth pill
-  WorldView.jsx                                  ✓ jormungandr-muse-signals + legend
+  worldMarketTape.js                             ✓ SPY calendar + degrade badge
+  worldCalibration.js                            ✓ claim Brier + precommit score
+  worldMuseBridge.js                             ✓ run / forecast / prove / ledger
+  jormungandrMuseOverlay.js                      ✓ signals + forecasts layers
+  WorldSimPanel.jsx                              ✓ Light Muse + Brier chips + precommit
+  WorldView.jsx                                  ✓ muse-signals + muse-forecasts
+
+mobile/src/lab/
+  honestLedger.js                                ✓ scenarioKey / worldRunId
+  honestLeaderboard.js                           ✓ scenario field filter; cross-rank refused
 
 kalshi-ai-advisor/python/worldfeed/
-  routes.py                                      (optional POST /world/muse/context @ P1)
+  routes.py                                      (POST /world/muse/context → P2 optional)
   WORLD_DATA_PLATFORM.md                         (one-paragraph cross-link)
 
 muse_fincog/docs/WORLD_SIM_BRIDGE.md             (cross-link only — fans remain source of truth)
