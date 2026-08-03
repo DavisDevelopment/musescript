@@ -449,6 +449,7 @@ class JsBackend {
 		Reflect.setField(api, "asset_is", function(cls:String) return harness.assetClass.toLowerCase() == (cls == null ? "" : cls).toLowerCase());
 		Reflect.setField(api, "symbol_is", function(sym:String) return harness.symbol == sym);
 		Reflect.setField(api, "count_true", function(conds:haxe.Rest<Dynamic>) { var n = 0; for (c in conds) if (c == true) n++; return n; });
+		Reflect.setField(api, "trail", function(dist:Float) return TradeBuiltins.trailStop(harness, dist));
 		Reflect.setField(api, "unrealized_pnl", function() {
 			var px = harness.currentBar != null ? harness.currentBar.close : 0.0;
 			return harness.orders.unrealizedPnl(px);
@@ -528,6 +529,7 @@ class JsBackend {
 		Reflect.setField(f0, "asset_is", function(cls:String) return harness.assetClass.toLowerCase() == (cls == null ? "" : cls).toLowerCase());
 		Reflect.setField(f0, "symbol_is", function(sym:String) return harness.symbol == sym);
 		Reflect.setField(f0, "count_true", function(conds:haxe.Rest<Dynamic>) { var n = 0; for (c in conds) if (c == true) n++; return n; });
+		Reflect.setField(f0, "trail", function(dist:Float) return TradeBuiltins.trailStop(harness, dist));
 		Reflect.setField(f0, "unrealized_pnl", function() return harness.orders.unrealizedPnl(harness.currentBar.close));
 		Reflect.setField(f0, "unrealized_pnl_pct", function() {
 			var pos = harness.orders.positionSize();
@@ -1074,6 +1076,7 @@ class JsBackend {
 				case "asset_is": harness.assetClass.toLowerCase() == (args.length > 0 && args[0] != null ? Std.string(args[0]) : "").toLowerCase();
 				case "symbol_is": harness.symbol == (args.length > 0 && args[0] != null ? Std.string(args[0]) : "");
 				case "count_true": { var n = 0; for (a in args) if (a == true) n++; n; }
+				case "trail": TradeBuiltins.trailStop(harness, args[0]);
 			case "unrealized_pnl": harness.orders.unrealizedPnl(harness.currentBar.close);
 			case "unrealized_pnl_pct":
 				var pos = harness.orders.positionSize();

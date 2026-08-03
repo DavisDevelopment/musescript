@@ -131,6 +131,8 @@ class TradeBuiltins {
 			for (c in conds) if (c == true) n++;
 			return n;
 		});
+		// Volatility-scaled trailing stop (peak-following); pair with atr(): `when trail(2*atr(14)): flat()`.
+		vars.set("trail", function(dist:Float) return trailStop(harness, dist));
 		vars.set("unrealized_pnl", function() {
 			var px = harness.currentBar != null ? harness.currentBar.close : 0.0;
 			return harness.orders.unrealizedPnl(px);
@@ -474,6 +476,38 @@ class TradeBuiltins {
 		var m = a[start];
 		for (i in start...a.length) if (a[i] < m) m = a[i];
 		return m;
+	}
+
+	/**
+	 * Trailing-stop test: true once price has retraced `dist` price-units from the best level reached
+	 * SINCE ENTRY -- the peak HIGH for a long, the trough LOW for a short. Pair with `atr(n)` for a
+	 * volatility-scaled ratchet stop that follows a winner up and only exits on a real pullback:
+	 *   `when trail(2 * atr(14)): flat()`
+	 * Inert (false) while flat, so it is safe to leave in an unconditional exit guard. This is the
+	 * peak-following behaviour a fixed `close < entry_price() - k*atr` stop (already expressible)
+	 * cannot give -- the missing primitive from the language-gap review.
+	 */
+	public static function trailStop(harness:HarnessContext, dist:Float):Bool {
+		var pos = harness.orders.position;
+		if (pos == 0) return false;
+		var eb = harness.orders.entryBar;
+		var cur = harness.currentBar;
+		if (cur == null || eb < 0) return false;
+		if (pos > 0) {
+			var hi = resolveSeries(harness, "high");
+			if (hi.length == 0) return false;
+			var s = eb < hi.length ? eb : hi.length - 1;
+			var peak = hi[s];
+			for (i in s...hi.length) if (hi[i] > peak) peak = hi[i];
+			return cur.close < peak - dist;
+		} else {
+			var lo = resolveSeries(harness, "low");
+			if (lo.length == 0) return false;
+			var s = eb < lo.length ? eb : lo.length - 1;
+			var trough = lo[s];
+			for (i in s...lo.length) if (lo[i] < trough) trough = lo[i];
+			return cur.close > trough + dist;
+		}
 	}
 
 	public static function change(harness:HarnessContext, src:Dynamic, ?n:Int = 1):Float {
