@@ -138,7 +138,37 @@ uses `MuseRuntime.on` / `pumpHostEvent`.
 | Broker fill/reject/status | **Stub** — pump from order ticket / node when ready |
 | Watchlist add/remove/ping | **Stub** — API ready; no watchlist UI pump yet |
 | UI click/selection/focus/command | **Stub** — host-injected |
-| World shock/scrub/muse_* | **Stub** — thin channel; do not fight `src/world/**` |
+| World shock/scrub/muse_* | **Live** (mobile `jormungandrMuseEvents.js` ← Desktop World) |
+
+---
+
+## World family (Jormungandr host)
+
+Desktop World pumps via `src/world/jormungandrMuseEvents.js` (never strategy source):
+
+| UI action | Event | Payload (small) |
+|-----------|-------|-----------------|
+| Simulate finishes (`status === "ran"`) | `world.shock` | `scenarioKey`, `eventIds`, `mag`/`dir`/`region`, `runId?` |
+| Scrubber T drag (throttle ~150ms) | `world.scrub` | `t`, `step?`, `runId?`, `scenarioKey?` |
+| Light Muse completes | `world.muse_light` | `scenarioKey`, `verdict?`, `reason?`, `ok` |
+| Evolve-under-world completes | `world.muse_evolve` | `scenarioKey`, `holdoutScenarioKey?`, `found?`, `disposition?`, `reproWorld?` summary |
+
+```js
+import { MuseRuntime } from "./museRuntimeClient.js";
+
+MuseRuntime.on("world.shock", (e) => {
+  console.log("shock", e.scenarioKey, e.eventIds);
+});
+MuseRuntime.on("world.scrub", (e) => {
+  console.log("scrub T=", e.t, "step", e.step);
+});
+MuseRuntime.on("world.muse_*", (e) => {
+  // light / evolve results — Truth / holdout only; no .ms source on the bus
+  console.log(e.type, e.scenarioKey, e.verdict || e.disposition);
+});
+```
+
+Selftest: `node src/world/jormungandrMuseEvents.selftest.js` (mocked pump).
 
 ---
 
