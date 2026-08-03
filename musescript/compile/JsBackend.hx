@@ -450,6 +450,14 @@ class JsBackend {
 		Reflect.setField(api, "symbol_is", function(sym:String) return harness.symbol == sym);
 		Reflect.setField(api, "count_true", function(conds:haxe.Rest<Dynamic>) { var n = 0; for (c in conds) if (c == true) n++; return n; });
 		Reflect.setField(api, "trail", function(dist:Float) return TradeBuiltins.trailStop(harness, dist));
+		Reflect.setField(api, "highest_since_entry", function(?f:String) return TradeBuiltins.highestSinceEntry(harness, f == null ? "high" : f));
+		Reflect.setField(api, "lowest_since_entry", function(?f:String) return TradeBuiltins.lowestSinceEntry(harness, f == null ? "low" : f));
+		Reflect.setField(api, "return_since_entry", function() return TradeBuiltins.returnSinceEntry(harness));
+		Reflect.setField(api, "slope", function(a:Dynamic, b:Dynamic) return TradeBuiltins.slopeN(harness, a, Std.int(b)));
+		Reflect.setField(api, "zscore_roll", function(a:Dynamic, b:Dynamic) return TradeBuiltins.zscoreN(harness, a, Std.int(b)));
+		Reflect.setField(api, "percent_rank", function(a:Dynamic, b:Dynamic) return TradeBuiltins.percentRank(harness, a, Std.int(b)));
+		Reflect.setField(api, "asset_in", function(cs:haxe.Rest<Dynamic>) { var a = harness.assetClass.toLowerCase(); for (c in cs) if (c != null && Std.string(c).toLowerCase() == a) return true; return false; });
+		Reflect.setField(api, "symbol_in", function(ss:haxe.Rest<Dynamic>) { for (x in ss) if (x != null && Std.string(x) == harness.symbol) return true; return false; });
 		Reflect.setField(api, "unrealized_pnl", function() {
 			var px = harness.currentBar != null ? harness.currentBar.close : 0.0;
 			return harness.orders.unrealizedPnl(px);
@@ -530,6 +538,14 @@ class JsBackend {
 		Reflect.setField(f0, "symbol_is", function(sym:String) return harness.symbol == sym);
 		Reflect.setField(f0, "count_true", function(conds:haxe.Rest<Dynamic>) { var n = 0; for (c in conds) if (c == true) n++; return n; });
 		Reflect.setField(f0, "trail", function(dist:Float) return TradeBuiltins.trailStop(harness, dist));
+		Reflect.setField(f0, "highest_since_entry", function(?f:String) return TradeBuiltins.highestSinceEntry(harness, f == null ? "high" : f));
+		Reflect.setField(f0, "lowest_since_entry", function(?f:String) return TradeBuiltins.lowestSinceEntry(harness, f == null ? "low" : f));
+		Reflect.setField(f0, "return_since_entry", function() return TradeBuiltins.returnSinceEntry(harness));
+		Reflect.setField(f0, "slope", function(a:Dynamic, b:Dynamic) return TradeBuiltins.slopeN(harness, a, Std.int(b)));
+		Reflect.setField(f0, "zscore_roll", function(a:Dynamic, b:Dynamic) return TradeBuiltins.zscoreN(harness, a, Std.int(b)));
+		Reflect.setField(f0, "percent_rank", function(a:Dynamic, b:Dynamic) return TradeBuiltins.percentRank(harness, a, Std.int(b)));
+		Reflect.setField(f0, "asset_in", function(cs:haxe.Rest<Dynamic>) { var a = harness.assetClass.toLowerCase(); for (c in cs) if (c != null && Std.string(c).toLowerCase() == a) return true; return false; });
+		Reflect.setField(f0, "symbol_in", function(ss:haxe.Rest<Dynamic>) { for (x in ss) if (x != null && Std.string(x) == harness.symbol) return true; return false; });
 		Reflect.setField(f0, "unrealized_pnl", function() return harness.orders.unrealizedPnl(harness.currentBar.close));
 		Reflect.setField(f0, "unrealized_pnl_pct", function() {
 			var pos = harness.orders.positionSize();
@@ -1077,6 +1093,14 @@ class JsBackend {
 				case "symbol_is": harness.symbol == (args.length > 0 && args[0] != null ? Std.string(args[0]) : "");
 				case "count_true": { var n = 0; for (a in args) if (a == true) n++; n; }
 				case "trail": TradeBuiltins.trailStop(harness, args[0]);
+				case "highest_since_entry": TradeBuiltins.highestSinceEntry(harness, args.length > 0 && args[0] != null ? Std.string(args[0]) : "high");
+				case "lowest_since_entry": TradeBuiltins.lowestSinceEntry(harness, args.length > 0 && args[0] != null ? Std.string(args[0]) : "low");
+				case "return_since_entry": TradeBuiltins.returnSinceEntry(harness);
+				case "slope": TradeBuiltins.slopeN(harness, args[0], Std.int(args[1]));
+				case "zscore_roll": TradeBuiltins.zscoreN(harness, args[0], Std.int(args[1]));
+				case "percent_rank": TradeBuiltins.percentRank(harness, args[0], Std.int(args[1]));
+				case "asset_in": { var a = harness.assetClass.toLowerCase(); var hit = false; for (c in args) if (c != null && Std.string(c).toLowerCase() == a) hit = true; hit; }
+				case "symbol_in": { var hit = false; for (x in args) if (x != null && Std.string(x) == harness.symbol) hit = true; hit; }
 			case "unrealized_pnl": harness.orders.unrealizedPnl(harness.currentBar.close);
 			case "unrealized_pnl_pct":
 				var pos = harness.orders.positionSize();

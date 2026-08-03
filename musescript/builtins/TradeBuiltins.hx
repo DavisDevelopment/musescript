@@ -133,6 +133,24 @@ class TradeBuiltins {
 		});
 		// Volatility-scaled trailing stop (peak-following); pair with atr(): `when trail(2*atr(14)): flat()`.
 		vars.set("trail", function(dist:Float) return trailStop(harness, dist));
+		// In-trade analytics: extremes since entry + signed open-trade return (position-aware).
+		vars.set("highest_since_entry", function(?field:String) return highestSinceEntry(harness, field == null ? "high" : field));
+		vars.set("lowest_since_entry", function(?field:String) return lowestSinceEntry(harness, field == null ? "low" : field));
+		vars.set("return_since_entry", function() return returnSinceEntry(harness));
+		// Series-stat regime gates: magnitude-carrying trend / normalized deviation / scale-free rank.
+		vars.set("slope", function(src:Dynamic, len:Int) return slopeN(harness, src, len));
+		vars.set("zscore_roll", function(src:Dynamic, len:Int) return zscoreN(harness, src, len));
+		vars.set("percent_rank", function(src:Dynamic, len:Int) return percentRank(harness, src, len));
+		// Variadic instrument membership (extends asset_is/symbol_is): `when asset_in("crypto","forex"): ...`.
+		vars.set("asset_in", function(classes:haxe.Rest<Dynamic>) {
+			var a = harness.assetClass.toLowerCase();
+			for (c in classes) if (c != null && Std.string(c).toLowerCase() == a) return true;
+			return false;
+		});
+		vars.set("symbol_in", function(syms:haxe.Rest<Dynamic>) {
+			for (s in syms) if (s != null && Std.string(s) == harness.symbol) return true;
+			return false;
+		});
 		vars.set("unrealized_pnl", function() {
 			var px = harness.currentBar != null ? harness.currentBar.close : 0.0;
 			return harness.orders.unrealizedPnl(px);
@@ -508,6 +526,85 @@ class TradeBuiltins {
 			for (i in s...lo.length) if (lo[i] < trough) trough = lo[i];
 			return cur.close > trough + dist;
 		}
+	}
+
+	/** Highest value of `field` (default "high") reached SINCE ENTRY, inclusive; the current bar's
+	 * field when flat. Companion to `trail` for take-profit targets / breakout-of-trade-range logic. */
+	public static function highestSinceEntry(harness:HarnessContext, ?field:String = "high"):Float {
+		var a = resolveSeries(harness, field == null ? "high" : field);
+		if (a.length == 0) return Math.NaN;
+		var eb = harness.orders.entryBar;
+		var start = (eb >= 0 && eb < a.length) ? eb : a.length - 1;
+		var m = a[start];
+		for (i in start...a.length) if (a[i] > m) m = a[i];
+		return m;
+	}
+
+	/** Lowest value of `field` (default "low") reached since entry, inclusive; current bar when flat. */
+	public static function lowestSinceEntry(harness:HarnessContext, ?field:String = "low"):Float {
+		var a = resolveSeries(harness, field == null ? "low" : field);
+		if (a.length == 0) return Math.NaN;
+		var eb = harness.orders.entryBar;
+		var start = (eb >= 0 && eb < a.length) ? eb : a.length - 1;
+		var m = a[start];
+		for (i in start...a.length) if (a[i] < m) m = a[i];
+		return m;
+	}
+
+	/** Signed return of the OPEN position since entry (position-aware: positive when the trade is in
+	 * profit, for a long or a short). 0 when flat. Cheaper/clearer than `unrealized_pnl_pct()` for
+	 * "scale out / tighten after +X%" logic: `when return_since_entry() > 0.05: flat()`. */
+	public static function returnSinceEntry(harness:HarnessContext):Float {
+		var pos = harness.orders.position;
+		var entry = harness.orders.entryPrice;
+		if (pos == 0 || entry == 0) return 0.0;
+		var cur = harness.currentBar;
+		if (cur == null) return 0.0;
+		var raw = (cur.close - entry) / entry;
+		return pos > 0 ? raw : -raw;
+	}
+
+	/** OLS slope (per-bar) of `src` over the last `len` bars -- a signed, magnitude-carrying trend
+	 * gauge, unlike the binary `rising`/`falling`. `when slope(close, 21) > 0.5: long()` gates on
+	 * trend STRENGTH, not just direction. NaN until `len` bars exist. */
+	public static function slopeN(harness:HarnessContext, src:Dynamic, len:Int):Float {
+		var a = resolveSeries(harness, src);
+		if (len < 2 || a.length < len) return Math.NaN;
+		var start = a.length - len;
+		var n = len;
+		var sx = 0.0, sy = 0.0, sxy = 0.0, sxx = 0.0;
+		for (i in 0...n) {
+			var x = i;
+			var y = a[start + i];
+			sx += x; sy += y; sxy += x * y; sxx += x * x;
+		}
+		var denom = n * sxx - sx * sx;
+		return denom == 0 ? 0.0 : (n * sxy - sx * sy) / denom;
+	}
+
+	/** Z-score of the current `src` value vs its last-`len` mean/stdev -- how many standard deviations
+	 * from normal. A ready-made mean-reversion / regime gate: `when zscore(close, 21) < -2: long()`.
+	 * 0 when stdev is 0 (flat window); NaN until `len` bars. */
+	public static function zscoreN(harness:HarnessContext, src:Dynamic, len:Int):Float {
+		var a = resolveSeries(harness, src);
+		if (a.length < len || len < 1) return Math.NaN;
+		var mean = sma(harness, src, len);
+		var sd = stdev(harness, src, len);
+		if (sd == 0 || Math.isNaN(sd)) return 0.0;
+		return (a[a.length - 1] - mean) / sd;
+	}
+
+	/** Percent rank in [0,1]: the fraction of the last `len` values (inclusive) that are <= the
+	 * current value. 1.0 = current is the highest in the window, 0.0 = the lowest. A scale-free
+	 * momentum/extreme gauge: `when percent_rank(close, 55) > 0.9: long()`. NaN until `len` bars. */
+	public static function percentRank(harness:HarnessContext, src:Dynamic, len:Int):Float {
+		var a = resolveSeries(harness, src);
+		if (a.length < len || len < 1) return Math.NaN;
+		var start = a.length - len;
+		var cur = a[a.length - 1];
+		var le = 0;
+		for (i in start...a.length) if (a[i] <= cur) le++;
+		return le / len;
 	}
 
 	public static function change(harness:HarnessContext, src:Dynamic, ?n:Int = 1):Float {

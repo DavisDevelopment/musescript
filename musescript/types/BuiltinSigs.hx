@@ -165,6 +165,17 @@ class BuiltinSigs {
 		// Peak-following trailing stop: true once price retraces `dist` (price units, e.g. k*atr(n))
 		// from the best level reached since entry. Inert while flat.
 		fun("trail", [TScalar], TBool);
+		// In-trade analytics: extremes since entry (optional field, default high/low) + signed return.
+		fun("highest_since_entry", [TString], TScalar, 0);
+		fun("lowest_since_entry", [TString], TScalar, 0);
+		fun("return_since_entry", [], TScalar);
+		// Series-stat regime gates: signed trend slope / normalized deviation / scale-free rank.
+		fun("slope", [TSeries, TWindow], TScalar);
+		fun("zscore_roll", [TSeries, TWindow], TScalar);
+		fun("percent_rank", [TSeries, TWindow], TScalar);
+		// Variadic instrument membership (extends asset_is/symbol_is).
+		fun("asset_in", [TString], TBool, 1, true);
+		fun("symbol_in", [TString], TBool, 1, true);
 		fun("unrealized_pnl", [], TScalar);
 		fun("unrealized_pnl_pct", [], TScalar);
 		// Multi-symbol panel / portfolio surface
