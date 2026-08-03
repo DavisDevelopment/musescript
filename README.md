@@ -223,14 +223,18 @@ columns (CSV extras, panel join, or a loader). Single-symbol strategies read the
 idents (`revenue`, `pe`, …) on interp/JS/WASM — WASM packs those columns into the feature-tape
 region next to OHLCV. Live network/EDGAR fetch is intentionally out of strategy runtime.
 
-**Panel WASM v1:** literal-symbol cross-section reads (`close_of` / `mom_of` / `sma_of` /
-`sym_available` / `fund_of` / OHLCV `*_of`) lower natively onto dense feature slots keyed
-`field@SYM`, packed from a calendar-aligned `PanelFeed` (missing bars → NaN; PIT join stays
-host-side). Drive with `ctx.panel`. **Escape list** (host_eval or whole-module fallback —
-same honest failure class as today): bags, computed bags, graph bags, `symbols()`,
-`scan_top`/`scan_bottom`, `rebalance_equal`/`target_weight`, portfolio queries
-(`pos`/`holdings`/…), `ema_of`/`rsi_of`. Literal `buy`/`sell_all` are HostABI
-imports (not host_eval). See `StrategyWasmEmitter.PANEL_HOST_ESCAPE`.
+**Panel WASM:** literal-symbol cross-section reads (`close_of` / `mom_of` / `sma_of` /
+`ema_of` / `rsi_of` / `sym_available` / `fund_of` / OHLCV `*_of`) lower natively onto dense
+feature slots keyed `field@SYM`, packed from a calendar-aligned `PanelFeed` (missing bars →
+NaN; PIT join stays host-side). Drive with `ctx.panel`. Literal `buy` / `sell_all` /
+`target_weight` / `rebalance_equal([...])` are HostABI imports. **Escape list** (host_eval
+or whole-module fallback): bags, computed bags, graph bags, `symbols()`,
+`scan_top`/`scan_bottom`, portfolio queries (`pos`/`holdings`/…). See
+`StrategyWasmEmitter.PANEL_HOST_ESCAPE`. Panel evo genomes: `SPanel` leaves under
+`Variation.configureForUniverse` → Expand `*_of("SYM",…)`; constrained `PanelAction`
+templates → HostABI `buy`/`sell_all`/`rebalance_equal([...])`/`target_weight` (not
+`long`/`short`/`flat`). Still single-name-only without a universe: classic Expand skeleton.
+Dynamic bags / `symbols()` / `scan_*` remain panel-escape (not genome-grown).
 
 ## `musescript.evo` — typed genetic-programming engine
 
@@ -312,11 +316,74 @@ node build/js/gene-runner.js --source strat.ms --tape tape.csv --execution next-
 Portfolio builtins (single-symbol sim today):
 
 - `position()`, `entry_price()`, `bars_in_trade()`
-- `cash()`, `equity()`, `unrealized_pnl()`
+- `cash()`, `equity()`, `unrealized_pnl()`, `unrealized_pnl_pct()`
 - `rising(x, n)` / `falling(x, n)` on any numeric series, with optional
   `rising(x, n, minBars)` / `falling(x, n, minBars)` gated by `bars_in_trade`
 
+**In-trade analytics** (read while a position is open):
+
+- `highest_since_entry(?field)` / `lowest_since_entry(?field)` — the peak/trough of a bar field
+  (default `high`/`low`) reached since entry; the current bar's value while flat.
+- `return_since_entry()` — signed return of the open position (positive when the trade is in
+  profit, long **or** short); `0` while flat.
+- `trail(dist)` — peak-following trailing stop: `true` once price retraces `dist` price-units from
+  the best level since entry. Pair with `atr` for a volatility ratchet:
+  `when trail(2 * atr(close, 14)): flat()`. Inert while flat.
+
 Legacy annotation: `@on(position) { ... }`.
+
+### Per-instrument, voting, and regime builtins
+
+One uniform strategy can self-specialize per instrument and gate on richer signal shapes:
+
+```muse
+strategy Adaptive {
+  onBar {
+    // branch by asset class / symbol (reads the tape's asset/symbol columns)
+    when asset_in("crypto", "forex") && slope(close, 21) > 0
+         && count_true(close > sma(close, 21), zscore_roll(close, 34) > 0, percent_rank(close, 55) > 0.7) >= 2:
+      long()
+  }
+  onPosition {
+    when trail(2.5 * atr(close, 14)) || return_since_entry() > 0.08: flat()
+  }
+}
+```
+
+- `asset_is("crypto")` / `symbol_is("BTCUSD")` — exact instrument match; `asset_in(...)` /
+  `symbol_in(...)` — variadic membership. `asset_is`/`asset_in` are case-insensitive on the class.
+- `count_true(a, b, c, …)` — variadic bool→number: `>= k` is an **N-of-M confirmation gate**;
+  `count_true(x)` is a plain `0/1` coercion.
+- `slope(series, n)` — signed OLS per-bar slope (trend **strength**, unlike binary `rising`).
+- `zscore_roll(series, n)` — rolling z-score vs the last-`n` mean/stdev (mean-reversion gate).
+- `percent_rank(series, n)` — fraction of the last `n` values ≤ the current, in `[0,1]`.
+
+> `atr` is `atr(close, n)` (series **and** window) — a bare `atr(n)` returns `NaN`.
+
+### Parameter sweeps (`--optimize`)
+
+A `param` can declare a search range or an explicit value list; `--optimize` grid-searches them
+through the honesty-gated optimizer (DSR-deflated, purge/embargo OOS — an overfit combo is rejected,
+not crowned):
+
+```muse
+strategy Swept {
+  param slow = 34 { min: 21, max: 55, step: 1 }   // contiguous range
+  param fast = 8  { values: [5, 8, 13, 21] }        // explicit NON-uniform list (e.g. Fib windows)
+  onBar {
+    when close > sma(close, fast) && close > sma(close, slow): long()
+    when close < sma(close, slow): flat()
+  }
+}
+```
+
+```powershell
+node build/js/gene-runner.js --source swept.ms --tape tape.csv --optimize --metric sharpe
+```
+
+`values: […]` takes priority over `min/max/step` and is the only way to sweep a non-uniform set (a
+fixed step can't hit exactly `5,8,13,21`). For a window param, a `min/max` range alone already stays
+on the Fibonacci ladder automatically.
 
 Statement templates can package the same hooks for reuse (no `->` return type):
 
