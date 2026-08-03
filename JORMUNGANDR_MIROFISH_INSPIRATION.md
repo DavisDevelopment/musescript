@@ -1,6 +1,6 @@
 # Jormungandr ← MiroFish inspiration
 
-*Scouted 2026-08-03. Ideas only — no vendor of MiroFish/OASIS/Zep code. Cross-link: [`JORMUNGANDR_MUSESCRIPT_INTEGRATION_PLAN.md`](./JORMUNGANDR_MUSESCRIPT_INTEGRATION_PLAN.md).*
+*Scouted 2026-08-03 (first pass @ `96096ea`). Second pass 2026-08-03 @ `a97ba4f` (+51). Ideas only — no vendor of MiroFish/OASIS/Zep code. Cross-link: [`JORMUNGANDR_MUSESCRIPT_INTEGRATION_PLAN.md`](./JORMUNGANDR_MUSESCRIPT_INTEGRATION_PLAN.md) · clone index: [`JORMUNGANDR_INSPIRATION_REPOS.md`](./JORMUNGANDR_INSPIRATION_REPOS.md).*
 
 ---
 
@@ -10,7 +10,7 @@
 | --- | --- |
 | **Product** | Multi-agent “swarm” prediction sandbox: seed docs → knowledge graph → persona agents → dual social sims → LLM report + chat |
 | **Canonical clone** | `C:\Users\epiki\Documents\Development\kalshai\inspiration_repos_and_sources\MiroFish` (also a worktree copy under `.claude\worktrees\…`) |
-| **Upstream** | https://github.com/666ghj/MiroFish (head at scout: `96096ea`) |
+| **Upstream** | https://github.com/666ghj/MiroFish (first pass `96096ea` → second pass `a97ba4f`) |
 | **License** | **AGPL-3.0** (root + backend) — viral for networked services if code is copied |
 | **Frontend** | Vue 3 + Vite + vue-router + vue-i18n + **D3** force graphs (`GraphPanel.vue`) |
 | **Backend** | Python 3.11–3.12, Flask, OpenAI-compatible LLM client, **Zep Cloud** GraphRAG, **CAMEL OASIS** (`camel-oasis` / `camel-ai`) for Twitter+Reddit twin sims |
@@ -138,3 +138,79 @@
 | Prediction Report | TruthReport + Brier chips |
 | Interview agents | Tool-bound explain node / claim / strategy |
 | God’s-eye inject | Mag mult / remediation / counterfactual (already on sim panel) — not LLM persona puppetry |
+
+---
+
+## 6. Second pass (2026-08-03) — MiroFish delta `96096ea` → `a97ba4f`
+
+**Pull:** ff-only on existing clone (51 commits). Mostly Zep/ontology hardening, Docker ARM, star-history CI — **not** a new product surface. Still AGPL-3.0; still do not vendor.
+
+### New portable ideas (re-implement; do not copy)
+
+| ID | Pattern | Evidence in delta | Jormungandr seam | Steal? |
+| --- | --- | --- | --- | --- |
+| **G** | **Fail-fast wizard polling** — one `handlePrepareFailure` stops all pollers + emits error status | Step2: prepare/config/profiles failed → stop polling | World Lab prep / `/world/simulate` start: never leave scrubbers spinning on dead runs | **Yes — reliability chrome** |
+| **H** | **Terminal failure prioritized over “looks done”** | Step3: `runner_status === 'failed'` before completed/stopped; UI stops poll | Causal Sim / Wasm run status: failed beats stale “completed” heuristics | **Yes** |
+| **I** | **Ingestion / publish barrier before terminal UI state** | Comment + runner: terminal published only after Zep barrier drains | Don’t show TruthReport complete until ledger + series are flush; “STOPPING” ≠ ready | **Yes (concept)** — own barrier over local stores, not Zep |
+| **J** | **Strip fabricated tool_result / hallucinated tool logs from LLM prose** | ReportAgent `_strip_fake_tool_result`; tests for sanitizer | Muse Light / Truth chat: only host-executed tools count; strip fake citation blocks | **Yes — Constitution-critical** |
+| **K** | **Graph build reuse short-circuit** | `reused && graph_id` → load without new poll storm | Cache `sim_seed` + WorldContext graph fingerprints; skip rebuild | **Yes** |
+| **L** | **Local timezone on history cards** | HistoryDatabase local date/time; don’t drop duplicate user messages | Run-history UI + chat transcript honesty | Nice-to-have |
+| **M** | Cap pager / max_items on graph edge fetch | Unbounded edge fetch memory fix | Local contagion graph loaders need hard caps + lod | Yes if we ship abstract graph |
+
+**Still not new product UX:** layout triad / dual timeline / D3 graph (first-pass A–C) unchanged in meaningful ways. Delta is reliability + cloud-contract glue.
+
+### Second-pass adoption delta
+
+| Order | Add after first-pass A/B | Why |
+| --- | --- | --- |
+| **1a** | **G + H** fail-fast + failed-wins polling | Cheap; prevents lying World Lab UX |
+| **1b** | **J** tool-result sanitizer (our tools only) | Required before any Muse report chat ships |
+| later | **I** local publish barrier | After simulate persistence is real |
+
+### Second-pass non-ports (extra)
+
+| Item | Why not |
+| --- | --- |
+| Zep lifecycle / ontology contract / edge paging code | AGPL + SaaS lock-in |
+| GPT-5 chat-compat helpers verbatim | AGPL; re-express against Muse host if needed |
+| Fabricated-tool strip regex as-copied | Reimplement against our tool envelope; don’t paste ReportAgent |
+| Star-history / README cosmetics | Noise |
+
+---
+
+## 7. Cross-repo steal matrix (second pass companions)
+
+Clones live under `C:\Users\epiki\Documents\Development\kalshai\inspiration_repos_and_sources\` — see [`JORMUNGANDR_INSPIRATION_REPOS.md`](./JORMUNGANDR_INSPIRATION_REPOS.md). Prefer **MIT/Apache** for deep mine; AGPL/GPL/unlicensed = **read-only concepts**.
+
+| Steal | Source (license) | Seam | Priority | Vendor code? |
+| --- | --- | --- | --- | --- |
+| Map · Split · Muse layout triad | MiroFish **A** (AGPL) | WorldView modes | P0 chrome | **No** |
+| Dual-lane scrub timeline | MiroFish **B** (AGPL) | feed ↔ fan scrub | P0 | **No** |
+| Fail-fast + failed-wins poll | MiroFish **G/H** (AGPL) | simulate status | P0 reliability | **No** |
+| Fabricated-tool strip | MiroFish **J** (AGPL) | Muse Light / Truth | P0 honesty | **No** |
+| Multi-scenario overlay + error bands | **spkmc** (MIT) | Causal Sim fan bands | **P0 viz** | Ideas OK; rewrite |
+| Scenario A/B comparison + cascade depth/width | **Prophet** (MIT) | fan compare / contagion metrics | **P0 analytics UX** | Ideas OK |
+| Timeline sparkline + emergent event pins | **Prophet** TimelinePanel (MIT) | `tDays` scrub + event markers | P1 | Ideas OK |
+| Live WebSocket sim store | **Prophet** `useSimulationSocket` (MIT) | Desktop poll → push optional | P2 | Ideas OK |
+| Normalize → fuse nearby watchpoints → confidence | **GSID** IntelligenceEvent (no license) | WorldFeedStore fusion | **P0 data** | **Read only** — reimplement |
+| Heuristic first paint → optional LLM upgrade w/ fallback | **GSID** (no license) | insight strip without blocking map | P1 | Reimplement |
+| Split.js multi-pane + persisted layout + pulse markers | **OSINT-War-Room** (MIT) | World Lab panels / GDELT-like pulses | P1 chrome | Ideas OK (Leaflet≠MapLibre) |
+| Layer catalog + dual 3D/flat map + site variants | **worldmonitor** (AGPL) | deck.gl layer IA only | P1 concepts | **No code** |
+| Intervention builder + 3D network playback | **EpiVirus** (unlicensed) | remediation UI / node playback | P2 | **Read only** |
+| ABM scheduler / Solara viz components | **mesa** (Apache-2.0) | agent stepping metaphors | P2 | Can study; unlikely direct dep |
+| Gillespie / network epidemic process API | **epydemic** (GPL-3.0) | contagion math vocabulary | P3 reading | **No vendor** |
+
+### Top 3 steals (all clones)
+
+1. **spkmc multi-scenario fan overlay + uncertainty bands** — Causal Sim’s core “wow” without social-sim LLM burn (MIT).
+2. **GSID-style feed normalize + spatial fuse + confidence** — WorldFeed honesty before narrative (reimplement; unlicensed upstream).
+3. **Prophet cascade metrics + scrub timeline event pins** *or* MiroFish **G/H/J** reliability+sanitizer — pick analytics chrome (MIT) vs integrity chrome (AGPL patterns reimplemented) depending on layout sibling’s week.
+
+### Explicit do-not-vendor (global)
+
+- Any **AGPL** tree as product source: MiroFish, worldmonitor platform, AgentTorch (not cloned this pass; same poison).
+- **GPL** epydemic as a linked library.
+- Unlicensed EpiVirus / GSID **source files**.
+- OASIS / camel / Zep Cloud pipelines.
+- “Predict anything / win decisions” marketing copy.
+- Polymarket/VIX/novelty widgets that invent certainty without Brier.
