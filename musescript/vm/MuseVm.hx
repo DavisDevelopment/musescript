@@ -15,25 +15,31 @@ import musescript.vm.MuseBytecodeCompiler.VmUnsupported;
  * replacement for the tree-walking `MuseInterp` on the evo hot path. Runs a
  * `MuseChunk` (from `MuseBytecodeCompiler`) against a real `HarnessContext`,
  * submitting orders through the SAME `OrderSim` the interp uses, so a full
- * backtest driven by this VM is byte-identical to the interp's for the P0
+ * backtest driven by this VM is byte-identical to the interp's for the covered
  * subset — the parity gate (`TestBytecodeVmParity`, §4) enforces it.
  *
- * P0 is the correctness/structure milestone: the operand stack is `Dynamic` and
- * values route through `MuseVmOps` for exact parity. The unboxed-double fast
- * path, superinstructions and inline caches (the actual 3–10× — §7/P1) come
- * next and don't change observable behaviour.
+ * P1.1: tagged unboxed numeric operand stack (`nums`/`tags`/`objs`) — arithmetic,
+ * compares, bar fields, IND/LOOKBACK hit `Float` storage without per-op
+ * `Dynamic` boxing/`MuseVmOps.toNum` classification. Bools/strings/objects stay
+ * on the object lane. Observable values still match `MuseVmOps` / interp.
+ * Dispatch stays a single `runLoop` (no per-opcode call) — WITH_OFFSET re-enters
+ * the same loop for `withSeriesOffset` lookbacks.
  */
 class MuseVm {
+	static inline var TAG_NUM = 0;
+	static inline var TAG_BOOL = 1;
+	static inline var TAG_OBJ = 2;
+	static inline var STACK_CAP = 256;
+
 	final harness:HarnessContext;
 	final chunk:MuseChunk;
 	final locals:Array<Dynamic>;
-	final stack:Array<Dynamic> = [];
-	// Builtin globals — same install as MuseInterp, so CALL_BUILTIN resolves the
-	// identical function the interp's callValue plain-fn path would (§V3).
+	// P1.1 tagged stack — fixed-capacity vectors; `sp` is the live top.
+	final tags:haxe.ds.Vector<Int>;
+	final nums:haxe.ds.Vector<Float>;
+	final objs:haxe.ds.Vector<Dynamic>;
+	var sp:Int = 0;
 	final globals:Map<String, Dynamic>;
-	// P1a inline cache: `CALL_BUILTIN name` resolves `globals.get(name)` ONCE per callsite (keyed by
-	// the name's const index) and reuses it across every bar — the resolved function is stable for a
-	// VM instance's lifetime. Removes a per-bar hashmap lookup the interp pays on every call.
 	final builtinIC:haxe.ds.Vector<Dynamic>;
 
 	function new(harness:HarnessContext, chunk:MuseChunk) {
@@ -43,15 +49,11 @@ class MuseVm {
 		this.globals = new Map();
 		MuseVmBuiltins.install(this.globals, harness);
 		this.builtinIC = new haxe.ds.Vector(chunk.consts.length);
+		this.tags = new haxe.ds.Vector(STACK_CAP);
+		this.nums = new haxe.ds.Vector(STACK_CAP);
+		this.objs = new haxe.ds.Vector(STACK_CAP);
 	}
 
-	/**
-	 * Compile `prog`'s `onBar` handlers to bytecode and run a full backtest on
-	 * `feed`, driving each bar through the VM instead of the interp's stmt-walk.
-	 * Throws `VmUnsupported` (caught by the caller for interp fallback) if the
-	 * program uses anything outside the P0 subset — including any non-`onBar`
-	 * top-level statement or handler, which the subset does not yet cover.
-	 */
 	public static function runBacktest(harness:HarnessContext, prog:MuseProgram, feed:BarFeed):BacktestResult {
 		return runChunk(harness, compileProgram(prog), feed);
 	}
@@ -80,28 +82,26 @@ class MuseVm {
 			case StrategyDecl(_, body): collect(body);
 			default: throw new VmUnsupported("declaration " + Std.string(d).substr(0, 24));
 		}
-		collect(prog.stmts); // bare top-level onBar / prelude assigns, if any
+		collect(prog.stmts);
 		if (onBarBodies.length == 0) throw new VmUnsupported("no onBar handler");
 		var bodies:Array<Array<Stmt>> = [prelude];
 		for (b in onBarBodies) bodies.push(b);
 		return MuseBytecodeCompiler.compileOnBar(bodies);
 	}
 
-	/** Run a pre-compiled chunk against a (caller-configured) harness + feed. */
 	public static function runChunk(harness:HarnessContext, chunk:MuseChunk, feed:BarFeed):BacktestResult {
 		var vm = new MuseVm(harness, chunk);
 		return harness.runBacktest(function(bar) vm.execBar(bar), feed);
 	}
 
-	/** Per-bar execution — mirror of `MuseInterp.execBar`'s bindBar prelude for
-	 * the subset (no prelude/onPosition), then run the compiled chunk. */
 	function execBar(bar:Bar):Void {
 		TradeBuiltins.beginBar();
 		harness.indCols.beginBar();
-		run();
+		sp = 0;
+		runLoop(0, chunk.code.length);
 	}
 
-	inline function barField(code:Int):Dynamic {
+	inline function barField(code:Int):Float {
 		var b = harness.currentBar;
 		return switch (code) {
 			case Op.FIELD_OPEN: b.open;
@@ -111,69 +111,145 @@ class MuseVm {
 			case Op.FIELD_VOLUME: b.volume;
 			case Op.FIELD_TIME: b.time;
 			case Op.FIELD_BAR_INDEX: b.index;
-			default: null;
+			default: Math.NaN;
 		}
 	}
 
-	function run():Void {
+	inline function pushNum(f:Float):Void {
+		tags[sp] = TAG_NUM;
+		nums[sp] = f;
+		sp++;
+	}
+
+	inline function pushBool(b:Bool):Void {
+		tags[sp] = TAG_BOOL;
+		objs[sp] = b;
+		sp++;
+	}
+
+	inline function pushObj(o:Dynamic):Void {
+		tags[sp] = TAG_OBJ;
+		objs[sp] = o;
+		sp++;
+	}
+
+	function slotToDyn(i:Int):Dynamic {
+		return switch (tags[i]) {
+			case TAG_NUM: MuseVmOps.preserveNum(nums[i]);
+			case TAG_BOOL: objs[i];
+			default: objs[i];
+		};
+	}
+
+	function pushDyn(v:Dynamic):Void {
+		if (v == null) { pushObj(null); return; }
+		if (Std.isOfType(v, Bool)) { pushBool((v : Bool)); return; }
+		if (Std.isOfType(v, Float) || Std.isOfType(v, Int)) { pushNum(MuseVmOps.toNum(v)); return; }
+		pushObj(v);
+	}
+
+	function popDyn():Dynamic {
+		sp--;
+		return slotToDyn(sp);
+	}
+
+	inline function popNum():Float {
+		sp--;
+		return switch (tags[sp]) {
+			case TAG_NUM: nums[sp];
+			case TAG_BOOL: (objs[sp] : Bool) ? 1.0 : 0.0;
+			default: MuseVmOps.toNum(objs[sp]);
+		};
+	}
+
+	inline function popTruth():Bool {
+		sp--;
+		return switch (tags[sp]) {
+			case TAG_NUM: nums[sp] != 0;
+			case TAG_BOOL: (objs[sp] : Bool);
+			default: MuseVmOps.truthy(objs[sp]);
+		};
+	}
+
+	/**
+	 * Execute bytecode in `[from, until)`. One shared switch — WITH_OFFSET re-enters for the
+	 * lookback body under `harness.withSeriesOffset` (mirrors MuseInterp.evalLookback).
+	 */
+	function runLoop(from:Int, until:Int):Void {
 		var code = chunk.code;
 		var consts = chunk.consts;
-		var sp = stack;
-		sp.splice(0, sp.length); // fresh operand stack per bar (locals persist)
-		var pc = 0;
-		while (pc < code.length) {
+		var pc = from;
+		while (pc < until) {
 			var op = code[pc++];
 			switch (op) {
-				case Op.CONST: sp.push(consts[code[pc++]]);
-				case Op.LOAD_LOCAL: sp.push(locals[code[pc++]]);
-				case Op.STORE_LOCAL: locals[code[pc++]] = sp.pop();
+				case Op.CONST:
+					pushDyn(consts[code[pc++]]);
+				case Op.LOAD_LOCAL:
+					pushDyn(locals[code[pc++]]);
+				case Op.STORE_LOCAL:
+					locals[code[pc++]] = popDyn();
 				case Op.STORE_LOCAL_S:
 					var slot = code[pc++];
-					var v = sp.pop();
+					var v = popDyn();
 					locals[slot] = v;
-					// Parity with MuseInterp.Assign: numeric assigns push a series sample.
 					if (Std.isOfType(v, Float) || Std.isOfType(v, Int))
 						harness.pushSeries(chunk.localNames[slot], MuseVmOps.toNum(v));
-				case Op.BAR_FIELD: sp.push(barField(code[pc++]));
+				case Op.BAR_FIELD:
+					pushNum(barField(code[pc++]));
 				case Op.ADD:
-					var b = sp.pop(); var a = sp.pop();
-					if (MuseVmOps.isStringy(a) || MuseVmOps.isStringy(b))
-						sp.push(Std.string(a) + Std.string(b));
-					else sp.push(MuseVmOps.preserveNum(MuseVmOps.toNum(a) + MuseVmOps.toNum(b)));
-				case Op.SUB: var b = sp.pop(); var a = sp.pop(); sp.push(MuseVmOps.preserveNum(MuseVmOps.toNum(a) - MuseVmOps.toNum(b)));
-				case Op.MUL: var b = sp.pop(); var a = sp.pop(); sp.push(MuseVmOps.preserveNum(MuseVmOps.toNum(a) * MuseVmOps.toNum(b)));
-				case Op.DIV: var b = sp.pop(); var a = sp.pop(); sp.push(MuseVmOps.preserveNum(MuseVmOps.toNum(a) / MuseVmOps.toNum(b)));
-				case Op.MOD: var b = sp.pop(); var a = sp.pop(); sp.push(MuseVmOps.preserveNum(MuseVmOps.toNum(a) % MuseVmOps.toNum(b)));
-				case Op.LT: var b = sp.pop(); var a = sp.pop(); sp.push(MuseVmOps.toNum(a) < MuseVmOps.toNum(b));
-				case Op.LE: var b = sp.pop(); var a = sp.pop(); sp.push(MuseVmOps.toNum(a) <= MuseVmOps.toNum(b));
-				case Op.GT: var b = sp.pop(); var a = sp.pop(); sp.push(MuseVmOps.toNum(a) > MuseVmOps.toNum(b));
-				case Op.GE: var b = sp.pop(); var a = sp.pop(); sp.push(MuseVmOps.toNum(a) >= MuseVmOps.toNum(b));
-				case Op.EQ: var b = sp.pop(); var a = sp.pop(); sp.push(a == b);
-				case Op.NE: var b = sp.pop(); var a = sp.pop(); sp.push(a != b);
-				case Op.AND: var b = sp.pop(); var a = sp.pop(); sp.push(MuseVmOps.truthy(a) && MuseVmOps.truthy(b));
-				case Op.OR: var b = sp.pop(); var a = sp.pop(); sp.push(MuseVmOps.truthy(a) || MuseVmOps.truthy(b));
-				case Op.NOT: sp.push(!MuseVmOps.truthy(sp.pop()));
-				case Op.NEG: sp.push(MuseVmOps.preserveNum(-MuseVmOps.toNum(sp.pop())));
-				case Op.JZ: var addr = code[pc++]; if (!MuseVmOps.truthy(sp.pop())) pc = addr;
-				case Op.JMP: pc = code[pc++];
+					var bi = sp - 1; var ai = sp - 2;
+					if (tags[ai] == TAG_OBJ && MuseVmOps.isStringy(objs[ai])
+						|| tags[bi] == TAG_OBJ && MuseVmOps.isStringy(objs[bi])) {
+						var b = popDyn(); var a = popDyn();
+						pushObj(Std.string(a) + Std.string(b));
+					} else {
+						var bn = popNum(); var an = popNum();
+						pushNum(an + bn);
+					}
+				case Op.SUB: var bn = popNum(); var an = popNum(); pushNum(an - bn);
+				case Op.MUL: var bn = popNum(); var an = popNum(); pushNum(an * bn);
+				case Op.DIV: var bn = popNum(); var an = popNum(); pushNum(an / bn);
+				case Op.MOD: var bn = popNum(); var an = popNum(); pushNum(an % bn);
+				case Op.LT: var bn = popNum(); var an = popNum(); pushBool(an < bn);
+				case Op.LE: var bn = popNum(); var an = popNum(); pushBool(an <= bn);
+				case Op.GT: var bn = popNum(); var an = popNum(); pushBool(an > bn);
+				case Op.GE: var bn = popNum(); var an = popNum(); pushBool(an >= bn);
+				case Op.EQ:
+					var b = popDyn(); var a = popDyn();
+					pushBool(a == b);
+				case Op.NE:
+					var b = popDyn(); var a = popDyn();
+					pushBool(a != b);
+				case Op.AND: var bt = popTruth(); var at = popTruth(); pushBool(at && bt);
+				case Op.OR: var bt = popTruth(); var at = popTruth(); pushBool(at || bt);
+				case Op.NOT: pushBool(!popTruth());
+				case Op.NEG: pushNum(-popNum());
+				case Op.JZ:
+					var addr = code[pc++];
+					if (!popTruth()) pc = addr;
+				case Op.JMP:
+					pc = code[pc++];
 				case Op.CMP_JZ:
-					// Fused `cmp; JZ`: compute the SAME bool the standalone cmp would, jump if false.
 					var cmpOp = code[pc++];
 					var addr = code[pc++];
-					var b = sp.pop(); var a = sp.pop();
-					var r = switch (cmpOp) {
-						case Op.LT: MuseVmOps.toNum(a) < MuseVmOps.toNum(b);
-						case Op.LE: MuseVmOps.toNum(a) <= MuseVmOps.toNum(b);
-						case Op.GT: MuseVmOps.toNum(a) > MuseVmOps.toNum(b);
-						case Op.GE: MuseVmOps.toNum(a) >= MuseVmOps.toNum(b);
-						case Op.EQ: a == b;
-						default: a != b; // NE
-					};
+					var r = false;
+					if (cmpOp == Op.EQ || cmpOp == Op.NE) {
+						var b = popDyn(); var a = popDyn();
+						r = (cmpOp == Op.EQ) ? (a == b) : (a != b);
+					} else {
+						var bn = popNum(); var an = popNum();
+						r = switch (cmpOp) {
+							case Op.LT: an < bn;
+							case Op.LE: an <= bn;
+							case Op.GT: an > bn;
+							default: an >= bn;
+						};
+					}
 					if (!r) pc = addr;
 				case Op.ORDER:
 					var verb = code[pc++];
 					var hasArg = code[pc++];
-					var arg:Dynamic = hasArg == 1 ? sp.pop() : null;
+					var arg:Dynamic = hasArg == 1 ? popDyn() : null;
 					var verbStr = switch (verb) {
 						case Op.VERB_LONG: "long";
 						case Op.VERB_SHORT: "short";
@@ -186,17 +262,11 @@ class MuseVm {
 					var argc = code[pc++];
 					var argv:Array<Dynamic> = [for (_ in 0...argc) null];
 					var i = argc - 1;
-					while (i >= 0) { argv[i] = sp.pop(); i--; }
-					// Inline cache (P1a): resolve the builtin once per callsite, reuse across bars.
+					while (i >= 0) { argv[i] = popDyn(); i--; }
 					var fn = builtinIC[nameIdx];
 					if (fn == null) { fn = globals.get(consts[nameIdx]); builtinIC[nameIdx] = fn; }
-					// Mirror of MuseInterp.callValue's plain-function path (recv = null).
-					sp.push(MuseVmOps.preserveNum(Reflect.callMethod(null, fn, argv)));
+					pushDyn(MuseVmOps.preserveNum(Reflect.callMethod(null, fn, argv)));
 				case Op.IND:
-					// TB0: statically-dispatched indicator — the SAME TradeBuiltins static the
-					// interp's dynamic call reaches, minus Reflect dispatch + argv/arg boxing.
-					// All operands are compile-time immediates (compiler guarantees), so the
-					// callee sees bit-identical inputs to the generic CALL_BUILTIN path.
 					var ind = code[pc++];
 					var nameIdx = code[pc++];
 					var np = code[pc++];
@@ -217,41 +287,61 @@ class MuseVm {
 						case Op.IND_MOM: TradeBuiltins.mom(harness, sname, p1);
 						case Op.IND_CHANGE:
 							np > 0 ? TradeBuiltins.change(harness, sname, p1) : TradeBuiltins.change(harness, sname);
-						default: // IND_PCT_CHANGE
+						case Op.IND_PCT_CHANGE:
 							np > 0 ? TradeBuiltins.pctChange(harness, sname, p1) : TradeBuiltins.pctChange(harness, sname);
+						case Op.IND_SLOPE: TradeBuiltins.slopeN(harness, sname, p1);
+						case Op.IND_ZSCORE_ROLL: TradeBuiltins.zscoreN(harness, sname, p1);
+						case Op.IND_PERCENT_RANK: TradeBuiltins.percentRank(harness, sname, p1);
+						case Op.IND_EWM_VAR: TradeBuiltins.ewmVar(harness, sname, p1);
+						case Op.IND_EWM_STDEV: TradeBuiltins.ewmStdev(harness, sname, p1);
+						case Op.IND_HL2: TradeBuiltins.hl2(harness);
+						case Op.IND_HLC3: TradeBuiltins.hlc3(harness);
+						case Op.IND_OHLC4: TradeBuiltins.ohlc4(harness);
+						default: TradeBuiltins.vwap(harness);
 					};
-					sp.push(MuseVmOps.preserveNum(r));
+					pushNum(r);
 				case Op.CROSS:
 					var csId = code[pc++];
 					var fnCode = code[pc++];
 					var argc = code[pc++];
 					var a0:Array<Dynamic> = [for (_ in 0...argc) null];
 					var j = argc - 1;
-					while (j >= 0) { a0[j] = sp.pop(); j--; }
+					while (j >= 0) { a0[j] = popDyn(); j--; }
 					var res:Bool = switch (fnCode) {
 						case Op.CS_CROSSOVER: TradeBuiltins.crossoverCS(harness, csId, a0[0], a0[1]);
 						case Op.CS_CROSSUNDER: TradeBuiltins.crossunderCS(harness, csId, a0[0], a0[1]);
 						case Op.CS_RISING: TradeBuiltins.risingCS(harness, csId, a0[0], Std.int(a0[1]), argc > 2 ? Std.int(a0[2]) : 0);
 						default: TradeBuiltins.fallingCS(harness, csId, a0[0], Std.int(a0[1]), argc > 2 ? Std.int(a0[2]) : 0);
 					};
-					sp.push(res);
+					pushBool(res);
 				case Op.LOOKBACK:
 					var sname:String = consts[code[pc++]];
-					var n = Std.int(sp.pop());
-					sp.push(harness.seriesLookback(sname, n));
+					var n = Std.int(popNum());
+					pushNum(harness.seriesLookback(sname, n));
+				case Op.WITH_OFFSET:
+					var end = code[pc++];
+					var n = Std.int(popNum());
+					var start = pc;
+					var self = this;
+					var savedSp = sp;
+					harness.withSeriesOffset(n, function() {
+						self.sp = savedSp;
+						self.runLoop(start, end);
+						return null;
+					});
+					pc = end;
 				case Op.GET_FIELD:
 					var f:String = consts[code[pc++]];
-					var o = sp.pop();
-					sp.push(o == null ? null : Reflect.getProperty(o, f));
+					var o = popDyn();
+					pushDyn(o == null ? null : Reflect.getProperty(o, f));
 				case Op.SERIES:
 					var scrId = code[pc++];
 					var fnCode = code[pc++];
 					var argc = code[pc++];
 					var s0:Array<Dynamic> = [for (_ in 0...argc) null];
 					var k = argc - 1;
-					while (k >= 0) { s0[k] = sp.pop(); k--; }
+					while (k >= 0) { s0[k] = popDyn(); k--; }
 					var scrOut = harness.indCols.scratchObj(scrId);
-					// Exact mirror of MuseInterp's __scr default/Std.int handling per indicator.
 					switch (fnCode) {
 						case Op.SCR_MACD:
 							TradeBuiltins.macd(harness, s0[0], argc > 1 ? Std.int(s0[1]) : 12,
@@ -259,14 +349,17 @@ class MuseVm {
 						case Op.SCR_BBANDS:
 							TradeBuiltins.bbands(harness, s0[0], Std.int(s0[1]),
 								argc > 2 ? (s0[2] : Float) : 2.0, scrOut);
-						default: // SCR_STOCH — no series arg
+						default:
 							TradeBuiltins.stoch(harness, argc > 0 ? Std.int(s0[0]) : 14,
 								argc > 1 ? Std.int(s0[1]) : 3, argc > 2 ? Std.int(s0[2]) : 3, scrOut);
 					}
-					sp.push(scrOut);
-				case Op.POP: sp.pop();
-				case Op.HALT: return;
-				default: throw "MuseVm: bad opcode " + op + " @ " + (pc - 1);
+					pushObj(scrOut);
+				case Op.POP:
+					if (sp > 0) sp--;
+				case Op.HALT:
+					return;
+				default:
+					throw "MuseVm: bad opcode " + op + " @ " + (pc - 1);
 			}
 		}
 	}

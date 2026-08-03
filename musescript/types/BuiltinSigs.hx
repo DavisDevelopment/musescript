@@ -162,6 +162,15 @@ class BuiltinSigs {
 		// Variadic; returns a scalar so `count_true(a, b, c) >= 2` expresses an N-of-M gate, and
 		// `count_true(x)` is a plain bool->0/1 coercion. minArgs 1 so an empty call is a type error.
 		fun("count_true", [TBool], TScalar, 1, true);
+		// Variadic boolean combinators (OR / AND over N conditions).
+		fun("any_of", [TBool], TBool, 1, true);
+		fun("all_of", [TBool], TBool, 1, true);
+		// Donchian channel struct (reads high/low implicitly): donchian(n).upper / .lower / .mid.
+		fun("donchian", [TWindow], TObject([
+			{name: "upper", ty: TScalar},
+			{name: "lower", ty: TScalar},
+			{name: "mid", ty: TScalar}
+		]));
 		// Peak-following trailing stop: true once price retraces `dist` (price units, e.g. k*atr(n))
 		// from the best level reached since entry. Inert while flat.
 		fun("trail", [TScalar], TBool);

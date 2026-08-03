@@ -27,11 +27,13 @@ import musescript.evo.Palette;
  * idents like `revenue`) lower onto feature-tape series ids (sid >= 7) — the
  * host packs those columns from the tape at configure time.
  *
- * Panel v1 (fixed-universe literal symbols): `close_of` / `mom_of` / `sma_of` /
- * `sym_available` / `fund_of` / OHLCV `*_of` reserve dense feature slots keyed
- * `field@SYM` (same as `PortfolioBuiltins.seriesKey`) — calendar-aligned panel
- * columns packed by the host from `PanelFeed`. Bags / computed bags / graph bags
- * / `symbols()` / portfolio apply stay `host_eval` or whole-module fallback.
+ * Panel v1+ (fixed-universe literal symbols): `close_of` / `mom_of` / `sma_of` /
+ * `ema_of` / `rsi_of` / `sym_available` / `fund_of` / OHLCV `*_of` reserve dense
+ * feature slots keyed `field@SYM` (same as `PortfolioBuiltins.seriesKey`) —
+ * calendar-aligned panel columns packed by the host from `PanelFeed`.
+ * Literal `buy`/`sell_all`/`target_weight`/`rebalance_equal([...])` are HostABI
+ * imports. Bags / computed bags / graph bags / `symbols()` / scan / portfolio
+ * queries stay `host_eval` or whole-module fallback.
  */
 class StrategyWasmEmitter {
 	var locals:Map<String, String> = new Map();
@@ -1230,6 +1232,17 @@ class StrategyWasmEmitter {
 				if (args.length < 1) throw new EmitUnsupported();
 				needImport("sell_all", "(param i32)");
 				"i32.const " + strId(stringKey(args[0])) + "\n    call $sell_all\n    f64.const 0";
+			case "target_weight":
+				// Literal-sym portfolio apply — HostABI, same shape as buy (reads stay native).
+				if (args.length < 2) throw new EmitUnsupported();
+				needImport("target_weight", "(param i32 f64)");
+				"i32.const " + strId(stringKey(args[0])) + "\n    " + coerceF64(args[1])
+					+ "\n    call $target_weight\n    f64.const 0";
+			case "rebalance_equal":
+				// Literal string-array only (fixed universe). Dynamic/bag lists stay EmitUnsupported.
+				if (args.length < 1) throw new EmitUnsupported();
+				needImport("rebalance_equal", "(param i32)");
+				"i32.const " + strId(literalSymListKey(args[0])) + "\n    call $rebalance_equal\n    f64.const 0";
 			case "position":
 				needPositionImports();
 				"call $get_position";
@@ -1315,6 +1328,14 @@ class StrategyWasmEmitter {
 				if (args.length < 2) throw new EmitUnsupported();
 				usedIndicators.set("sma", true);
 				"i32.const " + panelSeriesSid("close", args[0]) + "\n    " + asI32(args[1]) + "\n    call $sma";
+			case "ema_of":
+				if (args.length < 2) throw new EmitUnsupported();
+				usedIndicators.set("ema", true);
+				"i32.const " + panelSeriesSid("close", args[0]) + "\n    " + asI32(args[1]) + "\n    call $ema";
+			case "rsi_of":
+				if (args.length < 2) throw new EmitUnsupported();
+				usedIndicators.set("rsi", true);
+				"i32.const " + panelSeriesSid("close", args[0]) + "\n    " + asI32(args[1]) + "\n    call $rsi";
 			case "sym_available":
 				if (args.length < 1) throw new EmitUnsupported();
 				emitSymAvailable(args[0]);
@@ -1472,8 +1493,10 @@ class StrategyWasmEmitter {
 	public static inline var FEATURE_SLOT_PREFIX = "feature-slot:";
 
 	/**
-	 * WASM panel escape list (v1): these stay host_eval / whole-module fallback.
-	 * Native subset is literal-symbol `*_of` / `mom_of` / `sma_of` / `sym_available` / `fund_of`.
+	 * WASM panel escape list: these stay host_eval / whole-module fallback.
+	 * Native/hybrid subset: literal-symbol OHLCV `*_of` / `mom_of` / `sma_of` / `ema_of` /
+	 * `rsi_of` / `sym_available` / `fund_of`, plus HostABI `buy` / `sell_all` /
+	 * `target_weight` / literal-array `rebalance_equal`.
 	 */
 	public static final PANEL_HOST_ESCAPE:Array<String> = [
 		"symbols", "bag_new", "bag_set", "bag_get", "bag_has", "bag_delete", "bag_name",
@@ -1481,11 +1504,11 @@ class StrategyWasmEmitter {
 		"bag_equal", "bag_pair", "bag_from_dict", "bag_from_scan", "bag_to_dict", "bag_computed",
 		"bag_resolve", "bag_rank_mom", "bag_rank_rsi", "bag_rank_field", "bag_graph",
 		"bag_add", "bag_sub", "bag_mask", "bag_scale", "bag_norm",
-		"rebalance_equal", "target_weight", "scan_top", "scan_bottom",
+		"scan_top", "scan_bottom",
 		"pos", "entry_of", "weight_of", "holdings",
-		"portfolio_equity", "portfolio_cash", "portfolio_unrealized",
-		"ema_of", "rsi_of"
-		// buy / sell_all: native HostABI imports (literal sym), not host_eval
+		"portfolio_equity", "portfolio_cash", "portfolio_unrealized"
+		// buy / sell_all / target_weight / rebalance_equal(literal[]): HostABI, not host_eval
+		// ema_of / rsi_of: native panel series slots (removed from escape)
 	];
 
 	function featureSlot(key:String):Int {
@@ -1525,6 +1548,19 @@ class StrategyWasmEmitter {
 			case EConst(CString(s)): s;
 			case EIdent(n) | EBarField(n): n;
 			case EParent(inner): stringKey(inner);
+			default: throw new EmitUnsupported();
+		};
+	}
+
+	/** Pack literal `["AAA","BBB"]` into one string-table key (US unit sep). Dynamic lists escape. */
+	public static inline var REBALANCE_SYM_SEP = "\x1f";
+
+	function literalSymListKey(e:Expr):String {
+		return switch (e) {
+			case EParent(inner): literalSymListKey(inner);
+			case EArrayDecl(values):
+				if (values.length == 0) return "";
+				[for (v in values) stringKey(v)].join(REBALANCE_SYM_SEP);
 			default: throw new EmitUnsupported();
 		};
 	}

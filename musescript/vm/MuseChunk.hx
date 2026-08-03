@@ -5,12 +5,10 @@ package musescript.vm;
  * `MuseBytecodeCompiler` for the P0 subset (strategy `onBar`/`when`/`order`),
  * executed by `MuseVm`.
  *
- * P0 is deliberately a flat `Int` instruction array + a `Dynamic` constant pool
- * + a local-slot layout — the "small VM, large parity harness" split the spec
- * calls for. The unboxed numeric operand path, superinstructions and inline
- * caches are P1; here the operand stack is `Dynamic` and every value op routes
- * through `MuseVmOps` so the VM is byte-identical to `MuseInterp` by construction
- * (§4). The compiled artifact is what an oracle memo can eventually cache (§6).
+ * P1.1: tagged unboxed numeric operand path (`tags`/`nums`/`objs` in `MuseVm`).
+ * P1a/P1b: builtin IC + `CMP_JZ`. Observable values stay byte-identical to `MuseInterp`
+ * via `MuseVmOps` at Dynamic boundaries (§4). The compiled artifact is what the oracle
+ * memo caches (`Fitness.vmChunkCache`, §6).
  */
 @:structInit
 class MuseChunk {

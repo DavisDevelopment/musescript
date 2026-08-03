@@ -82,14 +82,20 @@ class MuseBytecodeCompiler {
 		}
 	}
 
-	// TB0: indicators eligible for static IND dispatch — exactly the
+	// TB0 + widen: indicators eligible for static IND dispatch — exactly the
 	// `TradeBuiltins` statics `install` registers under these names. NOT `hma`
 	// (registered elsewhere) and NOT the __cs/__scr callsite-stateful ones.
 	static final IND_CODES:Map<String, Int> = [
 		"sma" => Op.IND_SMA, "ema" => Op.IND_EMA, "rsi" => Op.IND_RSI, "atr" => Op.IND_ATR,
 		"highest" => Op.IND_HIGHEST, "lowest" => Op.IND_LOWEST, "stdev" => Op.IND_STDEV,
 		"wma" => Op.IND_WMA, "rma" => Op.IND_RMA, "roc" => Op.IND_ROC, "mom" => Op.IND_MOM,
-		"change" => Op.IND_CHANGE, "pct_change" => Op.IND_PCT_CHANGE
+		"change" => Op.IND_CHANGE, "pct_change" => Op.IND_PCT_CHANGE,
+		"slope" => Op.IND_SLOPE, "zscore_roll" => Op.IND_ZSCORE_ROLL, "percent_rank" => Op.IND_PERCENT_RANK,
+		"ewm_var" => Op.IND_EWM_VAR, "ewm_stdev" => Op.IND_EWM_STDEV,
+		"hl2" => Op.IND_HL2, "hlc3" => Op.IND_HLC3, "ohlc4" => Op.IND_OHLC4, "vwap" => Op.IND_VWAP
+	];
+	static final IND_ZERO_ARG:Map<Int, Bool> = [
+		Op.IND_HL2 => true, Op.IND_HLC3 => true, Op.IND_OHLC4 => true, Op.IND_VWAP => true
 	];
 
 	static function unwrapParent(e:Expr):Expr {
@@ -213,6 +219,12 @@ class MuseBytecodeCompiler {
 	function tryLowerInd(name:String, args:Array<Expr>):Bool {
 		var ind = IND_CODES.get(name);
 		if (ind == null) return false;
+		// 0-arg bar helpers (hl2/hlc3/ohlc4/vwap) — no series/param immediates.
+		if (IND_ZERO_ARG.exists(ind)) {
+			if (args.length != 0) return false;
+			emit(Op.IND); emit(ind); emit(constIndex("")); emit(0);
+			return true;
+		}
 		var optionalParam = (ind == Op.IND_CHANGE || ind == Op.IND_PCT_CHANGE);
 		if (optionalParam) {
 			if (args.length < 1 || args.length > 2) return false;
@@ -232,6 +244,18 @@ class MuseBytecodeCompiler {
 		emit(Op.IND); emit(ind); emit(constIndex(sname));
 		if (p1 != null) { emit(1); emit(p1); } else emit(0);
 		return true;
+	}
+
+	function emitBuiltinCall(name:String, args:Array<Expr>):Void {
+		// TB0 fast path: fully-static indicator callsite → single IND op with immediates.
+		// Falls through to the generic CALL_BUILTIN when the shape doesn't qualify.
+		if (tryLowerInd(name, args)) return;
+		for (i in 0...args.length) {
+			var sn = BuiltinSigs.wantsSeries(name, i) ? BuiltinSigs.seriesNameOf(args[i]) : null;
+			if (sn != null) { emit(Op.CONST); emit(constIndex(sn)); }
+			else expr(args[i]);
+		}
+		emit(Op.CALL_BUILTIN); emit(constIndex(name)); emit(args.length);
 	}
 
 	// ---- statements ----
@@ -277,8 +301,15 @@ class MuseBytecodeCompiler {
 				emit(Op.CONST);
 				emit(constIndex(constValue(c)));
 			case EBarField(name):
-				emit(Op.BAR_FIELD);
-				emit(barFieldCode(name));
+				// StrategyParser lowers 0-arg series helpers to EBarField; bare `hl2` (not `hl2()`)
+				// must still invoke TradeBuiltins.hl2 — same as MuseInterp.resolve + nullary auto-call.
+				var zind = IND_CODES.get(name);
+				if (zind != null && IND_ZERO_ARG.exists(zind)) {
+					emitBuiltinCall(name, []);
+				} else {
+					emit(Op.BAR_FIELD);
+					emit(barFieldCode(name));
+				}
 			case EIdent(name):
 				if (BAR_FIELDS.exists(name)) { emit(Op.BAR_FIELD); emit(BAR_FIELDS.get(name)); }
 				else if (localSlots.exists(name)) { emit(Op.LOAD_LOCAL); emit(localSlots.get(name)); }
@@ -347,24 +378,27 @@ class MuseBytecodeCompiler {
 			// CALL_BUILTIN resolves the same function the interp's `callValue` plain-fn path does.
 			// A local shadowing the name, or a non-plain-function global (IndicatorInstance/closure),
 			// is out of subset ⇒ fallback (deterministic).
+			// StrategyParser also lowers 0-arg series helpers (`hl2`/`hlc3`/`ohlc4`) to `EBarField`,
+			// so `hl2()` arrives as `ECall(EBarField("hl2"), [])` — accept that callee shape too.
 			case ECall(EIdent(name), args) if (!localSlots.exists(name) && isPlainBuiltin(name)):
-				// TB0 fast path: fully-static indicator callsite → single IND op with immediates.
-				// Falls through to the generic CALL_BUILTIN when the shape doesn't qualify.
-				if (tryLowerInd(name, args)) return;
-				for (i in 0...args.length) {
-					var sn = BuiltinSigs.wantsSeries(name, i) ? BuiltinSigs.seriesNameOf(args[i]) : null;
-					if (sn != null) { emit(Op.CONST); emit(constIndex(sn)); }
-					else expr(args[i]);
-				}
-				emit(Op.CALL_BUILTIN); emit(constIndex(name)); emit(args.length);
-			// `series[n]` — `ELookback`. Interp: `evalLookback(series, Std.int(evalExpr(n)))`, and for
-			// a bar-field/ident series that is `harness.seriesLookback(name, n)`. The `ECall`/offset
-			// series case (`withSeriesOffset` re-entrancy) is deferred ⇒ VmUnsupported.
+				emitBuiltinCall(name, args);
+			case ECall(EBarField(name), args) if (!localSlots.exists(name) && isPlainBuiltin(name)):
+				emitBuiltinCall(name, args);
+			// `series[n]` — `ELookback`. Interp: `evalLookback(series, Std.int(evalExpr(n)))`.
+			// Bar-field/ident → LOOKBACK (series buffer by name). ECall/other → WITH_OFFSET
+			// wrapping the series sub-expr (same `harness.withSeriesOffset` re-entrancy as interp).
 			case ELookback(series, nExpr):
 				var sname = lookbackSeriesName(series);
-				if (sname == null) throw new VmUnsupported("lookback of non-series expr");
-				expr(nExpr);
-				emit(Op.LOOKBACK); emit(constIndex(sname));
+				if (sname != null) {
+					expr(nExpr);
+					emit(Op.LOOKBACK); emit(constIndex(sname));
+				} else {
+					expr(nExpr);
+					emit(Op.WITH_OFFSET);
+					var endPatch = code.length; emit(0);
+					expr(series);
+					code[endPatch] = code.length;
+				}
 			// `__scr` multi-output indicators (macd/bbands/stoch): fill a per-callsite scratch object
 			// (`indCols.scratchObj(scrId)`) and return it — the fields are read via EField below.
 			// Args via plain `expr()` (interp uses plain evalExpr; SERIES applies Std.int per-indicator

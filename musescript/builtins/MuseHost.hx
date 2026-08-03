@@ -28,10 +28,11 @@ import musescript.harness.HarnessContext;
  * WASM: `MuseCompiler.lower` / `StrategyWasmBackend` always run `MuseHostLower`
  * before emit. Single-symbol orders/chart/math and bare aux reads from
  * `Bar.data` (PIT-joined offline; no live EDGAR/network in strategy runtime)
- * lower natively. Panel v1: literal-symbol `close_of` / `mom_of` / `sma_of` /
- * `sym_available` / `fund_of` pack into `field@SYM` feature slots; literal
- * `buy`/`sell_all` are HostABI imports. Bags, computed/graph bags, `symbols()`,
- * scan/rebalance/portfolio queries stay `host_eval` or whole-module fallback
+ * lower natively. Panel: literal-symbol `close_of` / `mom_of` / `sma_of` /
+ * `ema_of` / `rsi_of` / `sym_available` / `fund_of` pack into `field@SYM`
+ * feature slots; literal `buy`/`sell_all`/`target_weight`/`rebalance_equal([…])`
+ * are HostABI imports. Bags, computed/graph bags, `symbols()`, scan/portfolio
+ * queries stay `host_eval` or whole-module fallback
  * (`StrategyWasmEmitter.PANEL_HOST_ESCAPE`).
  */
 class MuseHost {

@@ -1,13 +1,9 @@
 # SPEC — A stack-bytecode IR + VM (and the GraalVM/Truffle force-multiplier)
 
-**Status:** Design spec, 2026-07-31. **Execution checklist lives in `BYTECODE_VM_TODO.md`** (V0–V6
-ordering; this spec stays design/rationale). **P0 vertical slice LANDED (2026-07-31):** `musescript/vm/`
-(`Op`, `MuseChunk`, `MuseVmOps`, `MuseBytecodeCompiler`, `MuseVm`) compiles the no-indicator
-`onBar`/`when`/`order` subset and runs a full backtest byte-identical to the interp — parity gated by
-`TestBytecodeVmParity` (raw-f64-bit trades + equity across 6 programs; out-of-subset ⇒ `VmUnsupported`
-fallback). Full JS suite green (75,068 asserts, 0 fail). Remaining P0 = broaden the subset
-(`SERIES`/`CROSS` callsite state, `LOOKBACK`, prelude coverage) + wire the oracle behind a flag +
-extend `DetParityDump` to the VM tier; P1 = the unboxed fast path (the actual speed). Replaces the
+**Status:** Design spec, 2026-07-31. **Execution checklist lives in `BYTECODE_VM_TODO.md`.**
+P0 vertical + V3–V6 oracle flag + DetParityDump VM tier + P1.1 unboxed stack **LANDED**
+(see `musescript/vm/README.md` for oracle-eligible subset / `--vm` enable). Remaining: optional
+further IND widen / P3 long-tail / Tier B gated on §9. Replaces the
 tree-walking `MuseInterp` on the hot path with a
 compile-once **stack-bytecode IR** run by a tight VM. On GraalVM this is not "a bit faster" — a
 Truffle-hosted bytecode interpreter is **partially evaluated to native code specialized per

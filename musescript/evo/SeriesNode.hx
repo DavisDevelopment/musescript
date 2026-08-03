@@ -12,4 +12,13 @@ enum SeriesNode {
 	 * evaluate this yet — a genome containing `SProj` takes the Expand→interp fallback (nma-unsupported).
 	 */
 	SProj(name:String, field:String);
+	/**
+	 * Literal-symbol panel series for fixed-universe panel genomes v0.
+	 * `kind` is an OHLCV field (`close`/`open`/…), an of-indicator (`mom`/`sma`/`ema`/`rsi`),
+	 * or `fund`. Expand emits `close_of("AAA")` / `mom_of("AAA", 5)` / `fund_of("AAA", "revenue")`.
+	 * `field` is the aux name for `fund` (ignored otherwise). `window` is lookback for OHLCV
+	 * (omit/0 = current) or indicator length for mom/sma/ema/rsi. WASM lowers these onto
+	 * `field@SYM` feature slots when the symbol is a string literal.
+	 */
+	SPanel(kind:String, sym:String, ?field:String, ?window:Int);
 }

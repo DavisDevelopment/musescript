@@ -233,7 +233,11 @@ or whole-module fallback): bags, computed bags, graph bags, `symbols()`,
 `StrategyWasmEmitter.PANEL_HOST_ESCAPE`. Panel evo genomes: `SPanel` leaves under
 `Variation.configureForUniverse` → Expand `*_of("SYM",…)`; constrained `PanelAction`
 templates → HostABI `buy`/`sell_all`/`rebalance_equal([...])`/`target_weight` (not
-`long`/`short`/`flat`). Still single-name-only without a universe: classic Expand skeleton.
+`long`/`short`/`flat`). Attach a panel tape with `Fitness.configurePanel` /
+`EvolutionEngine.configureForPanel` so evo scores `PanelAction` genomes on
+portfolio equity/Sharpe (`runPanelBacktest`); classic genomes stay single-name.
+NMA/VM leave panel genomes on Expand→interp/WASM (no fake columnar panel
+fitness). Still single-name-only without a universe: classic Expand skeleton.
 Dynamic bags / `symbols()` / `scan_*` remain panel-escape (not genome-grown).
 
 ## `musescript.evo` — typed genetic-programming engine
@@ -448,9 +452,28 @@ Also: `bag`/`bag_set`/`bag_from_dict`, `bag_computed`/`bag_resolve`/`bag_mode`,
 Per-symbol series live under `close@SYM`. Single-symbol `long`/`flat`/
 `OrderSim` is unchanged.
 
-**Also not yet:** live agent/user portfolio broker objects; GeneRunner
-`--panel` CSV/DB loader (use `PanelFeed.fromSymbolBars` / `runPanelBacktest`
-from Haxe/JS until then).
+**Panel CLI loaders (shipped):** offline `PanelLoader` + GeneRunner / PanelRunner:
+
+```bash
+# bySym JSON from tools/fund_panel_loader.py (sqlite/duckdb → JSON; no live EDGAR)
+node build/js/gene-runner.js --source scan.ms --panel data/fund_panel.json \
+  --fill-next-open --cost-bps 10
+
+# multi-file tapes (same as PanelRunner)
+node build/js/gene-runner.js --source scan.ms --tapes AAPL=a.csv,MSFT=b.csv
+
+# long CSV with a symbol column, or a directory of SYM.csv files
+node build/js/gene-runner.js --source scan.ms --panel data/panel_long.csv
+node build/js/panel-runner.js --source scan.ms --panel data/fund_panel.json
+```
+
+Evo discovery: `EvolutionEngine.configureForPanel(PanelLoader.load(path))` (also
+`CorpusEvoRun --panel <path>`). `MuseRuntime.panelFromBySym(bySym)` for in-memory
+Studio / browser — file I/O stays on the CLI side. Single-name `--tape` GeneRunner
+path is unchanged.
+
+**Also not yet:** live agent/user portfolio broker objects; per-symbol pending
+order books under panel (`PortfolioSim` is immediate fill — see ROADMAP §2).
 
 ### Vectors, recent windows, and strings
 

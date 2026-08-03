@@ -66,6 +66,7 @@ class TestMain {
 		runner.addCase(new TestTrailingStop());
 		runner.addCase(new TestParamSweep());
 		runner.addCase(new TestMoreBuiltins());
+		runner.addCase(new TestTier1Builtins());
 		runner.addCase(new TestWatAssembler());
 		runner.addCase(new TestBuiltinDocs());
 		runner.addCase(new TestWalkForwardPipeline());
@@ -163,6 +164,8 @@ class TestMain {
 		runner.addCase(new TestHybridWasm());
 		runner.addCase(new TestPanelWasmParity());
 		runner.addCase(new TestPanelEvoGenomes());
+		runner.addCase(new TestPanelFitness());
+		runner.addCase(new TestPanelLoader());
 		runner.addCase(new TestCompiler());
 		runner.addCase(new TestGenerator());
 		runner.addCase(new TestGeneratorLower());

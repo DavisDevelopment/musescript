@@ -10,8 +10,30 @@ StrategyGenome (Haxe enums)
     → Expand.expand()                → MuseScript source
     → Fitness.evaluate()             → MuseCompiler (js/wasm/interp)
          OR NmaFitness (columnar) when Fitness.preferNma / --nma
+         OR panel runPanelBacktest when panelFeed + PanelAction
   → EvolutionEngine                → selection / elitism
 ```
+
+**Panel fitness:** attach a `PanelFeed` via `Fitness.configurePanel` or
+`EvolutionEngine.configureForPanel(panel)` (also gates Variation universe growth).
+Genomes with `panelAction` score through the portfolio path (`buy` /
+`rebalance_equal` / `target_weight` → `PortfolioSim`). Classic genomes
+(`panelAction == null`) stay on single-name `OrderSim` even if a panel is
+attached. Compose with `configureForTape` for aux field pools.
+
+**Offline loaders / CLI:** `PanelLoader` (`json` bySym, long CSV + `symbol`,
+`--tapes SYM=path`, dir of CSVs). GeneRunner:
+
+```text
+node build/js/gene-runner.js --source scan.ms --panel data/fund_panel.json
+CorpusEvoRun --panel data/fund_panel.json   # configureForPanel + panel session tape
+```
+
+Pre-join DB panels with `tools/fund_panel_loader.py` (offline sqlite/duckdb → JSON).
+
+**NMA / VM:** panelAction and `SPanel` remain Expand→interp/WASM
+(`nma-unsupported` / `vm-unsupported`). There is no fake columnar multi-symbol
+fitness — honest panel packing only.
 
 Jenetics (`io.jenetics:jenetics:8.3.0`, Java 21) is the preferred host for
 Engine/selection when deploying on JVM; the Haxe `EvolutionEngine` is the
@@ -59,6 +81,7 @@ Primary entry: `CorpusEvoRun` (`build-corpus-evo.hxml`). Useful strangler / sear
 | `--speculative-growth-windows N` / `--speculative-growth-lambda X` | Spec-growth v2 blocked score controls (defaults 4 / 0.5) |
 | `--speculative-growth-min-delta X` / `--speculative-growth-parsimony X` | Parent acceptance margin / candidate complexity penalty |
 | `--exec-profile single\|evo\|prod\|mobile` | PreferNma / caches / prefixAttr / backend knobs |
+| `--panel PATH` | Offline `PanelLoader` → `configureForPanel` (PanelAction portfolio fitness; optional session tape when no `--tape`) |
 | `--lexicase` | ε-lexicase selection (single-tape: `Fitness.windowSharpes` cases when `--fitness-windows`>1; multi-`--tapes`: per-symbol) |
 | `--cvt-cells N` | CVT MAP-Elites cells — recommended recipe: `--lexicase --cvt-cells 64` |
 | `--credit-map-axis` | Research-only 5th CVT axis = credit HHI; **hurt OOS** (26/50 vs CVT 41/50) — keep off full-stack |
@@ -75,8 +98,27 @@ Primary entry: `CorpusEvoRun` (`build-corpus-evo.hxml`). Useful strangler / sear
 | `--arena-every N` / `--arena-steps N` / `--arena-retune-rounds N` | Sparse arena cadence / tick budget / mid-arena response rounds |
 | `--rivalry-weight W` | Selection blend weight (default 0.40 under `--rivalry`). Scale-safe z-norm blend so arena z can unseat tape-only elites |
 | `--foundry-every N` / `--foundry-bags` / `--foundry-perms N` | Rare fork→consensus Foundry with **real OOS / multi-bag gate** (Fitness+BasketFitness over held-out `oosBasket`). Off by default; under `--rivalry` defaults to every **25** gens. Set `--foundry-every 0` to disable. Bags: `auto` + `--tapes` labels |
+| `--proj-map-axis` | MAP-Elites niches by purged OOS forecast skill (5th CVT axis). **Not** additive `--proj-weight`. |
+| `--proj-ablate` | Deposit projection-ablation Δ → `NmaCreditBank` `proj:` + `GrowthWeights.projRead` |
+| `--ccea` | P5 two-pop forecaster×manager mini-loop on IS tape, then exit (`CceaCoEvo.runMini`) |
+| `--ccea-gens` / `--ccea-f-pop` / `--ccea-m-pop` | CCEA gens / forecaster pop / manager pop (defaults 3 / 4 / 4) |
 
 Oracle scoring: always use `Fitness.score` / `Fitness.scoreFacts` (bankrupt → NEG_INF).
+
+### Projection co-evo (skill axis + CCEA)
+
+```powershell
+# MAP niches by purged skill (preferred selection story)
+haxe build-corpus-evo.hxml
+# java … CorpusEvoRun --proj-map-axis [--ew-host] [--proj-ablate] --tape …
+
+# CCEA two-pop smoke (coupled trading fitness; skill is telemetry / niche, not --proj-weight)
+# java … CorpusEvoRun --ccea --ccea-gens 3 --proj-ablate --tape build/graal/smoke_spy_320.csv
+
+# Node projection scaffold + CCEA unit tests
+haxe build-projection-host-tests.hxml
+node build/js/tests-projection-host.js
+```
 
 Rivalry smoke (GraalVM + `graal/cp.txt`):
 
@@ -155,5 +197,7 @@ don't couple rivalry arenas onto the EDT without this snapshot bus.
 | `Variation` | grow / mutate / crossover |
 | `Fitness` / `scoreFacts` | compile + backtest + bankrupt-aware oracle |
 | `EvolutionEngine` | tournament + elitism (+ lexicase) |
+| `CceaCoEvo` | P5 two-pop forecaster×manager; coupled trading fitness |
+| `ProjectionAblation` / `ProjectionScore` | module credit + purged OOS skill |
 | `EvoProof` | seeded demonstration |
 | `jenetics/JeneticsNotes` | classpath contract |

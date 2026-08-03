@@ -249,6 +249,7 @@ class TestNmaFitness extends Test {
 		return switch (n) {
 			case SPrice(_): false;
 			case SProj(_, _): false;
+			case SPanel(_, _, _, _): false;
 			case SInd(_, _, _, src): src != null && seriesHasFeature(src);
 		};
 	}

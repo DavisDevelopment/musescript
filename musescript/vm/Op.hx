@@ -38,6 +38,8 @@ enum abstract Op(Int) from Int to Int {
 	                  //   static runs, minus Reflect/argv boxing (no math duplicated ⇒ parity by construction).
 	var CROSS;        // + Int csId + Int fnCode + Int argc -> push TradeBuiltins.<fn>CS(harness, csId, ...)
 	var LOOKBACK;     // + Int nameConst -> pop n; push harness.seriesLookback(name, Std.int(n))  (series[n])
+	var WITH_OFFSET;  // + Int endAddr -> pop n; run [pc,end) under harness.withSeriesOffset(n); push result; pc=end
+	                  //   P1.1+broaden: ELookback of ECall/non-series (interp's withSeriesOffset re-entrancy).
 	var GET_FIELD;    // + Int fieldConst -> pop o; push o==null ? null : Reflect.getProperty(o, field)  (obj.field)
 	var SERIES;       // + Int scrId + Int fnCode + Int argc -> multi-output indicator -> push scratch object
 	var POP;                                       // discard top
@@ -68,7 +70,7 @@ enum abstract Op(Int) from Int to Int {
 	public static inline var SCR_BBANDS = 1;
 	public static inline var SCR_STOCH = 2;
 
-	// IND indicator codes (TB0) — each maps 1:1 to a `TradeBuiltins` static
+	// IND indicator codes (TB0 + widen) — each maps 1:1 to a `TradeBuiltins` static
 	// registered under the same name in `TradeBuiltins.install`.
 	public static inline var IND_SMA = 0;
 	public static inline var IND_EMA = 1;
@@ -83,4 +85,14 @@ enum abstract Op(Int) from Int to Int {
 	public static inline var IND_MOM = 10;
 	public static inline var IND_CHANGE = 11;
 	public static inline var IND_PCT_CHANGE = 12;
+	// Uniform (src,len) / 0-arg TradeBuiltins already on `install` — same shape as TB0 (BYTECODE_VM_TODO / TB0 residual).
+	public static inline var IND_SLOPE = 13;
+	public static inline var IND_ZSCORE_ROLL = 14;
+	public static inline var IND_PERCENT_RANK = 15;
+	public static inline var IND_EWM_VAR = 16;
+	public static inline var IND_EWM_STDEV = 17;
+	public static inline var IND_HL2 = 18;   // 0-arg
+	public static inline var IND_HLC3 = 19;  // 0-arg
+	public static inline var IND_OHLC4 = 20; // 0-arg
+	public static inline var IND_VWAP = 21;  // 0-arg
 }

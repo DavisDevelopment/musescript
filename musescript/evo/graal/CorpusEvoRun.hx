@@ -107,6 +107,11 @@ class CorpusEvoRun {
 		// flag, the `spy.csv`-default path) builds a one-element basket and is completely
 		// unaffected. `--tapes`, when given, takes priority over `--tape`.
 		var tapesArg = argStr("--tapes", null);
+		// Portfolio panel tape (distinct from `--tapes` basket): load offline bySym JSON / long CSV /
+		// CSV dir via PanelLoader and attach with EvolutionEngine.configureForPanel so PanelAction
+		// genomes score via runPanelBacktest. Classic genomes stay single-name. Optional; when
+		// given without `--tape`/`--tapes`, session bars from the panel become the IS tape.
+		var panelArg = argStr("--panel", null);
 		var oosFrac = argFloat("--oos-frac", 0.25);
 		var embargo = argInt("--embargo", 21);
 		// Bucket A1: genomes below this trade count score NEG_INF (thin-trade false-positive gate).
@@ -729,7 +734,7 @@ class CorpusEvoRun {
 			}
 			Sys.println('EW-HOST: on -- kind=$ewHostKind (ProjectionProvider.autoBindGenomeHost; PSHost seeds + mutate logs; decorate→JS fallback)');
 		}
-		// Forecast-skill MAP axis (plan §7 / P3 owed wiring). Opt-in via `--proj-map-axis`;
+		// Forecast-skill MAP axis (plan §7). Opt-in via `--proj-map-axis`;
 		// `--ew-host` defaults it ON (CVT-only) so host genomes can niche apart by projScore.
 		// Disable with `--no-proj-map-axis`. Conflicts with `--credit-map-axis` → skill wins + warn.
 		var projMapAxis = argFlag("--proj-map-axis") || (ewHostOn && !argFlag("--no-proj-map-axis"));
@@ -742,12 +747,18 @@ class CorpusEvoRun {
 			Sys.println("PROJ-MAP-AXIS: enabling --cvt-cells 48 (skill axis is CVT-only; pass --cvt-cells N to override)");
 		}
 		if (projMapAxis)
-			Sys.println("PROJ-MAP-AXIS: on — MAP-Elites niches by forecast skill (Fitness.projectionScore → 5th CVT axis)");
-		// P3 smoke knob: additive `tradingScore + w·projScore` (plan §7). Default 0.2 under
-		// `--ew-host` so fusion can move fitness when host columns are referenced; 0 otherwise.
-		var projWeight = argFloat("--proj-weight", ewHostOn ? 0.2 : 0.0);
+			Sys.println("PROJ-MAP-AXIS: on — MAP-Elites niches by purged OOS forecast skill (Fitness.projectionScorePurged → 5th CVT axis)");
+		// P3 smoke knob ONLY (plan §7): additive `tradingScore + w·projScore`. Default ALWAYS 0 —
+		// selection story is the MAP skill axis, not a hand-tuned weight. Pass `--proj-weight w`
+		// explicitly to enable the smoke path (never default-on under `--ew-host`).
+		var projWeight = argFloat("--proj-weight", 0.0);
 		if (projWeight != 0)
-			Sys.println('PROJ-WEIGHT: $projWeight — selection fitness += w·projScore when finite (smoke / fusion pressure)');
+			Sys.println('PROJ-WEIGHT: $projWeight — smoke only; selection fitness += w·projScore (prefer --proj-map-axis)');
+		// P4 module credit: projection-ablation → NmaCreditBank (`proj:name`). Opt-in — each
+		// deposit re-scores the policy once per referenced projection.
+		var projAblate = argFlag("--proj-ablate");
+		if (projAblate)
+			Sys.println("PROJ-ABLATE: on — deposit ablation Δ to NmaCreditBank for referenced projections (capped per gen)");
 		var dashTitle = "MuseGene Evolution -- " + (simTapeOn ? "sim-tape (MurmurationSim)" : (tapePath != null ? tapePath : "default tape"));
 		if (ewHostOn) dashTitle = "MuseGene Evolution -- EW host (" + ewHostKind + ") -- " + (tapePath != null ? tapePath : "default tape");
 		var dashboard = guiOn ? new EvoDashboardWindow(dashTitle, guiCompete) : null;
@@ -794,6 +805,16 @@ class CorpusEvoRun {
 			#else
 			throw "--sim-tape requires a kestrel build (musescript.murmuration is gated behind -D kestrel) -- see build-scratch-simtape.hxml";
 			#end
+		} else if (panelArg != null && tapesArg == null && tapePath == null) {
+			// Panel-only: calendar-aligned session feed as the single IS/OOS tape.
+			var allBars = musescript.harness.PanelLoader.load(panelArg).all();
+			var oosLen = Std.int(allBars.length * oosFrac);
+			var isLen = allBars.length - oosLen - embargo;
+			if (isLen < 200) throw 'panel too short for a ${oosFrac}-fraction OOS split with ${embargo}-bar embargo (${allBars.length} bars total, $panelArg)';
+			isBasket.push(allBars.slice(0, isLen));
+			oosBasket.push(allBars.slice(isLen + embargo, allBars.length));
+			bagLabels.push(panelArg);
+			Sys.println('panel: $panelArg -> ${allBars.length} session bars -> IS ${isLen} / embargo $embargo / OOS ${oosBasket[0].length}');
 		} else {
 			var tapePaths = tapesArg != null ? tapesArg.split(",") : [tapePath];
 			for (path in tapePaths) {
@@ -826,6 +847,22 @@ class CorpusEvoRun {
 		// and the final top-10 OOS re-score actually run the WHOLE basket.
 		var bars = isBasket[0];
 		var oosBars = oosBasket[0];
+		// P5 CCEA smoke: two-pop forecaster×manager mini-loop on the IS tape, then exit.
+		// Selection = shared trading fitness; skill recorded for niches / telemetry only.
+		if (argFlag("--ccea")) {
+			var cceaGens = Std.int(argFloat("--ccea-gens", 3));
+			if (cceaGens < 1) cceaGens = 1;
+			var cceaF = Std.int(argFloat("--ccea-f-pop", 4));
+			var cceaM = Std.int(argFloat("--ccea-m-pop", 4));
+			Sys.println('CCEA: two-pop vertical — fPop=$cceaF mPop=$cceaM gens=$cceaGens (trading couples; skill niches NOT --proj-weight)');
+			var cceaR = musescript.evo.CceaCoEvo.runMini(bars, {
+				seed: seed, fPop: cceaF, mPop: cceaM, gens: cceaGens, ablate: projAblate
+			});
+			Sys.println('CCEA DONE: bestTrading=${cceaR.bestTrading} bestSkill=${cceaR.bestSkill} (skill telemetry only)');
+			if (cceaR.bestJoint != null)
+				Sys.println('CCEA champion: ${cceaR.bestJoint.name}');
+			return;
+		}
 		if (!sys.FileSystem.exists(watDir)) sys.FileSystem.createDirectory(watDir);
 
 		// Buy-and-hold benchmark for the GUI's performance panel: "mean performance of the
@@ -1067,6 +1104,12 @@ class CorpusEvoRun {
 		else Sys.println('wat2wasm: Python batch (--wat2wasm-python)');
 
 		var engine = new EvolutionEngine(seed, pop, Std.int(Math.max(2, pop / 16)), 3, null, tuner);
+		engine.configureForTape(bars);
+		if (panelArg != null) {
+			var panelFeed = musescript.harness.PanelLoader.load(panelArg);
+			engine.configureForPanel(panelFeed);
+			Sys.println('panel fitness: ${panelFeed.symbols.length} symbols from $panelArg (PanelAction → runPanelBacktest; classic genomes stay single-name)');
+		}
 		var popG = seedPop;
 
 		// Background distillation thread (`--distill-thread`): a continuously-running search on
@@ -1360,8 +1403,9 @@ class CorpusEvoRun {
 			return Fitness.scoreFacts(e.trades, e.sharpe, e.bankrupt == true, minTrades, nodes, parsimonyThreshold, parsimonyLambda);
 		};
 
-		// Per-generation memo of `Fitness.projectionScore` (structural key → skill). Cleared each
-		// gen so tape/provider rebinds stay honest; avoids N× redundant cloud materialize on offer.
+		// Per-generation memo of forecast skill (structural key → skill). Cleared each gen so
+		// tape/provider rebinds stay honest; avoids N× redundant cloud materialize on offer.
+		// MAP axis uses purged OOS skill; smoke `--proj-weight` uses full-tape skill (cheap).
 		var projScoreByKey:Map<String, Float> = new Map();
 		var projHitByKey:Map<String, Float> = new Map();
 		function memoProjScore(g:StrategyGenome):Float {
@@ -1370,7 +1414,9 @@ class CorpusEvoRun {
 			var key = Canonical.structuralKey(g);
 			if (projScoreByKey.exists(key))
 				return projScoreByKey.get(key);
-			var ps = Fitness.projectionScore(g, bars, Fitness.projectionProvider);
+			var ps = projMapAxis
+				? Fitness.projectionScorePurged(g, bars, Fitness.projectionProvider)
+				: Fitness.projectionScore(g, bars, Fitness.projectionProvider);
 			projScoreByKey.set(key, ps);
 			return ps;
 		}
@@ -1480,7 +1526,7 @@ class CorpusEvoRun {
 					var tradesPerBar = steppers[i].tradeCount() / steps;
 					var dutyCycle = desc.dutyCycle;
 					var cc:Null<Float> = creditMapAxis ? MapElites.creditConcentration(genomesByKey[i].g) : null;
-					var ck = MapElites.assignCell(tradesPerBar, desc.avgHold, desc.longFrac, dutyCycle, cvtCentroids.length > 0 ? cvtCentroids : null, cc);
+					var ck = assignNicheCell(tradesPerBar, desc.avgHold, desc.longFrac, dutyCycle, genomesByKey[i].g, cc);
 					archive.offer(genomesByKey[i].g, zscores[i], ck, tradesPerBar, desc.avgHold, desc.longFrac, dutyCycle, creditMapAxis && cc != null ? cc : 0.0);
 				}
 			}
@@ -1546,7 +1592,7 @@ class CorpusEvoRun {
 						var dutyCycle = desc.dutyCycle;
 						var gOffer = individuals[groupIdx[k]];
 						var cc:Null<Float> = creditMapAxis ? MapElites.creditConcentration(gOffer) : null;
-						var ck = MapElites.assignCell(tradesPerBar, desc.avgHold, desc.longFrac, dutyCycle, cvtCentroids.length > 0 ? cvtCentroids : null, cc);
+						var ck = assignNicheCell(tradesPerBar, desc.avgHold, desc.longFrac, dutyCycle, gOffer, cc);
 						archive.offer(gOffer, z, ck, tradesPerBar, desc.avgHold, desc.longFrac, dutyCycle, creditMapAxis && cc != null ? cc : 0.0);
 					}
 				}
@@ -1682,7 +1728,7 @@ class CorpusEvoRun {
 					var tradesPerBar = steppers[k].tradeCount() / steps;
 					var dutyCycle = desc.dutyCycle;
 					var cc:Null<Float> = creditMapAxis ? MapElites.creditConcentration(genomesByKey[k].g) : null;
-					var ck = MapElites.assignCell(tradesPerBar, desc.avgHold, desc.longFrac, dutyCycle, cvtCentroids.length > 0 ? cvtCentroids : null, cc);
+					var ck = assignNicheCell(tradesPerBar, desc.avgHold, desc.longFrac, dutyCycle, genomesByKey[k].g, cc);
 					archive.offer(genomesByKey[k].g, zscores[k], ck, tradesPerBar, desc.avgHold, desc.longFrac, dutyCycle, creditMapAxis && cc != null ? cc : 0.0);
 				}
 			}
@@ -1863,8 +1909,9 @@ class CorpusEvoRun {
 		for (gen in 0...gens) {
 			var tGen0 = haxe.Timer.stamp();
 			profile.beginGeneration();
-			projScoreByKey = new Map();
-			projHitByKey = new Map();
+		projScoreByKey = new Map();
+		projHitByKey = new Map();
+		var projAblateLeft = projAblate ? 8 : 0;
 			if (Fitness.preferNma && Fitness.nmaPopMemo != null) Fitness.beginNmaPopMemo();
 			if (Fitness.nmaDirtySpine) {
 				var keepKeys = [for (g in popG) Canonical.structuralKey(g)];
@@ -2176,13 +2223,19 @@ class CorpusEvoRun {
 					var dutyCycle = e.dutyCycle != null ? e.dutyCycle : 0.0;
 					var gOffer = popG[idxs[0]];
 					var cc:Null<Float> = creditMapAxis ? MapElites.creditConcentration(gOffer) : null;
+					// Archive quality = trading fitness only (plan §7). Skill niches via cell
+					// assignment; never fold `--proj-weight` into the elite comparison.
 					var offerFit = e.sharpe;
-					if (projWeight != 0) {
-						var psOffer = memoProjScore(gOffer);
-						if (Math.isFinite(psOffer)) offerFit = e.sharpe + projWeight * psOffer;
-					}
 					var ck = assignNicheCell(tradesPerBar, avgHold, longFrac, dutyCycle, gOffer, cc);
 					archive.offer(gOffer, offerFit, ck, tradesPerBar, avgHold, longFrac, dutyCycle, creditMapAxis && cc != null ? cc : 0.0);
+					if (projAblateLeft > 0 && gOffer.projections != null && gOffer.projections.length > 0) {
+						ProjectionAblation.deposit(gOffer, bars, function(gg) {
+							return Fitness.evaluate(gg, bars, "js");
+						});
+						projAblateLeft--;
+						// Variation growth bias from `proj:` credit (P4→P5).
+						ProjectionAblation.applyBankToTuner(tuner);
+					}
 				}
 			}
 			profile.stop(PhaseTimer.EVAL_OFFER, tOffer);

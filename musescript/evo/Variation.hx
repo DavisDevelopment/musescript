@@ -61,6 +61,11 @@ class Variation {
 	 * carries fund/aux `Bar.data` columns so genomes may reference those series.
 	 */
 	var fieldPool:Array<String>;
+	/**
+	 * Fixed-universe symbols for panel genomes v0. Empty ⇒ prior single-name growth only
+	 * (no `SPanel`). Set via `configureForUniverse` so Expand can emit literal `*_of("SYM",…)`.
+	 */
+	var universeSyms:Array<String> = [];
 	/** Adaptive node-type-choice weights (see GrowthWeights.hx). Defaults to a fresh instance
 	 * seeded with this file's ORIGINAL literal probabilities, so a caller that never wires a
 	 * shared tuner (or never triggers its reward loop) sees zero behavior change from before this
@@ -104,6 +109,7 @@ class Variation {
 	var memoLock = new EvoLock();
 	var indicatorPoolRef:Array<String>;
 	var fieldPoolRef:Array<String>;
+	var universeSymsRef:Array<String> = [];
 	var baseSeed:Int;
 	/**
 	 * Bumped every `beginGeneration`. Instance catalogs on `StrategyGenome` compare against this
@@ -128,6 +134,30 @@ class Variation {
 	}
 
 	/**
+	 * Gate fixed-universe symbols into growth so `growSeries` can emit `SPanel` leaves
+	 * (Expand → `close_of`/`mom_of`/`fund_of`) and `randomGenome` can attach a `PanelAction`
+	 * template (Expand → HostABI `buy`/`rebalance_equal`/`target_weight`). Empty/null clears
+	 * panel growth (prior single-name behavior). Idempotent when already set to the same list.
+	 * No live EDGAR — symbols are caller-chosen.
+	 */
+	public function configureForUniverse(?syms:Array<String>):Void {
+		this.universeSyms = syms != null && syms.length > 0 ? syms.copy() : [];
+		this.universeSymsRef = this.universeSyms;
+		if (this.universeSyms.length > 0) {
+			tuner.ensureTag("scalarTerm", "panelOf", 0.12);
+			tuner.ensureTag("panelOf", "close", 0.35);
+			tuner.ensureTag("panelOf", "mom", 0.25);
+			tuner.ensureTag("panelOf", "sma", 0.12);
+			tuner.ensureTag("panelOf", "ema", 0.10);
+			tuner.ensureTag("panelOf", "rsi", 0.10);
+			tuner.ensureTag("panelOf", "fund", 0.08);
+			tuner.ensureTag("panelAction", "buy", 0.50);
+			tuner.ensureTag("panelAction", "rebalance", 0.30);
+			tuner.ensureTag("panelAction", "target_weight", 0.20);
+		}
+	}
+
+	/**
 	 * Gate aux fields from a tape's `Bar.data` into the growth pool (idempotent for OHLCV-only).
 	 * Same offline PIT columns WASM packs via configure_features — no live EDGAR.
 	 */
@@ -143,6 +173,8 @@ class Variation {
 	 */
 	public function forkForSlot(slot:Int):Variation {
 		var v = new Variation(baseSeed + RngStreams.VARIATION_PARALLEL + slot * 100003, indicatorPoolRef, tuner, fieldPoolRef);
+		v.universeSyms = universeSymsRef.copy();
+		v.universeSymsRef = universeSymsRef;
 		v.siteDeltaMemo = siteDeltaMemo;
 		v.donorScoreMemo = donorScoreMemo;
 		v.boolCatalogMemo = boolCatalogMemo;
@@ -160,6 +192,8 @@ class Variation {
 	 */
 	public function forkDeme(deme:Int):Variation {
 		var v = new Variation(baseSeed + RngStreams.VARIATION_PARALLEL + 900000 + deme * 100003, indicatorPoolRef, tuner, fieldPoolRef);
+		v.universeSyms = universeSymsRef.copy();
+		v.universeSymsRef = universeSymsRef;
 		v.cacheGen = cacheGen;
 		return v;
 	}
@@ -182,9 +216,84 @@ class Variation {
 	// while surveying evolution-system coverage: both were typed but never generated) ----
 
 	function growSeries(depth:Int):SeriesNode {
+		// Projection leaf — credit-biased when `growableProjNames` is set (CCEA / P4 credit bank).
+		if (growableProjNames.length > 0 && rng.float() < projLeafRate)
+			return growProjSeries();
+		// Fixed-universe panel leaves (~30% when configured) — Expand emits literal *_of.
+		if (universeSyms.length > 0 && rng.float() < 0.30)
+			return growPanelSeries();
 		if (depth <= 0 || rng.float() < 0.4)
 			return SPrice(rng.pick(fieldPool));
 		return SInd(rng.pick(indicatorPool), rng.pick(fieldPool), rng.pick(Palette.WINDOWS), null);
+	}
+
+	/** `SProj(name, field)` with name drawn from `projRead` credit weights when available. */
+	function growProjSeries(?tagOut:Array<String>):SeriesNode {
+		var name = pickProjNameByCredit();
+		if (tagOut != null) tagOut.push('projRead:$name');
+		var fields = growableProjFields.length > 0 ? growableProjFields : ["p50"];
+		return SProj(name, rng.pick(fields));
+	}
+
+	/**
+	 * Roulette over `growableProjNames` weighted by `GrowthWeights.projRead` (seeded from
+	 * `NmaCreditBank` `proj:` keys via `ProjectionAblation.applyBankToTuner`). Cold names get
+	 * the explore floor from `ensureTag`.
+	 */
+	public function pickProjNameByCredit():String {
+		if (growableProjNames.length == 0) return "proj_0";
+		if (growableProjNames.length == 1) return growableProjNames[0];
+		if (tuner.hasCategory("projRead")) {
+			// Build a temporary roulette over the growable set using current tag weights.
+			var weights:Array<Float> = [];
+			var total = 0.0;
+			for (n in growableProjNames) {
+				tuner.ensureTag("projRead", n, 0.05);
+			}
+			// Re-pick among growable only: summary doesn't filter, so manual wheel.
+			var summary = tuner.summary("projRead");
+			var byTag:Map<String, Float> = new Map();
+			for (s in summary) byTag.set(s.tag, s.weight);
+			for (n in growableProjNames) {
+				var w = byTag.exists(n) ? byTag.get(n) : 0.05;
+				if (w < 0.02) w = 0.02;
+				weights.push(w);
+				total += w;
+			}
+			var r = rng.float() * total;
+			var acc = 0.0;
+			for (i in 0...growableProjNames.length) {
+				acc += weights[i];
+				if (r <= acc) return growableProjNames[i];
+			}
+			return growableProjNames[growableProjNames.length - 1];
+		}
+		return rng.pick(growableProjNames);
+	}
+
+	/** Panel-of leaf for the configured universe (close_of / mom_of / fund_of / …). */
+	function growPanelSeries(?tagOut:Array<String>):SeriesNode {
+		var sym = rng.pick(universeSyms);
+		var choice = tuner.hasCategory("panelOf") ? tuner.pick("panelOf", rng) : "close";
+		if (tagOut != null) tagOut.push('panelOf:$choice');
+		if (choice == "fund") {
+			var aux = auxFieldsInPool();
+			var fname = aux.length > 0 ? rng.pick(aux) : "revenue";
+			return SPanel("fund", sym, fname, null);
+		}
+		if (Palette.PANEL_OF_INDS.indexOf(choice) >= 0)
+			return SPanel(choice, sym, null, rng.pick(Palette.WINDOWS));
+		// close / open / high / low / volume
+		var kind = Palette.FIELDS.indexOf(choice) >= 0 ? choice : "close";
+		return SPanel(kind, sym, null, null);
+	}
+
+	function auxFieldsInPool():Array<String> {
+		var out:Array<String> = [];
+		for (f in fieldPool) {
+			if (Palette.FIELDS.indexOf(f) < 0) out.push(f);
+		}
+		return out;
 	}
 
 	/**
@@ -210,6 +319,7 @@ class Variation {
 			return switch (choice) {
 				case "param": mintParam(pool);
 				case "multiOutput": growMultiOutputField(tagOut);
+				case "panelOf" if (universeSyms.length > 0): KSeries(growPanelSeries(tagOut));
 				default: KSeries(growSeries(0));
 			};
 		}
@@ -347,21 +457,79 @@ class Variation {
 	/** `size` now grows a real scalar tree (with param minting) instead of a hardcoded
 	 * `KConst(1)` — the second reachability gap found while surveying evolution-system
 	 * coverage: the type system always supported an evolved size expression, the generator
-	 * just never used it. */
+	 * just never used it.
+	 *
+	 * With a configured universe (~45%): attach a constrained `PanelAction` template so Expand
+	 * emits HostABI buy/rebalance/target_weight instead of long/short/flat. Short slots stay
+	 * always-false under those templates (Expand ignores them; growing real trees would inflate
+	 * structural keys without changing source). */
 	public function randomGenome(depth:Int = 3):StrategyGenome {
 		var pool:Array<EvoParam> = [];
+		var usePanelAction = universeSyms.length > 0 && rng.float() < 0.45;
+		var action:Null<PanelAction> = usePanelAction ? growPanelAction() : null;
 		var g:StrategyGenome = {
 			entryLong: growBool(depth, pool),
-			entryShort: growBool(depth, pool),
+			entryShort: usePanelAction ? alwaysFalse() : growBool(depth, pool),
 			exitLong: growBool(depth, pool),
-			exitShort: growBool(depth, pool),
-			size: growScalar(1, pool),
+			exitShort: usePanelAction ? alwaysFalse() : growBool(depth, pool),
+			size: actionIsTargetWeight(action) ? growTargetWeight(pool) : growScalar(1, pool),
 			params: pool,
 			name: "musegene",
 			lineage: [],
-			seedOrigin: rng.seed
+			seedOrigin: rng.seed,
+			panelAction: action
 		};
 		return compactParams(g);
+	}
+
+	static inline function alwaysFalse():BoolNode
+		return BCmp(">", KConst(0.0), KConst(1.0));
+
+	static function actionIsTargetWeight(a:Null<PanelAction>):Bool {
+		return a != null && switch (a) { case PATargetWeight(_): true; default: false; };
+	}
+
+	/** Weight in (0,1] for `target_weight` templates — avoids growScalar minting huge qtys. */
+	function growTargetWeight(pool:Array<EvoParam>):ScalarNode {
+		if (pool.length > 0 && rng.float() < 0.35) {
+			var idx = rng.int(pool.length);
+			return KParam(idx);
+		}
+		var w = Math.round((0.1 + rng.float() * 0.9) * 1000) / 1000;
+		return KConst(w);
+	}
+
+	/**
+	 * Constrained panel-action template from the configured universe (literal symbols only).
+	 * Rebalance always covers the full fixed universe (determinism, WASM-native array literal).
+	 */
+	function growPanelAction(?tagOut:Array<String>):PanelAction {
+		var choice = tuner.hasCategory("panelAction") ? tuner.pick("panelAction", rng) : "buy";
+		if (tagOut != null) tagOut.push('panelAction:$choice');
+		return switch (choice) {
+			case "rebalance":
+				PARebalance(universeSyms.copy());
+			case "target_weight":
+				PATargetWeight(rng.pick(universeSyms));
+			default:
+				PABuy(rng.pick(universeSyms));
+		};
+	}
+
+	/** Soft panel-action retune: re-pick template/symbol under a configured universe. */
+	public function maybeMutatePanelAction(g:StrategyGenome):StrategyGenome {
+		if (universeSyms.length == 0) return g;
+		if (rng.float() >= 0.12) return g;
+		var o = copyGenome(g);
+		o.panelAction = growPanelAction();
+		if (o.panelAction != null) {
+			o.entryShort = alwaysFalse();
+			o.exitShort = alwaysFalse();
+			if (actionIsTargetWeight(o.panelAction) && !actionIsTargetWeight(g.panelAction))
+				o.size = growTargetWeight(o.params);
+		}
+		o.lineage = (g.lineage != null ? g.lineage.copy() : []).concat([Canonical.structuralKey(g)]);
+		return compactParams(o);
 	}
 
 	// ---- catalog: every Bool/Scalar/Series position across all 5 slots, path-tagged ----
@@ -399,11 +567,11 @@ class Variation {
 	}
 
 	/**
-	 * Fill every BHole/KHole in `g` with a freshly-grown subtree (P0 of SPEC_AUTHOR_HOLES §5).
-	 * Each hole is REPLACED by the grow (not re-wrapped), so the result is an UNTEMPLATED candidate
-	 * Fitness/Expand see as a clean, byte-identical-recordable genome. Each call draws a fresh fill
-	 * from this instance's rng, so repeated calls sample the fill space (the `muse fill` search).
-	 * Bool/scalar holes only in P0; series holes (SHole) + domain constraints are P1.
+	 * Fill every BHole/KHole in `g` with a freshly-grown (or domain-sampled) subtree
+	 * (SPEC_AUTHOR_HOLES §5). Each hole is REPLACED by the fill (not re-wrapped), so the
+	 * result is an UNTEMPLATED candidate Fitness/Expand see as a clean,
+	 * byte-identical-recordable genome. Domain constraints on author holes are respected;
+	 * unconstrained holes draw from the full grow grammar. Series holes (`SHole`) are P1.
 	 */
 	public function fillHoles(g:StrategyGenome):StrategyGenome {
 		return {
@@ -416,7 +584,8 @@ class Variation {
 			name: g.name,
 			lineage: g.lineage,
 			seedOrigin: g.seedOrigin,
-			projections: g.projections
+			projections: g.projections,
+			panelAction: copyPanelAction(g.panelAction)
 		};
 	}
 
@@ -424,20 +593,52 @@ class Variation {
 
 	function refillBool(n:BoolNode):BoolNode {
 		return switch (n) {
-			case BHole(_): growBool(HOLE_FILL_DEPTH);
+			case BHole(_, domain, _): sampleBoolFill(domain);
 			case BAnd(a, b): BAnd(refillBool(a), refillBool(b));
 			case BOr(a, b): BOr(refillBool(a), refillBool(b));
 			case BNot(a): BNot(refillBool(a));
 			case BCmp(op, a, b): BCmp(op, refillScalar(a), refillScalar(b));
-			case BCross(_, _, _) | BTrend(_, _, _) | BFeature(_): n; // series holes are P1 (no SHole yet); opaque leaf has none
+			case BCross(_, _, _) | BTrend(_, _, _) | BFeature(_): n;
 		};
 	}
 
 	function refillScalar(n:ScalarNode):ScalarNode {
 		return switch (n) {
-			case KHole(_): growScalar(HOLE_FILL_DEPTH);
+			case KHole(_, domain, _): sampleScalarFill(domain);
 			case KArith(op, a, b): KArith(op, refillScalar(a), refillScalar(b));
 			case KConst(_) | KParam(_) | KFeature(_) | KSeries(_) | KLookback(_, _): n;
+		};
+	}
+
+	/** Domain-aware scalar fill (SPEC_AUTHOR_HOLES §14 sampleFill). */
+	function sampleScalarFill(domain:Null<HoleDomain>):ScalarNode {
+		return switch (domain) {
+			case DIntRange(lo, hi):
+				var span = hi - lo + 1;
+				KConst(lo + (span > 0 ? rng.int(span) : 0) + 0.0);
+			case DRealInterval(lo, hi):
+				KConst(lo + rng.float() * (hi - lo));
+			case DFamily(_):
+				// Family constraints target series/bool; scalars fall back to free grow.
+				growScalar(HOLE_FILL_DEPTH);
+			case null:
+				growScalar(HOLE_FILL_DEPTH);
+		};
+	}
+
+	/** Domain-aware bool fill — `DFamily(["cross"])` stays inside the cross grammar. */
+	function sampleBoolFill(domain:Null<HoleDomain>):BoolNode {
+		return switch (domain) {
+			case DFamily(names):
+				var wantCross = false;
+				for (n in names) {
+					var k = n.toLowerCase();
+					if (k == "cross" || k == "crossover" || k == "crossunder") wantCross = true;
+				}
+				if (wantCross) return BCross(rng.pick(Palette.CROSS), growSeries(1), growSeries(1));
+				growBool(HOLE_FILL_DEPTH);
+			case DIntRange(_, _) | DRealInterval(_, _) | null:
+				growBool(HOLE_FILL_DEPTH);
 		};
 	}
 
@@ -577,7 +778,89 @@ class Variation {
 			lineage: g.lineage != null ? g.lineage.copy() : [], seedOrigin: g.seedOrigin,
 			// Projections are genome identity, not a cache — preserve across splices. Deep-copy
 			// decls so φ-delta map mutations cannot leak into the parent.
-			projections: g.projections != null ? [for (p in g.projections) copyProj(p)] : null };
+			projections: g.projections != null ? [for (p in g.projections) copyProj(p)] : null,
+			panelAction: copyPanelAction(g.panelAction) };
+	}
+
+	/** Public elitist / CCEA clone (same as internal `copyGenome`). */
+	public static inline function copyGenomePublic(g:StrategyGenome):StrategyGenome return copyGenome(g);
+
+	/**
+	 * Forecaster mutate: touch `PSPoint` sampler series / horizon / seed. Leaves manager policy
+	 * stubs alone. Falls back to `pointMutate` when no projections.
+	 */
+	public function mutateProjectionSampler(g:StrategyGenome):StrategyGenome {
+		if (g.projections == null || g.projections.length == 0)
+			return pointMutate(g);
+		var o = copyGenome(g);
+		var idx = rng.int(o.projections.length);
+		var p = copyProj(o.projections[idx]);
+		switch (p.sampler) {
+			case PSPoint(_):
+				var roll = rng.float();
+				if (roll < 0.55)
+					p.sampler = PSPoint(growSeries(1));
+				else if (roll < 0.8) {
+					p.horizon = rng.pick(Palette.WINDOWS);
+					if (p.horizon < 1) p.horizon = 5;
+				} else {
+					p.seed = p.seed ^ (rng.int(0x7fffffff) + 1);
+					p.kind = switch (rng.int(3)) {
+						case 0: PLevel;
+						case 1: PReturn;
+						default: PDirection;
+					};
+				}
+				o.projections = o.projections.copy();
+				o.projections[idx] = p;
+				o.lineage = (g.lineage != null ? g.lineage.copy() : []).concat([Canonical.structuralKey(g)]);
+				return compactParams(o);
+			case PSNoise(_, _, _) | PSHost(_):
+				return mutateHostProjection(g);
+		}
+	}
+
+	/**
+	 * Manager mutate: policy trees + optional `SProj` rewiring from credit-biased names.
+	 * Does not invent projection decls (CCEA compose supplies them from the forecaster).
+	 */
+	public function mutateManagerPolicy(g:StrategyGenome):StrategyGenome {
+		var names = growableProjNames.length > 0
+			? growableProjNames
+			: (g.projections != null ? [for (p in g.projections) p.name] : []);
+		if (names.length > 0 && rng.float() < 0.35)
+			return wireProjRead(g, names);
+		return pointMutate(g);
+	}
+
+	/**
+	 * Soft-wire an `SProj` read into `entryLong` (AND-gated), name pick via credit bank priors.
+	 */
+	public function wireProjRead(g:StrategyGenome, ?names:Array<String>):StrategyGenome {
+		var pool = names != null && names.length > 0
+			? names
+			: (growableProjNames.length > 0 ? growableProjNames : ["proj_0"]);
+		var prev = growableProjNames;
+		growableProjNames = pool;
+		var name = pickProjNameByCredit();
+		growableProjNames = prev;
+		var fields = growableProjFields.length > 0 ? growableProjFields : ["p50"];
+		var field = rng.pick(fields);
+		var o = copyGenome(g);
+		var cmp = rng.pick(Palette.CMP);
+		o.entryLong = BAnd(o.entryLong,
+			BCmp(cmp, KSeries(SProj(name, field)), KSeries(SPrice("close"))));
+		o.lineage = (g.lineage != null ? g.lineage.copy() : []).concat([Canonical.structuralKey(g)]);
+		return compactParams(o);
+	}
+
+	static function copyPanelAction(a:Null<PanelAction>):Null<PanelAction> {
+		if (a == null) return null;
+		return switch (a) {
+			case PABuy(sym): PABuy(sym);
+			case PARebalance(syms): PARebalance(syms.copy());
+			case PATargetWeight(sym): PATargetWeight(sym);
+		};
 	}
 
 	static function setEntryLong(g:StrategyGenome, v:BoolNode):StrategyGenome { var o = copyGenome(g); o.entryLong = v; return o; }
@@ -621,6 +904,9 @@ class Variation {
 		mutated.lineage = (g.lineage != null ? g.lineage.copy() : []).concat([Canonical.structuralKey(g)]);
 		var out = compactParams(mutated);
 		if (boolRepl != null) maybeRegisterDirtySpineBool(g, entry, boolRepl, out);
+		// Occasional panel-action retune under a fixed universe (symbol / template swap).
+		if (universeSyms.length > 0 && out.panelAction != null)
+			out = maybeMutatePanelAction(out);
 		return out;
 	}
 
@@ -1094,7 +1380,8 @@ class Variation {
 			// projections are PSHost (no param refs / nodes), so verbatim is correct here; the
 			// param `mapping` only touches the five policy roots. (PSPoint/PSNoise carry param
 			// refs and would need remapping + inclusion in `used`, but those are test-only today.)
-			projections: g.projections
+			projections: g.projections,
+			panelAction: copyPanelAction(g.panelAction)
 		};
 	}
 
@@ -1408,6 +1695,17 @@ class Variation {
 	static var HOST_FIELDS:Array<String> = [
 		"p50", "spread", "prob_up", "inv", "dist_inv", "entropy", "nest", "top_mass"
 	];
+
+	/**
+	 * Declared projection names `growSeries` / manager mutate may emit as `SProj` leaves.
+	 * Empty ⇒ never grow SProj (byte-identical prior). CCEA / `--proj-ablate` sets this from
+	 * the forecaster pop or genome decls; weights come from `NmaCreditBank` via `projRead`.
+	 */
+	public var growableProjNames:Array<String> = [];
+	/** Fan-reduction fields for growable SProj (default point reductions — no owed `prob_up`). */
+	public var growableProjFields:Array<String> = ["p50", "mean", "spread"];
+	/** Base probability of emitting an SProj leaf when `growableProjNames` is non-empty. */
+	public var projLeafRate:Float = 0.18;
 
 	/**
 	 * Grow or mutate `PSHost` projections + soft `phiDeltas`. Never invents hard-rule constants.

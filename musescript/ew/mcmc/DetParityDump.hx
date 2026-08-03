@@ -10,6 +10,9 @@ import haxe.io.FPHelper;
  * dual-compiled kernel will run on. (Compare bits, never decimals — decimal formatting itself can
  * differ across targets even when the underlying double is identical.)
  *
+ * Also locks the Tier-A bytecode VM vs MuseInterp on a fixed strategy (SPEC_BYTECODE_VM.md §4/§8:
+ * the fourth execution tier). `match=1` is part of the golden — a VM/interp drift fails CI.
+ *
  * Bucket D4: `render()` is the CI surface — utest locks the bit string on node; `tools/det_parity_ci.*`
  * builds JVM + node and diffs the same string.
  */
@@ -70,6 +73,40 @@ class DetParityDump {
 			host.onBar(cast bar, i);
 			var c = host.cloudAt(i);
 			buf.add("t" + i + "=" + fbits(c.priceMid) + "\n");
+		}
+
+		// SPEC_BYTECODE_VM.md §4 / §8 — fourth execution tier (interp ↔ Tier-A VM).
+		// Fixed program + synthetic feed; dump raw trades + equity bits from BOTH so CI golden
+		// catches silent VM/interp drift (DetParityDump is the standing cross-target bit lock).
+		buf.add("-- MuseVm vs MuseInterp (trades + raw f64 equity bits) --\n");
+		var vmSrc = "strategy S { onBar {\n"
+			+ "  when crossover(close, sma(close, 8)): { long(1); }\n"
+			+ "  when crossunder(close, sma(close, 8)): { flat(); }\n"
+			+ "} }";
+		var feed = musescript.harness.BarFeed.synthetic(200, 11);
+		var prog = new musescript.parse.MuseParser().parse(vmSrc);
+		musescript.builtins.TradeBuiltins.resetCrossState();
+		var interpRes = new musescript.interp.MuseInterp(new musescript.harness.HarnessContext())
+			.runBacktest(prog, feed);
+		feed.reset();
+		musescript.builtins.TradeBuiltins.resetCrossState();
+		var vmRes = musescript.vm.MuseVm.runBacktest(
+			new musescript.harness.HarnessContext(),
+			new musescript.parse.MuseParser().parse(vmSrc),
+			feed
+		);
+		buf.add("interp trades=" + interpRes.trades + " eq=" + fbits(interpRes.finalEquity) + "\n");
+		buf.add("vm trades=" + vmRes.trades + " eq=" + fbits(vmRes.finalEquity) + "\n");
+		var eqMatch = interpRes.trades == vmRes.trades
+			&& fbits(interpRes.finalEquity) == fbits(vmRes.finalEquity);
+		buf.add("match=" + (eqMatch ? "1" : "0") + "\n");
+		// Spot-check mid-tape equity (catches length/padding drift the final alone can miss).
+		var mid = Std.int(interpRes.equity.length / 2);
+		if (interpRes.equity.length > 0 && vmRes.equity.length > 0) {
+			var ii = mid < interpRes.equity.length ? mid : interpRes.equity.length - 1;
+			var vi = mid < vmRes.equity.length ? mid : vmRes.equity.length - 1;
+			buf.add("interp eq[" + ii + "]=" + fbits(interpRes.equity[ii]) + "\n");
+			buf.add("vm eq[" + vi + "]=" + fbits(vmRes.equity[vi]) + "\n");
 		}
 
 		return buf.toString();

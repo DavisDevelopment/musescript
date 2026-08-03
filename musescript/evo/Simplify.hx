@@ -82,6 +82,7 @@ class Simplify {
 		return switch (s) {
 			case SPrice(_): false;
 			case SProj(_, _): false; // a projection reference is a variable, not an indicator
+			case SPanel(_, _, _, _): false; // panel-of leaf — not an SInd callsite
 			case SInd(_, _, _, _): true;
 		};
 	}
@@ -113,6 +114,8 @@ class Simplify {
 	public static function seriesEq(a:SeriesNode, b:SeriesNode):Bool {
 		return switch [a, b] {
 			case [SPrice(x), SPrice(y)]: x == y;
+			case [SPanel(kx, sx, fx, wx), SPanel(ky, sy, fy, wy)]:
+				kx == ky && sx == sy && fx == fy && wx == wy;
 			case [SInd(nx, fx, wx, sx), SInd(ny, fy, wy, sy)]:
 				nx == ny && fx == fy && wx == wy
 				&& (sx == null && sy == null || sx != null && sy != null && seriesEq(sx, sy));
@@ -302,7 +305,8 @@ class Simplify {
 			// Preserve host projections (genome identity) — same drop bug compactParams had: this
 			// rebuild runs BEFORE compactParams, so omitting the field nulls the PSHost decl before
 			// the fix downstream can help. Simplify never touches SProj reads or projection nodes.
-			projections: g.projections
+			projections: g.projections,
+			panelAction: g.panelAction
 		};
 		return variation.compactParams(out);
 	}

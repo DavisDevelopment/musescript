@@ -131,34 +131,35 @@ class NmaSemanticRdo {
 	}
 
 	static function spliceBool(g:StrategyGenome, slot:Int, path:GPath, repl:BoolNode):StrategyGenome {
-		// Bucket F1: preserve projections on every structural rebuild.
+		// Bucket F1: preserve projections + panelAction on every structural rebuild.
 		var proj = g.projections;
+		var pact = g.panelAction;
 		return switch (slot) {
 			case 0: {
 				entryLong: TreeSurgery.replaceBoolWithBool(g.entryLong, path, repl),
 				entryShort: g.entryShort, exitLong: g.exitLong, exitShort: g.exitShort,
 				size: g.size, params: g.params, name: g.name, lineage: g.lineage, seedOrigin: g.seedOrigin,
-				projections: proj
+				projections: proj, panelAction: pact
 			};
 			case 1: {
 				entryLong: g.entryLong,
 				entryShort: TreeSurgery.replaceBoolWithBool(g.entryShort, path, repl),
 				exitLong: g.exitLong, exitShort: g.exitShort,
 				size: g.size, params: g.params, name: g.name, lineage: g.lineage, seedOrigin: g.seedOrigin,
-				projections: proj
+				projections: proj, panelAction: pact
 			};
 			case 2: {
 				entryLong: g.entryLong, entryShort: g.entryShort,
 				exitLong: TreeSurgery.replaceBoolWithBool(g.exitLong, path, repl),
 				exitShort: g.exitShort,
 				size: g.size, params: g.params, name: g.name, lineage: g.lineage, seedOrigin: g.seedOrigin,
-				projections: proj
+				projections: proj, panelAction: pact
 			};
 			default: {
 				entryLong: g.entryLong, entryShort: g.entryShort, exitLong: g.exitLong,
 				exitShort: TreeSurgery.replaceBoolWithBool(g.exitShort, path, repl),
 				size: g.size, params: g.params, name: g.name, lineage: g.lineage, seedOrigin: g.seedOrigin,
-				projections: proj
+				projections: proj, panelAction: pact
 			};
 		};
 	}

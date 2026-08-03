@@ -27,10 +27,17 @@ Columns:
 | 2026-07-31 | `026f8f4` | P1b CMP_JZ superinstruction | 1.01x (18.2→18ms) | 1.46x / 2.01x | fib_retracement_100_breakout · OOS 0.6167 · hold 9/10 · GO · PBO 0.8333 |
 | 2026-07-31 | `8261e21` | **P1a+b (min-bench, stable)** | **~1.2×** (15.0→12.5ms) | 1.62× / 1.88× | fib_retr_100 · OOS 0.617 · hold 9/10 · **GO** · PBO 0.83 |
 | 2026-08-01 | (uncommitted) | **TB0 IND static dispatch** | **1.58×** sma (13.44→8.52ms) · control 1.31× ulcer (opaque) | 1.77× / 1.89× | fib_retr_100 · OOS 0.617 · hold 9/10 · **GO** · PBO 0.83 |
+| 2026-08-03 | (uncommitted) | **P1.1 unboxed stack + WITH_OFFSET + IND widen** | *(JVM trail not re-run — jar rebuild deferred)* | **1.82× / 2.17×** | parity gates green (corpus 83/83, evolved 2260 identical, diverged=0); DetParityDump match=1 |
 
 **TB0 note (2026-08-01):** the JVM row now reports TWO genomes via `--vm-bench-name`: `sma_8_cross`
 (IND-lowered callsite — the TB0 path) and `ulcer_index_8_cross` (registry indicator, still opaque
 `CALL_BUILTIN` — the control). TB0 broke the builtin ceiling *for the 13 lowerable TradeBuiltins
 indicators* (sma/ema/rsi/atr/highest/lowest/stdev/wma/rma/roc/mom/change/pct_change): 1.2× → **1.58×**
-where IND applies; the opaque-callsite ceiling (~1.3×) still stands for registry indicators. Next
-lever if that residual matters: widen IND coverage to uniform-shape registry indicators, then Truffle.
+where IND applies; the opaque-callsite ceiling (~1.3×) still stands for registry indicators.
+
+**P1.1 note (2026-08-03):** tagged unboxed operand stack (`tags`/`nums`/`objs` Vectors) removes
+per-op Dynamic/`toNum` on the numeric hot path. JS arith-heavy **1.89× → 2.17×**; sma-cross
+**1.77× → 1.82×**. Also: `WITH_OFFSET` (call/expr lookback), IND widen (slope/zscore_roll/
+percent_rank/ewm_*/hl2/hlc3/ohlc4/vwap), DetParityDump VM golden. Re-run
+`bash scripts/vm_bench_trail.sh "P1.1 unboxed"` for the JVM + champion row when no corpus-evo
+is alive.

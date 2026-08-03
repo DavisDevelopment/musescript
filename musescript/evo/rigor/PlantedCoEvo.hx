@@ -116,7 +116,8 @@ class PlantedCoEvo {
 				name: base.name + "_c" + popG.length,
 				lineage: ["planted-coevo", "clone"],
 				seedOrigin: null,
-				projections: base.projections
+				projections: base.projections,
+				panelAction: base.panelAction
 			};
 			popG.push(clone);
 		}

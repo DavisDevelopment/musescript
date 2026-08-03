@@ -14,12 +14,13 @@ import musescript.interp.MuseInterp;
 import musescript.parse.MuseParser;
 
 /**
- * Panel linear-memory v1 parity gate: literal-symbol panel reads lower natively
- * (no host_eval for close_of/mom_of/sma_of/sym_available), pack from PanelFeed,
- * and match interp trades / equity / sharpe on synthetic universes.
+ * Panel linear-memory parity gate: literal-symbol panel reads lower natively
+ * (no host_eval for close_of/mom_of/sma_of/ema_of/rsi_of/sym_available), pack from PanelFeed,
+ * and match interp trades / equity / sharpe on synthetic universes. Literal
+ * rebalance_equal / target_weight are HostABI; bags/scan still escape honestly.
  */
 class TestPanelWasmParity extends Test {
-	/** Dual-name momentum flip — portfolio apply may host_eval; reads must be native. */
+	/** Dual-name momentum flip — portfolio apply may HostABI; reads must be native. */
 	static final PANEL_SCAN_SRC = '
 		@strategy("panel-wasm-scan")
 		@on(bar) {
@@ -31,6 +32,29 @@ class TestPanelWasmParity extends Test {
 			var okB = sym_available("BBB");
 			if (okA && okB && mA > mB && sA > cB) buy("AAA", 1);
 			if (okA && okB && mB > mA) buy("BBB", 1);
+		}
+	';
+
+	static final PANEL_EMA_RSI_SRC = '
+		@strategy("panel-ema-rsi")
+		@on(bar) {
+			var eA = ema_of("AAA", 5);
+			var rB = rsi_of("BBB", 5);
+			if (sym_available("AAA") && sym_available("BBB") && eA > close_of("BBB") && rB < 70)
+				buy("AAA", 1);
+			if (sym_available("BBB") && rsi_of("AAA", 5) > rB) buy("BBB", 1);
+		}
+	';
+
+	static final PANEL_REBALANCE_SRC = '
+		@strategy("panel-rebalance")
+		@on(bar) {
+			var mA = mom_of("AAA", 4);
+			var mB = mom_of("BBB", 4);
+			if (sym_available("AAA") && sym_available("BBB") && mA > mB)
+				rebalance_equal(["AAA"]);
+			if (sym_available("AAA") && sym_available("BBB") && mB > mA)
+				target_weight("BBB", 1.0);
 		}
 	';
 
@@ -157,8 +181,39 @@ class TestPanelWasmParity extends Test {
 		Assert.isTrue(emitted.wat.indexOf("call $mom") >= 0);
 	}
 
+	public function testEmitNativeEmaRsiOf() {
+		var prog = MuseHostLower.lower(new MuseParser().parse(PANEL_EMA_RSI_SRC));
+		var emitted = StrategyWasmBackend.emitOnBar(prog);
+		Assert.notNull(emitted);
+		Assert.isTrue(emitted.wat.indexOf("call $ema") >= 0, emitted.wat);
+		Assert.isTrue(emitted.wat.indexOf("call $rsi") >= 0, emitted.wat);
+		Assert.isTrue(emitted.wat.indexOf("call $host_eval") < 0, emitted.wat);
+		Assert.isTrue(StrategyWasmEmitter.PANEL_HOST_ESCAPE.indexOf("ema_of") < 0);
+		Assert.isTrue(StrategyWasmEmitter.PANEL_HOST_ESCAPE.indexOf("rsi_of") < 0);
+	}
+
+	public function testEmitHostAbiRebalanceAndTargetWeight() {
+		var prog = MuseHostLower.lower(new MuseParser().parse(PANEL_REBALANCE_SRC));
+		var emitted = StrategyWasmBackend.emitOnBar(prog);
+		Assert.notNull(emitted);
+		Assert.isTrue(emitted.wat.indexOf("call $mom") >= 0, emitted.wat);
+		Assert.isTrue(emitted.wat.indexOf("call $rebalance_equal") >= 0, emitted.wat);
+		Assert.isTrue(emitted.wat.indexOf("call $target_weight") >= 0, emitted.wat);
+		Assert.isTrue(emitted.wat.indexOf("call $host_eval") < 0, emitted.wat);
+		Assert.isTrue(StrategyWasmEmitter.PANEL_HOST_ESCAPE.indexOf("rebalance_equal") < 0);
+		Assert.isTrue(StrategyWasmEmitter.PANEL_HOST_ESCAPE.indexOf("target_weight") < 0);
+	}
+
 	public function testDenseUniverseParity() {
 		assertParity(PANEL_SCAN_SRC, densePanel(80, 11));
+	}
+
+	public function testEmaRsiUniverseParity() {
+		assertParity(PANEL_EMA_RSI_SRC, densePanel(80, 17));
+	}
+
+	public function testRebalanceHybridParity() {
+		assertParity(PANEL_REBALANCE_SRC, densePanel(80, 23));
 	}
 
 	public function testSparseSymAvailableParity() {
@@ -257,8 +312,14 @@ class TestPanelWasmParity extends Test {
 
 	public function testEscapeListDocumented() {
 		Assert.isTrue(StrategyWasmEmitter.PANEL_HOST_ESCAPE.indexOf("bag_rank_mom") >= 0);
-		Assert.isTrue(StrategyWasmEmitter.PANEL_HOST_ESCAPE.indexOf("rebalance_equal") >= 0);
 		Assert.isTrue(StrategyWasmEmitter.PANEL_HOST_ESCAPE.indexOf("symbols") >= 0);
 		Assert.isTrue(StrategyWasmEmitter.PANEL_HOST_ESCAPE.indexOf("bag_graph") >= 0);
+		Assert.isTrue(StrategyWasmEmitter.PANEL_HOST_ESCAPE.indexOf("scan_top") >= 0);
+		Assert.isTrue(StrategyWasmEmitter.PANEL_HOST_ESCAPE.indexOf("pos") >= 0);
+		// Removed once native / HostABI: *_of ema/rsi + literal rebalance/target_weight
+		Assert.isTrue(StrategyWasmEmitter.PANEL_HOST_ESCAPE.indexOf("ema_of") < 0);
+		Assert.isTrue(StrategyWasmEmitter.PANEL_HOST_ESCAPE.indexOf("rsi_of") < 0);
+		Assert.isTrue(StrategyWasmEmitter.PANEL_HOST_ESCAPE.indexOf("rebalance_equal") < 0);
+		Assert.isTrue(StrategyWasmEmitter.PANEL_HOST_ESCAPE.indexOf("target_weight") < 0);
 	}
 }

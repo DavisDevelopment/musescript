@@ -136,6 +136,7 @@ class TreeSurgery {
 		switch (n) {
 			case SPrice(_):
 			case SProj(_, _): // projection reference is a leaf — no child series to recurse into
+			case SPanel(_, _, _, _): // literal panel-of leaf
 			case SInd(_, _, _, src):
 				if (src != null) { path.push(StepA); collectSeries(src, path, out, armed); path.pop(); }
 		}
@@ -287,6 +288,8 @@ class TreeSurgery {
 				throw "TreeSurgery.replaceSeriesWithSeries: path ran past a price leaf";
 			case SProj(_, _):
 				throw "TreeSurgery.replaceSeriesWithSeries: path ran past a projection leaf";
+			case SPanel(_, _, _, _):
+				throw "TreeSurgery.replaceSeriesWithSeries: path ran past a panel-of leaf";
 			case SInd(name, field, window, src):
 				SInd(name, field, window, src != null ? replaceSeriesWithSeriesAt(src, path, repl, idx + 1) : null);
 		};

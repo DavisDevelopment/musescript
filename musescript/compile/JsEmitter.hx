@@ -384,7 +384,7 @@ class JsEmitter {
 				switch (kind) {
 					case Long: 'api.long($a);';
 					case Short: 'api.short($a);';
-					case Flat | Close: 'api.flat();';
+					case Flat | Close: 'api.flat($a);'; // $a carries an optional string label -> exit-tag fire count
 				}
 			case ForIn(name, it, body):
 				var loopBody = [for (x in body) emitStmt(x)].join("\n");

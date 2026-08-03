@@ -20,6 +20,13 @@ typedef StrategyGenome = {
 	 */
 	var ?projections:Array<ProjectionDecl>;
 	/**
+	 * Panel portfolio-action template (panel genomes v1). Null/absent ⇒ Expand emits the classic
+	 * single-name `long`/`short`/`flat` skeleton. When set, Expand emits HostABI `buy` /
+	 * `sell_all` / `target_weight` / `rebalance_equal` with literal symbols. Genome identity —
+	 * preserved by `Variation.copyGenome` / compact / simplify like `projections`.
+	 */
+	var ?panelAction:PanelAction;
+	/**
 	 * Lazy `Canonical.structuralKey` / `nodeCount` / `shapeVector` memos. Valid only while the five
 	 * roots + params are unchanged. `Variation.copyGenome` deliberately omits these so any splice
 	 * starts cold; elites reused across generations keep their hits. Not part of the genome's identity.

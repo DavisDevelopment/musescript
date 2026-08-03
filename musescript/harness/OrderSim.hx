@@ -65,6 +65,10 @@ class OrderSim {
 	public var lastMark:Float = 0.0;
 	/** Return stream for `!trackCurve` — same values `Metrics.returnsFromEquity` would emit. Lazy. */
 	public var markReturns:Null<GrowableVec<Float>> = null;
+	/** Per-tag fire counts from string-labelled order calls (`flat("profit_lock")`). Surfaced in the
+	 * result JSON as `exitTags` so a strategy author can see which exit/entry layers actually trigger
+	 * -- an absent or 0-count tag is a silent no-op layer. */
+	public var tagFires:Map<String, Int> = new Map();
 	var pendingKind:String;
 	/** `NaN` means "no explicit qty, auto-size on fill" -- see `long`/`short`'s own doc comment
 	 * on why the omitted-qty sentinel is NaN (a genuine unboxed Float value) rather than null
@@ -97,7 +101,21 @@ class OrderSim {
 	 * object `{ type: "limit"|"stop"|"market", ?px, ?qty, ?tifBars }`, which
 	 * goes to the pending book and fills on FUTURE bars only.
 	 */
+	/** If `arg` is a string LABEL, bump its per-tag fire count and return true (so the caller treats
+	 * it as no order spec / auto-size). The single choke point every order surface routes tags through
+	 * -- direct `orders.flat(...)` closures on the compiled path bypass `submit`, so they call this too. */
+	public function noteTag(arg:Dynamic):Bool {
+		if (!Std.isOfType(arg, String)) return false;
+		var t:String = cast arg;
+		tagFires.set(t, (tagFires.exists(t) ? tagFires.get(t) : 0) + 1);
+		return true;
+	}
+
 	public function submit(kind:String, arg:Dynamic, closePx:Float, ?barIndex:Int = -1):Void {
+		// A STRING arg is an exit/entry LABEL, not an order spec: record that this tagged layer fired
+		// (per-tag fire counts surface in the result JSON) and fall through to a normal auto-sized
+		// order. Diagnoses "silent no-op exit layers" -- a tag with count 0/absent never triggered.
+		if (noteTag(arg)) arg = null;
 		if (arg != null && Reflect.hasField(arg, "type")) {
 			book.place(kind, arg, barIndex);
 			return;

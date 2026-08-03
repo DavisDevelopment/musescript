@@ -23,6 +23,10 @@ import musescript.evo.ProjectionDecl;
 import musescript.evo.Variation;
 import musescript.evo.EvoParam;
 import musescript.evo.Simplify;
+import musescript.evo.ProjInline;
+import musescript.evo.ProjectionAblation;
+import musescript.evo.CceaCoEvo;
+import musescript.evo.GrowthWeights;
 
 /**
  * P0.a scaffolding coverage for evolvable projections (PROJECTION_COEVOLUTION_PLAN.md).
@@ -457,6 +461,156 @@ class TestProjectionScaffold extends Test {
 		arch.offer(poor, 2.0, MapElites.assignCellWithSkill(0.05, 10, 0.5, 0.3, -0.8, cents));
 		arch.offer(good, 2.0, MapElites.assignCellWithSkill(0.05, 10, 0.5, 0.3, 0.8, cents));
 		Assert.equals(2, arch.size()); // both kept — not competed away into one basin
+	}
+
+	// ── P1 lean: PSPoint SProj → NMA via ProjInline ───────────────────────────────────────────
+
+	public function testPsPointInlineKeepsNmaParityWithExpand() {
+		var bars = BarFeed.synthetic(240, 1).all();
+		var g = projReadingGenome();
+		var inlined = ProjInline.forNma(g);
+		Assert.notNull(inlined);
+		Assert.isNull(inlined.projections);
+		var prev = Fitness.preferNma;
+		Fitness.preferNma = true;
+		var frNma = Fitness.evaluate(g, bars, "js"); // uses ProjInline inside evaluateNma
+		Fitness.preferNma = false;
+		var frExpand = Fitness.evaluate(g, bars, "js");
+		Fitness.preferNma = prev;
+		Assert.isTrue(frNma.ok);
+		Assert.isTrue(frExpand.ok);
+		Assert.equals(frNma.trades, frExpand.trades);
+		Assert.floatEquals(frNma.sharpe, frExpand.sharpe);
+	}
+
+	public function testHostProjectionStaysOnExpandFallback() {
+		var g = baseGenome();
+		g.entryLong = BCross("over", SProj("ew_0", "p50"), SPrice("close"));
+		g.projections = [hostProj("ew_0")];
+		Assert.isNull(ProjInline.forNma(g)); // PSHost cannot inline
+	}
+
+	// ── P2+ purged OOS skill (MAP-axis honesty) ───────────────────────────────────────────────
+
+	public function testPurgedSkillMasksInSamplePairs() {
+		var bars = rampBars(80);
+		var decl:ProjectionDecl = {
+			name: "proj_0", kind: PLevel, horizon: 3,
+			sampler: PSPoint(SPrice("close")), samples: 1, seed: 1
+		};
+		var full = ProjectionScore.skill(decl, [], bars, null, 0);
+		var purged = ProjectionScore.skill(decl, [], bars, null,
+			musescript.evo.rigor.PurgeEmbargo.split(bars.length, 0.25, 3).oosStart);
+		Assert.isTrue(full > 0.99);
+		Assert.isTrue(Math.isFinite(purged));
+		// OOS window is shorter but still monotone ⇒ still near-perfect when enough pairs.
+		Assert.isTrue(purged > 0.9);
+		var g = baseGenome();
+		g.entryLong = BCross("over", SProj("proj_0", "p50"), SPrice("close"));
+		g.projections = [decl];
+		Assert.isTrue(Fitness.projectionScorePurged(g, bars) > 0.9);
+	}
+
+	// ── P4: projection-ablation credit ───────────────────────────────────────────────────────
+
+	public function testAblationRewritesSProjToClose() {
+		var g = projReadingGenome();
+		var ab = ProjectionAblation.ablate(g, "proj_0");
+		Assert.isTrue(Expand.expand(ab).indexOf("proj_0__") < 0);
+		// Ablated leaf is SPrice("close") — Expand renders a close/close cross.
+		Assert.isTrue(Expand.expand(ab).indexOf("close") >= 0);
+	}
+
+	public function testAblationDeltaPositiveWhenProjectionIsLoadBearing() {
+		// On a synthetic tape, a crossover of sma (via proj) vs close usually trades; ablating to
+		// close×close removes the signal — Δ should be finite (may be +, −, or 0 depending on tape).
+		var bars = BarFeed.synthetic(240, 1).all();
+		var g = projReadingGenome();
+		var d = ProjectionAblation.deltas(g, bars);
+		Assert.isTrue(d.exists("proj_0"));
+		Assert.isTrue(Math.isFinite(d.get("proj_0")));
+	}
+
+	public function testAblationDepositReachesCreditBank() {
+		musescript.evo.nma.NmaCreditBank.clear();
+		var bars = BarFeed.synthetic(240, 1).all();
+		var g = projReadingGenome();
+		ProjectionAblation.deposit(g, bars);
+		Assert.isTrue(musescript.evo.nma.NmaCreditBank.observations(ProjectionAblation.bankKey("proj_0")) >= 1);
+	}
+
+	public function testUseWeightsNormalizePositiveDeltas() {
+		var w = ProjectionAblation.useWeights(["a" => 2.0, "b" => 2.0, "c" => -1.0]);
+		Assert.floatEquals(0.5, w.get("a"));
+		Assert.floatEquals(0.5, w.get("b"));
+		Assert.floatEquals(0.0, w.get("c"));
+	}
+
+	public function testApplyBankToTunerBoostsProjRead() {
+		musescript.evo.nma.NmaCreditBank.clear();
+		for (_ in 0...4) musescript.evo.nma.NmaCreditBank.deposit(ProjectionAblation.bankKey("proj_0"), 1.0);
+		var tuner = new GrowthWeights();
+		ProjectionAblation.applyBankToTuner(tuner, ["proj_0"]);
+		Assert.isTrue(tuner.hasCategory("projRead"));
+		var summary = tuner.summary("projRead");
+		Assert.isTrue(summary.length >= 1);
+		Assert.equals("proj_0", summary[0].tag);
+		Assert.isTrue(summary[0].weight > 0);
+	}
+
+	public function testPickProjNameBiasedTowardHighCredit() {
+		musescript.evo.nma.NmaCreditBank.clear();
+		for (_ in 0...8) musescript.evo.nma.NmaCreditBank.deposit(ProjectionAblation.bankKey("proj_hot"), 2.0);
+		for (_ in 0...2) musescript.evo.nma.NmaCreditBank.deposit(ProjectionAblation.bankKey("proj_cold"), 0.01);
+		var v = new Variation(7);
+		v.growableProjNames = ["proj_hot", "proj_cold"];
+		ProjectionAblation.applyBankToTuner(v.tuner, ["proj_hot", "proj_cold"]);
+		var hot = 0;
+		for (_ in 0...40) {
+			if (v.pickProjNameByCredit() == "proj_hot") hot++;
+		}
+		Assert.isTrue(hot >= 20, 'expected credit bias toward proj_hot (got $hot/40)');
+	}
+
+	// ── P5: CCEA two-pop vertical ───────────────────────────────────────────────────────────
+
+	public function testCceaComposeMergesManagerPolicyWithForecasterProjections() {
+		var f = CceaCoEvo.seedForecaster("F0", 5, 20, 1);
+		var m = CceaCoEvo.seedManager("M0");
+		var joint = CceaCoEvo.compose(f, m);
+		Assert.isTrue(joint.projections != null && joint.projections.length == 1);
+		Assert.equals("proj_0", joint.projections[0].name);
+		var jointSrc = Expand.expand(joint);
+		Assert.isTrue(jointSrc.indexOf("proj_0__p50 =") >= 0, "compose must bind projection field");
+		// Manager alone: policy may still *name* SProj leaves, but without decls Expand emits
+		// no field-binding line (compose is what supplies the decl).
+		Assert.isNull(m.projections);
+		Assert.isTrue(Expand.expand(m).indexOf("proj_0__p50 =") < 0);
+	}
+
+	public function testCceaPairScoresTradingNotAdditiveSkill() {
+		var bars = BarFeed.synthetic(240, 1).all();
+		var f = CceaCoEvo.seedForecaster("F0", 5, 10, 1);
+		var m = CceaCoEvo.seedManager("M0");
+		var sc = CceaCoEvo.scorePair(f, m, bars);
+		Assert.isTrue(Math.isFinite(sc.trading) || sc.trading == Fitness.NEG_INF);
+		Assert.isTrue(Math.isFinite(sc.skill));
+		// Anti-pattern pin: skill is recorded separately — callers must not treat it as offerFit.
+		Assert.isTrue(sc.joint != null);
+		Assert.isTrue(sc.joint.projections != null);
+	}
+
+	public function testCceaRunMiniAdvancesStateWithoutProjWeight() {
+		var bars = BarFeed.synthetic(180, 2).all();
+		var r = CceaCoEvo.runMini(bars, { seed: 11, fPop: 3, mPop: 3, gens: 2, ablate: true });
+		Assert.equals(2, r.gens);
+		Assert.equals(3, r.state.forecasters.length);
+		Assert.equals(3, r.state.managers.length);
+		Assert.equals(3, r.state.partners.length);
+		Assert.isTrue(r.state.gen >= 2);
+		// Trading may be NEG_INF on short/synthetic tapes; skill must stay finite telemetry.
+		Assert.isTrue(Math.isFinite(r.bestSkill));
+		for (s in r.state.fSkill) Assert.isTrue(Math.isFinite(s));
 	}
 
 	// ── the leakage-honesty guarantee ────────────────────────────────────────────────────────

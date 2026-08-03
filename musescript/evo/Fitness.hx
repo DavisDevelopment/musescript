@@ -6,6 +6,7 @@ import musescript.compile.MuseCompiler;
 import musescript.harness.HarnessContext;
 import musescript.harness.BarFeed;
 import musescript.harness.Bar;
+import musescript.harness.PanelFeed;
 import musescript.interp.MuseInterp;
 import musescript.builtins.TradeBuiltins;
 import musescript.BarStrategyFn;
@@ -20,6 +21,13 @@ import musescript.vm.MuseBytecodeCompiler.VmUnsupported;
  * When `preferNma` is true (CorpusEvoRun `--nma`), `evaluate` tries the columnar NMA path first
  * and falls back to Expand→compile→run on `KFeature` / NMA errors — see `muse_nse_spec.md` §8 P1c.
  *
+ * **Panel fitness:** when `panelFeed` is attached (via `configurePanel` /
+ * `EvolutionEngine.configureForPanel`) and the genome carries a `PanelAction`, evaluation runs
+ * `HarnessContext.runPanelBacktest` / compiled `ctx.panel` portfolio path — equity/Sharpe from
+ * `PortfolioSim`, not single-name `OrderSim`. Classic genomes (`panelAction == null`) keep the
+ * single-name BarFeed path even if a panel is attached. Columnar NMA / VM do **not** fake panel
+ * fitness: `panelAction` / `SPanel` stay Expand→interp/WASM (`nma-unsupported` / `vm-unsupported`).
+ *
  * «εὑρήκαμεν, συγκάθομεν· Βάκχος ἡγεῖται.»
  */
 class Fitness {
@@ -29,6 +37,23 @@ class Fitness {
 	 * Null (default) ⇒ prior behaviour; genomes without `PSHost` are unaffected either way.
 	 */
 	public static var projectionProvider:Null<ProjectionProvider> = null;
+
+	/**
+	 * Multi-symbol panel tape for portfolio fitness. Null (default) ⇒ single-name only.
+	 * Set via `configurePanel` / `EvolutionEngine.configureForPanel`. Used only when
+	 * `usesPanelFitness(g)` — never silently reinterpret a classic long/short genome.
+	 */
+	public static var panelFeed:Null<PanelFeed> = null;
+
+	/** Attach (or clear) the panel tape used by panel-action genomes on `evaluate`. */
+	public static function configurePanel(?panel:PanelFeed):Void {
+		panelFeed = panel;
+	}
+
+	/** True when this genome must be scored on the portfolio panel path (`PanelAction` set). */
+	public static inline function usesPanelFitness(g:StrategyGenome):Bool {
+		return g.panelAction != null;
+	}
 
 	/**
 	 * Compiled-program cache keyed on `(structural key, target, strict)` -- `Expand.expand(g)`
@@ -389,6 +414,9 @@ class Fitness {
 	 */
 	public static function evaluateVm(g:StrategyGenome, bars:Array<Bar>, ?costBps:Float = 0, ?initialCash:Float = 100000, ?equityFloor:Float = 0.0):FitnessResult {
 		try {
+			if (usesPanelFitness(g) || hasPanelOf(g))
+				return new FitnessResult(false, 0, 0, 0, "vm-unsupported",
+					"panelAction / SPanel -- bytecode VM has no portfolio panel path; Expand→interp/WASM");
 			if (projectionProvider != null && ProjectionProvider.hostProjRefs(g).length > 0)
 				return new FitnessResult(false, 0, 0, 0, "vm-unsupported");
 			var key = Canonical.structuralKey(g);
@@ -456,11 +484,26 @@ class Fitness {
 	 * Leakage-free aggregate forecast skill of the genome's REFERENCED projections (`ProjectionScore`).
 	 * `NaN` if the genome declares none. This is the forecast-quality SIGNAL; it feeds selection as a
 	 * MAP-Elites descriptor axis (plan §7), computed off the fitness hot path by callers that want it.
+	 * Full-tape (non-purged) by default — use `projectionScorePurged` for the MAP-axis / OOS claim.
 	 */
 	public static function projectionScore(
 		g:StrategyGenome, bars:Array<Bar>, ?provider:ProjectionProvider
 	):Float {
 		return ProjectionScore.score(g, bars, provider).agg;
+	}
+
+	/**
+	 * Purge+embargo OOS forecast skill — the honest MAP-Elites `--proj-map-axis` descriptor.
+	 * Temporarily flips `ProjectionScore.purgedSkill` so callers need not manage the flag.
+	 */
+	public static function projectionScorePurged(
+		g:StrategyGenome, bars:Array<Bar>, ?provider:ProjectionProvider
+	):Float {
+		var prev = ProjectionScore.purgedSkill;
+		ProjectionScore.purgedSkill = true;
+		var agg = ProjectionScore.score(g, bars, provider).agg;
+		ProjectionScore.purgedSkill = prev;
+		return agg;
 	}
 
 	/** Populate `fr.projScore`/`fr.projScores` from `g`'s projections vs `bars`. No-op when none.
@@ -475,14 +518,54 @@ class Fitness {
 		fr.projScores = s.per;
 	}
 
+	/** True when any policy root contains an `SPanel` leaf (panel genomes v0). */
+	static function hasPanelOf(g:StrategyGenome):Bool {
+		function ws(n:SeriesNode):Bool {
+			return switch (n) {
+				case SPanel(_, _, _, _): true;
+				case SInd(_, _, _, src): src != null && ws(src);
+				case SPrice(_) | SProj(_, _): false;
+			};
+		}
+		function wsc(n:ScalarNode):Bool {
+			return switch (n) {
+				case KSeries(s) | KLookback(s, _): ws(s);
+				case KArith(_, a, b): wsc(a) || wsc(b);
+				case KHole(inner): wsc(inner);
+				case KConst(_) | KParam(_) | KFeature(_): false;
+			};
+		}
+		function wb(n:BoolNode):Bool {
+			return switch (n) {
+				case BCross(_, a, b): ws(a) || ws(b);
+				case BCmp(_, a, b): wsc(a) || wsc(b);
+				case BTrend(_, s, _): ws(s);
+				case BAnd(a, b) | BOr(a, b): wb(a) || wb(b);
+				case BNot(a) | BHole(a): wb(a);
+				case BFeature(_): false;
+			};
+		}
+		return wb(g.entryLong) || wb(g.entryShort) || wb(g.exitLong) || wb(g.exitShort) || wsc(g.size);
+	}
+
 	/** Columnar NMA path with optional dirty-spine working-copy hit. */
 	static function evaluateNma(g:StrategyGenome, bars:Array<Bar>, costBps:Float, initialCash:Float, equityFloor:Float):FitnessResult {
-		// Projections (SProj) have no columnar column yet — route to the Expand→interp fallback so a
-		// projection genome still evaluates correctly (just not columnar-fast), and never reaches
-		// NmaBijection's defensive SProj throw. PROJECTION_COEVOLUTION_PLAN.md P0.b.
-		if (g.projections != null && g.projections.length > 0)
+		// Projections: PSHost / PSNoise stay on Expand→decorate. PSPoint-only `SProj` inlines to
+		// the underlying series (`ProjInline.forNma`) so columnar NMA stays bit-identical to
+		// Expand's PSPoint path. Unreferenced decls strip cleanly. Cache keys stay on original `g`.
+		var nmaGenome = g;
+		if (g.projections != null && g.projections.length > 0) {
+			var inlined = ProjInline.forNma(g);
+			if (inlined == null)
+				return new FitnessResult(false, -999, 0, 0, "nma-unsupported",
+					"genome uses PSHost/PSNoise SProj -- Expand→decorate/compile path");
+			nmaGenome = inlined;
+		}
+		// Panel predicates / HostABI actions stay on Expand→interp/WASM. Do not invent a
+		// columnar multi-symbol OrderSim — PortfolioSim panel packing is the honest path.
+		if (hasPanelOf(nmaGenome) || g.panelAction != null)
 			return new FitnessResult(false, -999, 0, 0, "nma-unsupported",
-				"genome declares projections (SProj) -- columnar NMA not yet wired");
+				"genome uses panel *_of / panelAction -- columnar NMA does not score panels; Expand→interp/WASM panel fitness");
 		if (nmaDirtySpine && nmaWorking != null) {
 			try {
 				var key = Canonical.structuralKey(g);
@@ -498,7 +581,7 @@ class Fitness {
 					nmaWorkingHits++;
 					return musescript.evo.nma.NmaFitness.evaluatePrepared(hit.nma, hit.ctx, bars, costBps, initialCash, equityFloor);
 				}
-				var built = musescript.evo.nma.NmaFitness.prepare(g, bars);
+				var built = musescript.evo.nma.NmaFitness.prepare(nmaGenome, bars);
 				if (built == null)
 					return new FitnessResult(false, -999, 0, 0, "nma-unsupported",
 						"genome uses KFeature or nested-source SInd -- columnar NMA fitness "
@@ -517,7 +600,7 @@ class Fitness {
 				return new FitnessResult(false, -999, 0, 0, "nma-error", Std.string(e));
 			}
 		}
-		return musescript.evo.nma.NmaFitness.evaluate(g, bars, costBps, initialCash, equityFloor);
+		return musescript.evo.nma.NmaFitness.evaluate(nmaGenome, bars, costBps, initialCash, equityFloor);
 	}
 
 	/**
@@ -589,6 +672,7 @@ class Fitness {
 	}
 
 	/** Classic Expand → MuseCompiler → harness path (the pre-NMA evaluate body).
+	 * When `usesPanelFitness(g)` and `panelFeed` is set, routes through the portfolio panel path.
 	 *
 	 * «Ὀρφεὺς κατέβη· κιθάρα νεκροὺς ἔπεισε.»
 	 */
@@ -610,8 +694,12 @@ class Fitness {
 			// the branch is removed -- JVM now runs the exact same real execution path as
 			// every other target, matching MuseCompiler's own documented "js (default) --
 			// JsEmitter hot path + eval on JS; MuseInterp elsewhere" fallback contract.
+			if (usesPanelFitness(g) && panelFeed == null)
+				return new FitnessResult(false, -999, 0, 0, "error",
+					"panelAction genome requires Fitness.configurePanel / EvolutionEngine.configureForPanel");
+			var usePanel = usesPanelFitness(g) && panelFeed != null;
 			var evalBars = bars;
-			if (projectionProvider != null && ProjectionProvider.hostProjRefs(g).length > 0)
+			if (!usePanel && projectionProvider != null && ProjectionProvider.hostProjRefs(g).length > 0)
 				evalBars = projectionProvider.decorateBars(bars, g);
 			var cacheKey = Canonical.structuralKey(g) + ":" + target + ":" + strict;
 			fnCacheLock.acquire();
@@ -641,30 +729,54 @@ class Fitness {
 			}
 			var tRun = musescript.evo.nma.NmaSignalProbe.stamp();
 			var harness = new HarnessContext();
+			var seed = new MuseInterp(harness);
+			for (d in decls) seed.registerDeclPublic(d);
+			TradeBuiltins.resetCrossState();
+			var result:Dynamic;
+			if (usePanel) {
+				// Portfolio path: compiled fn sees ctx.panel → runPanelBacktest / WASM panel pack.
+				if (costBps != 0) harness.portfolio.tradingCostBps = costBps;
+				if (initialCash != 100000) harness.portfolio.reset(initialCash);
+				harness.panel = panelFeed;
+				// Mirror TestPanelWasmParity: Reflect + field so wasm resolvePanel sees it.
+				Reflect.setField(harness, "panel", panelFeed);
+				result = fn(harness);
+				var fr = new FitnessResult(
+					true,
+					fieldF(result, "sharpe"),
+					fieldI(result, "trades"),
+					fieldF(result, "finalEquity"),
+					backend
+				);
+				fr.fills = Reflect.field(result, "fills");
+				// PortfolioSim has no equityFloor latch yet — leave bankrupt false.
+				fr.bankrupt = false;
+				if (equityCurveNeeded) fr.equity = harness.portfolio.equity.toArray();
+				var tEndP = musescript.evo.nma.NmaSignalProbe.wall();
+				musescript.evo.nma.NmaSignalProbe.observeCompiled(tEndP - tCompiled, tRun - tCompiled, tEndP - tRun);
+				return fr;
+			}
 			if (costBps != 0) harness.orders.book.slippageBps = costBps;
 			// `--equity-floor`/bankruptcy crank (see OrderSim.hx's doc comment): both are no-ops at
 			// their defaults (100000/0.0), so an existing caller that doesn't pass them sees the
 			// exact same OrderSim state a bare `new HarnessContext()` already produced.
 			if (initialCash != 100000) harness.orders.reset(initialCash);
 			if (equityFloor > 0) harness.orders.equityFloor = equityFloor;
-			var seed = new MuseInterp(harness);
-			for (d in decls) seed.registerDeclPublic(d);
 			harness.feed = new BarFeed(evalBars);
-			TradeBuiltins.resetCrossState();
-			var result:Dynamic = fn(harness);
-			var fr = new FitnessResult(
+			result = fn(harness);
+			var frSn = new FitnessResult(
 				true,
 				fieldF(result, "sharpe"),
 				fieldI(result, "trades"),
 				fieldF(result, "finalEquity"),
 				backend
 			);
-			fr.fills = Reflect.field(result, "fills");
-			fr.bankrupt = harness.orders.bankrupt;
-			if (equityCurveNeeded) fr.equity = harness.orders.equity.toArray();
+			frSn.fills = Reflect.field(result, "fills");
+			frSn.bankrupt = harness.orders.bankrupt;
+			if (equityCurveNeeded) frSn.equity = harness.orders.equity.toArray();
 			var tEnd = musescript.evo.nma.NmaSignalProbe.wall();
 			musescript.evo.nma.NmaSignalProbe.observeCompiled(tEnd - tCompiled, tRun - tCompiled, tEnd - tRun);
-			return fr;
+			return frSn;
 		} catch (e:Dynamic) {
 			musescript.evo.nma.NmaSignalProbe.observeCompiled(musescript.evo.nma.NmaSignalProbe.wall() - tCompiled, 0, 0);
 			// Under `--nma-verify` this path is the ORACLE, so a failure here is the thing being

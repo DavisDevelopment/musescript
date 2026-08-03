@@ -93,6 +93,29 @@ class Canonical {
 		}
 		d.str(g.name);
 		digestReferencedProjections(d, g);
+		digestPanelAction(d, g);
+	}
+
+	/**
+	 * Digest the panel-action template when present. Absense is byte-identical to pre-v1 keys
+	 * (same contract as unreferenced projections). Present templates change Expand source, so
+	 * they must differentiate fitness / archive keys.
+	 */
+	static function digestPanelAction(d:StructuralDigest, g:StrategyGenome):Void {
+		if (g.panelAction == null) return;
+		d.tag("@".code);
+		switch (g.panelAction) {
+			case PABuy(sym):
+				d.str("buy");
+				d.str(sym);
+			case PARebalance(syms):
+				d.str("rebal");
+				d.int(syms.length);
+				for (s in syms) d.str(s);
+			case PATargetWeight(sym):
+				d.str("tw");
+				d.str(sym);
+		}
 	}
 
 	/**
@@ -152,6 +175,7 @@ class Canonical {
 			case SPrice(_):
 			case SInd(_, _, _, src): if (src != null) ws(src);
 			case SProj(name, _): m.set(name, true);
+			case SPanel(_, _, _, _):
 		}
 		function wsc(n:ScalarNode):Void switch (n) {
 			case KConst(_) | KParam(_) | KFeature(_):
@@ -193,6 +217,13 @@ class Canonical {
 				d.tag("J".code);
 				d.str(name);
 				d.str(field);
+			case SPanel(kind, sym, field, window):
+				// "N" — panel (avoid P/I/J and Lookback's L)
+				d.tag("N".code);
+				d.str(kind);
+				d.str(sym);
+				d.str(field != null ? field : "");
+				d.int(window != null ? window : 0);
 		}
 	}
 
@@ -281,6 +312,8 @@ class Canonical {
 			case SInd(name, field, window, src):
 				["I", name, src != null ? keySeries(src) : ["P", field], window];
 			case SProj(name, field): ["J", name, field];
+			case SPanel(kind, sym, field, window):
+				["N", kind, sym, field != null ? field : "", window != null ? window : 0];
 		};
 	}
 
@@ -328,6 +361,7 @@ class Canonical {
 			case SPrice(_): 1;
 			case SInd(_, _, _, src): 1 + (src != null ? countSeries(src) : 0);
 			case SProj(_, _): 1;
+			case SPanel(_, _, _, _): 1;
 		};
 	}
 
@@ -386,7 +420,8 @@ class Canonical {
 			switch (n) {
 				case SPrice(_): bump(K_SPRICE);
 				case SInd(_, _, _, src): bump(K_SIND); if (src != null) walkSeries(src);
-					case SProj(_, _): bump(K_SPROJ);
+				case SProj(_, _): bump(K_SPROJ);
+				case SPanel(_, _, _, _): bump(K_SPANEL);
 			}
 		}
 		function walkScalar(n:ScalarNode):Void {
@@ -457,7 +492,7 @@ class Canonical {
 	/** Fixed declared order for `shapeVector`/`shapeFeatures`. */
 	static var SHAPE_KINDS = ["BCross", "BCmp", "BTrend", "BAnd", "BOr", "BNot", "BHole",
 		"KConst", "KParam", "KArith", "KSeries", "KLookback", "KFeature", "KHole", "SPrice", "SInd", "SProj",
-		"BFeature"];
+		"BFeature", "SPanel"];
 
 	static inline var K_BCROSS = 0;
 	static inline var K_BCMP = 1;
@@ -476,7 +511,8 @@ class Canonical {
 	static inline var K_SPRICE = 14;
 	static inline var K_SIND = 15;
 	static inline var K_SPROJ = 16;
-	static inline var K_BFEATURE = 17; // appended last so existing shapeVector indices stay stable
+	static inline var K_BFEATURE = 17; // before SPanel so existing shapeVector indices stay stable
+	static inline var K_SPANEL = 18;
 
 	/**
 	 * `shapeSignature` turned into a fixed-length, SCALE-INVARIANT numeric feature vector, for

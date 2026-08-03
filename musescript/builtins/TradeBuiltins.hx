@@ -131,6 +131,10 @@ class TradeBuiltins {
 			for (c in conds) if (c == true) n++;
 			return n;
 		});
+		// Variadic boolean combinators: `any_of(a,b,c)` = OR, `all_of(a,b,c)` = AND. Readable exit
+		// cascades: `when any_of(stopped, trail(2*atr(close,14)), bars_in_trade() > 21): flat()`.
+		vars.set("any_of", function(conds:haxe.Rest<Dynamic>) { for (c in conds) if (c == true) return true; return false; });
+		vars.set("all_of", function(conds:haxe.Rest<Dynamic>) { for (c in conds) if (c != true) return false; return true; });
 		// Volatility-scaled trailing stop (peak-following); pair with atr(): `when trail(2*atr(14)): flat()`.
 		vars.set("trail", function(dist:Float) return trailStop(harness, dist));
 		// In-trade analytics: extremes since entry + signed open-trade return (position-aware).
@@ -141,6 +145,8 @@ class TradeBuiltins {
 		vars.set("slope", function(src:Dynamic, len:Int) return slopeN(harness, src, len));
 		vars.set("zscore_roll", function(src:Dynamic, len:Int) return zscoreN(harness, src, len));
 		vars.set("percent_rank", function(src:Dynamic, len:Int) return percentRank(harness, src, len));
+		// Donchian channel struct: `donchian(20).upper` / `.lower` / `.mid` (reads high/low implicitly).
+		vars.set("donchian", function(len:Int) return donchian(harness, len));
 		// Variadic instrument membership (extends asset_is/symbol_is): `when asset_in("crypto","forex"): ...`.
 		vars.set("asset_in", function(classes:haxe.Rest<Dynamic>) {
 			var a = harness.assetClass.toLowerCase();
@@ -562,6 +568,18 @@ class TradeBuiltins {
 		if (cur == null) return 0.0;
 		var raw = (cur.close - entry) / entry;
 		return pos > 0 ? raw : -raw;
+	}
+
+	/** Donchian channel over the last `len` bars: `{upper, lower, mid}` = highest high / lowest low /
+	 * their midpoint. Multi-output like `bbands`/`macd`: `donchian(20).upper`. Reads high/low
+	 * implicitly (a Donchian channel is always on the bar extremes). NaN fields until `len` bars. */
+	public static function donchian(harness:HarnessContext, len:Int, ?out:Dynamic):Dynamic {
+		var up = highest(harness, "high", len);
+		var lo = lowest(harness, "low", len);
+		var mid = (up + lo) / 2.0;
+		if (out == null) return { upper: up, lower: lo, mid: mid };
+		out.upper = up; out.lower = lo; out.mid = mid;
+		return out;
 	}
 
 	/** OLS slope (per-bar) of `src` over the last `len` bars -- a signed, magnitude-carrying trend

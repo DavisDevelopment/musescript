@@ -288,6 +288,7 @@ class ProjectionProvider {
 			switch (s) {
 				case SPrice(_):
 				case SInd(_, _, _, src): if (src != null) addSeries(src);
+				case SPanel(_, _, _, _):
 				case SProj(n, f):
 					var decl = byName.get(n);
 					if (decl == null) return;

@@ -1,9 +1,9 @@
 # Evolvable Projections + Co-evolved Forecaster/Manager Pairs — design plan
 
-**Date:** 2026-07-27
-**Status:** DESIGN ONLY — nothing implemented. Grounded in the real genome/evo/fitness types
-(`StrategyGenome`, `SeriesNode`, `ScalarNode`, `BoolNode`, `Expand`, `Fitness`/`FitnessResult`,
-`NmaEval`/`NmaFeatureHost`). Order-flexible phases, all default-off / parity-preserving until gated on.
+**Date:** 2026-07-27 (live vertical landed 2026-08-03; CCEA crisp vertical 2026-08-03)
+**Status:** LIVE VERTICAL — genome with `SProj` → purged skill axis → MAP-Elites selectable;
+decorate→pack for hosts; **CCEA two-pop smoke** (`--ccea`) with coupled trading fitness.
+Remaining: CRPS / native `NmaSProj` / `NBlockBootstrap` / full Red-Queen CCEA.
 
 ---
 
@@ -31,7 +31,8 @@ not a feature.
 2. **Selection = MAP-Elites** with forecast skill as a behavioral-descriptor axis (CVT), *not* an
    additive fitness weight. `--proj-weight` survives only as a P3 smoke knob (§7).
 3. **v1 = intra-genome two-module co-evolution** (one genome carries both modules, module-aware credit
-   via projection-ablation). Two-population CCEA is the later v2 epic (§8).
+   via projection-ablation). **v2 CCEA two-pop** now has a crisp vertical (`CceaCoEvo` / `--ccea`);
+   full Red-Queen / multi-partner remains gated.
 
 ---
 
@@ -401,6 +402,15 @@ A projector population and a manager population, evaluated in pairs.
 - **P1 — columnar eval + `ProjectionProvider` + reductions.** `NmaEval` `SProj` arm; `ProjBundle` (1
   column for `PSPoint`, K for later); reduction table (`p50`/`spread`/`prob_up`/… — all aliasing the
   single column at K=1). Differential test NMA vs interp/JS on genomes that read projections.
+
+  **✅ Landed 2026-08-03 (P1 lean — PSPoint via `ProjInline`, not a new `NmaKind`):**
+  - `ProjInline.forNma` rewrites referenced `PSPoint` `SProj` → underlying `SeriesNode` (K=1 reductions
+    all alias) so columnar NMA runs bit-identically to Expand without `NmaSProj` / schema migration.
+  - Unreferenced projection decls strip cleanly; `PSHost` / `PSNoise` stay on Expand→decorate (Graal
+    workers intentionally never host `PSHost` — decorate-once then pack columns like aux).
+  - `Fitness.evaluateNma` uses the inline path; cache identity stays on the original genome key.
+  - **Still owed for full P1:** native `NmaSProj` + `ProjBundle` reduction table for fans; decorate
+    columns readable as NMA features without Expand for hosts.
 - **P1.5 — MC sampler (`PSNoise`) + fan reductions. ✅ LANDED 2026-07-27 (verified 64,219/64,219 green).**
   Key realization: for a **location-scale** noise family the `K` seeded shocks are a render-time
   constant, so every fan reduction is **closed-form in `(base, vol)`** — `Expand` bakes the fan into
@@ -418,7 +428,7 @@ A projector population and a manager population, evaluated in pairs.
     deterministic across passes.
   - **Owed next**: `prob_up` rendering (K-term count or a `<>`-fraction), `NStudentT` is generated but
     add explicit tests, and the `NBlockBootstrap` runtime path.
-- **P2 — projection scoring. ✅ POINT SCORER LANDED 2026-07-27 (verified 64,231/64,231 green).**
+- **P2 — projection scoring. ✅ POINT SCORER + PURGED OOS LANDED.**
   `ProjectionScore.hx`: the projection's central forecast series `p_t` is built PIT-causally by
   `NmaFitness.seriesColumnOf`/`scalarColumnOf` (new public helpers that reuse the exact columnar
   indicator tier); the realized target `y_t` for `kind`/`horizon` is derived STRICTLY from later bars;
@@ -428,27 +438,64 @@ A projector population and a manager population, evaluated in pairs.
   last-H exclusion, a level forecast scores ≈1 on a trend (end-to-end through the column helper),
   wiring for referenced vs unreferenced. **Leakage guarantee:** future data is touched only in the
   scorer, never in the eval the policy consumes.
+  - **✅ 2026-08-03 purged skill:** `ProjectionScore.purgedSkill` + `Fitness.projectionScorePurged`
+    mask pairs to the López-de-Prado purge+embargo OOS window (`PurgeEmbargo`). MAP axis uses the
+    purged number; full-tape `projectionScore` remains for smoke/debug.
   - **Owed on the scorer**: the **distributional** side for fans — CRPS-skill / coverage / pinball on
-    `spread`/quantile fields (§6.1) — plus an explicit **future-peek rejection** test and the
-    purge/embargo OOS reporting layer. The point scorer is what P3 needs first.
-- **P3 — fitness combination. ✅ MECHANISM LANDED 2026-07-27 (verified 64,243/64,243 green); live
-  wiring is a gated JVM experiment (owed).**
-  - `MapElites.normSkill` (skill [-1,1]→[0,1], NaN→0.5 neutral), `behaviorVecWithSkill` (forecast skill
-    as a 5th descriptor axis), `assignCellWithSkill` (nearest 5-D centroid; classic mode unchanged) —
-    the exact opt-in pattern of the existing `creditConc` axis, byte-identical when off.
-  - **Proven at the archive level**: two equally-fit, behaviourally-identical genomes — a poor and a
-    strong forecaster — both survive (niched apart by skill), which raw-fitness selection cannot do.
-    That IS the forecaster/manager pair co-evolution.
-  - **Owed — live `CorpusEvoRun` wiring behind `--proj-map-axis`** (mirrors `--credit-map-axis`, JVM):
-    thread `Fitness.projectionScore(g, bars)` into the descriptor at the four `offer` sites + build 5-D
-    centroids. Real caveats to resolve first: (a) per-genome `projScore` cost (NMA column eval every
-    offer) — memoize; (b) the `assignCell` dim-inference can't tell credit-5D from skill-5D apart —
-    needs explicit axis flags, not dim-count; (c) it needs a **same-seed multi-seed JVM A/B** before
-    default-on, because the analogous `creditConc` axis *measurably hurt OOS* (26/50 vs 41/50). The
-    mechanism is proven; whether this axis *helps* a real run is an honest open question, not a
-    foregone win.
-- **P4 — module-aware credit.** Projection-ablation in the attribution oracle → credit bank.
+    `spread`/quantile fields (§6.1) — plus an explicit **future-peek rejection** test.
+- **P3 — fitness combination. ✅ LIVE WIRING LANDED 2026-08-03.**
+  - `MapElites.normSkill` / `behaviorVecWithSkill` / `assignCellWithSkill` (forecast skill as 5th CVT
+    axis) — mechanism proven earlier.
+  - **`CorpusEvoRun --proj-map-axis`**: niches by `Fitness.projectionScorePurged` on all offer sites
+    (tape + compete paths). `--ew-host` defaults the axis ON. CVT auto-enables at 48 cells.
+  - **Anti-pattern fixed:** `--proj-weight` defaults to **0 always** (smoke knob only when explicit);
+    archive `offer` quality is **trading fitness only** — skill niches via cell assignment, never
+    folded into elite comparison.
+  - **Owed:** same-seed multi-seed JVM A/B before default-on for non-`--ew-host` runs (creditConc
+    axis measurably hurt OOS historically).
+- **P4 — module-aware credit. ✅ ABLATION API LANDED 2026-08-03.**
+  - `ProjectionAblation`: rewrite `SProj(name,*)→SPrice("close")`, Δ = baseline−ablated trading
+    sharpe, deposit to `NmaCreditBank` under `proj:name`; `useWeights` for use-weighted skill.
+  - Live deposit behind `--proj-ablate` (capped 8/gen on MAP offers) → also
+    `ProjectionAblation.applyBankToTuner` (`GrowthWeights.projRead`).
+  - **Owed:** automatic use-weighted `projScore` aggregation; mean-fill / shuffle ablation modes.
+    ~~Variation growth weights reading `proj:` bank keys~~ ✅ via `applyBankToTuner` + `pickProjNameByCredit`.
 - **P5 — CCEA (epic).** Two-population co-evolution on Archipelago/Rivalry; pairing + credit design.
+
+  **✅ Landed 2026-08-03 (P5 crisp vertical — two pops + coupled trading fitness):**
+  - `CceaCoEvo.hx`: forecaster pop (`PSPoint` decls) × manager pop (policy reads `SProj`); sticky
+    partners; `compose` → joint genome; **shared trading fitness** credited to both; purged
+    `projSkill` recorded on forecasters for niche/telemetry only — **never** selection-additive.
+  - `Variation.mutateProjectionSampler` / `mutateManagerPolicy` / `growableProjNames` + credit-biased
+    `pickProjNameByCredit` / `wireProjRead`; `ProjectionAblation.applyBankToTuner` seeds
+    `GrowthWeights.projRead` from `NmaCreditBank` `proj:` keys (P4→P5 loop).
+  - CorpusEvoRun `--ccea` (`--ccea-gens` / `--ccea-f-pop` / `--ccea-m-pop`) runs `runMini` on the
+    IS tape and exits. `--proj-ablate` deposits during CCEA when combined.
+  - **Still deferred for full CCEA:** multi-partner best-response / Red-Queen disengagement,
+    Archipelago demes dual to RivalryArena, Pareto pairing tournaments.
+
+---
+
+## Live vertical (how to run co-evo with skill axis)
+
+```
+# JVM corpus evo — MAP niches by purged forecast skill (recommended)
+haxe build-corpus-evo.hxml && java -jar … --proj-map-axis [--ew-host] [--proj-ablate]
+
+# Flags
+#   --proj-map-axis     CVT 5th axis = purged OOS proj skill (NOT additive weight)
+#   --no-proj-map-axis  disable when --ew-host would otherwise enable it
+#   --proj-weight w     SMOKE ONLY — do not use as the selection story
+#   --proj-ablate       deposit projection-ablation Δ to NmaCreditBank (+ GrowthWeights.projRead)
+#   --ew-host           decorate→pack PSHost columns; forces threads=1; enables proj-map-axis
+#   --ccea              P5 two-pop forecaster×manager mini-loop on IS tape, then exit
+#   --ccea-gens N       CCEA generations (default 3)
+#   --ccea-f-pop N      forecaster pop size (default 4)
+#   --ccea-m-pop N      manager pop size (default 4)
+```
+
+**Still deferred:** `NBlockBootstrap` / `prob_up` Expand rendering; native `NmaSProj`/`ProjBundle`;
+CRPS fan scoring; full CCEA Red-Queen / multi-partner; default-on A/B for skill axis on non-host runs.
 
 ---
 

@@ -16,9 +16,8 @@ import musescript.vm.VmParityDump;
  * built via `CorpusSeed` exactly as `CorpusEvoRun` seeds them) plus the P0 subset
  * programs. The invariant is `diverged == 0` — a program either runs on the VM
  * byte-identically to the interp, or cleanly falls back (`VmUnsupported`), never
- * silently differs. Today most genome seeds are `fallback` (they use indicators/
- * crossovers — out of the P0 subset); that bucket shrinks as V3 lands `SERIES`/
- * `CROSS`/`LOOKBACK`, and every newly-covered genome is byte-checked here for free.
+ * silently differs. Post-V3: gen-0 corpus is fully VM-covered (`identical==total`,
+ * `fallback==0`); residual fallback shows up under evolved stress (objects/match/…).
  */
 class TestVmParityCorpus extends Test {
 	// Subset programs guarantee the gate has LIVE coverage (identical > 0) today,

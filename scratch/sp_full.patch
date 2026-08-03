@@ -1,0 +1,138 @@
+diff --git a/musescript/parse/StrategyParser.hx b/musescript/parse/StrategyParser.hx
+index 242d95f..1290320 100644
+--- a/musescript/parse/StrategyParser.hx
++++ b/musescript/parse/StrategyParser.hx
+@@ -15,6 +15,8 @@ import musescript.types.BuiltinSigs;
+ import musescript.types.MuseType;
+ import musescript.types.AstSpans;
+ import musescript.types.SourcePositions;
++import musescript.evo.HoleDomain;
++import musescript.evo.HoleMeta;
+ 
+ /**
+  * Hand-rolled recursive-descent parser for the braced typed surface:
+@@ -267,9 +269,10 @@ class StrategyParser {
+ 						case "min": opts.min = constNum(val);
+ 						case "max": opts.max = constNum(val);
+ 						case "step": opts.step = constNum(val);
++						case "values": opts.values = arrNum(val);
+ 						case "tune": opts.tune = constStr(val);
+ 						default:
+-							throw err('unknown param option "$key" (expected min/max/step/tune)');
++							throw err('unknown param option "$key" (expected min/max/step/values/tune)');
+ 					}
+ 				} while (match(","));
+ 			}
+@@ -290,6 +293,20 @@ class StrategyParser {
+ 		};
+ 	}
+ 
++	/** Explicit sweep list `values: [8, 13, 21]` -> the numeric values; throws on a non-literal
++	 * element so a typo fails loudly rather than silently sweeping a truncated grid. */
++	function arrNum(e:Expr):Array<Float> {
++		return switch (e) {
++			case EArrayDecl(elems):
++				[for (el in elems) {
++					var n = constNum(el);
++					if (n == null) throw err("param `values` list must be numeric literals");
++					n;
++				}];
++			default: throw err("param `values` must be a list literal, e.g. values: [8, 13, 21]");
++		};
++	}
++
+ 	function constStr(e:Expr):Null<String> {
+ 		return switch (e) {
+ 			case EConst(CString(s)): s;
+@@ -870,21 +887,50 @@ class StrategyParser {
+ 			expect("}");
+ 			return stampExpr(start, MuseNodes.block(es));
+ 		}
+-		// Author hole: `?` (untyped) or `?Bool` / `?Scalar` / `?Series`. Lowers (via
+-		// CorpusSeed) to a synthesis hole the engine fills under the honest gate. Encoded as
+-		// EMeta("__hole", [tyString], seed) so an UNFILLED sketch is still a valid runnable
+-		// program — any pass ignorant of __hole just evaluates the seed. Domain/name are P1.
++		// Author hole: `?` / `?Bool` / `?Scalar` / `?Series`, optional `in 2..30` / `in [0.1,1.0]`.
++		// Encoded as EMeta("__hole", args, seed) so an unfilled sketch still runs (seed evaluated
++		// by any pass that ignores __hole). Named/`~ family`/`?Series` fill are P1.
+ 		if (c == "?") {
+ 			i++;
+ 			var ty = matchIdent("Bool") ? "Bool"
+ 				: matchIdent("Scalar") ? "Scalar"
+ 				: matchIdent("Series") ? "Series" : "";
++			var domain:Null<HoleDomain> = null;
++			if (matchIdent("in")) {
++				if (match("[")) {
++					var loE = parseSignedNumber();
++					expect(",");
++					var hiE = parseSignedNumber();
++					expect("]");
++					var lo = constNum(loE);
++					var hi = constNum(hiE);
++					if (lo == null || hi == null) throw err("hole domain `in [lo,hi]` needs numeric bounds");
++					if (lo > hi) throw err("hole domain `in [$lo,$hi]` is empty (lo > hi)");
++					domain = DRealInterval(lo, hi);
++				} else {
++					var loE = parseSignedNumber();
++					if (!match("..")) throw err("expected `..` in hole domain `in lo..hi`");
++					var hiE = parseSignedNumber();
++					var lo = constNum(loE);
++					var hi = constNum(hiE);
++					if (lo == null || hi == null) throw err("hole domain `in lo..hi` needs numeric bounds");
++					var loI = Std.int(lo);
++					var hiI = Std.int(hi);
++					if (loI > hiI) throw err("hole domain `in $loI..$hiI` is empty (lo > hi)");
++					domain = DIntRange(loI, hiI);
++				}
++			}
+ 			var seed:Expr = switch (ty) {
+ 				case "Bool": MuseNodes.boolExpr(true);
+ 				case "Series": MuseNodes.ident("close");
+-				default: MuseNodes.floatExpr(0.0);
++				default:
++					switch (domain) {
++						case DIntRange(lo, hi): MuseNodes.floatExpr(0.5 * (lo + hi));
++						case DRealInterval(lo, hi): MuseNodes.floatExpr(0.5 * (lo + hi));
++						default: MuseNodes.floatExpr(0.0);
++					};
+ 			};
+-			return stampExpr(start, MuseNodes.meta("__hole", [MuseNodes.stringExpr(ty)], seed));
++			return stampExpr(start, MuseNodes.meta("__hole", HoleMeta.encodeArgs(ty, domain), seed));
+ 		}
+ 		var id = expectIdentValue();
+ 		// General `if (cond) { ... } [else if (cond) { ... }]* [else { ... }]?`, building a
+@@ -1111,7 +1157,12 @@ class StrategyParser {
+ 
+ 	function parseNumber():Expr {
+ 		var start = i;
+-		while (i < len && (isDigit(src.charAt(i)) || src.charAt(i) == ".")) i++;
++		while (i < len && isDigit(src.charAt(i))) i++;
++		// Fractional part: only consume `.` when a digit follows (so `5..15` range stays intact).
++		if (i < len && src.charAt(i) == "." && i + 1 < len && isDigit(src.charAt(i + 1))) {
++			i++;
++			while (i < len && isDigit(src.charAt(i))) i++;
++		}
+ 		// Scientific notation: 1e-6 / 2.5E+3 (hscript parity).
+ 		if (i < len) {
+ 			var ec = src.charAt(i);
+@@ -1133,6 +1184,20 @@ class StrategyParser {
+ 		return MuseNodes.intExpr(Std.parseInt(s));
+ 	}
+ 
++	/** Number with optional leading `-` (hole domains). */
++	function parseSignedNumber():Expr {
++		skipWs();
++		if (match("-")) {
++			var n = parseNumber();
++			return switch (n) {
++				case EConst(CInt(v)): MuseNodes.intExpr(-v);
++				case EConst(CFloat(v)): MuseNodes.floatExpr(-v);
++				default: MuseNodes.unop("-", true, n);
++			};
++		}
++		return parseNumber();
++	}
++
+ 	function parseString():String {
+ 		var quote = src.charAt(i++);
+ 		var buf = new StringBuf();

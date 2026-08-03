@@ -26,12 +26,13 @@ import musescript.interp.MuseInterp;
  * packs into the feature-tape region after OHLCV; bare field reads / lookbacks /
  * indicators on those names lower natively (sid >= 7).
  *
- * Panel v1: literal-symbol `close_of` / `mom_of` / `sma_of` / `sym_available` /
- * `fund_of` pack as dense `field@SYM` feature slots from `PanelFeed` (calendar-
- * aligned; missing bars → NaN). Drive via `ctx.panel` + `runPanelBacktest`.
- * Escape list (host_eval / opaque whole-module fallback): bags, computed bags,
- * graph bags, `symbols()`, scan/rebalance/portfolio apply — see
- * `StrategyWasmEmitter.PANEL_HOST_ESCAPE`.
+ * Panel: literal-symbol `close_of` / `mom_of` / `sma_of` / `ema_of` / `rsi_of` /
+ * `sym_available` / `fund_of` pack as dense `field@SYM` feature slots from
+ * `PanelFeed` (calendar-aligned; missing bars → NaN). Drive via `ctx.panel` +
+ * `runPanelBacktest`. HostABI portfolio apply: literal `buy` / `sell_all` /
+ * `target_weight` / `rebalance_equal([...])`. Escape list (host_eval /
+ * opaque whole-module fallback): bags, computed bags, graph bags, `symbols()`,
+ * scan / portfolio queries — see `StrategyWasmEmitter.PANEL_HOST_ESCAPE`.
  */
 class StrategyWasmBackend {
 	#if js
@@ -210,6 +211,19 @@ class StrategyWasmBackend {
 				var px = harness.panelPrice(sym);
 				var bi = bar() != null ? bar().index : -1;
 				harness.portfolio.sellAll(sym, px, bi);
+			},
+			target_weight: function(sid:Int, w:Float) {
+				var sym = str(sid);
+				var bi = bar() != null ? bar().index : -1;
+				harness.portfolio.targetWeight(sym, w, harness.panelPrices, bi);
+			},
+			rebalance_equal: function(sid:Int) {
+				var packed = str(sid);
+				var list:Array<String> = packed.length == 0
+					? []
+					: packed.split(StrategyWasmEmitter.REBALANCE_SYM_SEP);
+				var bi = bar() != null ? bar().index : -1;
+				harness.portfolio.rebalanceEqual(list, harness.panelPrices, bi);
 			},
 			plot: function(v:Float, lid:Int) {
 				harness.chart.plot(v, str(lid), null, bar().index);

@@ -105,6 +105,24 @@ class EvolutionEngine {
 		variation.configureForTape(bars);
 	}
 
+	/** Gate fixed-universe symbols so Variation can grow `SPanel` → Expand `*_of("SYM",…)`
+	 * and constrained `PanelAction` templates → HostABI `buy`/`rebalance_equal`/`target_weight`.
+	 * Does not attach a panel tape — pair with `configureForPanel` (or `Fitness.configurePanel`)
+	 * so `PanelAction` genomes are scored via portfolio `runPanelBacktest`. */
+	public function configureForUniverse(?syms:Array<String>):Void {
+		variation.configureForUniverse(syms);
+	}
+
+	/**
+	 * Attach a multi-symbol panel tape for fitness and gate Variation growth to its symbols.
+	 * Composes with `configureForTape` (aux field pool stays independent). Pass `null` to
+	 * clear the fitness panel only (universe growth tags are left as last configured).
+	 */
+	public function configureForPanel(?panel:musescript.harness.PanelFeed):Void {
+		Fitness.configurePanel(panel);
+		if (panel != null) variation.configureForUniverse(panel.symbols);
+	}
+
 	public function seedPopulation(depth:Int = 3):Array<StrategyGenome> {
 		return [for (_ in 0...popSize) variation.randomGenome(depth)];
 	}

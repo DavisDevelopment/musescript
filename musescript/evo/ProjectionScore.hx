@@ -1,6 +1,7 @@
 package musescript.evo;
 
 import musescript.harness.Bar;
+import musescript.evo.rigor.PurgeEmbargo;
 
 /**
  * Leakage-free forecast-skill scoring for a genome's projections (PROJECTION_COEVOLUTION_PLAN.md §6).
@@ -12,9 +13,8 @@ import musescript.harness.Bar;
  * accuracy for `PDirection`, over the bars that have a target (the last `H` bars are excluded — no
  * future to score against). **Future data appears ONLY here, never in the eval the policy consumes.**
  *
- * This is the fitness SIGNAL for forecast quality; how it feeds selection (a MAP-Elites descriptor
- * axis per §7) and its out-of-sample / purge-embargo reporting are the next slices. The guarantee at
- * this layer is that `p_t ⊥ future` and `y_t ⊂ future` — a projection that could see ahead is a bug.
+ * When `purgedSkill` is on (default for MAP-Elites `--proj-map-axis`), pairs are restricted to the
+ * purge+embargo OOS window (`PurgeEmbargo`) so reported skill is never the in-sample fit.
  *
  * «τὸ μέλλον σκιά· μέτρησον, μὴ μαντεύου.»
  */
@@ -27,40 +27,72 @@ class ProjectionScore {
 	public static var minSample:Int = 10;
 
 	/**
+	 * When true, `score` / `skill` mask to the López-de-Prado purge+embargo OOS window so forecast
+	 * skill is not the same in-sample fit the trader trained on. Default off for point-scorer
+	 * parity; `--proj-map-axis` / `Fitness.projectionScorePurged` turn it on for live co-evo.
+	 */
+	public static var purgedSkill:Bool = false;
+
+	/** OOS fraction for purged skill (`PurgeEmbargo.split`). */
+	public static var purgedOosFrac:Float = 0.25;
+
+	/**
 	 * Aggregate skill (mean of finite per-projection skills) + the per-projection breakdown, aligned
 	 * to `g.projections`. Only REFERENCED projections are scored — an unread forecast has no effect on
 	 * behaviour and earns no skill. `agg` is `NaN` when nothing is scoreable.
+	 *
+	 * Pass `useWeights` (from `ProjectionAblation.useWeights`) to aggregate as a use-weighted mean
+	 * instead of a flat mean — skillful-but-unused forecasts contribute little.
 	 */
 	public static function score(
-		g:StrategyGenome, bars:Array<Bar>, ?provider:ProjectionProvider
+		g:StrategyGenome, bars:Array<Bar>, ?provider:ProjectionProvider,
+		?useWeights:Map<String, Float>
 	):{agg:Float, per:Array<Float>} {
 		var per:Array<Float> = [];
 		if (g.projections == null || g.projections.length == 0)
 			return {agg: Math.NaN, per: per};
 		var refs = referencedNames(g);
 		var sum = 0.0;
+		var wSum = 0.0;
 		var cnt = 0;
+		var oosFrom = purgedOosStart(g, bars.length);
 		for (decl in g.projections) {
-			var s = refs.exists(decl.name) ? skill(decl, g.params, bars, provider) : Math.NaN;
+			var s = refs.exists(decl.name) ? skill(decl, g.params, bars, provider, oosFrom) : Math.NaN;
 			per.push(s);
 			if (finite(s)) {
-				sum += s;
+				var w = 1.0;
+				if (useWeights != null && useWeights.exists(decl.name))
+					w = useWeights.get(decl.name);
+				sum += w * s;
+				wSum += w;
 				cnt++;
 			}
 		}
+		if (useWeights != null)
+			return {agg: wSum > 0 ? sum / wSum : Math.NaN, per: per};
 		return {agg: cnt > 0 ? sum / cnt : Math.NaN, per: per};
 	}
 
 	/** Skill of one projection: rank-IC (or directional accuracy for `PDirection`) of its central
 	 * forecast vs the realized target. `NaN` when the forecast can't be evaluated or there's no signal.
-	 * Host-backed (`PSHost`) projections need a `ProjectionProvider` with an `EwForecastHost`. */
+	 * Host-backed (`PSHost`) projections need a `ProjectionProvider` with an `EwForecastHost`.
+	 * `oosFrom` ≥ 0 masks pairs before that index (purge+embargo window); `null` uses `purgedSkill`. */
 	public static function skill(
-		decl:ProjectionDecl, params:Array<EvoParam>, bars:Array<Bar>, ?provider:ProjectionProvider
+		decl:ProjectionDecl, params:Array<EvoParam>, bars:Array<Bar>, ?provider:ProjectionProvider,
+		?oosFrom:Null<Int>
 	):Float {
 		var p = centralSeries(decl, params, bars, provider);
 		if (p == null)
 			return Math.NaN;
-		var y = realizedTarget(bars, decl.kind, decl.horizon < 1 ? 1 : decl.horizon);
+		var h = decl.horizon < 1 ? 1 : decl.horizon;
+		var y = realizedTarget(bars, decl.kind, h);
+		var from = oosFrom;
+		if (from == null && purgedSkill)
+			from = PurgeEmbargo.split(bars.length, purgedOosFrac, h).oosStart;
+		if (from != null && from > 0) {
+			p = maskBefore(p, from);
+			y = maskBefore(y, from);
+		}
 		var point = switch (decl.kind) {
 			case PDirection: directionalSkill(p, y);
 			default: rankIC(p, y);
@@ -68,7 +100,7 @@ class ProjectionScore {
 		// Host projections: blend forward point skill with band coverage so UQ width is scored
 		// without rewarding hard-rule soft hits (lattice already ranked those into the cloud).
 		if (decl.sampler.match(PSHost(_)) && provider != null) {
-			var cov = provider.bandCoverage(bars, decl.horizon < 1 ? 1 : decl.horizon);
+			var cov = provider.bandCoverage(bars, h);
 			if (finite(cov)) {
 				var covSkill = 2.0 * cov - 1.0; // map [0,1] → [-1,1]
 				if (finite(point))
@@ -77,6 +109,28 @@ class ProjectionScore {
 			}
 		}
 		return point;
+	}
+
+	/** First legal OOS index for a genome's referenced horizons; 0 when purge is off / empty. */
+	public static function purgedOosStart(g:StrategyGenome, n:Int):Int {
+		if (!purgedSkill || n < 1)
+			return 0;
+		var maxH = 1;
+		if (g.projections != null) {
+			var refs = referencedNames(g);
+			for (decl in g.projections) {
+				if (!refs.exists(decl.name))
+					continue;
+				var h = decl.horizon < 1 ? 1 : decl.horizon;
+				if (h > maxH) maxH = h;
+			}
+		}
+		return PurgeEmbargo.split(n, purgedOosFrac, maxH).oosStart;
+	}
+
+	static function maskBefore(col:Array<Float>, from:Int):Array<Float> {
+		if (from <= 0) return col;
+		return [for (i in 0...col.length) i >= from ? col[i] : Math.NaN];
 	}
 
 	/** The projection's central (median) forecast series over the tape; `null` if un-evaluable. */
@@ -323,6 +377,7 @@ class ProjectionScore {
 			case SPrice(_):
 			case SInd(_, _, _, src): if (src != null) ws(src);
 			case SProj(name, _): m.set(name, true);
+			case SPanel(_, _, _, _):
 		}
 		function wsc(n:ScalarNode):Void switch (n) {
 			case KConst(_) | KParam(_) | KFeature(_):

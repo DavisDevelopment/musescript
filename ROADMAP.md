@@ -56,7 +56,9 @@ Richer order semantics compose as **rules on the sim side**, not new AST verbs
   `orders_pending()` / `orders_cancel_all()` builtins added; `slippageBps`
   exposed via `MuseRuntime.run` opts.
 - **Next**: order-book support for panel/portfolio strategies (today
-  single-symbol `OrderSim` only); market-impact models (pluggable fn of
+  single-symbol `OrderSim` only — `PortfolioSim` fills immediately;
+  GeneRunner/`PanelLoader` `--panel` offline loaders shipped, but pending
+  limit/stop books are still per-`OrderSim`); market-impact models (pluggable fn of
   size/bar-volume/spread) layered on top of the same book once a real
   cost-calibration source exists — don't invent impact numbers speculatively
   (the turnover-cost-bug lesson: eval-side cost models must be validated
@@ -123,11 +125,16 @@ Richer order semantics compose as **rules on the sim side**, not new AST verbs
 - **Next**: wire the assembler into `StrategyWasmBackend.compile`'s Node path
   too (currently still shells to `tools/wat2wasm_cli.py` via wasmtime there;
   could unify on one assembler everywhere and drop that subprocess+Python
-  dependency entirely). Panel linear-memory v1 lands literal-symbol
-  `close_of`/`mom_of`/`sma_of`/`sym_available`/`fund_of` on the feature tape
-  (`field@SYM` slots from `PanelFeed`); bags/rebalance/portfolio apply remain
-  host_eval — see `StrategyWasmEmitter.PANEL_HOST_ESCAPE` and
-  `TestPanelWasmParity`.
+  dependency entirely). Panel WASM: literal-symbol
+  `close_of`/`mom_of`/`sma_of`/`ema_of`/`rsi_of`/`sym_available`/`fund_of` on
+  the feature tape (`field@SYM` from `PanelFeed`); HostABI
+  `buy`/`sell_all`/`target_weight`/`rebalance_equal([...])`. Bags / scan /
+  portfolio queries remain host_eval — see `PANEL_HOST_ESCAPE`,
+  `TestPanelWasmParity`. Panel evo genomes: `SPanel` +
+  `Variation.configureForUniverse` → Expand `*_of`; `PanelAction`
+  (`PABuy`/`PARebalance`/`PATargetWeight`) → Expand HostABI
+  buy/rebalance/target_weight (`TestPanelEvoGenomes`). Without a universe,
+  Expand stays single-name `long`/`short`/`flat`. Bags/scan still escape.
 
 ## 5. Macro-specialized numeric kernels
 

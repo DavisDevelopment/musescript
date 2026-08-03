@@ -430,9 +430,11 @@ class JsBackend {
 			if (harness.currentBar != null)
 				harness.orders.short(harness.currentBar.close, qty, harness.currentBar.index);
 		});
-		Reflect.setField(api, "flat", function() {
-			if (harness.currentBar != null)
+		Reflect.setField(api, "flat", function(?tag:Dynamic) {
+			if (harness.currentBar != null) {
+				harness.orders.noteTag(tag); // record a `flat("label")` fire (exit-layer diagnostics)
 				harness.orders.flat(harness.currentBar.close, harness.currentBar.index);
+			}
 		});
 		Reflect.setField(api, "position", function() return harness.orders.positionSize());
 		Reflect.setField(api, "entry_price", function() return harness.orders.entryPrice);
@@ -458,6 +460,9 @@ class JsBackend {
 		Reflect.setField(api, "percent_rank", function(a:Dynamic, b:Dynamic) return TradeBuiltins.percentRank(harness, a, Std.int(b)));
 		Reflect.setField(api, "asset_in", function(cs:haxe.Rest<Dynamic>) { var a = harness.assetClass.toLowerCase(); for (c in cs) if (c != null && Std.string(c).toLowerCase() == a) return true; return false; });
 		Reflect.setField(api, "symbol_in", function(ss:haxe.Rest<Dynamic>) { for (x in ss) if (x != null && Std.string(x) == harness.symbol) return true; return false; });
+		Reflect.setField(api, "donchian", function(a:Dynamic) return TradeBuiltins.donchian(harness, Std.int(a)));
+		Reflect.setField(api, "any_of", function(cs:haxe.Rest<Dynamic>) { for (c in cs) if (c == true) return true; return false; });
+		Reflect.setField(api, "all_of", function(cs:haxe.Rest<Dynamic>) { for (c in cs) if (c != true) return false; return true; });
 		Reflect.setField(api, "unrealized_pnl", function() {
 			var px = harness.currentBar != null ? harness.currentBar.close : 0.0;
 			return harness.orders.unrealizedPnl(px);
@@ -546,6 +551,8 @@ class JsBackend {
 		Reflect.setField(f0, "percent_rank", function(a:Dynamic, b:Dynamic) return TradeBuiltins.percentRank(harness, a, Std.int(b)));
 		Reflect.setField(f0, "asset_in", function(cs:haxe.Rest<Dynamic>) { var a = harness.assetClass.toLowerCase(); for (c in cs) if (c != null && Std.string(c).toLowerCase() == a) return true; return false; });
 		Reflect.setField(f0, "symbol_in", function(ss:haxe.Rest<Dynamic>) { for (x in ss) if (x != null && Std.string(x) == harness.symbol) return true; return false; });
+		Reflect.setField(f0, "any_of", function(cs:haxe.Rest<Dynamic>) { for (c in cs) if (c == true) return true; return false; });
+		Reflect.setField(f0, "all_of", function(cs:haxe.Rest<Dynamic>) { for (c in cs) if (c != true) return false; return true; });
 		Reflect.setField(f0, "unrealized_pnl", function() return harness.orders.unrealizedPnl(harness.currentBar.close));
 		Reflect.setField(f0, "unrealized_pnl_pct", function() {
 			var pos = harness.orders.positionSize();
@@ -560,6 +567,7 @@ class JsBackend {
 		Reflect.setField(f1, "change", function(a:Dynamic) return builtinChange(harness, a, 1));
 		Reflect.setField(f1, "pct_change", function(a:Dynamic) return builtinPctChange(harness, a, 1));
 		Reflect.setField(f1, "stoch", function(a:Dynamic) return TradeBuiltins.stoch(harness, Std.int(a), 3, 3));
+		Reflect.setField(f1, "donchian", function(a:Dynamic) return TradeBuiltins.donchian(harness, Std.int(a)));
 		Reflect.setField(f1, "ohlcv_window", function(a:Dynamic) return TradeBuiltins.ohlcvWindow(harness, Std.int(a)));
 		// arity 2
 		Reflect.setField(f2, "sma", function(a:Dynamic, b:Dynamic) return TradeBuiltins.sma(harness, a, Std.int(b)));
@@ -1101,6 +1109,9 @@ class JsBackend {
 				case "percent_rank": TradeBuiltins.percentRank(harness, args[0], Std.int(args[1]));
 				case "asset_in": { var a = harness.assetClass.toLowerCase(); var hit = false; for (c in args) if (c != null && Std.string(c).toLowerCase() == a) hit = true; hit; }
 				case "symbol_in": { var hit = false; for (x in args) if (x != null && Std.string(x) == harness.symbol) hit = true; hit; }
+				case "donchian": TradeBuiltins.donchian(harness, Std.int(args[0]));
+				case "any_of": { var hit = false; for (c in args) if (c == true) hit = true; hit; }
+				case "all_of": { var ok = true; for (c in args) if (c != true) ok = false; ok; }
 			case "unrealized_pnl": harness.orders.unrealizedPnl(harness.currentBar.close);
 			case "unrealized_pnl_pct":
 				var pos = harness.orders.positionSize();

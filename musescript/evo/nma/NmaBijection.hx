@@ -45,6 +45,8 @@ class NmaBijection {
 				// Columnar NMA has no projection column yet; a genome with SProj is detected upstream
 				// (Fitness.evaluateNma) and routed to the Expand→interp fallback. Defensive net.
 				throw "NmaBijection.seriesFromEnum: SProj is not columnar-NMA supported (nma-unsupported)";
+			case SPanel(_, _, _, _):
+				throw "NmaBijection.seriesFromEnum: SPanel is not columnar-NMA supported (nma-unsupported)";
 		};
 	}
 

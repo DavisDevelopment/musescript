@@ -45,7 +45,12 @@ class TestBytecodeVmParity extends Test {
 		// V3: EField — read a field off a multi-output indicator (bbands), incl. a lookback of it
 		"strategy S { onBar {\n  when close > bbands(close, 20).upper: { long(1); }\n  when close < bbands(close, 20).lower: { flat(); }\n} }",
 		// V3: __scr macd multi-output field access driving orders
-		"strategy S { onBar {\n  when macd(close).macd > macd(close).signal: { long(1); }\n  when macd(close).macd < macd(close).signal: { flat(); }\n} }"
+		"strategy S { onBar {\n  when macd(close).macd > macd(close).signal: { long(1); }\n  when macd(close).macd < macd(close).signal: { flat(); }\n} }",
+		// P1.1: lookback of a CALL (withSeriesOffset re-entrancy) — sma(close,5)[1]
+		"strategy S { onBar {\n  when sma(close, 5) > sma(close, 5)[1]: { long(1); }\n  when sma(close, 5) < sma(close, 5)[1]: { flat(); }\n} }",
+		// P1.1 widen IND: slope / hl2 static dispatch
+		"strategy S { onBar {\n  when slope(close, 8) > 0.0: { long(1); }\n  when slope(close, 8) < 0.0: { flat(); }\n} }",
+		"strategy S { onBar {\n  when close > hl2(): { long(1); }\n  when close < hl2(): { flat(); }\n} }"
 	];
 
 	public function testInterpVsVmByteParity() {

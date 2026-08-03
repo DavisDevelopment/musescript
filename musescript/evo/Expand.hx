@@ -44,22 +44,50 @@ class Expand {
 			}
 		}
 		lines.push("  onBar {");
-		// Guarded on `position()` so a STICKY entry condition (BCmp/BTrend-based, e.g. `rsi(...) <
-		// 55` staying true for many consecutive bars -- unlike a transient crossover, which only
-		// fires once) doesn't re-fire `long`/`short` every single bar it holds and pyramid an
-		// unbounded position. `long`/`short` themselves stay generically additive at the LANGUAGE
-		// level (a hand-written strategy that WANTS pyramiding can still call them directly,
-		// unguarded) -- this guard is specific to genome-EXPANDED source, where `size` is meant as
-		// a target exposure, not a per-bar increment. `<= 0`/`>= 0` (not `== 0`) deliberately still
-		// allows a same-bar REVERSAL (short flips to long, long flips to short) to fire -- only
-		// same-direction re-entry is blocked, matching executeLong/executeShort's own existing
-		// "close the opposite side first" behavior.
-		lines.push('    when (${bool(g.entryLong, g.params)}) && position() <= 0: { long($size) }');
-		lines.push('    when (${bool(g.entryShort, g.params)}) && position() >= 0: { short($size) }');
-		lines.push('    when (${bool(g.exitLong, g.params)}) || (${bool(g.exitShort, g.params)}): { flat() }');
+		if (g.panelAction != null) {
+			// Panel genomes v1: HostABI portfolio verbs with literal symbols (WASM-native).
+			// No `position()`/`pos()` guards — `pos` is PANEL_HOST_ESCAPE; panel smokes leave
+			// apply unguarded. Short slot unused under these templates.
+			emitPanelActionBody(lines, g.panelAction, g, size);
+		} else {
+			// Guarded on `position()` so a STICKY entry condition (BCmp/BTrend-based, e.g. `rsi(...) <
+			// 55` staying true for many consecutive bars -- unlike a transient crossover, which only
+			// fires once) doesn't re-fire `long`/`short` every single bar it holds and pyramid an
+			// unbounded position. `long`/`short` themselves stay generically additive at the LANGUAGE
+			// level (a hand-written strategy that WANTS pyramiding can still call them directly,
+			// unguarded) -- this guard is specific to genome-EXPANDED source, where `size` is meant as
+			// a target exposure, not a per-bar increment. `<= 0`/`>= 0` (not `== 0`) deliberately still
+			// allows a same-bar REVERSAL (short flips to long, long flips to short) to fire -- only
+			// same-direction re-entry is blocked, matching executeLong/executeShort's own existing
+			// "close the opposite side first" behavior.
+			lines.push('    when (${bool(g.entryLong, g.params)}) && position() <= 0: { long($size) }');
+			lines.push('    when (${bool(g.entryShort, g.params)}) && position() >= 0: { short($size) }');
+			lines.push('    when (${bool(g.exitLong, g.params)}) || (${bool(g.exitShort, g.params)}): { flat() }');
+		}
 		lines.push("  }");
 		lines.push("}");
 		return lines.join("\n");
+	}
+
+	/** Emit HostABI panel apply lines for a panel-action template. */
+	static function emitPanelActionBody(
+		lines:Array<String>, action:PanelAction, g:StrategyGenome, size:String
+	):Void {
+		var entry = bool(g.entryLong, g.params);
+		var exit = bool(g.exitLong, g.params);
+		switch (action) {
+			case PABuy(sym):
+				lines.push('    when ($entry): { buy("$sym", $size) }');
+				lines.push('    when ($exit): { sell_all("$sym") }');
+			case PARebalance(syms):
+				var list = [for (s in syms) '"$s"'].join(", ");
+				lines.push('    when ($entry): { rebalance_equal([$list]) }');
+				var sells = [for (s in syms) 'sell_all("$s")'].join("; ");
+				lines.push('    when ($exit): { $sells }');
+			case PATargetWeight(sym):
+				lines.push('    when ($entry): { target_weight("$sym", $size) }');
+				lines.push('    when ($exit): { sell_all("$sym") }');
+		}
 	}
 
 	static function num(x:Float):String {
@@ -145,6 +173,7 @@ class Expand {
 		function addSeries(s:SeriesNode):Void {
 			switch (s) {
 				case SPrice(_):
+				case SPanel(_, _, _, _): // literal-panel leaf — no projection prelude
 				case SInd(_, _, _, src): if (src != null) addSeries(src);
 				case SProj(n, f):
 					var k = n + "\t" + f;
@@ -183,7 +212,27 @@ class Expand {
 				if (src != null) '${name}(${series(src)}, $window)';
 				else '${name}("$field", $window)';
 			case SProj(pn, pf): projRef(pn, pf);
+			case SPanel(kind, sym, field, window): panelOfExpr(kind, sym, field, window);
 		};
+	}
+
+	/**
+	 * Render a fixed-universe panel leaf: `close_of("AAA")`, `mom_of("AAA", 5)`,
+	 * `fund_of("AAA", "revenue")`. Shared by scalar and series Expand paths.
+	 */
+	public static function panelOfExpr(kind:String, sym:String, ?field:String, ?window:Int):String {
+		if (kind == "fund") {
+			var fname = field != null && field.length > 0 ? field : "revenue";
+			if (window != null && window != 0) return 'fund_of("$sym", "$fname", $window)';
+			return 'fund_of("$sym", "$fname")';
+		}
+		if (Palette.PANEL_OF_INDS.indexOf(kind) >= 0) {
+			var w = window != null && window > 0 ? window : 14;
+			return '${kind}_of("$sym", $w)';
+		}
+		// OHLCV*_of
+		if (window != null && window != 0) return '${kind}_of("$sym", $window)';
+		return '${kind}_of("$sym")';
 	}
 
 	public static function scalar(n:ScalarNode, params:Array<EvoParam>):String {
@@ -196,10 +245,14 @@ class Expand {
 					case SInd(name, field, window, src):
 						src != null ? '${name}(${series(src)}, $window)' : '${name}("$field", $window)';
 					case SProj(pn, pf): projRef(pn, pf);
+					case SPanel(kind, sym, field, window): panelOfExpr(kind, sym, field, window);
 				}
 			case KLookback(s, k):
 				switch (s) {
 					case SPrice(f): '$f[$k]';
+					case SPanel(kind, sym, field, _):
+						// Fold lookback into the of-call (subscript on close_of is not strategy surface).
+						panelOfExpr(kind, sym, field, k);
 					default: '(${series(s)})[$k]';
 				}
 			case KFeature(name):

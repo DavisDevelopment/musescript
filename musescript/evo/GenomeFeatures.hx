@@ -128,6 +128,7 @@ class GenomeFeatures {
 		switch (n) {
 			case SPrice(_):
 			case SProj(_, _): // projection reference — not an indicator feature
+			case SPanel(_, _, _, _): // panel-of — expand→interp/WASM, not GenomeFeatures ind set
 			case SInd(name, field, window, src):
 				if (src == null && !isPaletteInd(name)) {
 					var key = name + "|" + field + "|" + window;

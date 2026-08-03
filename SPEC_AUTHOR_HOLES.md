@@ -271,39 +271,14 @@ muse fill sketch.ms --tape data.csv --budget 2000 --seed 1337
   deflation via `ProbSharpe.dsr(returns, nEval)`. Negative control passes (noise → Coin-flip).
 - `983edf8` P0.5: positive control (momentum tape → Robust). Gate tells the truth both ways.
 
-**P1 — for Cursor (deliberate, wide-blast-radius; verify each with the `MuseFill` demo pattern):**
+**P1 (partial) — OOS honesty ✅; remaining:**
 
-1. **Domain-carrying holes + `?Scalar in 2..30` / `?Series ~ {sma,ema}` / named `?len:`.**
-   - Parser (`StrategyParser.parsePrimary`, the `?` branch): after the type, parse optional
-     `in <int>..<int>` / `in [<f>,<f>]` and `~ { name, ... }` and a leading `name:`; encode into
-     the `EMeta("__hole", …)` args (positional `EConst`/`EArrayDecl`).
-   - **Extend the hole constructors to carry the domain+name** — `BHole(inner, ?domain, ?name)`,
-     `KHole(inner, ?domain, ?name)`. **Switch sites to update** (found during P0):
-     `evo/BoolNode.hx` + `evo/ScalarNode.hx` (defs), `Variation.boolHasHole/scalarHasHole` +
-     the new `refillBool/refillScalar`, `CorpusSeed.translate{Bool,Scalar}`,
-     `Canonical.key*/count*`, `TreeSurgery.collect*`, and any `Expand` hole handling. Grep
-     `BHole(`/`KHole(` first — it's a small, enumerable set.
-   - `Variation.fillHoles`: make `growScalar`/`growBool` **domain-aware** (clamp `KConst` to the
-     range; restrict indicator family) — see §5 `sampleFill`.
-
-2. **`SHole` (series hole).** New `SeriesNode` variant `SHole(inner, ?domain, ?name)`. Update
-   `translateSeries` (emit it), `Variation` series growth + a `seriesHasHole`/`refillSeries`,
-   `Canonical` series keying, `Expand.series`. This is the novel "let the engine pick the
-   indicator" axis — highest expressiveness payoff.
-
-3. **Constrained evolution** (replace P0 random-search): drive `EvolutionEngine` with hole-only
-   variation (the `armed = !isTemplated` boundary already freezes the skeleton). Keep
-   `fillHoles` as the seed/sampler seam.
-
-4. **OOS hardening.** `MuseFill.run` currently scores full-sample; wire `Fitness.evaluate(…,
-   honestOos=true)` + purge/embargo so the verdict is OOS-honest, not just deflation-honest.
-
-5. **Size-slot holes.** `translateStrategy` hardcodes `size: KConst(1.0)` and discards order-call
-   args — teach it to translate `long(<scalar>)` → `g.size` so `?Scalar` there is fillable.
-
-6. **Studio "Fill holes" button** (mederos-web + muse-runtime): expose `fill` over the runtime
-   API; the Truth panel renders the *filled* verdict, incl. the honest "coin-flip after filling"
-   chrome + a `runShare` receipt. (Conversion/virality tie-in.)
-
-7. **Determinism/CLI polish.** File-arg + flags (`--budget/--seed/--tape`), and emit the fill as a
-   reproducible `runShare` receipt.
+1. **Domain-carrying holes + `?Scalar in 2..30` / named `?len:`.** (landed with P0 follow-ups)
+2. **`SHole` (series hole) / `?Series ~ {sma,ema}`.** Deferred.
+3. **Constrained evolution** (EvolutionEngine hole-only vs P0 random `fillHoles`). Deferred.
+4. **OOS hardening.** ✅ `MuseFill.run(..., { honestOos: true, oosFrac, embargoBars })`
+   ranks on IS, scores TruthReport / OosVerdict on purge/embargo OOS; IS-only cannot claim
+   Robust; search-N still deflates DSR. Covered by `TestAuthorHoles`.
+5. **Size-slot holes.** Deferred.
+6. **Studio "Fill holes" UI** + share-verdict chrome. Deferred.
+7. **CLI polish** (`muse fill` file flags + `runShare` receipt). Deferred.

@@ -17,6 +17,18 @@ import musescript.harness.Bar;
  * Expanding the aux catalog further: (1) add names to AUX_FIELDS, (2) Expand
  * already emits bare field idents, (3) NmaFitness + StrategyWasmBackend pack
  * `Bar.data` into tape columns, (4) keep Expand+fitness+WASM regression tests green.
+ *
+ * Panel genomes v0: `Variation.configureForUniverse(syms)` gates `SPanel` growth
+ * so Expand emits literal `close_of`/`mom_of`/`fund_of` for a fixed universe
+ * (WASM panel packing), not opaque `dict_new` / bag scaffolding.
+ * Panel genomes v1: same gate also grows constrained `PanelAction` templates
+ * (`PABuy` / `PARebalance` / `PATargetWeight`) so Expand emits HostABI
+ * `buy`/`sell_all`/`rebalance_equal`/`target_weight` instead of `long`/`short`/`flat`.
+ * Fitness: attach a `PanelFeed` (`Fitness.configurePanel` /
+ * `EvolutionEngine.configureForPanel`) so `PanelAction` genomes score via
+ * portfolio `runPanelBacktest` — not single-name Sharpe dressed up. NMA does
+ * not columnarize panels (`nma-unsupported` → Expand→interp/WASM).
+ * Dynamic bags / `symbols()` remain out of genome Expand.
  */
 class Palette {
 	public static final FIELDS:Array<String> = ["open", "high", "low", "close", "volume"];
@@ -33,6 +45,11 @@ class Palette {
 		"sma", "ema", "rsi", "atr", "wma", "rma", "stdev",
 		"highest", "lowest", "mom", "roc", "change"
 	];
+	/**
+	 * Panel-of indicator kinds Expand emits as `mom_of`/`sma_of`/`ema_of`/`rsi_of`
+	 * (WASM-native on literal symbols). OHLCV panel kinds reuse `FIELDS`.
+	 */
+	public static final PANEL_OF_INDS:Array<String> = ["mom", "sma", "ema", "rsi"];
 	public static final WINDOWS:Array<Int> = [2, 3, 5, 8, 13, 21, 34, 55, 89];
 	public static final ARITH:Array<String> = ["+", "-", "*", "min", "max"];
 	public static final CMP:Array<String> = [">", "<", ">=", "<="];
@@ -73,6 +90,7 @@ class Palette {
 			id: "musegene.bar-v1",
 			fields: FIELDS,
 			auxFields: AUX_FIELDS,
+			panelOfInds: PANEL_OF_INDS,
 			windows: WINDOWS,
 			indicators: INDS,
 			arith: ARITH,

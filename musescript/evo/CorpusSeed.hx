@@ -372,8 +372,8 @@ class CorpusSeed {
 				b != null ? BHole(b) : null;
 			// Author hole `?` / `?Bool` (SPEC_AUTHOR_HOLES) — surface-syntax sibling of evolve(...).
 			// A blank bool hole starts from a neutral always-true inner; the fill loop replaces it.
-			case EMeta("__hole", _, _):
-				BHole(BCmp(">", KConst(1.0), KConst(0.0)));
+			case EMeta("__hole", args, _):
+				BHole(BCmp(">", KConst(1.0), KConst(0.0)), HoleMeta.decodeDomain(args));
 			// Compositional arms fail OPEN per-child: a translatable side stays structured (and
 			// mutable), an untranslatable side becomes a frozen opaque leaf -- so a condition like
 			// `(fast>slow || rising(m.hist,3))` keeps the `fast>slow` BCmp and only opaque-wraps the
@@ -432,9 +432,10 @@ class CorpusSeed {
 			case ECall(EIdent("evolve"), [inner]):
 				var s = translateScalar(inner, bindings, allowed);
 				s != null ? KHole(s) : null;
-			// Author hole `?` / `?Scalar` — neutral KConst(0) inner; the fill loop replaces it.
-			case EMeta("__hole", _, _):
-				KHole(KConst(0.0));
+			// Author hole `?` / `?Scalar` — domain-aware seed; the fill loop replaces it.
+			case EMeta("__hole", args, _):
+				var domain = HoleMeta.decodeDomain(args);
+				KHole(HoleMeta.scalarSeed(domain), domain);
 			case EConst(CFloat(v)): KConst(v);
 			case EConst(CInt(v)): KConst(v);
 			case EUnop("-", true, EConst(CFloat(v))): KConst(-v);

@@ -127,6 +127,7 @@ class LearnedLibrary {
 		return switch (n) {
 			case SPrice(f): SPrice(f);
 			case SProj(n, f): SProj(n, f);
+			case SPanel(kind, sym, field, window): SPanel(kind, sym, field, window);
 			case SInd(name, field, window, src):
 				SInd(name, field, window, src != null ? cloneSeries(src) : null);
 		};

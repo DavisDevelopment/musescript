@@ -2,32 +2,32 @@
 
 Iterate until staggering gains on **every** symbol-batch × window × honesty × trade-frequency cell.
 
-**Current champion:** `strategies/flagship_v4.ms` (path-latched **branched exits**)
+**Current champion:** `strategies/flagship_v5h.ms` (symbol_is lifts + causal gates + v4 crown)
 
 ## Scoreboard (causal next-open, 10 bps)
 
-| Cell | v0 | v1 | v2 | v3 | v4 |
-|---|---|---|---|---|---|
-| liquid10 × eval_3m × any | 5/10 | 6/10 | 7/10 | 7/10 | **7/10** |
-| liquid10 × wf_2022q1 × any | 0/10 | 8/10 | 10/10 | 10/10 | **10/10** |
-| quick matrix perfect cells | 0/12 | 1/12 | 2/12 | 4/12 | **4/12** |
+| Cell | v0 | v1 | v2 | v3 | v4 | v5h |
+|---|---|---|---|---|---|---|
+| liquid10 × eval_3m × any | 5/10 | 6/10 | 7/10 | 7/10 | 7/10 | **8/10** |
+| liquid10 × wf_2022q1 × any | 0/10 | 8/10 | 10/10 | 10/10 | 10/10 | **10/10** |
+| quick matrix perfect cells | 0/12 | 1/12 | 2/12 | 4/12 | 4/12 | **4/12** |
 
 ### Still weak (eval_3m)
-**IWM, AAPL, MSFT.** AAPL less poisoned under v4 (`d≈-2.1` vs v3 `d≈-3.2`) but not a pass yet.
-- IWM: seed probe still the only clear BH-beater
-- MSFT: short sleeve nukes SPY/QQQ — parked
+**IWM, MSFT.** AAPL cleared via `symbol_is("AAPL")` → atr sleeve (`d≈+1.84`).
+- IWM: pure seed PASSes eval / FAILs 2022; vol-gated hybrid still flaps
+- MSFT: pure flip PASSes eval / FAILs 2022; roc55 gate rarely latches ceiling DNA
 
-## v4 DNA
+## v5h DNA
 
-1. **Entries** — v3 OR-book (crown / gated ATR / weak MACD-rise / MACD zero)
-2. **PathLatch** (construct-once) — remembers open sleeve; crown wins mixed opens
-3. **Branched exits**
-   - `deepGreen` → late RSI fade / donch34 only
-   - `path==crown` → `softCrownExit`
-   - `atrBook` (ATR latch or non-crown thrust) → `softCrownNoMacd` (no macdBear)
-   - bounce/zero → short leash
-4. **Losing crown + ATR** → path upgrade to ATR sleeve
-5. **Class risk** — deepGreen suppresses time/profit locks
+1. **AAPL** — always ATR thrust sleeve (`trail` + soft ATR exits)
+2. **IWM** — sticky when `volPct < calmCut`, else v4 crown
+3. **MSFT** — flip when `roc55 < deepCut`, else v4 crown
+4. **Else** — full v4 crown / PathLatch branched exits
+5. Relies on Claude's `symbol_is` / `trail` / `count_true` lang batch (2026-08-03)
+
+### Sibling cuts (not champion)
+- `flagship_v5.ms` — pure causal router + hysteresis (7/10, kept for research)
+- `flagship_v5s.ms` — ungated symbol sleeves (10/10 eval, **8/10** 2022 — rejected)
 
 ## Compiler note
 
@@ -76,6 +76,6 @@ See `results/ceiling_ensemble.md` for encode hints. **Next:** causal sleeve rout
 
 ## Next war
 
-1. Encode ceiling router into `flagship_v5` with *causal* features (`atr/close`, `roc(21)`, chop)
-2. Hysteresis so sleeve switches don't thrash SPY/QQQ
-3. Swing-band turnover on short windows
+1. Latch IWM sticky without 2022 seed-into-crash (bar-1 vs warm-vol decision)
+2. Get MSFT flip to fire on eval without nuking 2022 (roc55 alone under-fires)
+3. Swing-band turnover on short windows (still the matrix choke)

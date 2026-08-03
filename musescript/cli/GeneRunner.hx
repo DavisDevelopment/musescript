@@ -9,8 +9,11 @@ import musescript.harness.HarnessContext;
 import musescript.harness.BarFeed;
 import musescript.harness.Bar;
 import musescript.harness.OhlcvCsv;
+import musescript.harness.PanelFeed;
+import musescript.harness.PanelLoader;
 import musescript.interp.MuseInterp;
 import musescript.builtins.TradeBuiltins;
+import musescript.runtime.MuseRuntime;
 import musescript.ast.ExprJson;
 import musescript.ast.MuseAstJson;
 // Murmuration (proprietary market simulator, private classpath addition like Kestrel — see
@@ -36,7 +39,13 @@ import musescript.murmuration.MurmurationTape;
  *   node build/js/gene-runner.js --source strat.ms --tape data/real/tape.csv --symbol SPY
  *   node build/js/gene-runner.js --check --source strat.ms
  *   node build/js/gene-runner.js --optimize --source strat.ms --tape tape.csv
+ *   node build/js/gene-runner.js --source scan.ms --panel data/fund_panel.json
+ *   node build/js/gene-runner.js --source scan.ms --tapes AAPL=a.csv,MSFT=b.csv
  *   echo "<src>" | node build/js/gene-runner.js --target wasm
+ *
+ * Panel mode (`--panel` / `--tapes`): portfolio `runPanelBacktest` via MuseRuntime.runPanel.
+ * Offline only — JSON bySym (fund_panel_loader), long CSV with symbol column, dir of CSVs,
+ * or SYM=path tapes. Attach the same PanelFeed in evo with EvolutionEngine.configureForPanel.
  */
 class GeneRunner {
 	static function argVal(name:String, def:String):String {
@@ -65,10 +74,13 @@ class GeneRunner {
 			musescript.parse.MuseParser.native = true;
 		var sourcePath = argVal("--source", "");
 		var tapePath = argVal("--tape", "");
+		var panelPath = argVal("--panel", "");
+		var tapesArg = argVal("--tapes", "");
 		var symbol = argVal("--symbol", "");
 		var target = argVal("--target", "js");
 		var synthN = intArg("--synth", 400);
 		var seed = intArg("--seed", 42);
+		var fillNextOpen = argBool("--fill-next-open", true);
 		#if kestrel
 		var murmurationConfigPath = argVal("--murmuration-config", "");
 		var murmurationSteps = intArg("--murmuration-synth", 0);
@@ -105,6 +117,7 @@ class GeneRunner {
 		var minTrades = intArg("--min-trades", 1);
 
 		var batchPath = argVal("--batch", "");
+		var panelMode = panelPath != "" || tapesArg != "";
 
 		// --extract-cond: Forge's reverse projection (MuseAST -> Forge graph). Parses only -- no
 		// tape/backtest needed -- and returns the JSON-serialized condition expression of the
@@ -192,6 +205,10 @@ class GeneRunner {
 
 		// Batch mode: load the tape ONCE, then compile+run each JSONL {id, source}.
 		if (batchPath != "") {
+			if (panelMode) {
+				emit({ ok: false, error: "GeneRunner: --batch does not support --panel/--tapes yet" });
+				return;
+			}
 			var bars = loadBars(tapePath, symbol, synthN, seed, murmurationConfigPath, murmurationSteps);
 			var batchMeta = tapeMeta(tapePath, symbol);
 			var lines = readFile(batchPath).split("\r\n").join("\n").split("\r").join("\n").split("\n");
@@ -219,10 +236,28 @@ class GeneRunner {
 		}
 
 		var source = sourcePath != "" ? readFile(sourcePath) : readStdin();
-		var bars = (checkOnly && !optimizeFlag)
-			? []
-			: loadBars(tapePath, symbol, synthN, seed, murmurationConfigPath, murmurationSteps);
 		try {
+			if (panelMode) {
+				if (optimizeFlag) {
+					emit({ ok: false, error: "GeneRunner: --optimize with --panel/--tapes is not supported yet" });
+					return;
+				}
+				if (checkOnly) {
+					var progP = new MuseParser().parse(source, "<gene>");
+					progP = musescript.compile.ClassStrategyLower.expand(progP);
+					progP = musescript.compile.MuseHostLower.lower(progP);
+					progP = musescript.compile.TemplateExpand.expand(progP);
+					progP = musescript.compile.ModuleExpand.expand(progP);
+					var warningsP = new MuseChecker().check(progP);
+					emit({ ok: true, decls: progP.decls.length, warnings: warningsP, panel: true });
+					return;
+				}
+				emit(runPanel(source, panelPath, tapesArg, target, costBps, startCapital, fillNextOpen, seed, instrument));
+				return;
+			}
+			var bars = (checkOnly && !optimizeFlag)
+				? []
+				: loadBars(tapePath, symbol, synthN, seed, murmurationConfigPath, murmurationSteps);
 			if (optimizeFlag) {
 				// Honesty-gated param search over @param / pipeline tune+optimize holes
 				// (and synthesized ranges from param { min, max, step, tune }).
@@ -247,6 +282,51 @@ class GeneRunner {
 		} catch (e:Dynamic) {
 			emit({ ok: false, error: Std.string(e) });
 		}
+	}
+
+	/**
+	 * Portfolio / panel backtest. `--panel` path auto-detects JSON bySym, long CSV, or
+	 * directory of CSVs; `--tapes SYM=path,...` is the multi-file sibling of PanelRunner.
+	 */
+	static function runPanel(
+		source:String, panelPath:String, tapesArg:String, target:String,
+		costBps:Float, startCapital:Float, fillNextOpen:Bool, seed:Int, instrument:Bool
+	):Dynamic {
+		var bySymMap:Map<String, Array<Bar>>;
+		if (tapesArg != "") bySymMap = PanelLoader.fromTapesSpecMap(tapesArg);
+		else bySymMap = PanelLoader.loadMap(panelPath);
+		var panel:PanelFeed = PanelFeed.fromSymbolBars(bySymMap);
+		var tier = target == "interp" ? "interp" : "js";
+		if (target == "wasm")
+			return { ok: false, error: "GeneRunner panel: wasm tier not supported yet; use js or interp" };
+		var res:Dynamic = MuseRuntime.runPanel(source, PanelLoader.toBySymDyn(bySymMap), {
+			tier: tier,
+			costBps: costBps,
+			fillNextOpen: fillNextOpen,
+			initialCash: startCapital,
+			instrument: instrument,
+			seed: seed
+		});
+		Reflect.setField(res, "costBps", costBps);
+		Reflect.setField(res, "fillNextOpen", fillNextOpen);
+		Reflect.setField(res, "seed", seed);
+		Reflect.setField(res, "panelSymbols", panel.symbols);
+		return res;
+	}
+
+	/** Default-true boolean flag: absent → def; bare `--flag` → true; `--flag false` → false. */
+	static function argBool(name:String, def:Bool):Bool {
+		var a = Sys.args();
+		for (i in 0...a.length) {
+			if (a[i] != name) continue;
+			if (i + 1 < a.length) {
+				var v = a[i + 1].toLowerCase();
+				if (v == "false" || v == "0") return false;
+				if (v == "true" || v == "1") return true;
+			}
+			return true;
+		}
+		return def;
 	}
 
 	/** Compile+backtest one source against pre-loaded bars; returns a metrics struct. */
@@ -356,6 +436,13 @@ class GeneRunner {
 			Reflect.setField(out, "fallback", true); // VM requested but the strategy fell to interp
 		else if (!useVm && backendName != target)
 			Reflect.setField(out, "fallback", true);
+		// Per-tag fire counts from labelled order calls (`flat("profit_lock")`) -- surfaced only
+		// when the strategy used any, so untagged runs stay byte-identical (silent no-op diagnostics).
+		if (harness.orders.tagFires.keys().hasNext()) {
+			var tagObj:Dynamic = {};
+			for (k in harness.orders.tagFires.keys()) Reflect.setField(tagObj, k, harness.orders.tagFires.get(k));
+			Reflect.setField(out, "exitTags", tagObj);
+		}
 		// IDE instrumentation payload (--instrument): the chart commands, per-bar
 		// console log, executed fills, and equity curve — all already collected
 		// during the run, returned only on demand so the fitness/batch path stays

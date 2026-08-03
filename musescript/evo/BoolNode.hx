@@ -15,8 +15,10 @@ enum BoolNode {
 	 * fitness caching (Canonical.keyBool/countBool unwrap it too, so a hole-wrapped and bare
 	 * version of the same logical subtree share one cache entry and one parsimony cost). A genome
 	 * with zero BHole/KHole anywhere is untouched by any of this -- see Variation.isTemplated.
+	 * Optional `domain`/`name` carry author-hole constraints (SPEC_AUTHOR_HOLES); plain
+	 * `BHole(inner)` stays the internal evolve(...) form.
 	 */
-	BHole(inner:BoolNode);
+	BHole(inner:BoolNode, ?domain:HoleDomain, ?name:Null<String>);
 
 	/**
 	 * Opaque boolean leaf: verbatim MuseScript boolean source text that no structured BoolNode

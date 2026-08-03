@@ -242,6 +242,15 @@ class MuseRuntime {
 		}
 	}
 
+	/**
+	 * Build a `PanelFeed` from in-memory `{ SYM: bars[], ... }` (same shape as
+	 * `runPanel` / offline `PanelLoader` JSON). Browser-safe — no file I/O.
+	 * File/CSV/DB panel loading lives in `PanelLoader` (CLI / Node / JVM).
+	 */
+	public static function panelFromBySym(bySym:Dynamic):Null<musescript.harness.PanelFeed> {
+		return toPanel(bySym);
+	}
+
 	static function toPanel(bySym:Dynamic):Null<musescript.harness.PanelFeed> {
 		if (bySym == null) return null;
 		var map = new Map<String, Array<Bar>>();

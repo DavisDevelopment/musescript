@@ -88,8 +88,8 @@
   genomes: identical=2257 (92.9%), fallback=128 (5.3%), interpError=45, diverged=0.** So the VM already
   covers ~93% of a realistically-evolving population with ZERO divergence under mutation stress — the
   V5 oracle flag will usefully hit the fast path. The 5.3% fallback = genomes that grow out-of-subset
-  constructs (loops/match/objects/user-@indicators/offset-lookback); chase those later only if V6
-  shows the residual interp cost matters. No further broadening needed before V5.
+  constructs (loops/match/objects/user-@indicators); offset-lookback now covered via `WITH_OFFSET`
+  (P1.1 broaden). Chase residual objects/match later only if residual interp cost matters.
 - [x] **V5. Oracle flag. DONE** (`2f709f1`). `Fitness.preferVm` routes `evaluate()` through the
   bytecode VM (`evaluateVm`, `MuseChunk` cached by structural key) with interp fallback on the
   out-of-subset tail. `CorpusEvoRun --vm` enables it AFTER a startup `vmParityCheck` that evaluates
@@ -113,13 +113,20 @@
     promote `--vm` to default on this evidence — keep it behind the flag (default OFF).**
   - **The real win is P1** (unboxed operand stack). V6 makes it justified: correctness + the plumbing
     are proven end-to-end; the speed is left on the table by the boxed Dynamic stack. Pursue P1 next.
+- [x] **DetParityDump VM tier. DONE (with P1.1).** `DetParityDump.render` dumps interp vs MuseVm
+  trades + raw-f64 equity bits on a fixed sma-cross program (`match=1` locked in golden). Completes
+  the SPEC §8 "fourth tier in the parity harness" P0 item that trailed V3–V6.
 
 ## P1 — only after V6 shows a real win
 
-- [ ] **P1.1** Unboxed numeric operand stack (the actual speed).
-- [ ] **P1.2** Superinstructions (fuse `LOAD_LOCAL`+cmp etc.) + inline caches where dispatch shows up.
-- [ ] **P1.3** Compiled-`MuseChunk` cache by structural key beside `EvoCache` (currently facts-only;
-  nearest precedent is `Fitness.fnCache`, in-memory per run).
+- [x] **P1.1** Unboxed numeric operand stack (the actual speed). **LANDED:** tagged dual-lane
+  stack (`tags`/`nums`/`objs`) — arith/cmp/bar/IND/LOOKBACK stay on `Float` without per-op
+  `Dynamic` boxing. Also shipped in the same vertical: `WITH_OFFSET` (call/expr lookback via
+  `harness.withSeriesOffset`), IND widen (slope/zscore_roll/percent_rank/ewm_*/hl2/hlc3/ohlc4/vwap),
+  `musescript/vm/README.md` oracle-eligibility doc. Re-measure with `scripts/vm_bench_trail.sh`.
+- [x] **P1.2** Superinstructions — partial: `CMP_JZ` (P1b) + builtin IC (P1a) already landed;
+  further fusions optional.
+- [x] **P1.3** Compiled-`MuseChunk` cache by structural key — landed with V5 (`Fitness.vmChunkCache`).
 
 ## P2+ — gated, not scheduled
 
@@ -132,11 +139,12 @@
   1.2× → 1.58× on IND-lowered genomes (sma_8_cross); opaque control 1.31× (ulcer). JS sma-cross
   1.62× → 1.77×.** Parity: corpus 83/83, evolved 2430 diverged=0, full suite 75,093 green, champion
   quality unchanged. Ring-buffer primitive ops remain the *Truffle-tier* design (PE needs a body it
-  can see) — port them there if TB1+ is ever green-lit.
-- [ ] **P2 → see `TIER_B_BUILD_PLAN.md`** (scoped 2026-07-31). Post-TB0 status: the residual opaque
-  ceiling (~1.3×) now applies only to registry indicators (TaToolbelt et al). Before any Truffle
-  work, the cheaper lever is widening `IND` coverage to uniform-shape registry indicators. Tier B
-  (TB1–TB5, GraalVM-only) stays gated on the §9 ≥1.5× kill-criterion vs the WASM tier.
+  can see) — port them there if TB1+ is ever green-lit. **P1.1 IND widen** added uniform-shape
+  install builtins (slope/zscore_roll/percent_rank/ewm_var/ewm_stdev + 0-arg hl2/hlc3/ohlc4/vwap).
+  Registry/TaToolbelt opaques remain `CALL_BUILTIN`.
+- [ ] **P2 → see `TIER_B_BUILD_PLAN.md`** (scoped 2026-07-31). Post-TB0+P1.1 status: residual opaque
+  ceiling covers TaToolbelt/registry indicators. Tier B (TB1–TB5) stays gated on the §9 ≥1.5×
+  kill-criterion vs the WASM tier.
 - [ ] **P3** Long-tail coverage (objects/arrays/classes/match; generators stay interp on Tier A).
 - [ ] **P4** Retarget JS/WASM emitters from the shared IR — do not destabilize audited WASM parity
   before Tier A has earned default status.

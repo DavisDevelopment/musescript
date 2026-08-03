@@ -399,8 +399,11 @@ Proposed policy, per package, adopt-when-phase-needs-it:
 | Cons | Multi-GB model download; WebGPU support gaps | Server cost; privacy story changes | Feature gap vs app |
 | Recommendation | Defer; ship manual mode in Phase 1 and revisit after P7 basics | Candidate if demand appears | **Default for now** |
 
-**Status:** still deferred. Phase 7 shipped without an LLM analogue; shims stay honest
-`ineligible`/`unavailable`, Autoresearch/Forge assist remain manual.
+**Status:** on-device still deferred. **Relay-hosted Muse assist** shipped as the
+web/away-from-home path: mederos-relay `GET /llm/status` + `POST /llm/assist`
+(JWT, `GROQ_API_KEY` / `OPENAI_API_KEY`, honest per-user rate limits). Clients
+validate proposals locally. Autoresearch falls back to in-browser loop + manual
+when unsigned / key unset. Forge on-device rule propose remains manual.
 
 ### Decision 6 — Dual relay + Firestore redundancy (resolved)
 

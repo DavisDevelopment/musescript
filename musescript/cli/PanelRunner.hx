@@ -1,15 +1,14 @@
 package musescript.cli;
 
-import musescript.harness.Bar;
-import musescript.harness.OhlcvCsv;
+import musescript.harness.PanelLoader;
 import musescript.runtime.MuseRuntime;
 
 /**
  * PanelRunner — headless multi-symbol (panel/portfolio) fitness bridge.
  *
  * The panel sibling of GeneRunner: reads a MuseScript portfolio strategy (file
- * or stdin), loads one CSV tape per symbol, calendar-aligns them via
- * `MuseRuntime.runPanel` (PanelFeed), backtests, and prints ONE line of JSON
+ * or stdin), loads offline panel data via `PanelLoader`, calendar-aligns them
+ * via `MuseRuntime.runPanel` (PanelFeed), backtests, and prints ONE line of JSON
  * metrics to stdout. Designed to be shelled out to from Python
  * (muse_fincog's PanelFitnessHost).
  *
@@ -20,10 +19,15 @@ import musescript.runtime.MuseRuntime;
  *     --tapes AAPL=data/real/aapl.csv,MSFT=data/real/msft.csv \
  *     --cost-bps 20 --tier js --seed 42
  *
+ *   node build/js/panel-runner.js --source strat.ms --panel data/fund_panel.json
+ *
  * Honesty defaults: `--fill-next-open` defaults TRUE (decide at close[t], fill
  * at open[t+1] — kills the same-bar close->close lookahead), and the repro
  * stamp is seeded from `--seed`. Panel supports tiers `js` and `interp` only;
  * `--tier wasm` is rejected by MuseRuntime with an honest error (still exit 0).
+ *
+ * Prefer GeneRunner `--panel` / `--tapes` for a unified CLI; this entry remains
+ * for existing PanelFitnessHost callers.
  */
 class PanelRunner {
 	static function argVal(name:String, def:String):String {
@@ -64,14 +68,15 @@ class PanelRunner {
 	static function run():Void {
 		var sourcePath = argVal("--source", "");
 		var tapesArg = argVal("--tapes", "");
+		var panelPath = argVal("--panel", "");
 		var tier = argVal("--tier", "js");
 		var costBps = Std.parseFloat(argVal("--cost-bps", "0"));
 		if (Math.isNaN(costBps)) costBps = 0;
 		var fillNextOpen = argBool("--fill-next-open", true);
 		var seed = intArg("--seed", 42);
 
-		if (tapesArg == "") {
-			emit({ ok: false, error: "PanelRunner: --tapes SYM=path[,SYM=path...] is required" });
+		if (tapesArg == "" && panelPath == "") {
+			emit({ ok: false, error: "PanelRunner: --tapes SYM=path[,SYM=path...] or --panel <json|csv|dir> is required" });
 			return;
 		}
 
@@ -81,38 +86,12 @@ class PanelRunner {
 			return;
 		}
 
-		// `MuseRuntime.toPanel` reads bySym with Reflect.fields, so this must be a
-		// plain anonymous object keyed by symbol — NOT a haxe.ds.StringMap.
-		var bySym:Dynamic = {};
-		var symbols:Array<String> = [];
-		for (spec in tapesArg.split(",")) {
-			var s = StringTools.trim(spec);
-			if (s == "") continue;
-			var eq = s.indexOf("=");
-			if (eq <= 0 || eq == s.length - 1) {
-				emit({ ok: false, error: 'PanelRunner: bad --tapes entry "$s" (want SYM=path)' });
-				return;
-			}
-			var sym = StringTools.trim(s.substr(0, eq));
-			var path = StringTools.trim(s.substr(eq + 1));
-			var bars:Array<Bar>;
-			try {
-				bars = OhlcvCsv.parse(readFile(path));
-			} catch (e:Dynamic) {
-				emit({ ok: false, error: 'PanelRunner: failed to load tape for $sym at $path: ' + Std.string(e) });
-				return;
-			}
-			if (bars.length == 0) {
-				emit({ ok: false, error: 'PanelRunner: tape for $sym at $path parsed to 0 bars' });
-				return;
-			}
-			Reflect.setField(bySym, sym, bars);
-			symbols.push(sym);
-		}
-		if (symbols.length == 0) {
-			emit({ ok: false, error: "PanelRunner: --tapes parsed to no symbols" });
-			return;
-		}
+		var bySymMap = tapesArg != ""
+			? PanelLoader.fromTapesSpecMap(tapesArg)
+			: PanelLoader.loadMap(panelPath);
+		var bySym:Dynamic = PanelLoader.toBySymDyn(bySymMap);
+		var symbols:Array<String> = [for (s in bySymMap.keys()) s];
+		symbols.sort(Reflect.compare);
 
 		var res:Dynamic = MuseRuntime.runPanel(source, bySym, {
 			tier: tier,
@@ -126,6 +105,7 @@ class PanelRunner {
 		Reflect.setField(res, "costBps", costBps);
 		Reflect.setField(res, "fillNextOpen", fillNextOpen);
 		Reflect.setField(res, "seed", seed);
+		Reflect.setField(res, "panelSymbols", symbols);
 		emit(res);
 	}
 
