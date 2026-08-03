@@ -117,6 +117,12 @@ class TradeBuiltins {
 			var px = harness.currentBar != null ? harness.currentBar.close : 0.0;
 			return harness.orders.equityAt(px);
 		});
+		// Per-instrument conditionality: run-constant identity of the tape being backtested, so one
+		// uniform strategy can branch by instrument (e.g. `when asset_is("crypto") && donHigh(13):`).
+		// Case-insensitive on the class ("Crypto"/"CRYPTO" match) so hand-written strategies aren't
+		// tripped up by the tape's exact casing; symbol match is exact.
+		vars.set("asset_is", function(cls:String) return harness.assetClass.toLowerCase() == (cls == null ? "" : cls).toLowerCase());
+		vars.set("symbol_is", function(sym:String) return harness.symbol == sym);
 		vars.set("unrealized_pnl", function() {
 			var px = harness.currentBar != null ? harness.currentBar.close : 0.0;
 			return harness.orders.unrealizedPnl(px);

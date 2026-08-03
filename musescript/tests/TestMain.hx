@@ -61,6 +61,7 @@ class TestMain {
 		runner.addCase(new TestParse());
 		runner.addCase(new TestNativeParser());
 		runner.addCase(new TestOrderBook());
+		runner.addCase(new TestAssetConditionality());
 		runner.addCase(new TestWatAssembler());
 		runner.addCase(new TestBuiltinDocs());
 		runner.addCase(new TestWalkForwardPipeline());
@@ -107,6 +108,7 @@ class TestMain {
 		runner.addCase(new TestGrowthWeights());
 		runner.addCase(new TestSimplify());
 		runner.addCase(new TestCorpusSeed());
+		runner.addCase(new TestAuthorHoles());
 		runner.addCase(new TestFourierBuiltins());
 		// Delegated indicator-port batches self-register from musescript/tests/ports/
 		// (PortTestsMacro) — no per-batch edit here, so parallel porting never
@@ -156,6 +158,7 @@ class TestMain {
 		// TestProbCloud moved to musescript-kestrel/musescript/tests/ (Kestrel package, not core).
 		runner.addCase(new TestHybridWasm());
 		runner.addCase(new TestPanelWasmParity());
+		runner.addCase(new TestPanelEvoGenomes());
 		runner.addCase(new TestCompiler());
 		runner.addCase(new TestGenerator());
 		runner.addCase(new TestGeneratorLower());

@@ -445,6 +445,9 @@ class JsBackend {
 			var px = harness.currentBar != null ? harness.currentBar.close : 0.0;
 			return harness.orders.equityAt(px);
 		});
+		// Per-instrument conditionality (mirrors TradeBuiltins): run-constant tape identity.
+		Reflect.setField(api, "asset_is", function(cls:String) return harness.assetClass.toLowerCase() == (cls == null ? "" : cls).toLowerCase());
+		Reflect.setField(api, "symbol_is", function(sym:String) return harness.symbol == sym);
 		Reflect.setField(api, "unrealized_pnl", function() {
 			var px = harness.currentBar != null ? harness.currentBar.close : 0.0;
 			return harness.orders.unrealizedPnl(px);
@@ -521,6 +524,8 @@ class JsBackend {
 		Reflect.setField(f0, "bars_in_trade", function() return harness.orders.barsInTrade(harness.currentBar.index));
 		Reflect.setField(f0, "cash", function() return harness.orders.cash);
 		Reflect.setField(f0, "equity", function() return harness.orders.equityAt(harness.currentBar.close));
+		Reflect.setField(f0, "asset_is", function(cls:String) return harness.assetClass.toLowerCase() == (cls == null ? "" : cls).toLowerCase());
+		Reflect.setField(f0, "symbol_is", function(sym:String) return harness.symbol == sym);
 		Reflect.setField(f0, "unrealized_pnl", function() return harness.orders.unrealizedPnl(harness.currentBar.close));
 		Reflect.setField(f0, "unrealized_pnl_pct", function() {
 			var pos = harness.orders.positionSize();
@@ -1064,6 +1069,8 @@ class JsBackend {
 			case "bars_in_trade": harness.orders.barsInTrade(harness.currentBar.index);
 			case "cash": harness.orders.cash;
 			case "equity": harness.orders.equityAt(harness.currentBar.close);
+				case "asset_is": harness.assetClass.toLowerCase() == (args.length > 0 && args[0] != null ? Std.string(args[0]) : "").toLowerCase();
+				case "symbol_is": harness.symbol == (args.length > 0 && args[0] != null ? Std.string(args[0]) : "");
 			case "unrealized_pnl": harness.orders.unrealizedPnl(harness.currentBar.close);
 			case "unrealized_pnl_pct":
 				var pos = harness.orders.positionSize();

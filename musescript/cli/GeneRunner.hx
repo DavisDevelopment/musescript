@@ -193,6 +193,7 @@ class GeneRunner {
 		// Batch mode: load the tape ONCE, then compile+run each JSONL {id, source}.
 		if (batchPath != "") {
 			var bars = loadBars(tapePath, symbol, synthN, seed, murmurationConfigPath, murmurationSteps);
+			var batchMeta = tapeMeta(tapePath, symbol);
 			var lines = readFile(batchPath).split("\r\n").join("\n").split("\r").join("\n").split("\n");
 			for (ln in lines) {
 				var t = StringTools.trim(ln);
@@ -207,7 +208,7 @@ class GeneRunner {
 					// genome's, leaving only the LAST genome's artifact on disk (a real gap found
 					// while wiring MuseGene's fitness loop through KestrGraal's WASM-artifact RPC).
 					var perGenomeDir = artifactDir != "" ? artifactDir + "/" + id : "";
-					var res = runOne(Std.string(obj.source), bars, target, checkOnly, strict, perGenomeDir, executionMode, false, costBps, startCapital, equityFloor, useVm);
+					var res = runOne(Std.string(obj.source), bars, target, checkOnly, strict, perGenomeDir, executionMode, false, costBps, startCapital, equityFloor, useVm, batchMeta.symbol, batchMeta.assetClass);
 					Reflect.setField(res, "id", id);
 					emit(res);
 				} catch (e:Dynamic) {
@@ -241,7 +242,8 @@ class GeneRunner {
 				emit(optRes);
 				return;
 			}
-			emit(runOne(source, bars, target, checkOnly, strict, artifactDir, executionMode, instrument, costBps, startCapital, equityFloor, useVm));
+			var meta = tapeMeta(tapePath, symbol);
+			emit(runOne(source, bars, target, checkOnly, strict, artifactDir, executionMode, instrument, costBps, startCapital, equityFloor, useVm, meta.symbol, meta.assetClass));
 		} catch (e:Dynamic) {
 			emit({ ok: false, error: Std.string(e) });
 		}
@@ -252,7 +254,7 @@ class GeneRunner {
 		source:String, bars:Array<Bar>, target:String, checkOnly:Bool,
 		strict:Bool, artifactDir:String, executionMode:String, ?instrument:Bool = false,
 		?costBps:Float = 0.0, ?startCapital:Float = 100000, ?equityFloor:Float = 0.0,
-		?useVm:Bool = false
+		?useVm:Bool = false, ?symbol:String = "", ?assetClass:String = ""
 	):Dynamic {
 		// Expand statement templates before any interpreter seeding. Seeding the
 		// raw AST left bare `TrailingStop(0.05)` calls unresolved ("Cannot call null").
@@ -272,6 +274,8 @@ class GeneRunner {
 		}
 
 		var harness = new HarnessContext();
+		harness.symbol = symbol;
+		harness.assetClass = assetClass;
 		harness.orders.executionMode = executionMode;
 		if (startCapital != 100000) harness.orders.reset(startCapital);
 		if (equityFloor > 0) harness.orders.equityFloor = equityFloor;
@@ -394,6 +398,40 @@ class GeneRunner {
 		var text = readFile(tapePath);
 		if (symbol != "") text = filterSymbol(text, symbol);
 		return OhlcvCsv.parse(text);
+	}
+
+	/**
+	 * Run-constant instrument identity from the tape's `symbol`/`asset` columns (crypto/FX harness
+	 * tapes carry both; plain OHLCV tapes carry neither → empty, and `asset_is`/`symbol_is` just
+	 * return false). Reads the header + first data row (respecting an optional `--symbol` filter);
+	 * the `--symbol` CLI value is the fallback/override for the symbol when no column exists.
+	 */
+	static function tapeMeta(tapePath:String, symbolArg:String):{symbol:String, assetClass:String} {
+		if (tapePath == "") return {symbol: symbolArg, assetClass: ""};
+		var text = try readFile(tapePath) catch (_:Dynamic) return {symbol: symbolArg, assetClass: ""};
+		var lines = text.split("\r\n").join("\n").split("\r").join("\n").split("\n");
+		if (lines.length < 2) return {symbol: symbolArg, assetClass: ""};
+		var header = lines[0].split(",");
+		var symIdx = -1, assetIdx = -1;
+		for (i in 0...header.length) {
+			switch (StringTools.trim(header[i]).toLowerCase()) {
+				case "symbol": symIdx = i;
+				case "asset" | "asset_class" | "assetclass" | "class": assetIdx = i;
+				default:
+			}
+		}
+		if (symIdx < 0 && assetIdx < 0) return {symbol: symbolArg, assetClass: ""};
+		var sym = symbolArg, asset = "";
+		for (i in 1...lines.length) {
+			if (StringTools.trim(lines[i]) == "") continue;
+			var cols = lines[i].split(",");
+			var rowSym = symIdx >= 0 && symIdx < cols.length ? StringTools.trim(cols[symIdx]) : "";
+			if (symbolArg != "" && rowSym != "" && rowSym != symbolArg) continue; // honor --symbol filter
+			if (symbolArg == "" && rowSym != "") sym = rowSym;
+			if (assetIdx >= 0 && assetIdx < cols.length) asset = StringTools.trim(cols[assetIdx]);
+			break;
+		}
+		return {symbol: sym, assetClass: asset};
 	}
 
 	/** Keep the header row + only rows whose first CSV field equals `sym`. */

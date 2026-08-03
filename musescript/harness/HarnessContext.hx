@@ -43,6 +43,17 @@ class HarnessContext implements IHarness {
 	/** Per-bar console output from the strategy's `log()`/`trace` calls (IDE console pane). */
 	public var logs:Array<{bar:Int, msg:String}>;
 
+	/**
+	 * Identity of the instrument this single-tape backtest is running on -- run-CONSTANT metadata
+	 * (a backtest is always one symbol), set by the tape loader from the CSV's `symbol`/`asset`
+	 * columns before the run. Read by the `symbol_is(name)` / `asset_is(class)` boolean builtins so
+	 * one uniform strategy can self-specialize per instrument (e.g. stricter on crypto than FX).
+	 * Empty string = unknown (default equity tapes with no such column) -- both builtins simply
+	 * return false for any non-empty query, so a strategy that never mentions them is unaffected.
+	 */
+	public var symbol:String = "";
+	public var assetClass:String = "";
+
 	public function new() {
 		universe = new SymbolUniverse();
 		params = new ParamRegistry();

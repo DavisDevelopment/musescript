@@ -155,6 +155,9 @@ class BuiltinSigs {
 		fun("bars_in_trade", [], TScalar);
 		fun("cash", [], TScalar);
 		fun("equity", [], TScalar);
+		// Per-instrument conditionality: run-constant tape identity (crypto vs FX vs equity).
+		fun("asset_is", [TString], TBool);
+		fun("symbol_is", [TString], TBool);
 		fun("unrealized_pnl", [], TScalar);
 		fun("unrealized_pnl_pct", [], TScalar);
 		// Multi-symbol panel / portfolio surface
