@@ -5,8 +5,8 @@
 //   MuseRuntime.pumpHostEvent({ type: "order.status", symbol: "SPY", status: "filled" });
 //   MuseRuntime.pumpHostEvent({ type: "order.suggested", summary: { n: 1 }, runId: "r1" });
 //
-// Swarm live path already pumps `order.suggested` from createLiveScheduler.
-// Broker fill/reject pumps are stubs — same API when the ticket wires them.
+// Swarm live path pumps `order.suggested` from createLiveScheduler.
+// Broker submit/fill/reject/status: mobile orderMuseEvents.js ← TradeSheet + DeployBookSheet.
 //
 // Docs: docs/MUSE_EVENTS.md
 

@@ -135,10 +135,41 @@ uses `MuseRuntime.on` / `pumpHostEvent`.
 | `MuseRuntime.run` → `lifecycle.start/stop/error` | **Live** (opt-out `emitLifecycle:false`) |
 | `MuseRuntime.check` → `meta.diagnostics` | **Live** (opt-out `emitDiagnostics:false`) |
 | Swarm `order.suggested` via `pumpHostEvent` | **Live** (mobile `createLiveScheduler`) |
-| Broker fill/reject/status | **Stub** — pump from order ticket / node when ready |
-| Watchlist add/remove/ping | **Stub** — API ready; no watchlist UI pump yet |
-| UI click/selection/focus/command | **Stub** — host-injected |
+| Broker fill/reject/status | **Live** (mobile `orderMuseEvents.js` ← TradeSheet + DeployBookSheet) |
+| Watchlist add/remove/ping | **Live** (mobile `watchlistMuseEvents.js` ← SymbolPicker + signalAlerts) |
+| UI click/selection/focus/command | **Live** (mobile `uiMuseEvents.js` ← Lab/Studio/Charts; selection throttled) |
 | World shock/scrub/muse_* | **Live** (mobile `jormungandrMuseEvents.js` ← Desktop World) |
+
+### Broker family (Kestrel / DeployBook)
+
+| Host path | Events | Payload (small) |
+|-----------|--------|-----------------|
+| TradeSheet / DeployBook approve ok | `order.submit` → `order.status(submitted)` → `order.fill` → `order.status(filled)` | symbol, side, usd/qty/price?, orderId, dryRun?, runId? |
+| TradeSheet / DeployBook approve fail | `order.reject` → `order.status(rejected)` | symbol, reason, runId? |
+| `order.partial` / `order.cancel` | Helpers ready | No live cancel/partial broker path yet |
+
+Never scores, ranks, or P&L vanity on the bus.
+
+Selftest: `node src/lab/orderMuseEvents.selftest.js`
+
+### Watchlist family
+
+| Host path | Events | Payload |
+|-----------|--------|---------|
+| SymbolPicker add/remove (Lab/Studio/Swarm) | `watchlist.add` / `.remove` | symbol, listId (dataset) |
+| `fireSignalAlert` (cockpit signals) | `watchlist.ping` | kind, message |
+
+Selftest: `node src/lab/watchlistMuseEvents.selftest.js`
+
+### UI family (Lab / terminal only — not World)
+
+| Host path | Events | Notes |
+|-----------|--------|-------|
+| StrategyLab symbol focus | `ui.selection` + `ui.focus` | throttled ~150ms |
+| Lab ignite / Studio run | `ui.command` + `ui.click` | `lab.ignite` / `studio.run` |
+| Charts widget palette | `ui.command` + `ui.click` + `ui.focus` | `charts.widget_palette` |
+
+Selftest: `node src/lab/uiMuseEvents.selftest.js`
 
 ---
 

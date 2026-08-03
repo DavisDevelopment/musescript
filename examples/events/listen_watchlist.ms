@@ -5,7 +5,8 @@
 //   MuseRuntime.pumpHostEvent("watchlist.add", { symbol: "AAPL" });
 //   MuseRuntime.pumpHostEvent("watchlist.ping", { symbol: "AAPL", kind: "alert", message: "gap" });
 //
-// Status today: pump API ready; watchlist UI not yet wired (stub).
+// Status today: SymbolPicker → add/remove; fireSignalAlert → ping
+// (mobile watchlistMuseEvents.js).
 
 {
   @strategy("ListenWatchlist")
