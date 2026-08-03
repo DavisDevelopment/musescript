@@ -158,6 +158,10 @@ class BuiltinSigs {
 		// Per-instrument conditionality: run-constant tape identity (crypto vs FX vs equity).
 		fun("asset_is", [TString], TBool);
 		fun("symbol_is", [TString], TBool);
+		// Confirmation voting / bool->number: count how many of the given boolean conditions hold.
+		// Variadic; returns a scalar so `count_true(a, b, c) >= 2` expresses an N-of-M gate, and
+		// `count_true(x)` is a plain bool->0/1 coercion. minArgs 1 so an empty call is a type error.
+		fun("count_true", [TBool], TScalar, 1, true);
 		fun("unrealized_pnl", [], TScalar);
 		fun("unrealized_pnl_pct", [], TScalar);
 		// Multi-symbol panel / portfolio surface

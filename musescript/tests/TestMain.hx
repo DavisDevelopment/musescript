@@ -62,6 +62,7 @@ class TestMain {
 		runner.addCase(new TestNativeParser());
 		runner.addCase(new TestOrderBook());
 		runner.addCase(new TestAssetConditionality());
+		runner.addCase(new TestConfirmationVote());
 		runner.addCase(new TestWatAssembler());
 		runner.addCase(new TestBuiltinDocs());
 		runner.addCase(new TestWalkForwardPipeline());

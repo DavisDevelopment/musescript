@@ -123,6 +123,14 @@ class TradeBuiltins {
 		// tripped up by the tape's exact casing; symbol match is exact.
 		vars.set("asset_is", function(cls:String) return harness.assetClass.toLowerCase() == (cls == null ? "" : cls).toLowerCase());
 		vars.set("symbol_is", function(sym:String) return harness.symbol == sym);
+		// Confirmation voting / bool->number coercion: `count_true(a, b, c) >= 2` for an N-of-M gate,
+		// `count_true(x)` for a plain 0/1. Variadic via haxe.Rest so any arg count works uniformly
+		// through the interp's Reflect.callMethod dispatch. Non-boolean args count as false.
+		vars.set("count_true", function(conds:haxe.Rest<Dynamic>) {
+			var n = 0;
+			for (c in conds) if (c == true) n++;
+			return n;
+		});
 		vars.set("unrealized_pnl", function() {
 			var px = harness.currentBar != null ? harness.currentBar.close : 0.0;
 			return harness.orders.unrealizedPnl(px);
