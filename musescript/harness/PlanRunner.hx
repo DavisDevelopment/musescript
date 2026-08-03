@@ -356,6 +356,9 @@ class PlanRunner {
 
 	function gridValues(name:String):Array<Float> {
 		var o = harness.params.getOpts(name);
+		// Explicit discrete list wins over any min/max/step -- the only way to sweep a NON-uniform
+		// set (e.g. Fibonacci window lengths 8,13,21,34) that no fixed step can express.
+		if (o != null && o.values != null && o.values.length > 0) return o.values.copy();
 		var cur = asFloat(harness.params.get(name));
 		var curInt = Std.int(Math.round(cur));
 		var windowish = musescript.types.MuseTypes.isWindow(curInt)

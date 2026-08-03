@@ -267,9 +267,10 @@ class StrategyParser {
 						case "min": opts.min = constNum(val);
 						case "max": opts.max = constNum(val);
 						case "step": opts.step = constNum(val);
+						case "values": opts.values = arrNum(val);
 						case "tune": opts.tune = constStr(val);
 						default:
-							throw err('unknown param option "$key" (expected min/max/step/tune)');
+							throw err('unknown param option "$key" (expected min/max/step/values/tune)');
 					}
 				} while (match(","));
 			}
@@ -287,6 +288,20 @@ class StrategyParser {
 				var v = constNum(inner);
 				v != null ? -v : null;
 			default: null;
+		};
+	}
+
+	/** Explicit sweep list `values: [8, 13, 21]` -> the numeric values; throws on a non-literal
+	 * element so a typo fails loudly rather than silently sweeping a truncated grid. */
+	function arrNum(e:Expr):Array<Float> {
+		return switch (e) {
+			case EArrayDecl(elems):
+				[for (el in elems) {
+					var n = constNum(el);
+					if (n == null) throw err("param `values` list must be numeric literals");
+					n;
+				}];
+			default: throw err("param `values` must be a list literal, e.g. values: [8, 13, 21]");
 		};
 	}
 

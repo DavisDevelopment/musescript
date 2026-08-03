@@ -223,6 +223,7 @@ class MuseParser {
 						case "min": opts.min = numOf(lowerExpr(f.e));
 						case "max": opts.max = numOf(lowerExpr(f.e));
 						case "step": opts.step = numOf(lowerExpr(f.e));
+						case "values": opts.values = arrOf(lowerExpr(f.e));
 						case "tune": opts.tune = strOf(lowerExpr(f.e));
 						default:
 					}
@@ -682,7 +683,19 @@ class MuseParser {
 		return switch (e) {
 			case MExpr.EConst(MC.CInt(i)): i;
 			case MExpr.EConst(MC.CFloat(f)): f;
+			case MExpr.EUnop("-", _, inner): -numOf(inner);
+			case MExpr.EParent(inner): numOf(inner);
 			default: 0;
+		};
+	}
+
+	/** Extract an explicit numeric sweep list `[8, 13, 21]` for `param x = v { values: [...] }`.
+	 * `null` (not `[]`) when the initializer isn't an array literal, so the caller leaves opts.values
+	 * unset and the optimizer falls back to min/max/step. */
+	function arrOf(e:MExpr):Null<Array<Float>> {
+		return switch (e) {
+			case MExpr.EArrayDecl(values): [for (v in values) numOf(v)];
+			default: null;
 		};
 	}
 

@@ -198,7 +198,8 @@ class HonestOptimize {
 		} else {
 			for (n in harness.params.names()) {
 				var o = harness.params.getOpts(n);
-				if (o != null && o.min != null && o.max != null) names.push(n);
+				// A param is sweepable if it has an explicit `values` list OR a min/max range.
+				if (o != null && ((o.values != null && o.values.length > 0) || (o.min != null && o.max != null))) names.push(n);
 			}
 		}
 		if (names.length == 0) return plan;

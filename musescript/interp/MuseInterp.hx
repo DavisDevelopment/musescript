@@ -368,7 +368,7 @@ class MuseInterp {
 
 			case ParamDecl(name, def, opts):
 				var v = def != null ? evalExpr(def) : 0;
-				harness.params.register(name, v, opts.min, opts.max, opts.step, opts.tune);
+				harness.params.register(name, v, opts.min, opts.max, opts.step, opts.tune, opts.values);
 				globals.set(name, v);
 
 			case FnDecl(name, args, body, kind):
