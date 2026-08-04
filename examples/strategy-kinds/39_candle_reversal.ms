@@ -4,8 +4,8 @@ strategy CandleReversal {
   onBar {
     when candle_dir(1) < 0 && candle_body_abs(1) > 0.4
          && candle_dir(0) > 0 && candle_body_abs(0) > 0.5
-         && close > sma(close, 50): long()
+         && close > sma(close, 55): long()
     when candle_upper_wick(0) > 0.5 && candle_dir(0) > 0: flat()
-    when close < sma(close, 50): flat()
+    when close < sma(close, 55): flat()
   }
 }

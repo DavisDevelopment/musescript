@@ -1,6 +1,6 @@
 strategy AtrTrailingStop {
   // Peak-following ATR trailing stop (trail) + a signed open-trade return take-profit.
-  param atrLen: Window = 14
+  param atrLen: Window = 13
   fast = ema(close, 13)
   slow = ema(close, 34)
   onBar {

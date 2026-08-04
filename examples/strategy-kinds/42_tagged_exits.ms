@@ -4,11 +4,11 @@ strategy TaggedExits {
   fast = ema(close, 8)
   slow = ema(close, 34)
   onBar {
-    when fast > slow && close > sma(close, 50): long()
+    when fast > slow && close > sma(close, 55): long()
     when crossunder(fast, slow): flat("trend_flip")
   }
   onPosition {
-    when trail(2 * atr(close, 14)): flat("trail_stop")
+    when trail(2 * atr(close, 13)): flat("trail_stop")
     when bars_in_trade() >= 34: flat("time_stop")
   }
 }
