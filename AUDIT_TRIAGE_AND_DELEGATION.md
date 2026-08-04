@@ -326,3 +326,34 @@ Reasons:
 Once the human has ruled on WP-A's re-baseline question, that package should be run next given its
 severity — but it should not gate the start of WP-B, WP-C, or WP-D, all three of which can begin
 immediately and in parallel with WP-A's planning/decision cycle.
+
+---
+
+## 6. Resolution log (2026-08-04) — ALL SHIPPED
+
+Human ruled "go ahead with all the fixes" (incl. the WP-A re-baseline judgment call). Every
+package is now applied, verified green, and committed (swept into `cdacffa`). Build=0; the only
+two failing tests are Cursor-owned and unrelated (`TestTypes` missing `fs_read_bytes` sig/dispatch;
+`TestWatAssembler` `unsupported value type i64`).
+
+- **WP-A — min/max true 2-arg — DONE.** `TradeBuiltins` min/max now `haxe.Rest`, arity-aware
+  (1-arg = iterable reduce; 2+ = element-wise). `JsBackend` switch cases made arity-aware.
+  `NmaEval` case `"min"/"max"` now computes real `Math.min/max(a,b)` (comment updated). This
+  **RESTORES parity** — WASM (`WasmEmitter.hx:403-406`) and `Simplify` already did true 2-arg;
+  interp/JS/NMA were the outliers. `TestNmaEval` re-baselined to element-wise expectation
+  `[10,11,11,11.5→11,13]`. **WP-A1 (kernel min/max) is subsumed** by the same fix.
+- **WP-B — auto-reset — DONE.** `HarnessContext.autoResetCrossState:Bool = true` field (NOT a
+  param — a param would break the `IHarness.runBacktest` interface signature). Both
+  `runBacktest`/`runPanelBacktest` call `resetCrossState()` first when the flag is set. Opt-out
+  preserved for streaming callers.
+- **WP-C — `atr(n)` 1-arg — DONE.** `atr(harness, a, ?b)` treats 1-arg as implicit-OHLC window;
+  `JsBackend` case + `BuiltinSigs` `fun("atr", [TSeries, TWindow], TSeries, 1)`. `atr(14)` now
+  yields real trades (was silent NaN/0).
+- **WP-D — prob_up renderable — DONE.** Both `Expand` throw-sites replaced: PSPoint →
+  `count_true((base) > close)`; PSNoise K-fan → `count_true(z0>close, …, z_{K-1}>close) / K`.
+  The evolution engine can now materialize prob_up nodes instead of aborting expansion.
+- **WP-E — interp multi-output cross-field read — DEFERRED (documented).** Reading two fields of
+  the SAME multi-output call in one interp expression (e.g. `donchian(n).mid` vs `.upper`) is a
+  CONFIRMED interp-only bug. It is NOT the state-leak — it survives the WP-B auto-reset — and
+  js/wasm/vm are all correct. Left as low-pri per this triage; `TestTier1Builtins` documents it
+  in-place rather than asserting the broken path.
