@@ -212,6 +212,9 @@ $files = @(
   "kestrel\robinhood.js",           # quotes-only client on top of equitiesFeed seam
   "kestrel\companyNav.js",          # pub/sub open-company channel (silent no-op with no subscriber)
   "lab\SymbolPicker.jsx",
+  "lab\uiMuseEvents.js",          # Lab/terminal UI MuseEvents host pumps (ui.click|selection|focus|command)
+  "lab\watchlistMuseEvents.js",   # watchlist.add|remove|ping pumps (SymbolPicker)
+  "lab\orderMuseEvents.js",       # broker/order status pumps (TradeSheet / DeployBookSheet)
   "lab\canvas\graphArena.js",
   "lab\distillExplain.js",
   "lab\distillFolds.js",
