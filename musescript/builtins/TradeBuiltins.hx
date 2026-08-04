@@ -687,8 +687,11 @@ class TradeBuiltins {
 		var up = highest(harness, "high", len);
 		var lo = lowest(harness, "low", len);
 		var mid = (up + lo) / 2.0;
-		if (out == null) return { upper: up, lower: lo, mid: mid };
-		out.upper = up; out.lower = lo; out.mid = mid;
+		// `middle` is a name-parity alias for `mid`: the indicator-lib Donchian (which the interp
+		// resolves `donchian` to) spells the midline `.middle`, so both keys must always be present
+		// and equal or `.middle`/`.mid` silently reads null on one backend. See Donchian.hx.
+		if (out == null) return { upper: up, lower: lo, mid: mid, middle: mid };
+		out.upper = up; out.lower = lo; out.mid = mid; out.middle = mid;
 		return out;
 	}
 

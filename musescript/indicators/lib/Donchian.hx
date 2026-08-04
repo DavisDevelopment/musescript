@@ -6,10 +6,15 @@ import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
 import musescript.types.MuseType;
 
-/** Donchian Channel output: upper/middle/lower bands. */
+/** Donchian Channel output: upper/middle/lower bands. `mid` is a name-parity alias for
+ * `middle` -- the strategy surface, `BuiltinSigs`, and `TradeBuiltins.donchian` (the backend
+ * used by JS/WASM) spell the midline `.mid`, so both keys are always present and equal.
+ * Without the alias, `donchian(n).mid` read `null` under the interp (which resolves `donchian`
+ * to THIS indicator-lib impl) while working in JS -- a silent cross-backend parity break. */
 typedef DonchianOutput = {
 	var upper:Float;
 	var middle:Float;
+	var mid:Float;
 	var lower:Float;
 }
 
@@ -44,7 +49,8 @@ class Donchian implements MuseIndicator<Bar, DonchianOutput> {
 		for (v in highs) if (v > hh) hh = v;
 		var ll = lows[0];
 		for (v in lows) if (v < ll) ll = v;
-		return { upper: hh, middle: (hh + ll) / 2.0, lower: ll };
+		var m = (hh + ll) / 2.0;
+		return { upper: hh, middle: m, mid: m, lower: ll };
 	}
 
 	public function reset():Void {
@@ -59,11 +65,12 @@ class Donchian implements MuseIndicator<Bar, DonchianOutput> {
 	public static function spec():IndicatorSpec {
 		return {
 			name: "donchian", args: [TWindow], ret: TObject([
-				{name: "upper", ty: TScalar}, {name: "middle", ty: TScalar}, {name: "lower", ty: TScalar}
+				{name: "upper", ty: TScalar}, {name: "middle", ty: TScalar},
+				{name: "mid", ty: TScalar}, {name: "lower", ty: TScalar}
 			]), minArgs: 1,
 			eval: function(h, args) {
 				var p = IndicatorCache.intArg(args, 0, 20);
-				return IndicatorCache.evalBar(h, "donchian:" + p, { upper: Math.NaN, middle: Math.NaN, lower: Math.NaN },
+				return IndicatorCache.evalBar(h, "donchian:" + p, { upper: Math.NaN, middle: Math.NaN, mid: Math.NaN, lower: Math.NaN },
 					() -> new Donchian(p), (i, b) -> (cast i : Donchian).update(b));
 			}
 		};

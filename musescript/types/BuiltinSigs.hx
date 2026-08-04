@@ -166,10 +166,13 @@ class BuiltinSigs {
 		fun("any_of", [TBool], TBool, 1, true);
 		fun("all_of", [TBool], TBool, 1, true);
 		// Donchian channel struct (reads high/low implicitly): donchian(n).upper / .lower / .mid.
+		// `.middle` is an equal alias for `.mid` (the interp resolves donchian to the indicator-lib
+		// impl, which historically named the midline `middle`; both keys are declared for parity).
 		fun("donchian", [TWindow], TObject([
 			{name: "upper", ty: TScalar},
 			{name: "lower", ty: TScalar},
-			{name: "mid", ty: TScalar}
+			{name: "mid", ty: TScalar},
+			{name: "middle", ty: TScalar}
 		]));
 		// Candle-pattern vocabulary (SPEC_CANDLE_PATTERN_DSL.md P0): scale-free per-bar features,
 		// `i` bars back (0 = current). Range-normalized; the last two are ATR-normalized (optional n).
