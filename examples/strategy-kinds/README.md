@@ -40,6 +40,15 @@ type-hardening work, plus optimize/tune and primitive ML surfaces.
 | `32_bag_pair_sleeve.ms` | bag + pair sleeve | `bag_equal` / `bag_pair` |
 | `33_computed_bag.ms` | computed bag sleeve | `bag_rank_mom` rematerialize |
 | `34_arrow_lambdas.ms` | HOF arrows | `r => …` / `(a,b) => …` |
+| `35_per_instrument_regime.ms` | per-instrument logic | `asset_is` / `asset_in` (tape asset/symbol) |
+| `36_confirmation_vote.ms` | N-of-M confirmation | `count_true` / `any_of` / `all_of` |
+| `37_atr_trailing_stop.ms` | volatility ratchet | `trail(k*atr)` + `return_since_entry` |
+| `38_regime_strength_gate.ms` | trend-strength gate | `slope` / `zscore_roll` / `percent_rank` |
+| `39_candle_reversal.ms` | candle-shape pattern | `candle_dir` / `candle_body_abs` / wicks |
+| `40_setup_memory.ms` | setup memory | `bars_since(cond)` |
+| `41_donchian_breakout.ms` | channel breakout | `donchian(n).upper/.lower/.mid` |
+| `42_tagged_exits.ms` | exit-layer diagnostics | `flat("label")` → `exitTags` fire counts |
+| `43_param_value_sweep.ms` | explicit grid sweep | `param x { values: [...] }` + `--optimize` |
 
 Kinds `01`–`20` use the strategy surface. `21`–`22` and `23`/`30` use hscript
 `@strategy` blocks to exercise that parse path. The typed surface itself now
