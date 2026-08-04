@@ -352,7 +352,14 @@ two failing tests are Cursor-owned and unrelated (`TestTypes` missing `fs_read_b
 - **WP-D — prob_up renderable — DONE.** Both `Expand` throw-sites replaced: PSPoint →
   `count_true((base) > close)`; PSNoise K-fan → `count_true(z0>close, …, z_{K-1}>close) / K`.
   The evolution engine can now materialize prob_up nodes instead of aborting expansion.
-- **WP-E — interp multi-output cross-field read — DEFERRED (documented).** Reading two fields of
+- **WP-E — interp `donchian(n).mid` = null — FIXED (`71e66e3`).** Root cause was NOT a
+  multi-output cross-field quirk: two `donchian` impls disagreed on the midline field name. The
+  interp resolves `donchian` to `indicators/lib/Donchian.hx` (`.middle`); JS/WASM + `BuiltinSigs`
+  + docs use `TradeBuiltins.donchian` (`.mid`). `.mid` read null under interp only, coerced to 0
+  in a numeric compare, and fired a phantom trade. Both impls now carry BOTH `mid` and `middle`
+  (equal); both sigs declare both; the WP-E assertion is restored + a `.middle==.mid` check added.
+
+  *(superseded — original deferral note below)* — interp multi-output cross-field read — DEFERRED (documented).** Reading two fields of
   the SAME multi-output call in one interp expression (e.g. `donchian(n).mid` vs `.upper`) is a
   CONFIRMED interp-only bug. It is NOT the state-leak — it survives the WP-B auto-reset — and
   js/wasm/vm are all correct. Left as low-pri per this triage; `TestTier1Builtins` documents it
