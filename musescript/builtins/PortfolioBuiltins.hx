@@ -75,6 +75,22 @@ class PortfolioBuiltins {
 			var bi = harness.currentBar != null ? harness.currentBar.index : -1;
 			harness.portfolio.sellAll(sym, px, bi);
 		});
+		// Per-symbol pending / immediate order verbs (OrderSim.submit surface for panel).
+		vars.set("portfolio_long", function(sym:String, ?arg:Dynamic) {
+			submitPanel(harness, "long", sym, arg);
+		});
+		vars.set("portfolio_short", function(sym:String, ?arg:Dynamic) {
+			submitPanel(harness, "short", sym, arg);
+		});
+		vars.set("portfolio_flat", function(sym:String, ?arg:Dynamic) {
+			submitPanel(harness, "flat", sym, arg);
+		});
+		vars.set("portfolio_orders_pending", function(?sym:String) {
+			return harness.portfolio.pendingCount(sym);
+		});
+		vars.set("portfolio_orders_cancel_all", function(?sym:String) {
+			return harness.portfolio.cancelAll(sym);
+		});
 		vars.set("pos", function(sym:String) return harness.portfolio.positionOf(sym));
 		vars.set("entry_of", function(sym:String) return harness.portfolio.entryOf(sym));
 		vars.set("weight_of", function(sym:String) {
@@ -97,6 +113,13 @@ class PortfolioBuiltins {
 		vars.set("portfolio_unrealized", function() {
 			return harness.portfolio.unrealizedPnl(harness.panelPrices);
 		});
+	}
+
+	/** Route panel order verb through `PortfolioSim.submit` at the current bar. */
+	public static function submitPanel(harness:HarnessContext, kind:String, sym:String, arg:Dynamic):Void {
+		var px = harness.panelPrice(sym);
+		var bi = harness.currentBar != null ? harness.currentBar.index : -1;
+		harness.portfolio.submit(kind, sym, arg, px, bi);
 	}
 
 	public static function lookback(harness:HarnessContext, field:String, sym:String, n:Null<Int>):Float {

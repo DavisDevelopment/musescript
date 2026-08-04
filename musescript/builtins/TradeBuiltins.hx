@@ -73,6 +73,7 @@ class TradeBuiltins {
 		vars.set("str_to_bool", StringBuiltins.toBool);
 		vars.set("str_from_float", StringBuiltins.fromFloat);
 		vars.set("str_from_bool", StringBuiltins.fromBool);
+		vars.set("str_fmt", StringBuiltins.fmt);
 		vars.set("ml_dot", MlBuiltins.dot);
 		vars.set("ml_sigmoid", MlBuiltins.sigmoid);
 		vars.set("ml_softmax", MlBuiltins.softmax);
@@ -90,8 +91,19 @@ class TradeBuiltins {
 		vars.set("ml_matrix_determinant", MlBuiltins.matrixDeterminant);
 		vars.set("ml_ridge_fit_matrix", MlBuiltins.ridgeFitMatrix);
 
+		NpBuiltins.install(vars);
+		PdBuiltins.install(vars, function() return harness.ioGrants);
+		PathBuiltins.install(vars);
+		RegexBuiltins.install(vars);
+		FsBuiltins.install(vars, function() return harness.ioGrants);
+		HttpBuiltins.install(vars, function() return harness.ioGrants, function() return harness);
+		DiagBuiltins.install(vars, harness);
+
 		// `long(10)` = legacy immediate close-fill; `long({type:"limit", px:...})`
 		// places on the pending book and fills on future bars (OrderBook.hx).
+		// `flat({qty})` / `flat({frac})` = immediate partial scale-out.
+		// Bracket sugar: `long({ qty, bracket: { stop:{px|dist}, limit:{px|dist},
+		// link:"oco" } })` expands via OrderSim to entry + OCO exit flats.
 		vars.set("long", function(?arg:Dynamic) {
 			if (harness.currentBar != null)
 				harness.orders.submit("long", arg, harness.currentBar.close, harness.currentBar.index);
@@ -158,16 +170,6 @@ class TradeBuiltins {
 		vars.set("candle_gap", function(i:Int, ?n:Int) return candleGap(harness, i, n == null ? 14 : n));
 		// Temporal setup-memory: bars since `cond` was last true (large sentinel if never).
 		vars.set("bars_since", function(cond:Dynamic) return barsSince(harness, cond));
-		// Variadic instrument membership (extends asset_is/symbol_is): `when asset_in("crypto","forex"): ...`.
-		vars.set("asset_in", function(classes:haxe.Rest<Dynamic>) {
-			var a = harness.assetClass.toLowerCase();
-			for (c in classes) if (c != null && Std.string(c).toLowerCase() == a) return true;
-			return false;
-		});
-		vars.set("symbol_in", function(syms:haxe.Rest<Dynamic>) {
-			for (s in syms) if (s != null && Std.string(s) == harness.symbol) return true;
-			return false;
-		});
 		// Variadic instrument membership (extends asset_is/symbol_is): `when asset_in("crypto","forex"): ...`.
 		vars.set("asset_in", function(classes:haxe.Rest<Dynamic>) {
 			var a = harness.assetClass.toLowerCase();
@@ -272,11 +274,21 @@ class TradeBuiltins {
 		vars.set("count", function(xs:Dynamic) {
 			return IterDriver.count(MuseIters.from(xs));
 		});
-		vars.set("min", function(xs:Dynamic) {
-			return IterDriver.min(MuseIters.from(xs));
+		// Arity-aware: `min(iterable)` reduces (legacy behavior); `min(a, b, ...)` is the true
+		// element-wise minimum. The old single-arg form silently DROPPED extra args, so `min(a,b)`
+		// returned `a` -- a silent-wrong-number bug across interp/JS/NMA while WASM + the evo
+		// constant-folder already did true 2-arg min/max. This restores parity to the correct side.
+		vars.set("min", function(args:haxe.Rest<Dynamic>) {
+			if (args.length == 1) return IterDriver.min(MuseIters.from(args[0]));
+			var m:Float = args[0];
+			for (i in 1...args.length) { var v:Float = args[i]; if (v < m) m = v; }
+			return m;
 		});
-		vars.set("max", function(xs:Dynamic) {
-			return IterDriver.max(MuseIters.from(xs));
+		vars.set("max", function(args:haxe.Rest<Dynamic>) {
+			if (args.length == 1) return IterDriver.max(MuseIters.from(args[0]));
+			var m:Float = args[0];
+			for (i in 1...args.length) { var v:Float = args[i]; if (v > m) m = v; }
+			return m;
 		});
 		vars.set("avg", function(xs:Dynamic) {
 			return IterDriver.avg(MuseIters.from(xs));
@@ -486,7 +498,12 @@ class TradeBuiltins {
 		return 100 - (100 / (1 + rs));
 	}
 
-	public static function atr(harness:HarnessContext, src:Dynamic, len:Int):Float {
+	public static function atr(harness:HarnessContext, a:Dynamic, ?b:Dynamic):Float {
+		// atr reads high/low/close directly; the first positional arg is a vestigial series selector.
+		// Accept BOTH `atr(close, n)` (2-arg, historical) AND `atr(n)` (1-arg, implicit OHLC like
+		// stoch/donchian). The 1-arg form used to bind `n` to the ignored series slot and silently
+		// return NaN (a real footgun -- the corpus even had buggy `atr(13)` calls).
+		var len:Int = (b != null) ? Std.int(b) : Std.int(a);
 		var h = harness.series.get("high");
 		var l = harness.series.get("low");
 		var c = harness.series.get("close");

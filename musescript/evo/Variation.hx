@@ -66,6 +66,16 @@ class Variation {
 	 * (no `SPanel`). Set via `configureForUniverse` so Expand can emit literal `*_of("SYM",…)`.
 	 */
 	var universeSyms:Array<String> = [];
+	/**
+	 * Closed NP ops open for `KNp` growth. Empty ⇒ off (default). Set via `configureForNp`
+	 * filtered against `Palette.NP_OPS` — never open-world muse.np trees.
+	 */
+	var npOps:Array<String> = [];
+	/**
+	 * Closed PD ops open for `KPd` growth. Empty ⇒ off (default). Needs non-empty universe
+	 * for `xs_rank`. Filtered against `Palette.PD_OPS` — no open groupby/merge/HTTP.
+	 */
+	var pdOps:Array<String> = [];
 	/** Adaptive node-type-choice weights (see GrowthWeights.hx). Defaults to a fresh instance
 	 * seeded with this file's ORIGINAL literal probabilities, so a caller that never wires a
 	 * shared tuner (or never triggers its reward loop) sees zero behavior change from before this
@@ -110,6 +120,8 @@ class Variation {
 	var indicatorPoolRef:Array<String>;
 	var fieldPoolRef:Array<String>;
 	var universeSymsRef:Array<String> = [];
+	var npOpsRef:Array<String> = [];
+	var pdOpsRef:Array<String> = [];
 	var baseSeed:Int;
 	/**
 	 * Bumped every `beginGeneration`. Instance catalogs on `StrategyGenome` compare against this
@@ -166,6 +178,50 @@ class Variation {
 	}
 
 	/**
+	 * Gate closed NP palette ops into scalar growth (`KNp` → Expand `np_mean`/`np_dot`/`np_sum`).
+	 * Pass `null` for the full `Palette.NP_OPS` catalog; `[]` clears (default single-name
+	 * behavior). Ops outside the catalog are ignored. No open-world muse.np trees.
+	 */
+	public function configureForNp(?ops:Array<String>):Void {
+		this.npOps = Palette.npOpsFor(ops);
+		this.npOpsRef = this.npOps;
+		if (this.npOps.length > 0) {
+			tuner.ensureTag("scalarTerm", "np", 0.10);
+			for (o in this.npOps) {
+				var w = switch (o) {
+					case "mean": 0.45;
+					case "dot": 0.35;
+					case "sum": 0.20;
+					default: 0.10;
+				};
+				tuner.ensureTag("npOp", o, w);
+			}
+		}
+	}
+
+	/**
+	 * Gate closed PD palette ops into scalar growth (`KPd` → Expand one-row `pd_xs_rank`).
+	 * Requires `configureForUniverse` for `xs_rank`. Pass `null` for full `Palette.PD_OPS`;
+	 * `[]` clears. No open groupby/merge/HTTP in Expand.
+	 * When open, also biases `panelAction` toward `target_weight` so grown PD genomes score
+	 * via portfolio `runPanelBacktest` (pair with `Fitness.configurePanel` / `configureForPanel`).
+	 */
+	public function configureForPd(?ops:Array<String>):Void {
+		this.pdOps = Palette.pdOpsFor(ops);
+		this.pdOpsRef = this.pdOps;
+		if (this.pdOps.length > 0) {
+			tuner.ensureTag("scalarTerm", "pd", 0.08);
+			for (o in this.pdOps) tuner.ensureTag("pdOp", o, 1.0);
+			// Prefer rank→target_weight when PD is open (cross-section sizing on panel fitness).
+			if (universeSyms.length > 0) {
+				tuner.ensureTag("panelAction", "target_weight", 0.45);
+				tuner.ensureTag("panelAction", "buy", 0.35);
+				tuner.ensureTag("panelAction", "rebalance", 0.20);
+			}
+		}
+	}
+
+	/**
 	 * Per-slot Variation for parallel child production: own RNG stream, shared tuner + site-delta
 	 * memo. Selection/crossover/mutate choice stays on EvolutionEngine's streams; only the
 	 * Variation-internal draws (site picks, growBool, donor sample) move to
@@ -175,6 +231,10 @@ class Variation {
 		var v = new Variation(baseSeed + RngStreams.VARIATION_PARALLEL + slot * 100003, indicatorPoolRef, tuner, fieldPoolRef);
 		v.universeSyms = universeSymsRef.copy();
 		v.universeSymsRef = universeSymsRef;
+		v.npOps = npOpsRef.copy();
+		v.npOpsRef = npOpsRef;
+		v.pdOps = pdOpsRef.copy();
+		v.pdOpsRef = pdOpsRef;
 		v.siteDeltaMemo = siteDeltaMemo;
 		v.donorScoreMemo = donorScoreMemo;
 		v.boolCatalogMemo = boolCatalogMemo;
@@ -194,6 +254,10 @@ class Variation {
 		var v = new Variation(baseSeed + RngStreams.VARIATION_PARALLEL + 900000 + deme * 100003, indicatorPoolRef, tuner, fieldPoolRef);
 		v.universeSyms = universeSymsRef.copy();
 		v.universeSymsRef = universeSymsRef;
+		v.npOps = npOpsRef.copy();
+		v.npOpsRef = npOpsRef;
+		v.pdOps = pdOpsRef.copy();
+		v.pdOpsRef = pdOpsRef;
 		v.cacheGen = cacheGen;
 		return v;
 	}
@@ -315,11 +379,15 @@ class Variation {
 		if (depth <= 0 || rng.float() < 0.5) {
 			var choice = tuner.pick("scalarTerm", rng);
 			if (choice == "param" && pool == null) choice = "series"; // no pool to mint from -- fall back
+			if (choice == "np" && npOps.length == 0) choice = "series";
+			if (choice == "pd" && (pdOps.length == 0 || universeSyms.length == 0)) choice = "series";
 			if (tagOut != null) tagOut.push('scalarTerm:$choice');
 			return switch (choice) {
 				case "param": mintParam(pool);
 				case "multiOutput": growMultiOutputField(tagOut);
 				case "panelOf" if (universeSyms.length > 0): KSeries(growPanelSeries(tagOut));
+				case "np" if (npOps.length > 0): growNp(tagOut);
+				case "pd" if (pdOps.length > 0 && universeSyms.length > 0): growPd(tagOut);
 				default: KSeries(growSeries(0));
 			};
 		}
@@ -332,6 +400,49 @@ class Variation {
 			case "const": KConst(rng.float() * 4 - 2);
 			default: KArith(rng.pick(Palette.ARITH), growScalar(depth - 1, pool, tagOut), growScalar(depth - 1, pool, tagOut));
 		};
+	}
+
+	/** Closed NP leaf — Expand emits `np_mean` / `np_dot` / `np_sum` over capped windows. */
+	function growNp(?tagOut:Array<String>):ScalarNode {
+		var op = tuner.hasCategory("npOp") ? tuner.pick("npOp", rng) : rng.pick(npOps);
+		if (npOps.indexOf(op) < 0) op = npOps[0];
+		if (tagOut != null) tagOut.push('npOp:$op');
+		var wins = Palette.npWindows();
+		var w = wins.length > 0 ? rng.pick(wins) : 5;
+		var a = growSeries(0);
+		if (op == "dot") return KNp("dot", a, w, growSeries(0));
+		return KNp(op, a, w, null);
+	}
+
+	/**
+	 * Closed PD leaf — Expand emits one-row `pd_xs_rank` over literal panel scores.
+	 * Symbols must be safe object-literal keys (`^[A-Za-z_][A-Za-z0-9_]*$`).
+	 */
+	function growPd(?tagOut:Array<String>):ScalarNode {
+		var op = tuner.hasCategory("pdOp") ? tuner.pick("pdOp", rng) : rng.pick(pdOps);
+		if (pdOps.indexOf(op) < 0) op = pdOps[0];
+		if (tagOut != null) tagOut.push('pdOp:$op');
+		var safe = [for (s in universeSyms) if (~/^[A-Za-z_][A-Za-z0-9_]*$/.match(s)) s];
+		if (safe.length == 0) return KSeries(growSeries(0));
+		var choice = tuner.hasCategory("panelOf") ? tuner.pick("panelOf", rng) : "mom";
+		var kind = "close";
+		var window:Null<Int> = null;
+		if (choice == "fund") {
+			// One-row pd score from close (fund needs a name/aux); keep Expand literal-safe.
+			kind = "mom";
+			window = rng.pick(Palette.WINDOWS);
+		} else if (Palette.PANEL_OF_INDS.indexOf(choice) >= 0) {
+			kind = choice;
+			window = rng.pick(Palette.WINDOWS);
+		} else if (Palette.FIELDS.indexOf(choice) >= 0) {
+			kind = choice;
+		} else {
+			kind = "mom";
+			window = rng.pick(Palette.WINDOWS);
+		}
+		var w = window != null && window > 0 ? window : 0;
+		var sym = rng.pick(safe);
+		return KPd(op, kind, w, sym, safe.copy());
 	}
 
 	/**
@@ -462,24 +573,87 @@ class Variation {
 	 * With a configured universe (~45%): attach a constrained `PanelAction` template so Expand
 	 * emits HostABI buy/rebalance/target_weight instead of long/short/flat. Short slots stay
 	 * always-false under those templates (Expand ignores them; growing real trees would inflate
-	 * structural keys without changing source). */
+	 * structural keys without changing source).
+	 *
+	 * When `configureForPd` is open (+ universe): always attach a PanelAction, and with ~40%
+	 * plant an explicit xs_rank → `target_weight` template so panel fitness sees the cross-section. */
 	public function randomGenome(depth:Int = 3):StrategyGenome {
 		var pool:Array<EvoParam> = [];
-		var usePanelAction = universeSyms.length > 0 && rng.float() < 0.45;
+		var pdOpen = pdOps.length > 0 && universeSyms.length > 0;
+		if (pdOpen && rng.float() < 0.40)
+			return ensurePdPanelAction(compactParams(plantPdRankTargetWeight(pool)));
+		// Under PD gate: force PanelAction so KPd never lands in a classic long/short skeleton.
+		var usePanelAction = universeSyms.length > 0 && (pdOpen || rng.float() < 0.45);
 		var action:Null<PanelAction> = usePanelAction ? growPanelAction() : null;
+		var sizeNode:ScalarNode;
+		if (actionIsTargetWeight(action) && pdOpen && rng.float() < 0.50) {
+			var pdSize = growPd();
+			sizeNode = pdSize;
+			// Align target_weight symbol with the ranked KPd leaf when we planted rank-as-weight.
+			switch (pdSize) {
+				case KPd(_, _, _, sym, _): action = PATargetWeight(sym);
+				default:
+			}
+		} else {
+			sizeNode = actionIsTargetWeight(action) ? growTargetWeight(pool) : growScalar(1, pool);
+		}
 		var g:StrategyGenome = {
 			entryLong: growBool(depth, pool),
 			entryShort: usePanelAction ? alwaysFalse() : growBool(depth, pool),
 			exitLong: growBool(depth, pool),
 			exitShort: usePanelAction ? alwaysFalse() : growBool(depth, pool),
-			size: actionIsTargetWeight(action) ? growTargetWeight(pool) : growScalar(1, pool),
+			size: sizeNode,
 			params: pool,
 			name: "musegene",
 			lineage: [],
 			seedOrigin: rng.seed,
 			panelAction: action
 		};
-		return compactParams(g);
+		return ensurePdPanelAction(compactParams(g));
+	}
+
+	/**
+	 * Hand template: percentile xs_rank of `sym` gates entry/exit; same rank drives
+	 * `target_weight(sym, rank)`. Expand emits runnable panel MS for `runPanelBacktest`.
+	 */
+	function plantPdRankTargetWeight(pool:Array<EvoParam>):StrategyGenome {
+		var pd = growPd();
+		var sym = switch (pd) {
+			case KPd(_, _, _, s, _): s;
+			default: universeSyms[0];
+		};
+		return {
+			entryLong: BCmp(">", pd, KConst(0.5)),
+			entryShort: alwaysFalse(),
+			exitLong: BCmp("<=", pd, KConst(0.5)),
+			exitShort: alwaysFalse(),
+			size: pd,
+			params: pool,
+			name: "musegene",
+			lineage: [],
+			seedOrigin: rng.seed,
+			panelAction: PATargetWeight(sym)
+		};
+	}
+
+	/**
+	 * If growth introduced `KPd` without a `PanelAction`, attach `PATargetWeight` on the ranked
+	 * symbol so Expand→Fitness use the portfolio panel path.
+	 */
+	function ensurePdPanelAction(g:StrategyGenome):StrategyGenome {
+		if (universeSyms.length == 0) return g;
+		if (g.panelAction != null) return g;
+		var pd = Expand.firstKPd(g);
+		if (pd == null) return g;
+		var o = copyGenome(g);
+		switch (pd) {
+			case KPd(_, _, _, sym, _):
+				o.panelAction = PATargetWeight(sym);
+				o.entryShort = alwaysFalse();
+				o.exitShort = alwaysFalse();
+			default:
+		}
+		return o;
 	}
 
 	static inline function alwaysFalse():BoolNode
@@ -529,7 +703,7 @@ class Variation {
 				o.size = growTargetWeight(o.params);
 		}
 		o.lineage = (g.lineage != null ? g.lineage.copy() : []).concat([Canonical.structuralKey(g)]);
-		return compactParams(o);
+		return ensurePdPanelAction(compactParams(o));
 	}
 
 	// ---- catalog: every Bool/Scalar/Series position across all 5 slots, path-tagged ----
@@ -562,7 +736,7 @@ class Variation {
 		return switch (n) {
 			case KHole(_): true;
 			case KArith(_, a, b): scalarHasHole(a) || scalarHasHole(b);
-			case KConst(_) | KParam(_) | KFeature(_) | KSeries(_) | KLookback(_, _): false;
+			case KConst(_) | KParam(_) | KFeature(_) | KSeries(_) | KLookback(_, _) | KNp(_, _, _, _) | KPd(_, _, _, _, _): false;
 		};
 	}
 
@@ -606,7 +780,7 @@ class Variation {
 		return switch (n) {
 			case KHole(_, domain, _): sampleScalarFill(domain);
 			case KArith(op, a, b): KArith(op, refillScalar(a), refillScalar(b));
-			case KConst(_) | KParam(_) | KFeature(_) | KSeries(_) | KLookback(_, _): n;
+			case KConst(_) | KParam(_) | KFeature(_) | KSeries(_) | KLookback(_, _) | KNp(_, _, _, _) | KPd(_, _, _, _, _): n;
 		};
 	}
 
@@ -907,7 +1081,7 @@ class Variation {
 		// Occasional panel-action retune under a fixed universe (symbol / template swap).
 		if (universeSyms.length > 0 && out.panelAction != null)
 			out = maybeMutatePanelAction(out);
-		return out;
+		return ensurePdPanelAction(out);
 	}
 
 	/** Swap a random same-typed subtree from `g2` into `g1` (child inherits g1's frame) —
@@ -937,7 +1111,7 @@ class Variation {
 				child.lineage = [Canonical.structuralKey(g1), Canonical.structuralKey(g2)];
 				var out = compactParams(child);
 				maybeRegisterDirtySpineBool(g1, site, remapped, out);
-				return out;
+				return ensurePdPanelAction(out);
 			case EScalar:
 				var donor:ScalarNode = cast donorPool[donorIdx];
 				var refs = [];
@@ -950,7 +1124,7 @@ class Variation {
 		};
 		result.params = g1.params.concat(extraParams);
 		result.lineage = [Canonical.structuralKey(g1), Canonical.structuralKey(g2)];
-		return compactParams(result);
+		return ensurePdPanelAction(compactParams(result));
 	}
 
 	/**
@@ -1270,7 +1444,7 @@ class Variation {
 
 	static function paramRefsInScalar(n:ScalarNode, out:Array<Int>):Void {
 		switch (n) {
-			case KConst(_) | KFeature(_) | KSeries(_) | KLookback(_, _):
+			case KConst(_) | KFeature(_) | KSeries(_) | KLookback(_, _) | KNp(_, _, _, _) | KPd(_, _, _, _, _):
 			case KParam(i): out.push(i);
 			case KArith(_, a, b): paramRefsInScalar(a, out); paramRefsInScalar(b, out);
 			case KHole(inner): paramRefsInScalar(inner, out);
@@ -1293,6 +1467,8 @@ class Variation {
 			case KFeature(f): KFeature(f);
 			case KSeries(s): KSeries(s);
 			case KLookback(s, k): KLookback(s, k);
+			case KNp(op, a, w, b): KNp(op, a, w, b);
+			case KPd(op, kind, w, sym, syms): KPd(op, kind, w, sym, syms.copy());
 			case KParam(i): KParam(mapping.get(i));
 			case KArith(op, a, b): KArith(op, remapScalar(a, mapping), remapScalar(b, mapping));
 			case KHole(inner): KHole(remapScalar(inner, mapping));

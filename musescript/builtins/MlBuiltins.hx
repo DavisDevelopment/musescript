@@ -1,11 +1,14 @@
 package musescript.builtins;
 
+import musescript.ndarray.NdArrayF64;
+import musescript.ndarray.Np;
+
 /**
  * Small dependency-free numeric primitives for evolved strategies.
  *
- * Matrix values are JSON-safe `{rows, cols, data}` objects backed by packed
- * row-major vectors. Invalid dimensions produce NaN for scalar results and []
- * for vector results.
+ * Matrix values remain JSON-safe `{rows, cols, data}` objects for Muse
+ * compatibility (`TMatrix`). Under the hood packing / transpose / get use
+ * `NdArrayF64` — the Dynamic-shaped payload is a compat shim, not the core.
  */
 class MlBuiltins {
 	public static inline var MAX_FIT_FEATURES:Int = 32;
@@ -13,12 +16,7 @@ class MlBuiltins {
 
 	public static function dot(a:Array<Float>, b:Array<Float>):Float {
 		if (!sameNonEmptyLength(a, b)) return Math.NaN;
-		var out = 0.0;
-		for (i in 0...a.length) {
-			if (!Math.isFinite(a[i]) || !Math.isFinite(b[i])) return Math.NaN;
-			out += a[i] * b[i];
-		}
-		return out;
+		return Np.dot(NdArrayF64.asarray1d(a), NdArrayF64.asarray1d(b));
 	}
 
 	/** Numerically stable logistic sigmoid. */
@@ -81,7 +79,8 @@ class MlBuiltins {
 
 	public static function matrix(rows:Int, cols:Int, data:Array<Float>):Dynamic {
 		if (!validMatrixShape(rows, cols, data)) return {rows: 0, cols: 0, data: []};
-		return {rows: rows, cols: cols, data: data.copy()};
+		var nd = NdArrayF64.fromPacked([rows, cols], data.copy());
+		return toLegacy(nd);
 	}
 
 	public static function matrixRows(value:Dynamic):Int {
@@ -100,26 +99,19 @@ class MlBuiltins {
 	}
 
 	public static function matrixGet(value:Dynamic, row:Int, col:Int):Float {
-		var m = readMatrix(value);
-		if (m == null || row < 0 || col < 0 || row >= m.rows || col >= m.cols) return Math.NaN;
-		return m.data[row * m.cols + col];
+		var nd = asNdMatrix(value);
+		if (nd == null || nd.ndim != 2) return Math.NaN;
+		return nd.get2(row, col);
 	}
 
 	/** Row-major transpose. Invalid input returns an empty matrix. */
 	public static function matrixTranspose(value:Dynamic):Dynamic {
-		var m = readMatrix(value);
-		if (m == null) return {rows: 0, cols: 0, data: []};
-		var out:Array<Float> = [];
-		for (c in 0...m.cols)
-			for (r in 0...m.rows)
-				out.push(m.data[r * m.cols + c]);
-		return {rows: m.cols, cols: m.rows, data: out};
+		var nd = asNdMatrix(value);
+		if (nd == null) return {rows: 0, cols: 0, data: []};
+		var t = nd.transpose();
+		return t == null ? {rows: 0, cols: 0, data: []} : toLegacy(t);
 	}
 
-	/**
-	 * Determinant via partial-pivot Gaussian elimination.
-	 * Non-square / invalid / oversized → NaN.
-	 */
 	public static function matrixDeterminant(value:Dynamic):Float {
 		var m = readMatrix(value);
 		if (m == null || m.rows != m.cols || m.rows == 0 || m.rows > MAX_FIT_FEATURES)
@@ -157,9 +149,6 @@ class MlBuiltins {
 		return Math.isFinite(det) ? det : Math.NaN;
 	}
 
-	/**
-	 * Inverse via Gauss-Jordan on [A|I]. Singular / non-square / invalid → empty matrix.
-	 */
 	public static function matrixInverse(value:Dynamic):Dynamic {
 		var m = readMatrix(value);
 		if (m == null || m.rows != m.cols || m.rows == 0 || m.rows > MAX_FIT_FEATURES)
@@ -206,13 +195,6 @@ class MlBuiltins {
 		return {rows: n, cols: n, data: out};
 	}
 
-	/**
-	 * Fit ridge regression weights from packed row-major features.
-	 *
-	 * `packedX.length == y.length * featureCount`; include a constant feature
-	 * column when an intercept is desired. The solve is bounded and uses
-	 * partial-pivot Gaussian elimination. Invalid or singular input returns [].
-	 */
 	public static function ridgeFit(
 		packedX:Array<Float>,
 		y:Array<Float>,
@@ -252,6 +234,20 @@ class MlBuiltins {
 		var m = readMatrix(matrix);
 		if (m == null) return [];
 		return ridgeFit(m.data, y, m.cols, lambda);
+	}
+
+	static function toLegacy(nd:NdArrayF64):Dynamic {
+		if (nd == null) return {rows: 0, cols: 0, data: []};
+		var sh:Array<Int> = nd.shape;
+		if (sh.length == 2) return {rows: sh[0], cols: sh[1], data: nd.toArray()};
+		if (sh.length == 1) return {rows: 1, cols: sh[0], data: nd.toArray()};
+		return {rows: 0, cols: 0, data: []};
+	}
+
+	static function asNdMatrix(value:Dynamic):Null<NdArrayF64> {
+		var m = readMatrix(value);
+		if (m == null) return null;
+		return NdArrayF64.fromPacked([m.rows, m.cols], m.data);
 	}
 
 	static function validMatrixShape(rows:Int, cols:Int, data:Array<Float>):Bool {

@@ -241,7 +241,8 @@ class TestNmaFitness extends Test {
 			case KArith(_, a, b): scalarHasFeature(a) || scalarHasFeature(b);
 			case KSeries(s) | KLookback(s, _): seriesHasFeature(s);
 			case KHole(inner): scalarHasFeature(inner);
-			case KConst(_) | KParam(_): false;
+			case KNp(_, a, _, b): seriesHasFeature(a) || (b != null && seriesHasFeature(b));
+			case KConst(_) | KParam(_) | KPd(_, _, _, _, _): false;
 		};
 	}
 

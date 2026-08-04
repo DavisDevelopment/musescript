@@ -178,9 +178,12 @@ class Canonical {
 			case SPanel(_, _, _, _):
 		}
 		function wsc(n:ScalarNode):Void switch (n) {
-			case KConst(_) | KParam(_) | KFeature(_):
+			case KConst(_) | KParam(_) | KFeature(_) | KPd(_, _, _, _, _):
 			case KSeries(s): ws(s);
 			case KLookback(s, _): ws(s);
+			case KNp(_, a, _, b):
+				ws(a);
+				if (b != null) ws(b);
 			case KArith(_, a, b): wsc(a); wsc(b);
 			case KHole(inner): wsc(inner);
 		}
@@ -244,6 +247,20 @@ class Canonical {
 				d.tag("L".code);
 				digestSeries(d, s);
 				d.int(k);
+			case KNp(op, a, window, b):
+				d.tag("Q".code); // NP (avoid N=panel)
+				d.str(op);
+				digestSeries(d, a);
+				d.int(window);
+				if (b != null) digestSeries(d, b) else d.tag(0);
+			case KPd(op, kind, window, sym, syms):
+				d.tag("D".code); // PD
+				d.str(op);
+				d.str(kind);
+				d.int(window);
+				d.str(sym);
+				d.int(syms != null ? syms.length : 0);
+				if (syms != null) for (s in syms) d.str(s);
 			case KArith(op, a, b):
 				d.tag("A".code);
 				d.str(op);
@@ -324,6 +341,10 @@ class Canonical {
 			case KFeature(name): ["F", name];
 			case KSeries(s): keySeries(s);
 			case KLookback(s, k): ["L", keySeries(s), k];
+			case KNp(op, a, window, b):
+				["Q", op, keySeries(a), window, b != null ? keySeries(b) : null];
+			case KPd(op, kind, window, sym, syms):
+				["D", op, kind, window, sym, syms != null ? syms.copy() : []];
 			case KArith(op, a, b):
 				var ka = keyScalar(a);
 				var kb = keyScalar(b);
@@ -371,6 +392,9 @@ class Canonical {
 			case KFeature(_): 1;
 			case KSeries(s): countSeries(s);
 			case KLookback(s, _): 1 + countSeries(s);
+			case KNp(_, a, _, b):
+				1 + countSeries(a) + (b != null ? countSeries(b) : 0);
+			case KPd(_, _, _, _, _): 1;
 			case KArith(_, a, b): 1 + countScalar(a) + countScalar(b);
 			// No +1: the wrapper is template scaffolding, not logical complexity -- parsimony
 			// pressure shouldn't penalize a genome for being templated.
@@ -431,6 +455,11 @@ class Canonical {
 				case KFeature(_): bump(K_KFEATURE);
 				case KSeries(s): bump(K_KSERIES); walkSeries(s);
 				case KLookback(s, _): bump(K_KLOOKBACK); walkSeries(s);
+				case KNp(_, a, _, b):
+					bump(K_KNP);
+					walkSeries(a);
+					if (b != null) walkSeries(b);
+				case KPd(_, _, _, _, _): bump(K_KPD);
 				case KArith(_, a, b): bump(K_KARITH); walkScalar(a); walkScalar(b);
 				case KHole(inner): bump(K_KHOLE); walkScalar(inner);
 			}
@@ -492,7 +521,7 @@ class Canonical {
 	/** Fixed declared order for `shapeVector`/`shapeFeatures`. */
 	static var SHAPE_KINDS = ["BCross", "BCmp", "BTrend", "BAnd", "BOr", "BNot", "BHole",
 		"KConst", "KParam", "KArith", "KSeries", "KLookback", "KFeature", "KHole", "SPrice", "SInd", "SProj",
-		"BFeature", "SPanel"];
+		"BFeature", "SPanel", "KNp", "KPd"];
 
 	static inline var K_BCROSS = 0;
 	static inline var K_BCMP = 1;
@@ -513,6 +542,8 @@ class Canonical {
 	static inline var K_SPROJ = 16;
 	static inline var K_BFEATURE = 17; // before SPanel so existing shapeVector indices stay stable
 	static inline var K_SPANEL = 18;
+	static inline var K_KNP = 19; // append only — prior indices stable
+	static inline var K_KPD = 20;
 
 	/**
 	 * `shapeSignature` turned into a fixed-length, SCALE-INVARIANT numeric feature vector, for

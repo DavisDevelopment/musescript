@@ -11,6 +11,14 @@ enum MuseType {
 	TStringArray;
 	TVector;
 	TMatrix;
+	/** Contiguous ndarray handle (runtime: `NdArrayF64` / `AnyNdArray`). */
+	TNdArray;
+	/** Tabular DataFrame (runtime: `musescript.dataframe.DataFrame`) — not a matrix shim. */
+	TDataFrame;
+	/** Tabular Series (runtime: `musescript.dataframe.Series`) — ≠ streaming `TSeries`. */
+	TPdSeries;
+	/** Index labels (runtime: `AnyIndex` / IndexF64|IndexStr). */
+	TIndex;
 	TGraph;
 	TGraphPath;
 	TGraphRanks;

@@ -175,10 +175,77 @@ class TestPluginKinds extends Test {
 
 	public function testPluginKindsTableJson() {
 		var t = MuseRuntime.pluginKinds();
-		Assert.equals("musescript.plugin-kinds/1", t.schema);
+		Assert.equals("musescript.plugin-kinds/2", t.schema);
 		Assert.isTrue(Std.isOfType(t.kinds, Array));
 		var kinds:Array<Dynamic> = cast t.kinds;
 		Assert.isTrue(kinds.length >= 4);
+		var denied:Array<Dynamic> = cast t.alwaysDenied;
+		Assert.isTrue(denied.indexOf("io_fs") >= 0);
+		Assert.isTrue(denied.indexOf("io_net") >= 0);
+	}
+
+	public function testIoFsDeniedEvenIfStubInstalled() {
+		Assert.equals(PluginCapabilities.CAP_IO_FS, PluginCapabilities.capabilityOf("fs_read_text"));
+		Assert.equals(PluginCapabilities.CAP_IO_FS, PluginCapabilities.capabilityOf("fs_made_up_stub"));
+		Assert.equals(PluginCapabilities.CAP_IO_NET, PluginCapabilities.capabilityOf("http_request"));
+		Assert.equals(PluginCapabilities.CAP_IO_FS, PluginCapabilities.capabilityOf("db_open"));
+		for (k in PluginKind.all()) {
+			Assert.isFalse(PluginCapabilities.allows(k, "fs_read_text"));
+			Assert.isFalse(PluginCapabilities.allows(k, "fs_write_text"));
+			Assert.isFalse(PluginCapabilities.allows(k, "http_get"));
+			Assert.isFalse(PluginCapabilities.allows(k, "db_query"));
+		}
+		// Pure path / string stay compute.
+		Assert.isTrue(PluginCapabilities.allows(PluginKind.Compute, "str_lower"));
+		Assert.isTrue(PluginCapabilities.allows(PluginKind.Panel, "path_join"));
+	}
+
+	public function testAuditRejectsFsReadTextUnderPanel() {
+		var src = '{
+			@strategy("w")
+			@on(bar) { fs_read_text("secret.txt"); }
+		}';
+		var a = auditSrc(src, PluginKind.Panel);
+		Assert.isFalse(a.ok == true);
+		Assert.isTrue(Std.string(a.error).indexOf("io_fs") >= 0, Std.string(a.error));
+	}
+
+	public function testAuditRejectsMuseFsAfterLower() {
+		var src = '{
+			@strategy("w")
+			@on(bar) { muse.fs.read_text("x"); }
+		}';
+		var a = auditSrc(src, PluginKind.Compute);
+		Assert.isFalse(a.ok == true);
+		Assert.isTrue(Std.string(a.error).indexOf("io_fs") >= 0
+			|| Std.string(a.error).indexOf("fs_read_text") >= 0, Std.string(a.error));
+	}
+
+	public function testAuditRejectsMuseHttpAfterLower() {
+		var src = '{
+			@strategy("w")
+			@on(bar) { muse.http.get("https://api.example.com/x"); }
+		}';
+		var a = auditSrc(src, PluginKind.Panel);
+		Assert.isFalse(a.ok == true);
+		Assert.isTrue(Std.string(a.error).indexOf("io_net") >= 0
+			|| Std.string(a.error).indexOf("http_get") >= 0, Std.string(a.error));
+	}
+
+	public function testAuditAllowsMuseStrAndPath() {
+		var src = '{
+			@strategy("w")
+			@on(bar) {
+				var s = muse.str.lower("Ab");
+				var p = muse.path.join("a", "b");
+				var r = muse.re.compile("a+");
+				log(s);
+				log(p);
+				log(muse.re.test(r, "aaa"));
+			}
+		}';
+		var a = auditSrc(src, PluginKind.Panel);
+		Assert.isTrue(a.ok == true, Std.string(a.error));
 	}
 }
 

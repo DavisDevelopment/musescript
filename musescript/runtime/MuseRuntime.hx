@@ -41,6 +41,8 @@ import musescript.builtins.TradeBuiltins;
  *   MuseRuntime.checkWidget(source, { kind }) / MuseRuntime.runWidget(source, bars, { kind })
  *   MuseRuntime.pluginKinds()         // capability table JSON (widget/plugin gate)
  *   MuseRuntime.resolveIoGrants(opts) / requireIoGrant(op, opts)  // IO grant stubs (default null)
+ *   MuseRuntime.runIngest(source, { grants, http, kind:"ingest"|"cli" })  // Fs+Net grant IO loop
+ *   MuseRuntime.diagPack(equity, opts?)  // post-run ACF / kiss-the-curve ChartSink pack
  *   MuseRuntime.proveDeterminism(source, bars, { seed, engines })  // Initiative 4.1
  *   MuseRuntime.equityDigest(equity) / foundationDigest()           // proof helpers
  *   MuseRuntime.on/off/once/emit/pumpHostEvent / eventsCatalog     // event bus (MuseEvents)
@@ -99,6 +101,7 @@ class MuseRuntime {
 			// Per-fill slippage (bps, against the trader) for pending-book fills
 			// (limit/stop/market spec orders). Legacy close-fills are unaffected.
 			harness.orders.book.slippageBps = optFloat(opts, "slippageBps", 0);
+			applyIoGrants(harness, opts);
 
 			harness.feed = feed;
 			TradeBuiltins.resetCrossState();
@@ -159,6 +162,7 @@ class MuseRuntime {
 			var out = baseResult(backend, emitted, feed.length(), result);
 			if (instrument) attachOrdersInstrumentation(out, harness);
 			attachParams(out, harness);
+			if (instrument) attachDiagIfRequested(out, harness, opts);
 			attachRepro(out, opts, backend,
 				instrument ? Reflect.field(out, "equity") : null,
 				instrument ? Reflect.field(out, "fills") : null);
@@ -202,6 +206,7 @@ class MuseRuntime {
 			harness.portfolio.tradingCostBps = optFloat(opts, "costBps", 0);
 			harness.panel = panel;
 			harness.feed = panel.asBarFeed();
+			applyIoGrants(harness, opts);
 			TradeBuiltins.resetCrossState();
 
 			var backend:String;
@@ -239,6 +244,7 @@ class MuseRuntime {
 				Reflect.setField(out, "logs", harness.logs);
 			}
 			attachParams(out, harness);
+			if (instrument) attachDiagIfRequested(out, harness, opts);
 			attachRepro(out, opts, backend,
 				instrument ? Reflect.field(out, "equity") : null,
 				instrument ? Reflect.field(out, "fills") : null);
@@ -326,6 +332,7 @@ class MuseRuntime {
 			var out = baseResult("wasm", true, feed.length(), result);
 			if (instrument) attachOrdersInstrumentation(out, harness);
 			attachParams(out, harness);
+			if (instrument) attachDiagIfRequested(out, harness, opts);
 			attachRepro(out, opts, "wasm",
 				instrument ? Reflect.field(out, "equity") : null,
 				instrument ? Reflect.field(out, "fills") : null);
@@ -860,7 +867,7 @@ class MuseRuntime {
 	/**
 	 * Resolve host IO grants from run opts. Default **null** — gated
 	 * `fs_*` / `http_*` / `db_*` must throw {@link musescript.io.IoDenied}.
-	 * Real FsGrant / NetGrant enforcement lands with M1+.
+	 * Pass `opts.grants` (IoGrant) to enable sandboxed `muse.fs` / `muse.http`.
 	 */
 	public static function resolveIoGrants(?opts:Dynamic):Null<musescript.io.IoGrant> {
 		if (opts == null || !Reflect.hasField(opts, "grants")) return null;
@@ -868,12 +875,118 @@ class MuseRuntime {
 	}
 
 	/**
-	 * Stub gate for future `muse.fs` / `muse.http` / `muse.db`. Throws
+	 * Gate for `muse.fs` / `muse.http` / `muse.db`. Throws
 	 * {@link musescript.io.IoDenied} when grants are absent (the fitness /
 	 * offline-backtest default).
 	 */
 	public static function requireIoGrant(op:String, ?opts:Dynamic):musescript.io.IoGrant {
 		return musescript.io.IoDenied.require(op, resolveIoGrants(opts));
+	}
+
+	/**
+	 * Attach `opts.grants` onto a harness (null when omitted — fitness refuse).
+	 * Also applies `opts.fitness` / `opts.isFitness`, `opts.isBacktest`, and
+	 * CLI `opts.http` (`replay`|`record`|`strict`|`off`) onto NetGrant.fixture_mode.
+	 *
+	 * Fitness / evo always force `ioGrants = null` even if a caller sneaks
+	 * `opts.grants` in — ingest is a separate entry (`runIngest` / kind ingest|cli).
+	 * Kind `ingest` / `cli` defaults `isBacktest=false` so HTTP record/strict can run
+	 * under an explicit NetGrant (never the silent fitness path).
+	 */
+	public static function applyIoGrants(harness:musescript.harness.HarnessContext, ?opts:Dynamic):Void {
+		harness.httpRequests = 0;
+		harness.isFitness = optBool(opts, "fitness", false) || optBool(opts, "isFitness", false);
+		var kind = optStr(opts, "kind", "");
+		var isIngest = kind == "ingest" || kind == "cli";
+		if (harness.isFitness) {
+			// Fitness law: io always null. Never enable TruthReport/evo IO via grants.
+			harness.ioGrants = null;
+			harness.isBacktest = true;
+			return;
+		}
+		harness.ioGrants = resolveIoGrants(opts);
+		// Backtest runs default isBacktest=true; ingest/cli defaults false for record/strict.
+		if (opts != null && Reflect.hasField(opts, "isBacktest"))
+			harness.isBacktest = optBool(opts, "isBacktest", true);
+		else
+			harness.isBacktest = !isIngest;
+		applyHttpModeOverride(harness, opts);
+	}
+
+	/**
+	 * Ingest / CLI tier: run a non-strategy program once with sandboxed IO.
+	 *
+	 * Requires `opts.grants` (FsGrant and/or NetGrant). Never used by fitness —
+	 * `fitness:true` / `isFitness:true` returns an error. Skips Truth Report.
+	 *
+	 * Typical loop: `muse.http.get` (replay|record) → `muse.fs.write_text` /
+	 * `pd_read_csv` under the grant root → PanelLoader / `--tape` consumable CSV,
+	 * then a subsequent offline `run` / `runPanel` with grants null.
+	 *
+	 * `opts.kind`: `"ingest"` (default) | `"cli"`. `opts.http` overrides NetGrant
+	 * fixture_mode. Programs must not declare `@on(bar)` / strategy onBar handlers.
+	 */
+	public static function runIngest(source:String, ?opts:Dynamic):Dynamic {
+		var emitLc = optBool(opts, "emitLifecycle", false);
+		var runId = optStr(opts, "runId", null);
+		if (emitLc) lifecycleEmit("lifecycle.start", { runId: runId, kind: "ingest" });
+		try {
+			if (optBool(opts, "fitness", false) || optBool(opts, "isFitness", false))
+				return err("runIngest refuses fitness path (use run/runPanel with grants null)");
+			var grants = resolveIoGrants(opts);
+			if (grants == null)
+				return err("runIngest requires opts.grants (FsGrant and/or NetGrant)");
+
+			var ingestOpts:Dynamic = {};
+			if (opts != null) {
+				for (k in Reflect.fields(opts))
+					Reflect.setField(ingestOpts, k, Reflect.field(opts, k));
+			}
+			if (!Reflect.hasField(ingestOpts, "kind"))
+				Reflect.setField(ingestOpts, "kind", "ingest");
+			Reflect.setField(ingestOpts, "fitness", false);
+			Reflect.setField(ingestOpts, "isFitness", false);
+			Reflect.setField(ingestOpts, "skipTruthReport", true);
+			if (!Reflect.hasField(ingestOpts, "isBacktest"))
+				Reflect.setField(ingestOpts, "isBacktest", false);
+
+			var prog = parse(source);
+			var harness = new HarnessContext();
+			applyIoGrants(harness, ingestOpts);
+			TradeBuiltins.resetCrossState();
+
+			var value = new MuseInterp(harness).executeIngest(prog);
+			var out:Dynamic = {
+				ok: true,
+				kind: optStr(ingestOpts, "kind", "ingest"),
+				backend: "interp",
+				emitted: false,
+				value: value,
+				logs: harness.logs,
+				httpRequests: harness.httpRequests
+			};
+			if (emitLc) lifecycleEmit("lifecycle.end", { runId: runId, kind: "ingest", ok: true });
+			return out;
+		} catch (e:Dynamic) {
+			if (emitLc) lifecycleEmit("lifecycle.end", { runId: runId, kind: "ingest", ok: false });
+			return err(Std.string(e));
+		}
+	}
+
+	static function applyHttpModeOverride(harness:musescript.harness.HarnessContext, ?opts:Dynamic):Void {
+		if (opts == null || !Reflect.hasField(opts, "http")) return;
+		var mode = optStr(opts, "http", null);
+		if (mode == null || mode.length == 0) return;
+		var m = StringTools.trim(mode).toLowerCase();
+		if (m == "off") {
+			if (harness.ioGrants != null) harness.ioGrants.net = null;
+			return;
+		}
+		if (m != "replay" && m != "record" && m != "strict") return;
+		var g = harness.ioGrants;
+		if (g == null) return;
+		if (g.net == null) return;
+		Reflect.setField(g.net, "fixture_mode", m);
 	}
 
 	/**
@@ -952,6 +1065,29 @@ class MuseRuntime {
 		};
 	}
 
+	/**
+	 * Post-run ACF / kiss-the-curve chart pack (Metrics + ChartSink).
+	 * Does not touch WASM hot paths — call after a backtest equity is known.
+	 *
+	 * `opts`: { maxLag?, rollingWindow?, prefix?, kiss?, underwater?, acf?, includeSeries? }
+	 * Returns `{ ok, summary, chart }` where `chart` is the command list emitted.
+	 */
+	public static function diagPack(equity:Array<Float>, ?opts:Dynamic):Dynamic {
+		try {
+			var chart = new musescript.harness.ChartSink();
+			var packOpts = diagOptsFrom(opts);
+			var r = musescript.harness.DiagPack.emit(chart, equity != null ? equity : [], packOpts);
+			var includeSeries = optBool(opts, "includeSeries", false);
+			return {
+				ok: true,
+				summary: musescript.harness.DiagPack.toSummary(r, includeSeries),
+				chart: chart.commands
+			};
+		} catch (e:Dynamic) {
+			return err(Std.string(e));
+		}
+	}
+
 	/** Single-symbol instrumentation payload (equity/fills from `orders`). */
 	static function attachOrdersInstrumentation(out:Dynamic, harness:HarnessContext):Void {
 		// See GeneRunner.hx's identical comment -- must be a real Array, not the
@@ -960,6 +1096,36 @@ class MuseRuntime {
 		Reflect.setField(out, "fills", harness.orders.fills);
 		Reflect.setField(out, "chart", harness.chart.commands);
 		Reflect.setField(out, "logs", harness.logs);
+	}
+
+	/** When `opts.diag` is true or an options object, append kiss/ACF charts onto the run. */
+	static function attachDiagIfRequested(out:Dynamic, harness:HarnessContext, opts:Dynamic):Void {
+		if (opts == null || !Reflect.hasField(opts, "diag")) return;
+		var d:Dynamic = Reflect.field(opts, "diag");
+		if (d == false || d == null) return;
+		var packOpts = d == true ? diagOptsFrom(null) : diagOptsFrom(d);
+		var equity:Array<Float> = Reflect.field(out, "equity");
+		if (equity == null) equity = [];
+		var r = musescript.harness.DiagPack.emit(harness.chart, equity, packOpts);
+		Reflect.setField(out, "chart", harness.chart.commands);
+		Reflect.setField(out, "diag", musescript.harness.DiagPack.toSummary(r, false));
+	}
+
+	static function diagOptsFrom(opts:Dynamic):Dynamic {
+		if (opts == null) return {};
+		return {
+			maxLag: Reflect.hasField(opts, "maxLag") ? optInt(opts, "maxLag", musescript.harness.DiagPack.DEFAULT_MAX_LAG) : null,
+			rollingWindow: Reflect.hasField(opts, "rollingWindow") ? optInt(opts, "rollingWindow", 0) : null,
+			prefix: Reflect.hasField(opts, "prefix") ? optStr(opts, "prefix", "diag") : null,
+			kiss: Reflect.hasField(opts, "kiss") ? optBool(opts, "kiss", true) : null,
+			underwater: Reflect.hasField(opts, "underwater") ? optBool(opts, "underwater", true) : null,
+			acf: Reflect.hasField(opts, "acf") ? optBool(opts, "acf", true) : null,
+			colorEquity: Reflect.hasField(opts, "colorEquity") ? optStr(opts, "colorEquity", null) : null,
+			colorPeak: Reflect.hasField(opts, "colorPeak") ? optStr(opts, "colorPeak", null) : null,
+			colorDd: Reflect.hasField(opts, "colorDd") ? optStr(opts, "colorDd", null) : null,
+			colorAcf: Reflect.hasField(opts, "colorAcf") ? optStr(opts, "colorAcf", null) : null,
+			colorRoll: Reflect.hasField(opts, "colorRoll") ? optStr(opts, "colorRoll", null) : null
+		};
 	}
 
 	/** Apply Studio/UI param overrides after @param registration. Accepts a

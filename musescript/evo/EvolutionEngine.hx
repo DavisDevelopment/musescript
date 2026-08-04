@@ -114,6 +114,23 @@ class EvolutionEngine {
 	}
 
 	/**
+	 * Gate closed NP palette (`KNp` → Expand `np_*`). Pass `null` for full catalog;
+	 * `[]` clears. Default off — single-name genomes unchanged.
+	 */
+	public function configureForNp(?ops:Array<String>):Void {
+		variation.configureForNp(ops);
+	}
+
+	/**
+	 * Gate closed PD palette (`KPd` → Expand `pd_xs_rank` + panel HostABI). Needs universe
+	 * for xs_rank. Pair with `configureForPanel` so genomes score via `runPanelBacktest`.
+	 * Pass `null` for full catalog; `[]` clears. WASM/NMA stay unsupported.
+	 */
+	public function configureForPd(?ops:Array<String>):Void {
+		variation.configureForPd(ops);
+	}
+
+	/**
 	 * Attach a multi-symbol panel tape for fitness and gate Variation growth to its symbols.
 	 * Composes with `configureForTape` (aux field pool stays independent). Pass `null` to
 	 * clear the fitness panel only (universe growth tags are left as last configured).

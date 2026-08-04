@@ -29,6 +29,18 @@ import musescript.harness.Bar;
  * portfolio `runPanelBacktest` — not single-name Sharpe dressed up. NMA does
  * not columnarize panels (`nma-unsupported` → Expand→interp/WASM).
  * Dynamic bags / `symbols()` remain out of genome Expand.
+ *
+ * Closed NP / PD palette (not open-world muse.np / muse.pd in Expand):
+ * `Variation.configureForNp` / `configureForPd` gate `KNp` / `KPd` growth
+ * analogous to AUX_FIELDS + tape presence. Default off ⇒ single-name genomes
+ * unchanged. NP Expand emits size-capped `np_mean`/`np_sum`/`np_dot` (WASM may
+ * claim native on that scalar subset). PD Expand emits literal one-row
+ * percentile `pd_xs_rank` under a fixed universe — no groupby/merge/HTTP — and
+ * coerces `KPd` genomes onto `PanelAction` / `target_weight` so fitness uses
+ * `configureForPanel` → `runPanelBacktest` (not single-name long/short that
+ * ignores the cross-section). WASM/NMA stay U / `nma-unsupported`
+ * (Expand→interp/JS). Enable trio: `configureForPanel` + `configureForPd` +
+ * `configureForUniverse` (panel configures universe automatically).
  */
 class Palette {
 	public static final FIELDS:Array<String> = ["open", "high", "low", "close", "volume"];
@@ -40,6 +52,24 @@ class Palette {
 	public static final AUX_FIELDS:Array<String> = [
 		"revenue", "pe", "eps", "sentiment", "market_cap", "book_value", "dividend_yield"
 	];
+
+	/**
+	 * Closed NP ops for `KNp` when `Variation.configureForNp` opens the gate.
+	 * Order is load-bearing for deterministic catalog / docs.
+	 */
+	public static final NP_OPS:Array<String> = ["mean", "dot", "sum"];
+	/**
+	 * Closed PD ops for `KPd` when `configureForPd` + universe. No open
+	 * groupby/merge — `xs_rank` over a fixed-universe one-row score frame only.
+	 * Fitness: pair with `configureForPanel` so Expand→`target_weight` scores
+	 * via portfolio `runPanelBacktest`.
+	 */
+	public static final PD_OPS:Array<String> = ["xs_rank"];
+	/**
+	 * Max `window(...)` length for NP genomes (≤ WasmNpEligibility.MAX_VEC_LEN).
+	 * WINDOWS entries above this are filtered out of NP growth.
+	 */
+	public static final NP_MAX_WIN:Int = 55;
 
 	public static final INDS:Array<String> = [
 		"sma", "ema", "rsi", "atr", "wma", "rma", "stdev",
@@ -54,6 +84,33 @@ class Palette {
 	public static final ARITH:Array<String> = ["+", "-", "*", "min", "max"];
 	public static final CMP:Array<String> = [">", "<", ">=", "<="];
 	public static final CROSS:Array<String> = ["over", "under"];
+
+	/** WINDOWS entries allowed as NP operand lengths (≤ NP_MAX_WIN). */
+	public static function npWindows():Array<Int> {
+		return [for (w in WINDOWS) if (w > 0 && w <= NP_MAX_WIN) w];
+	}
+
+	/**
+	 * Filter requested NP ops against `NP_OPS`. Null ⇒ full catalog; empty ⇒ off.
+	 */
+	public static function npOpsFor(?requested:Array<String>):Array<String> {
+		if (requested == null) return NP_OPS.copy();
+		if (requested.length == 0) return [];
+		var hit = new Map<String, Bool>();
+		for (r in requested) hit.set(r, true);
+		return [for (o in NP_OPS) if (hit.exists(o)) o];
+	}
+
+	/**
+	 * Filter requested PD ops against `PD_OPS`. Null ⇒ full catalog; empty ⇒ off.
+	 */
+	public static function pdOpsFor(?requested:Array<String>):Array<String> {
+		if (requested == null) return PD_OPS.copy();
+		if (requested.length == 0) return [];
+		var hit = new Map<String, Bool>();
+		for (r in requested) hit.set(r, true);
+		return [for (o in PD_OPS) if (hit.exists(o)) o];
+	}
 
 	/**
 	 * Field pool for genome growth: OHLCV always, plus each `AUX_FIELDS` name
@@ -90,6 +147,9 @@ class Palette {
 			id: "musegene.bar-v1",
 			fields: FIELDS,
 			auxFields: AUX_FIELDS,
+			npOps: NP_OPS,
+			pdOps: PD_OPS,
+			npMaxWin: NP_MAX_WIN,
 			panelOfInds: PANEL_OF_INDS,
 			windows: WINDOWS,
 			indicators: INDS,

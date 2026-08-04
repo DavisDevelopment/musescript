@@ -20,6 +20,10 @@ class MuseTypes {
 			case "StringArray": TStringArray;
 			case "Vector": TVector;
 			case "Matrix": TMatrix;
+			case "NdArray": TNdArray;
+			case "DataFrame": TDataFrame;
+			case "PdSeries": TPdSeries;
+			case "Index": TIndex;
 			case "Graph": TGraph;
 			case "GraphPath": TGraphPath;
 			case "GraphRanks": TGraphRanks;
@@ -50,6 +54,10 @@ class MuseTypes {
 			case TStringArray: "StringArray";
 			case TVector: "Vector";
 			case TMatrix: "Matrix";
+			case TNdArray: "NdArray";
+			case TDataFrame: "DataFrame";
+			case TPdSeries: "PdSeries";
+			case TIndex: "Index";
 			case TGraph: "Graph";
 			case TGraphPath: "GraphPath";
 			case TGraphRanks: "GraphRanks";

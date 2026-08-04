@@ -59,6 +59,10 @@ class NmaBijection {
 			case KLookback(s, k): new NmaKLookback(seriesFromEnum(s), k);
 			case KFeature(name): new NmaKFeature(name);
 			case KHole(inner): new NmaKHole(scalarFromEnum(inner));
+			case KNp(_, _, _, _):
+				throw "NmaBijection.scalarFromEnum: KNp is not columnar-NMA supported (nma-unsupported)";
+			case KPd(_, _, _, _, _):
+				throw "NmaBijection.scalarFromEnum: KPd is not columnar-NMA supported (nma-unsupported)";
 		};
 	}
 

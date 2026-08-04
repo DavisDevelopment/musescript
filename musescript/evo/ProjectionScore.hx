@@ -380,9 +380,12 @@ class ProjectionScore {
 			case SPanel(_, _, _, _):
 		}
 		function wsc(n:ScalarNode):Void switch (n) {
-			case KConst(_) | KParam(_) | KFeature(_):
+			case KConst(_) | KParam(_) | KFeature(_) | KPd(_, _, _, _, _):
 			case KSeries(s): ws(s);
 			case KLookback(s, _): ws(s);
+			case KNp(_, a, _, b):
+				ws(a);
+				if (b != null) ws(b);
 			case KArith(_, a, b): wsc(a); wsc(b);
 			case KHole(inner): wsc(inner);
 		}

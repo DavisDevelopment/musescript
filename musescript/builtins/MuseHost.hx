@@ -10,12 +10,21 @@ import musescript.harness.HarnessContext;
  *   muse.fund.of("AAPL", "revenue")
  *   muse.data.close_of("AAPL")
  *   muse.portfolio.buy("AAPL", 1)
+ *   muse.portfolio.long("AAPL", { type: "limit", px: 95, qty: 10 })
  *   muse.chart.plot(close, "c")
  *   muse.bags.equal(["AAPL", "MSFT"])
  *   muse.params.get("fast")
  *   muse.indicators.get("rsi")
  *   muse.math.abs(x)
  *   muse.ta.sma(close, 14)
+ *   muse.np.zeros([2, 3])
+ *   muse.pd.from_columns({close: [1, 2], volume: [3, 4]})
+ *   muse.str.lower(sym)
+ *   muse.path.join("a", "b")
+ *   muse.re.compile("a+")
+ *   muse.fs.read_text("workspace:file.txt")  // grant-gated
+ *   muse.http.get(url) / request / post      // NetGrant + fixtures
+ *   muse.diag.pack(equity)                   // post-run ACF / kiss-the-curve charts
  *
  * Same install shape as `ta` / `Math` — no new language surface. `MuseHostLower`
  * (and Strat `this.<ns>.*` sugar in `ClassStrategyLower`) rewrites these to
@@ -33,7 +42,8 @@ import musescript.harness.HarnessContext;
  * feature slots; literal `buy`/`sell_all`/`target_weight`/`rebalance_equal([…])`
  * are HostABI imports. Bags, computed/graph bags, `symbols()`, scan/portfolio
  * queries stay `host_eval` or whole-module fallback
- * (`StrategyWasmEmitter.PANEL_HOST_ESCAPE`).
+ * (`StrategyWasmEmitter.PANEL_HOST_ESCAPE`). muse.np: documented packed-f64
+ * native subset + per-op host_eval escapes (`WasmNpEligibility` / docs/WASM_NP.md).
  */
 class MuseHost {
 	/** Namespaces that lower to `Receiver.method(...)` rather than a flat builtin. */
@@ -61,6 +71,19 @@ class MuseHost {
 		Reflect.setField(muse, "indicators", buildIndicators(harness));
 		Reflect.setField(muse, "math", buildMath());
 		Reflect.setField(muse, "ta", TaToolbelt.build(harness));
+		Reflect.setField(muse, "np", NpBuiltins.build());
+		var pd = PdBuiltins.build(function() return harness.ioGrants);
+		Reflect.setField(muse, "pd", pd);
+		Reflect.setField(muse, "dataframe", pd); // alias — plan D8
+		Reflect.setField(muse, "str", buildStr());
+		Reflect.setField(muse, "path", PathBuiltins.build());
+		Reflect.setField(muse, "re", RegexBuiltins.build());
+		Reflect.setField(muse, "fs", FsBuiltins.build(function() return harness.ioGrants));
+		Reflect.setField(muse, "http", HttpBuiltins.build(
+			function() return harness.ioGrants,
+			function() return harness
+		));
+		Reflect.setField(muse, "diag", DiagBuiltins.build(harness));
 		return muse;
 	}
 
@@ -103,6 +126,34 @@ class MuseHost {
 		return [for (k in table.keys()) k];
 	}
 
+	/** Shared by `muse.pd` and alias `muse.dataframe`. */
+	static final PD_FLAT:Map<String, String> = [
+		"series" => "pd_series", "dataframe" => "pd_dataframe", "from_columns" => "pd_from_columns",
+		"from_ndarray" => "pd_from_ndarray", "empty" => "pd_empty",
+		"shape" => "pd_shape", "columns" => "pd_columns", "nrows" => "pd_nrows", "ncols" => "pd_ncols",
+		"index" => "pd_index", "get" => "pd_get", "select" => "pd_select", "assign" => "pd_assign",
+		"drop" => "pd_drop", "copy" => "pd_copy", "head" => "pd_head", "tail" => "pd_tail",
+		"iloc" => "pd_iloc", "to_ndarray" => "pd_to_ndarray",
+		"series_values" => "pd_series_values", "series_name" => "pd_series_name",
+		"series_length" => "pd_series_length", "index_kind" => "pd_index_kind",
+		"index_range" => "pd_index_range", "index_floats" => "pd_index_floats", "index_strings" => "pd_index_strings",
+		"from_bars" => "pd_from_bars", "from_bar_column" => "pd_from_bar_column",
+		"from_panel" => "pd_from_panel",
+		"reindex" => "pd_reindex", "align" => "pd_align", "join" => "pd_join",
+		"merge_asof" => "pd_merge_asof", "fillna" => "pd_fillna", "dropna" => "pd_dropna", "isna" => "pd_isna",
+		"concat" => "pd_concat", "concat_cols" => "pd_concat_cols",
+		"parse_csv" => "pd_parse_csv", "read_csv" => "pd_read_csv",
+		"groupby_agg" => "pd_groupby_agg", "groupby_transform" => "pd_groupby_transform",
+		"groupby_rank" => "pd_groupby_rank", "groupby_mean" => "pd_groupby_mean",
+		"groupby_sum" => "pd_groupby_sum", "groupby_std" => "pd_groupby_std",
+		"rank" => "pd_rank", "xs_rank" => "pd_xs_rank",
+		"shift" => "pd_shift", "diff" => "pd_diff", "pct_change" => "pd_pct_change",
+		"rolling_mean" => "pd_rolling_mean", "rolling_sum" => "pd_rolling_sum",
+		"rolling_std" => "pd_rolling_std", "ewm_mean" => "pd_ewm_mean",
+		"groupby_keys_agg" => "pd_groupby_keys_agg",
+		"pivot" => "pd_pivot", "melt" => "pd_melt", "corr" => "pd_corr", "cov" => "pd_cov"
+	];
+
 	static final FLAT:Map<String, Map<String, String>> = [
 		"orders" => [
 			"long" => "long",
@@ -140,6 +191,18 @@ class MuseHost {
 		"portfolio" => [
 			"buy" => "buy",
 			"sell_all" => "sell_all",
+			"long" => "portfolio_long",
+			"short" => "portfolio_short",
+			"flat" => "portfolio_flat",
+			"portfolio_long" => "portfolio_long",
+			"portfolio_short" => "portfolio_short",
+			"portfolio_flat" => "portfolio_flat",
+			"pending" => "portfolio_orders_pending",
+			"cancel_all" => "portfolio_orders_cancel_all",
+			"orders_pending" => "portfolio_orders_pending",
+			"orders_cancel_all" => "portfolio_orders_cancel_all",
+			"portfolio_orders_pending" => "portfolio_orders_pending",
+			"portfolio_orders_cancel_all" => "portfolio_orders_cancel_all",
 			"pos" => "pos",
 			"entry_of" => "entry_of",
 			"weight_of" => "weight_of",
@@ -191,6 +254,77 @@ class MuseHost {
 			"mask" => "bag_mask",
 			"scale" => "bag_scale",
 			"norm" => "bag_norm"
+		],
+		"np" => [
+			"zeros" => "np_zeros", "ones" => "np_ones", "full" => "np_full", "empty" => "np_empty",
+			"arange" => "np_arange", "linspace" => "np_linspace", "eye" => "np_eye", "identity" => "np_identity",
+			"asarray" => "np_asarray", "array" => "np_asarray",
+			"reshape" => "np_reshape", "transpose" => "np_transpose", "swapaxes" => "np_swapaxes", "copy" => "np_copy",
+			"ravel" => "np_ravel", "flatten" => "np_flatten", "expand_dims" => "np_expand_dims",
+			"squeeze" => "np_squeeze", "broadcast_to" => "np_broadcast_to",
+			"concatenate" => "np_concatenate", "stack" => "np_stack",
+			"shape" => "np_shape", "ndim" => "np_ndim", "size" => "np_size",
+			"is_c_contiguous" => "np_is_c_contiguous",
+			"get" => "np_get", "get_flat" => "np_get_flat", "slice" => "np_slice", "slice_axis" => "np_slice_axis",
+			"take" => "np_take", "gather" => "np_gather", "take_along" => "np_take_along",
+			"astype" => "np_astype", "dtype" => "np_dtype", "bool" => "np_bool", "bool_to_f64" => "np_bool_to_f64",
+			"add" => "np_add", "subtract" => "np_subtract", "multiply" => "np_multiply", "divide" => "np_divide",
+			"power" => "np_power", "minimum" => "np_minimum", "maximum" => "np_maximum",
+			"equal" => "np_equal", "not_equal" => "np_not_equal",
+			"greater" => "np_greater", "greater_equal" => "np_greater_equal",
+			"less" => "np_less", "less_equal" => "np_less_equal",
+			"negative" => "np_negative", "abs" => "np_abs", "sqrt" => "np_sqrt",
+			"exp" => "np_exp", "log" => "np_log", "square" => "np_square", "sign" => "np_sign",
+			"clip" => "np_clip", "where" => "np_where", "compress" => "np_compress", "assign_where" => "np_assign_where",
+			"sum" => "np_sum", "mean" => "np_mean", "min" => "np_min", "max" => "np_max", "prod" => "np_prod",
+			"std" => "np_std", "var" => "np_var", "any" => "np_any", "all" => "np_all",
+			"cumsum" => "np_cumsum", "diff" => "np_diff",
+			"matmul" => "np_matmul", "dot" => "np_dot", "outer" => "np_outer",
+			"to_vector" => "np_to_vector",
+			"vol_target_qty" => "np_vol_target_qty", "mask_qty" => "np_mask_qty",
+			"rolling_log_vol" => "np_rolling_log_vol"
+		],
+		"str" => [
+			"len" => "str_len", "slice" => "str_slice",
+			"contains" => "str_contains", "concat" => "str_concat",
+			"to_float" => "str_to_float", "trim" => "str_trim",
+			"lower" => "str_lower", "upper" => "str_upper",
+			"starts_with" => "str_starts_with", "ends_with" => "str_ends_with",
+			"index_of" => "str_index_of", "replace" => "str_replace",
+			"split" => "str_split", "join" => "str_join",
+			"to_bool" => "str_to_bool", "from_float" => "str_from_float",
+			"from_bool" => "str_from_bool", "fmt" => "str_fmt"
+		],
+		"path" => [
+			"join" => "path_join", "normalize" => "path_normalize",
+			"basename" => "path_basename", "dirname" => "path_dirname",
+			"ext" => "path_ext", "is_absolute" => "path_is_absolute"
+		],
+		"re" => [
+			"compile" => "re_compile", "test" => "re_test",
+			"match" => "re_match", "find_all" => "re_find_all",
+			"replace" => "re_replace", "split" => "re_split"
+		],
+		"pd" => PD_FLAT,
+		"dataframe" => PD_FLAT,
+		"fs" => [
+			"read_text" => "fs_read_text", "write_text" => "fs_write_text",
+			"append_text" => "fs_append_text", "exists" => "fs_exists",
+			"is_dir" => "fs_is_dir", "is_file" => "fs_is_file",
+			"list" => "fs_list", "mkdir" => "fs_mkdir",
+			"read_bytes" => "fs_read_bytes"
+		],
+		"http" => [
+			"request" => "http_request", "get" => "http_get", "post" => "http_post"
+		],
+		"diag" => [
+			"running_max" => "diag_running_max",
+			"drawdown" => "diag_drawdown",
+			"acf" => "diag_acf",
+			"rolling_acf" => "diag_rolling_acf",
+			"kiss" => "diag_kiss",
+			"underwater" => "diag_underwater",
+			"pack" => "diag_pack"
 		]
 	];
 
@@ -297,6 +431,34 @@ class MuseHost {
 			var px = harness.panelPrice(sym);
 			var bi = harness.currentBar != null ? harness.currentBar.index : -1;
 			harness.portfolio.sellAll(sym, px, bi);
+		});
+		Reflect.setField(p, "long", function(sym:String, ?arg:Dynamic) {
+			PortfolioBuiltins.submitPanel(harness, "long", sym, arg);
+		});
+		Reflect.setField(p, "short", function(sym:String, ?arg:Dynamic) {
+			PortfolioBuiltins.submitPanel(harness, "short", sym, arg);
+		});
+		Reflect.setField(p, "flat", function(sym:String, ?arg:Dynamic) {
+			PortfolioBuiltins.submitPanel(harness, "flat", sym, arg);
+		});
+		Reflect.setField(p, "portfolio_long", function(sym:String, ?arg:Dynamic) {
+			PortfolioBuiltins.submitPanel(harness, "long", sym, arg);
+		});
+		Reflect.setField(p, "portfolio_short", function(sym:String, ?arg:Dynamic) {
+			PortfolioBuiltins.submitPanel(harness, "short", sym, arg);
+		});
+		Reflect.setField(p, "portfolio_flat", function(sym:String, ?arg:Dynamic) {
+			PortfolioBuiltins.submitPanel(harness, "flat", sym, arg);
+		});
+		Reflect.setField(p, "pending", function(?sym:String) return harness.portfolio.pendingCount(sym));
+		Reflect.setField(p, "cancel_all", function(?sym:String) return harness.portfolio.cancelAll(sym));
+		Reflect.setField(p, "orders_pending", function(?sym:String) return harness.portfolio.pendingCount(sym));
+		Reflect.setField(p, "orders_cancel_all", function(?sym:String) return harness.portfolio.cancelAll(sym));
+		Reflect.setField(p, "portfolio_orders_pending", function(?sym:String) {
+			return harness.portfolio.pendingCount(sym);
+		});
+		Reflect.setField(p, "portfolio_orders_cancel_all", function(?sym:String) {
+			return harness.portfolio.cancelAll(sym);
 		});
 		Reflect.setField(p, "pos", function(sym:String) return harness.portfolio.positionOf(sym));
 		Reflect.setField(p, "entry_of", function(sym:String) return harness.portfolio.entryOf(sym));
@@ -434,5 +596,33 @@ class MuseHost {
 		Reflect.setField(m, "sin", Math.sin);
 		Reflect.setField(m, "cos", Math.cos);
 		return m;
+	}
+
+	static function buildStr():Dynamic {
+		var s:Dynamic = {};
+		Reflect.setField(s, "len", StringBuiltins.len);
+		Reflect.setField(s, "slice", StringBuiltins.slice);
+		Reflect.setField(s, "contains", StringBuiltins.contains);
+		Reflect.setField(s, "concat", StringBuiltins.concat);
+		Reflect.setField(s, "to_float", StringBuiltins.toFloat);
+		Reflect.setField(s, "trim", StringBuiltins.trim);
+		Reflect.setField(s, "lower", StringBuiltins.lower);
+		Reflect.setField(s, "upper", StringBuiltins.upper);
+		Reflect.setField(s, "starts_with", StringBuiltins.startsWith);
+		Reflect.setField(s, "ends_with", StringBuiltins.endsWith);
+		Reflect.setField(s, "index_of", StringBuiltins.indexOf);
+		Reflect.setField(s, "replace", StringBuiltins.replace);
+		Reflect.setField(s, "split", StringBuiltins.split);
+		Reflect.setField(s, "join", StringBuiltins.join);
+		Reflect.setField(s, "to_bool", StringBuiltins.toBool);
+		Reflect.setField(s, "from_float", StringBuiltins.fromFloat);
+		Reflect.setField(s, "from_bool", StringBuiltins.fromBool);
+		Reflect.setField(s, "fmt", Reflect.makeVarArgs(function(args:Array<Dynamic>) {
+			if (args.length == 0) return "";
+			if (args.length == 1) return StringBuiltins.fmt(args[0]);
+			if (args.length == 2) return StringBuiltins.fmt(args[0], args[1]);
+			return StringBuiltins.fmt(args[0], [for (i in 1...args.length) args[i]]);
+		}));
+		return s;
 	}
 }

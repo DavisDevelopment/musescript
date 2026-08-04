@@ -305,9 +305,12 @@ class ProjectionProvider {
 		}
 		function addScalar(sc:ScalarNode):Void {
 			switch (sc) {
-				case KConst(_) | KParam(_) | KFeature(_):
+				case KConst(_) | KParam(_) | KFeature(_) | KPd(_, _, _, _, _):
 				case KSeries(s): addSeries(s);
 				case KLookback(s, _): addSeries(s);
+				case KNp(_, a, _, b):
+					addSeries(a);
+					if (b != null) addSeries(b);
 				case KArith(_, a, b): addScalar(a); addScalar(b);
 				case KHole(inner): addScalar(inner);
 			}

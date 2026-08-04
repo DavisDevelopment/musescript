@@ -58,6 +58,10 @@ class ProjInline {
 				case KFeature(name): KFeature(name);
 				case KSeries(s): KSeries(ws(s));
 				case KLookback(s, k): KLookback(ws(s), k);
+				case KNp(op, a, w, b):
+					KNp(op, ws(a), w, b != null ? ws(b) : null);
+				case KPd(op, kind, w, sym, syms):
+					KPd(op, kind, w, sym, syms.copy());
 				case KArith(op, a, b): KArith(op, wsc(a), wsc(b));
 				case KHole(inner): KHole(wsc(inner));
 			};
@@ -115,8 +119,11 @@ class ProjInline {
 			case SPanel(_, _, _, _):
 		}
 		function wsc(n:ScalarNode):Void switch (n) {
-			case KConst(_) | KParam(_) | KFeature(_):
+			case KConst(_) | KParam(_) | KFeature(_) | KPd(_, _, _, _, _):
 			case KSeries(s) | KLookback(s, _): ws(s);
+			case KNp(_, a, _, b):
+				ws(a);
+				if (b != null) ws(b);
 			case KArith(_, a, b): wsc(a); wsc(b);
 			case KHole(inner): wsc(inner);
 		}

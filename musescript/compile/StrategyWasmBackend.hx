@@ -32,7 +32,11 @@ import musescript.interp.MuseInterp;
  * `runPanelBacktest`. HostABI portfolio apply: literal `buy` / `sell_all` /
  * `target_weight` / `rebalance_equal([...])`. Escape list (host_eval /
  * opaque whole-module fallback): bags, computed bags, graph bags, `symbols()`,
- * scan / portfolio queries — see `StrategyWasmEmitter.PANEL_HOST_ESCAPE`.
+ * scan / portfolio queries, and pending-book verbs (`portfolio_long` /
+ * `portfolio_short` / `portfolio_flat` / pending cancel — object specs,
+ * brackets, and cross-symbol OCO stay host_eval; HostABI is qty-only) —
+ * see `StrategyWasmEmitter.PANEL_HOST_ESCAPE`.
+ * muse.np: native packed-f64 subset + per-stmt host_eval (`WasmNpEligibility`, docs/WASM_NP.md).
  */
 class StrategyWasmBackend {
 	#if js

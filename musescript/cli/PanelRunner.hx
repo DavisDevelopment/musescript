@@ -28,12 +28,20 @@ import musescript.runtime.MuseRuntime;
  *
  * Prefer GeneRunner `--panel` / `--tapes` for a unified CLI; this entry remains
  * for existing PanelFitnessHost callers.
+ *
+ * Ingest: `--ingest` with `--fs-root` / `--fixture-dir` / `--http` / `--grants`
+ * (same as GeneRunner) — no `--panel`/`--tapes` required for that path.
  */
 class PanelRunner {
 	static function argVal(name:String, def:String):String {
 		var a = Sys.args();
 		for (i in 0...a.length) if (a[i] == name && i + 1 < a.length) return a[i + 1];
 		return def;
+	}
+
+	static function argFlag(name:String):Bool {
+		for (a in Sys.args()) if (a == name) return true;
+		return false;
 	}
 
 	/** Default-true boolean flag: absent -> def; bare flag -> true;
@@ -74,15 +82,26 @@ class PanelRunner {
 		if (Math.isNaN(costBps)) costBps = 0;
 		var fillNextOpen = argBool("--fill-next-open", true);
 		var seed = intArg("--seed", 42);
-
-		if (tapesArg == "" && panelPath == "") {
-			emit({ ok: false, error: "PanelRunner: --tapes SYM=path[,SYM=path...] or --panel <json|csv|dir> is required" });
-			return;
-		}
+		var ingestMode = argFlag("--ingest");
+		var httpMode = argVal("--http", "");
+		var fsRoot = argVal("--fs-root", "");
+		var fixtureDir = argVal("--fixture-dir", "");
+		var allowHosts = argVal("--allow-hosts", "");
+		var grantsPath = argVal("--grants", "");
 
 		var source = sourcePath != "" ? readFile(sourcePath) : readStdin();
 		if (StringTools.trim(source) == "") {
 			emit({ ok: false, error: "PanelRunner: empty strategy source (--source file or stdin)" });
+			return;
+		}
+
+		if (ingestMode) {
+			emit(runIngestCli(source, grantsPath, fsRoot, fixtureDir, allowHosts, httpMode));
+			return;
+		}
+
+		if (tapesArg == "" && panelPath == "") {
+			emit({ ok: false, error: "PanelRunner: --tapes SYM=path[,SYM=path...] or --panel <json|csv|dir> is required" });
 			return;
 		}
 
@@ -99,7 +118,8 @@ class PanelRunner {
 			fillNextOpen: fillNextOpen,
 			initialCash: 100000,
 			instrument: false,
-			seed: seed
+			seed: seed,
+			fitness: true
 		});
 		// Echo the honesty-relevant settings so the JSON line is self-describing.
 		Reflect.setField(res, "costBps", costBps);
@@ -107,6 +127,50 @@ class PanelRunner {
 		Reflect.setField(res, "seed", seed);
 		Reflect.setField(res, "panelSymbols", symbols);
 		emit(res);
+	}
+
+	static function runIngestCli(
+		source:String, grantsPath:String, fsRoot:String, fixtureDir:String,
+		allowHosts:String, httpMode:String
+	):Dynamic {
+		var grantOpts:Dynamic = {};
+		if (grantsPath != "") {
+			try {
+				Reflect.setField(grantOpts, "grants", musescript.io.CliIoGrants.parseJson(readFile(grantsPath)));
+			} catch (e:Dynamic) {
+				return { ok: false, error: "PanelRunner --grants: " + Std.string(e) };
+			}
+		}
+		if (fsRoot != "") {
+			#if (sys || nodejs)
+			Reflect.setField(grantOpts, "fsRoot", sys.FileSystem.absolutePath(fsRoot));
+			#else
+			Reflect.setField(grantOpts, "fsRoot", fsRoot);
+			#end
+		}
+		if (fixtureDir != "") {
+			#if (sys || nodejs)
+			Reflect.setField(grantOpts, "fixtureDir", sys.FileSystem.absolutePath(fixtureDir));
+			#else
+			Reflect.setField(grantOpts, "fixtureDir", fixtureDir);
+			#end
+		}
+		if (allowHosts != "") Reflect.setField(grantOpts, "allowHosts", allowHosts);
+		if (httpMode != "") Reflect.setField(grantOpts, "http", httpMode);
+		var grants = musescript.io.CliIoGrants.fromOpts(grantOpts);
+		if (grants == null)
+			return {
+				ok: false,
+				error: "PanelRunner --ingest requires --grants JSON and/or --fs-root / --fixture-dir"
+			};
+		var opts:Dynamic = {
+			grants: grants,
+			kind: "ingest",
+			isBacktest: false,
+			fitness: false
+		};
+		if (httpMode != "") Reflect.setField(opts, "http", httpMode);
+		return MuseRuntime.runIngest(source, opts);
 	}
 
 	static function emit(o:Dynamic):Void {

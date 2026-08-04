@@ -145,6 +145,14 @@ class GrowableFloatImpl implements IGrowableVec<Float> {
 		data = next;
 		#end
 	}
+
+	/**
+	 * Zero-copy 1-D `NdArrayF64` view of the live prefix. Mutations alias.
+	 * Capacity growth reallocates — call again after `push` that grow the store.
+	 */
+	public function asNdArrayView():musescript.ndarray.NdArrayF64 {
+		return musescript.ndarray.NdArrayF64.aliasBuffer(data, [length], 0);
+	}
 }
 
 /** Generic fallback for every T that isn't Float (this codebase's `@:structInit` pair classes,

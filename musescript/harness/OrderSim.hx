@@ -97,9 +97,12 @@ class OrderSim {
 	/**
 	 * Single entry point for the strategy verbs (`long`/`short`/`flat`) across
 	 * every execution tier. `arg` is either a plain qty (legacy immediate
-	 * close-fill path, bit-identical to historical behavior) or an order-spec
-	 * object `{ type: "limit"|"stop"|"market", ?px, ?qty, ?tifBars }`, which
-	 * goes to the pending book and fills on FUTURE bars only.
+	 * close-fill path, bit-identical to historical behavior), an order-spec
+	 * object `{ type: "limit"|"stop"|"market", ?px, ?qty, ?tifBars, ?groupId,
+	 * ?onFill }` (pending book, future bars only), a bracket sugar object
+	 * `{ ?type, ?px, ?qty, bracket: { ?stop/{px|dist}, ?limit/{px|dist},
+	 * link: "oco" } }` (entry + OCO exit flats), or — for `flat` only —
+	 * `{ qty }` / `{ frac }` for immediate partial scale-out (no `type` key).
 	 */
 	/** If `arg` is a string LABEL, bump its per-tag fire count and return true (so the caller treats
 	 * it as no order spec / auto-size). The single choke point every order surface routes tags through
@@ -116,8 +119,19 @@ class OrderSim {
 		// (per-tag fire counts surface in the result JSON) and fall through to a normal auto-sized
 		// order. Diagnoses "silent no-op exit layers" -- a tag with count 0/absent never triggered.
 		if (noteTag(arg)) arg = null;
+		// Bracket sugar: expand before the plain typed-spec path (entry may also carry type/px).
+		if (arg != null && Reflect.hasField(arg, "bracket")) {
+			placeBracket(kind, arg, closePx, barIndex);
+			return;
+		}
 		if (arg != null && Reflect.hasField(arg, "type")) {
 			book.place(kind, arg, barIndex);
+			return;
+		}
+		// Immediate partial flat: `flat({qty:n})` / `flat({frac:f})` — no `type`, so not a book order.
+		if ((kind == "flat" || kind == "close") && arg != null && isPartialFlatSpec(arg)) {
+			var q = resolvePartialFlatQty(arg, position);
+			flat(closePx, barIndex, q);
 			return;
 		}
 		var qty:Float = arg == null ? Math.NaN : (arg : Float);
@@ -127,6 +141,120 @@ class OrderSim {
 			case "flat" | "close": flat(closePx, barIndex);
 			default:
 		}
+	}
+
+	/**
+	 * Expand `long|short({ …, bracket: { stop?, limit?, link: "oco" } })` into
+	 * a pending entry plus OCO exit flats. Absolute `px` or relative `dist`
+	 * (from `closePx` at place time): long stop = ref−dist / limit = ref+dist;
+	 * short mirrors. Entry has no cancel_group; stop+limit share one groupId.
+	 * Book latency unchanged (first eligible bar t+1).
+	 */
+	function placeBracket(kind:String, arg:Dynamic, closePx:Float, barIndex:Int):Void {
+		if (kind != "long" && kind != "short")
+			throw 'bracket: only long/short support bracket sugar (got $kind)';
+		var bracket:Dynamic = Reflect.field(arg, "bracket");
+		if (bracket == null)
+			throw "bracket: bracket object is required";
+		var rawLink:Dynamic = Reflect.field(bracket, "link");
+		var link = rawLink == null ? "oco" : Std.string(rawLink);
+		if (link != "oco")
+			throw 'bracket: unknown link "$link" (expected oco)';
+		var stopLeg:Dynamic = Reflect.field(bracket, "stop");
+		var limitLeg:Dynamic = Reflect.field(bracket, "limit");
+		if (stopLeg == null && limitLeg == null)
+			throw "bracket: need at least one of stop | limit";
+
+		var isLong = kind == "long";
+		var entryType = "market";
+		var rawType:Dynamic = Reflect.field(arg, "type");
+		if (rawType != null) entryType = Std.string(rawType);
+		var entrySpec:Dynamic = { type: entryType };
+		var rawQty:Dynamic = Reflect.field(arg, "qty");
+		var qty:Null<Float> = null;
+		if (rawQty != null) {
+			qty = (rawQty : Float);
+			Reflect.setField(entrySpec, "qty", qty);
+		}
+		var rawPx:Dynamic = Reflect.field(arg, "px");
+		if (rawPx != null) Reflect.setField(entrySpec, "px", rawPx);
+		var rawTif:Dynamic = Reflect.field(arg, "tifBars");
+		if (rawTif != null) Reflect.setField(entrySpec, "tifBars", rawTif);
+		book.place(kind, entrySpec, barIndex);
+
+		var gid = book.allocGroupId();
+		if (stopLeg != null) {
+			var stopPx = resolveBracketLegPx(stopLeg, closePx, isLong, true);
+			var stopSpec:Dynamic = {
+				type: "stop", px: stopPx, groupId: gid, onFill: "cancel_group"
+			};
+			if (qty != null) Reflect.setField(stopSpec, "qty", qty);
+			book.place("flat", stopSpec, barIndex);
+		}
+		if (limitLeg != null) {
+			var limPx = resolveBracketLegPx(limitLeg, closePx, isLong, false);
+			var limSpec:Dynamic = {
+				type: "limit", px: limPx, groupId: gid, onFill: "cancel_group"
+			};
+			if (qty != null) Reflect.setField(limSpec, "qty", qty);
+			book.place("flat", limSpec, barIndex);
+		}
+	}
+
+	/** Resolve `{ px }` or `{ dist }` for a bracket exit leg against place-time ref. */
+	static function resolveBracketLegPx(leg:Dynamic, refPx:Float, isLong:Bool, isStop:Bool):Float {
+		var rawPx:Dynamic = Reflect.field(leg, "px");
+		var rawDist:Dynamic = Reflect.field(leg, "dist");
+		if (rawPx != null && rawDist != null)
+			throw "bracket: leg needs exactly one of px | dist (got both)";
+		if (rawPx != null) {
+			var px:Float = rawPx;
+			if (Math.isNaN(px) || !Math.isFinite(px) || px <= 0)
+				throw 'bracket: px must be a positive finite number (got $px)';
+			return px;
+		}
+		if (rawDist != null) {
+			var dist:Float = rawDist;
+			if (Math.isNaN(dist) || !Math.isFinite(dist) || dist <= 0)
+				throw 'bracket: dist must be a positive finite number (got $dist)';
+			if (Math.isNaN(refPx) || !Math.isFinite(refPx) || refPx <= 0)
+				throw 'bracket: cannot resolve dist without a positive ref price (got $refPx)';
+			var px = if (isLong)
+				(isStop ? refPx - dist : refPx + dist)
+			else
+				(isStop ? refPx + dist : refPx - dist);
+			if (px <= 0)
+				throw 'bracket: resolved px $px is not positive (ref=$refPx dist=$dist)';
+			return px;
+		}
+		throw "bracket: leg needs exactly one of px | dist";
+	}
+
+	static function isPartialFlatSpec(arg:Dynamic):Bool {
+		if (Std.isOfType(arg, String) || Std.isOfType(arg, Float) || Std.isOfType(arg, Int) || Std.isOfType(arg, Bool))
+			return false;
+		return Reflect.hasField(arg, "qty") || Reflect.hasField(arg, "frac");
+	}
+
+	/** Shares to close from `{qty}` or `{frac}` given current signed `position`. */
+	static function resolvePartialFlatQty(arg:Dynamic, position:Float):Float {
+		var abs = Math.abs(position);
+		if (abs == 0) return 0;
+		var rawQty:Dynamic = Reflect.field(arg, "qty");
+		if (rawQty != null) {
+			var q:Float = rawQty;
+			if (Math.isNaN(q) || !Math.isFinite(q) || q <= 0)
+				throw 'flat: qty must be a positive finite number (got $q)';
+			return Math.min(q, abs);
+		}
+		var rawFrac:Dynamic = Reflect.field(arg, "frac");
+		if (rawFrac != null) {
+			var f:Float = rawFrac;
+			if (Math.isNaN(f) || !Math.isFinite(f) || f <= 0 || f > 1)
+				throw 'flat: frac must be in (0, 1] (got $f)';
+			return abs * f;
+		}
+		return abs;
 	}
 
 	/** `qty` NaN means auto-size on fill; `barIndex` -1 means "unknown" -- see `pendingQty`'s doc
@@ -148,12 +276,14 @@ class OrderSim {
 		executeShort(price, qty, barIndex);
 	}
 
-	public function flat(price:Float, barIndex:Int):Void {
+	/** `qty` NaN = close the full position (legacy). Otherwise close min(|position|, qty). */
+	public function flat(price:Float, barIndex:Int, ?qty:Float):Void {
+		var q = qty == null ? Math.NaN : qty;
 		if (executionMode == "next-open") {
-			queue("flat", Math.NaN);
+			queue("flat", q);
 			return;
 		}
-		executeFlat(price, barIndex);
+		executeFlat(price, barIndex, q);
 	}
 
 	/**
@@ -172,7 +302,7 @@ class OrderSim {
 			switch (kind) {
 				case "long": executeLong(open, qty, barIndex);
 				case "short": executeShort(open, qty, barIndex);
-				case "flat": executeFlat(open, barIndex);
+				case "flat": executeFlat(open, barIndex, qty);
 				default:
 			}
 		}
@@ -185,9 +315,9 @@ class OrderSim {
 			// expecting exactly one slip application, not two compounded).
 			for (f in book.evalBar(open, h, l, barIndex, position)) {
 				switch (f.kind) {
-					case "long": executeLong(f.price, f.qty, barIndex);
-					case "short": executeShort(f.price, f.qty, barIndex);
-					case "flat": executeFlat(f.price, barIndex);
+					case "long": executeLong(f.price, f.qty == null ? Math.NaN : f.qty, barIndex);
+					case "short": executeShort(f.price, f.qty == null ? Math.NaN : f.qty, barIndex);
+					case "flat": executeFlat(f.price, barIndex, f.qty == null ? Math.NaN : f.qty);
 					default:
 				}
 			}
@@ -258,6 +388,9 @@ class OrderSim {
 	 * one position). A NORMAL explicit qty (`long(1)`, `long(2)`, ...) is essentially always well
 	 * under 25% of a $100k+ account regardless of price, so this is a no-op for every legitimate
 	 * strategy shape -- it only ever binds on an already-unreasonable request.
+	 *
+	 * muse.np helpers (`vol_target_qty` / `mask_qty`) return **requested** qty only; they do not
+	 * bypass this clamp. Prefer them for evo-safe sizing, but `size = volume` remains sim-capped.
 	 */
 	static inline var MAX_POSITION_FRACTION = 0.25;
 
@@ -302,17 +435,28 @@ class OrderSim {
 		if (recordFills) fills.push({ kind: "short", bar: barIndex, price: px, qty: q, pnl: 0.0 });
 	}
 
-	function executeFlat(price:Float, barIndex:Int):Void {
+	/**
+	 * Close `qty` shares of the current position (NaN/`abs(position)` = full flat).
+	 * Partial closes keep the remainder's cost basis; `entryBar` clears only when fully flat.
+	 */
+	function executeFlat(price:Float, barIndex:Int, ?qty:Float):Void {
 		if (position == 0) return;
+		var absPos = Math.abs(position);
+		var closeAbs = absPos;
+		if (qty != null && !Math.isNaN(qty)) {
+			if (qty <= 0) return;
+			closeAbs = Math.min(qty, absPos);
+		}
+		if (closeAbs <= 0) return;
 		var px = slip(price, position < 0); // closing a short covers (buy); closing a long sells
-		var pnl = position * (px - entryPrice);
+		var signedClose = position > 0 ? closeAbs : -closeAbs;
+		var pnl = signedClose * (px - entryPrice);
 		if (pnl > 0) wins++;
-		var closed = position;
-		cash += position * px;
-		position = 0;
-		entryBar = -1;
+		cash += signedClose * px;
+		position -= signedClose;
+		if (position == 0) entryBar = -1;
 		trades++;
-		if (recordFills) fills.push({ kind: "flat", bar: barIndex, price: px, qty: closed, pnl: pnl });
+		if (recordFills) fills.push({ kind: "flat", bar: barIndex, price: px, qty: signedClose, pnl: pnl });
 	}
 
 	/**

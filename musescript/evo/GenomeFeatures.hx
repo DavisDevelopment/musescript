@@ -48,7 +48,7 @@ class GenomeFeatures {
 			case KFeature(expr): isPositionFeature(expr);
 			case KArith(_, a, b): scalarCoupled(a) || scalarCoupled(b);
 			case KHole(inner): scalarCoupled(inner);
-			case KSeries(_) | KLookback(_, _) | KConst(_) | KParam(_): false;
+			case KSeries(_) | KLookback(_, _) | KConst(_) | KParam(_) | KNp(_, _, _, _) | KPd(_, _, _, _, _): false;
 		};
 	}
 
@@ -118,9 +118,12 @@ class GenomeFeatures {
 				collectScalar(b, cond, all, fed);
 			case KSeries(s) | KLookback(s, _):
 				collectSeries(s, cond, all, fed);
+			case KNp(_, a, _, b):
+				collectSeries(a, cond, all, fed);
+				if (b != null) collectSeries(b, cond, all, fed);
 			case KHole(inner):
 				collectScalar(inner, cond, all, fed);
-			case KConst(_) | KParam(_) | KFeature(_):
+			case KConst(_) | KParam(_) | KFeature(_) | KPd(_, _, _, _, _):
 		}
 	}
 

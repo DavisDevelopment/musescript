@@ -15,6 +15,13 @@ import musescript.builtins.TradeBuiltins;
 import musescript.builtins.StringBuiltins;
 import musescript.builtins.StatsBuiltins;
 import musescript.builtins.MlBuiltins;
+import musescript.builtins.NpBuiltins;
+import musescript.builtins.PdBuiltins;
+import musescript.builtins.PathBuiltins;
+import musescript.builtins.RegexBuiltins;
+import musescript.builtins.FsBuiltins;
+import musescript.builtins.HttpBuiltins;
+import musescript.harness.DiagPack;
 import musescript.builtins.GraphBuiltins;
 import musescript.builtins.DictBuiltins;
 import musescript.builtins.SetBuiltins;
@@ -422,19 +429,17 @@ class JsBackend {
 			return dispatchBuiltin(harness, name, [a, b, c4, d]);
 		});
 		#end
-		Reflect.setField(api, "long", function(?qty:Float) {
+		Reflect.setField(api, "long", function(?arg:Dynamic) {
 			if (harness.currentBar != null)
-				harness.orders.long(harness.currentBar.close, qty, harness.currentBar.index);
+				harness.orders.submit("long", arg, harness.currentBar.close, harness.currentBar.index);
 		});
-		Reflect.setField(api, "short", function(?qty:Float) {
+		Reflect.setField(api, "short", function(?arg:Dynamic) {
 			if (harness.currentBar != null)
-				harness.orders.short(harness.currentBar.close, qty, harness.currentBar.index);
+				harness.orders.submit("short", arg, harness.currentBar.close, harness.currentBar.index);
 		});
-		Reflect.setField(api, "flat", function(?tag:Dynamic) {
-			if (harness.currentBar != null) {
-				harness.orders.noteTag(tag); // record a `flat("label")` fire (exit-layer diagnostics)
-				harness.orders.flat(harness.currentBar.close, harness.currentBar.index);
-			}
+		Reflect.setField(api, "flat", function(?arg:Dynamic) {
+			if (harness.currentBar != null)
+				harness.orders.submit("flat", arg, harness.currentBar.close, harness.currentBar.index);
 		});
 		Reflect.setField(api, "position", function() return harness.orders.positionSize());
 		Reflect.setField(api, "entry_price", function() return harness.orders.entryPrice);
@@ -626,6 +631,164 @@ class JsBackend {
 		// arity 4
 		Reflect.setField(f4, "macd", function(a:Dynamic, b:Dynamic, c:Dynamic, d:Dynamic)
 			return TradeBuiltins.macd(harness, a, Std.int(b), Std.int(c), Std.int(d)));
+		// muse.np / np_* common arities → NpBuiltins (parity with dispatchBuiltin)
+		Reflect.setField(f1, "np_zeros", function(a:Dynamic) return NpBuiltins.zeros(a));
+		Reflect.setField(f1, "np_ones", function(a:Dynamic) return NpBuiltins.ones(a));
+		Reflect.setField(f1, "np_asarray", function(a:Dynamic) return NpBuiltins.asarray(a));
+		Reflect.setField(f1, "np_shape", function(a:Dynamic) return NpBuiltins.shapeOf(a));
+		Reflect.setField(f1, "np_ndim", function(a:Dynamic) return NpBuiltins.ndimOf(a));
+		Reflect.setField(f1, "np_size", function(a:Dynamic) return NpBuiltins.sizeOf(a));
+		Reflect.setField(f1, "np_sum", function(a:Dynamic) return NpBuiltins.sum(a));
+		Reflect.setField(f1, "np_mean", function(a:Dynamic) return NpBuiltins.mean(a));
+		Reflect.setField(f1, "np_abs", function(a:Dynamic) return NpBuiltins.abs(a));
+		Reflect.setField(f1, "np_sqrt", function(a:Dynamic) return NpBuiltins.sqrt(a));
+		Reflect.setField(f1, "np_exp", function(a:Dynamic) return NpBuiltins.exp(a));
+		Reflect.setField(f1, "np_log", function(a:Dynamic) return NpBuiltins.log(a));
+		Reflect.setField(f1, "np_transpose", function(a:Dynamic) return NpBuiltins.transpose(a));
+		Reflect.setField(f1, "np_arange", function(a:Dynamic) return NpBuiltins.arange(a));
+		Reflect.setField(f1, "np_copy", function(a:Dynamic) return NpBuiltins.copy(a));
+		Reflect.setField(f1, "np_bool", function(a:Dynamic) return NpBuiltins.asBool(a));
+		Reflect.setField(f1, "np_is_c_contiguous", function(a:Dynamic) return NpBuiltins.isCContiguous(a));
+		Reflect.setField(f2, "np_astype", function(a:Dynamic, b:Dynamic) return NpBuiltins.astype(a, b));
+		Reflect.setField(f1, "np_dtype", function(a:Dynamic) return NpBuiltins.dtypeOf(a));
+		Reflect.setField(f2, "np_add", function(a:Dynamic, b:Dynamic) return NpBuiltins.add(a, b));
+		Reflect.setField(f2, "np_subtract", function(a:Dynamic, b:Dynamic) return NpBuiltins.subtract(a, b));
+		Reflect.setField(f2, "np_multiply", function(a:Dynamic, b:Dynamic) return NpBuiltins.multiply(a, b));
+		Reflect.setField(f2, "np_divide", function(a:Dynamic, b:Dynamic) return NpBuiltins.divide(a, b));
+		Reflect.setField(f2, "np_matmul", function(a:Dynamic, b:Dynamic) return NpBuiltins.matmul(a, b));
+		Reflect.setField(f2, "np_dot", function(a:Dynamic, b:Dynamic) return NpBuiltins.dot(a, b));
+		Reflect.setField(f2, "np_reshape", function(a:Dynamic, b:Dynamic) return NpBuiltins.reshape(a, b));
+		Reflect.setField(f2, "np_full", function(a:Dynamic, b:Dynamic) return NpBuiltins.full(a, b));
+		Reflect.setField(f2, "np_arange", function(a:Dynamic, b:Dynamic) return NpBuiltins.arange(a, b));
+		Reflect.setField(f2, "np_greater", function(a:Dynamic, b:Dynamic) return NpBuiltins.greater(a, b));
+		Reflect.setField(f2, "np_equal", function(a:Dynamic, b:Dynamic) return NpBuiltins.equal(a, b));
+		Reflect.setField(f2, "np_sum", function(a:Dynamic, b:Dynamic) return NpBuiltins.sum(a, b));
+		Reflect.setField(f2, "np_compress", function(a:Dynamic, b:Dynamic) return NpBuiltins.compress(a, b));
+		Reflect.setField(f2, "np_take", function(a:Dynamic, b:Dynamic) return NpBuiltins.take(a, b));
+		Reflect.setField(f2, "np_gather", function(a:Dynamic, b:Dynamic) return NpBuiltins.gather(a, b));
+		Reflect.setField(f3, "np_arange", function(a:Dynamic, b:Dynamic, c:Dynamic) return NpBuiltins.arange(a, b, c));
+		Reflect.setField(f3, "np_where", function(a:Dynamic, b:Dynamic, c:Dynamic) return NpBuiltins.where(a, b, c));
+		Reflect.setField(f3, "np_clip", function(a:Dynamic, b:Dynamic, c:Dynamic) return NpBuiltins.clip(a, b, c));
+		Reflect.setField(f3, "np_sum", function(a:Dynamic, b:Dynamic, c:Dynamic) return NpBuiltins.sum(a, b, c));
+		Reflect.setField(f3, "np_swapaxes", function(a:Dynamic, b:Dynamic, c:Dynamic) return NpBuiltins.swapaxes(a, b, c));
+		Reflect.setField(f3, "np_assign_where", function(a:Dynamic, b:Dynamic, c:Dynamic) return NpBuiltins.assignWhere(a, b, c));
+		Reflect.setField(f3, "np_slice", function(a:Dynamic, b:Dynamic, c:Dynamic) return NpBuiltins.slice(a, b, c));
+		Reflect.setField(f3, "np_take", function(a:Dynamic, b:Dynamic, c:Dynamic) return NpBuiltins.take(a, b, c));
+		Reflect.setField(f3, "np_take_along", function(a:Dynamic, b:Dynamic, c:Dynamic) return NpBuiltins.takeAlong(a, b, c));
+		Reflect.setField(f4, "np_slice", function(a:Dynamic, b:Dynamic, c:Dynamic, d:Dynamic)
+			return NpBuiltins.slice(a, b, c, d));
+		Reflect.setField(f4, "np_slice_axis", function(a:Dynamic, b:Dynamic, c:Dynamic, d:Dynamic)
+			return NpBuiltins.sliceAxis(a, b, c, d));
+		// Risk / sizing helpers (WASM → host_eval; hotter paths via FLAT_NAMES / dispatch)
+		Reflect.setField(f2, "np_rolling_log_vol", function(a:Dynamic, b:Dynamic) return NpBuiltins.rollingLogVol(a, b));
+		Reflect.setField(f2, "np_mask_qty", function(a:Dynamic, b:Dynamic) return NpBuiltins.maskQty(a, b));
+		Reflect.setField(f3, "np_vol_target_qty", function(a:Dynamic, b:Dynamic, c:Dynamic)
+			return NpBuiltins.volTargetQty(a, b, c));
+		Reflect.setField(f3, "np_mask_qty", function(a:Dynamic, b:Dynamic, c:Dynamic)
+			return NpBuiltins.maskQty(a, b, c));
+		Reflect.setField(f3, "np_rolling_log_vol", function(a:Dynamic, b:Dynamic, c:Dynamic)
+			return NpBuiltins.rollingLogVol(a, b, c));
+		Reflect.setField(f4, "np_vol_target_qty", function(a:Dynamic, b:Dynamic, c:Dynamic, d:Dynamic)
+			return NpBuiltins.volTargetQty(a, b, c, d));
+		Reflect.setField(f4, "np_mask_qty", function(a:Dynamic, b:Dynamic, c:Dynamic, d:Dynamic)
+			return NpBuiltins.maskQty(a, b, c, d));
+		// slice_axis with step / vol_target 5–7-arg uses api.call / Reflect via FLAT_NAMES
+		// muse.pd / pd_* common arities
+		Reflect.setField(f1, "pd_from_columns", function(a:Dynamic) return PdBuiltins.fromColumns(a));
+		Reflect.setField(f1, "pd_from_ndarray", function(a:Dynamic) return PdBuiltins.fromNdArray(a));
+		Reflect.setField(f1, "pd_shape", function(a:Dynamic) return PdBuiltins.shapeOf(a));
+		Reflect.setField(f1, "pd_columns", function(a:Dynamic) return PdBuiltins.columnsOf(a));
+		Reflect.setField(f1, "pd_nrows", function(a:Dynamic) return PdBuiltins.nrowsOf(a));
+		Reflect.setField(f1, "pd_ncols", function(a:Dynamic) return PdBuiltins.ncolsOf(a));
+		Reflect.setField(f1, "pd_index", function(a:Dynamic) return PdBuiltins.indexOf(a));
+		Reflect.setField(f1, "pd_copy", function(a:Dynamic) return PdBuiltins.copyOf(a));
+		Reflect.setField(f1, "pd_to_ndarray", function(a:Dynamic) return PdBuiltins.toNdArray(a));
+		Reflect.setField(f1, "pd_series_values", function(a:Dynamic) return PdBuiltins.seriesValues(a));
+		Reflect.setField(f1, "pd_series_name", function(a:Dynamic) return PdBuiltins.seriesName(a));
+		Reflect.setField(f1, "pd_series_length", function(a:Dynamic) return PdBuiltins.seriesLength(a));
+		Reflect.setField(f1, "pd_index_kind", function(a:Dynamic) return PdBuiltins.indexKind(a));
+		Reflect.setField(f1, "pd_index_range", function(a:Dynamic) return PdBuiltins.indexRange(a));
+		Reflect.setField(f1, "pd_index_floats", function(a:Dynamic) return PdBuiltins.indexFloats(a));
+		Reflect.setField(f1, "pd_index_strings", function(a:Dynamic) return PdBuiltins.indexStrings(a));
+		Reflect.setField(f1, "pd_from_bars", function(a:Dynamic) return PdBuiltins.fromBars(a));
+		Reflect.setField(f1, "pd_from_panel", function(a:Dynamic) return PdBuiltins.fromPanel(a));
+		Reflect.setField(f1, "pd_series", function(a:Dynamic) return PdBuiltins.series(a));
+		Reflect.setField(f1, "pd_empty", function(a:Dynamic) return PdBuiltins.empty(a));
+		Reflect.setField(f1, "pd_head", function(a:Dynamic) return PdBuiltins.headOf(a));
+		Reflect.setField(f1, "pd_tail", function(a:Dynamic) return PdBuiltins.tailOf(a));
+		Reflect.setField(f2, "pd_get", function(a:Dynamic, b:Dynamic) return PdBuiltins.getCol(a, b));
+		Reflect.setField(f2, "pd_select", function(a:Dynamic, b:Dynamic) return PdBuiltins.select(a, b));
+		Reflect.setField(f2, "pd_drop", function(a:Dynamic, b:Dynamic) return PdBuiltins.drop(a, b));
+		Reflect.setField(f2, "pd_iloc", function(a:Dynamic, b:Dynamic) return PdBuiltins.iloc(a, b));
+		Reflect.setField(f2, "pd_from_columns", function(a:Dynamic, b:Dynamic) return PdBuiltins.fromColumns(a, b));
+		Reflect.setField(f2, "pd_from_ndarray", function(a:Dynamic, b:Dynamic) return PdBuiltins.fromNdArray(a, b));
+		Reflect.setField(f2, "pd_empty", function(a:Dynamic, b:Dynamic) return PdBuiltins.empty(a, b));
+		Reflect.setField(f2, "pd_head", function(a:Dynamic, b:Dynamic) return PdBuiltins.headOf(a, b));
+		Reflect.setField(f2, "pd_tail", function(a:Dynamic, b:Dynamic) return PdBuiltins.tailOf(a, b));
+		Reflect.setField(f2, "pd_series", function(a:Dynamic, b:Dynamic) return PdBuiltins.series(a, b));
+		Reflect.setField(f2, "pd_from_panel", function(a:Dynamic, b:Dynamic) return PdBuiltins.fromPanel(a, b));
+		Reflect.setField(f2, "pd_from_bar_column", function(a:Dynamic, b:Dynamic) return PdBuiltins.fromBarColumn(a, b));
+		Reflect.setField(f3, "pd_assign", function(a:Dynamic, b:Dynamic, c:Dynamic) return PdBuiltins.assign(a, b, c));
+		Reflect.setField(f3, "pd_from_columns", function(a:Dynamic, b:Dynamic, c:Dynamic) return PdBuiltins.fromColumns(a, b, c));
+		Reflect.setField(f3, "pd_from_ndarray", function(a:Dynamic, b:Dynamic, c:Dynamic) return PdBuiltins.fromNdArray(a, b, c));
+		Reflect.setField(f3, "pd_series", function(a:Dynamic, b:Dynamic, c:Dynamic) return PdBuiltins.series(a, b, c));
+		Reflect.setField(f3, "pd_from_bar_column", function(a:Dynamic, b:Dynamic, c:Dynamic) return PdBuiltins.fromBarColumn(a, b, c));
+		// M1 align / asof / na / concat / csv
+		Reflect.setField(f1, "pd_isna", function(a:Dynamic) return PdBuiltins.isna(a));
+		Reflect.setField(f1, "pd_concat", function(a:Dynamic) return PdBuiltins.concat(a));
+		Reflect.setField(f1, "pd_parse_csv", function(a:Dynamic) return PdBuiltins.parseCsv(a));
+		Reflect.setField(f1, "pd_read_csv", function(a:Dynamic) return PdBuiltins.readCsv(harness.ioGrants, a));
+		Reflect.setField(f1, "pd_dropna", function(a:Dynamic) return PdBuiltins.dropna(a));
+		Reflect.setField(f2, "pd_reindex", function(a:Dynamic, b:Dynamic) return PdBuiltins.reindex(a, b));
+		Reflect.setField(f2, "pd_align", function(a:Dynamic, b:Dynamic) return PdBuiltins.alignFrames(a, b));
+		Reflect.setField(f2, "pd_fillna", function(a:Dynamic, b:Dynamic) return PdBuiltins.fillna(a, b));
+		Reflect.setField(f2, "pd_dropna", function(a:Dynamic, b:Dynamic) return PdBuiltins.dropna(a, b));
+		Reflect.setField(f2, "pd_concat_cols", function(a:Dynamic, b:Dynamic) return PdBuiltins.concatCols(a, b));
+		Reflect.setField(f3, "pd_align", function(a:Dynamic, b:Dynamic, c:Dynamic) return PdBuiltins.alignFrames(a, b, c));
+		Reflect.setField(f3, "pd_join", function(a:Dynamic, b:Dynamic, c:Dynamic) return PdBuiltins.join(a, b, c));
+		Reflect.setField(f3, "pd_merge_asof", function(a:Dynamic, b:Dynamic, c:Dynamic) return PdBuiltins.mergeAsof(a, b, c));
+		Reflect.setField(f3, "pd_concat_cols", function(a:Dynamic, b:Dynamic, c:Dynamic) return PdBuiltins.concatCols(a, b, c));
+		Reflect.setField(f4, "pd_join", function(a:Dynamic, b:Dynamic, c:Dynamic, d:Dynamic) return PdBuiltins.join(a, b, c, d));
+		Reflect.setField(f4, "pd_merge_asof", function(a:Dynamic, b:Dynamic, c:Dynamic, d:Dynamic) return PdBuiltins.mergeAsof(a, b, c, d));
+		// M2 groupby / rank / windows
+		Reflect.setField(f1, "pd_shift", function(a:Dynamic) return PdBuiltins.shiftOf(a));
+		Reflect.setField(f1, "pd_diff", function(a:Dynamic) return PdBuiltins.diffOf(a));
+		Reflect.setField(f1, "pd_pct_change", function(a:Dynamic) return PdBuiltins.pctChangeOf(a));
+		Reflect.setField(f1, "pd_rank", function(a:Dynamic) return PdBuiltins.rankOf(a));
+		Reflect.setField(f1, "pd_xs_rank", function(a:Dynamic) return PdBuiltins.xsRank(a));
+		Reflect.setField(f2, "pd_groupby_mean", function(a:Dynamic, b:Dynamic) return PdBuiltins.groupbyMean(a, b));
+		Reflect.setField(f2, "pd_groupby_sum", function(a:Dynamic, b:Dynamic) return PdBuiltins.groupbySum(a, b));
+		Reflect.setField(f2, "pd_groupby_std", function(a:Dynamic, b:Dynamic) return PdBuiltins.groupbyStd(a, b));
+		Reflect.setField(f2, "pd_groupby_agg", function(a:Dynamic, b:Dynamic) return PdBuiltins.groupbyAgg(a, b));
+		Reflect.setField(f2, "pd_groupby_transform", function(a:Dynamic, b:Dynamic) return PdBuiltins.groupbyTransform(a, b));
+		Reflect.setField(f2, "pd_groupby_rank", function(a:Dynamic, b:Dynamic) return PdBuiltins.groupbyRank(a, b));
+		Reflect.setField(f2, "pd_shift", function(a:Dynamic, b:Dynamic) return PdBuiltins.shiftOf(a, b));
+		Reflect.setField(f2, "pd_diff", function(a:Dynamic, b:Dynamic) return PdBuiltins.diffOf(a, b));
+		Reflect.setField(f2, "pd_pct_change", function(a:Dynamic, b:Dynamic) return PdBuiltins.pctChangeOf(a, b));
+		Reflect.setField(f2, "pd_rank", function(a:Dynamic, b:Dynamic) return PdBuiltins.rankOf(a, b));
+		Reflect.setField(f2, "pd_xs_rank", function(a:Dynamic, b:Dynamic) return PdBuiltins.xsRank(a, b));
+		Reflect.setField(f2, "pd_rolling_mean", function(a:Dynamic, b:Dynamic) return PdBuiltins.rollingMeanOf(a, b));
+		Reflect.setField(f2, "pd_rolling_sum", function(a:Dynamic, b:Dynamic) return PdBuiltins.rollingSumOf(a, b));
+		Reflect.setField(f2, "pd_rolling_std", function(a:Dynamic, b:Dynamic) return PdBuiltins.rollingStdOf(a, b));
+		Reflect.setField(f2, "pd_ewm_mean", function(a:Dynamic, b:Dynamic) return PdBuiltins.ewmMeanOf(a, b));
+		Reflect.setField(f3, "pd_groupby_agg", function(a:Dynamic, b:Dynamic, c:Dynamic) return PdBuiltins.groupbyAgg(a, b, c));
+		Reflect.setField(f3, "pd_groupby_transform", function(a:Dynamic, b:Dynamic, c:Dynamic) return PdBuiltins.groupbyTransform(a, b, c));
+		Reflect.setField(f3, "pd_groupby_rank", function(a:Dynamic, b:Dynamic, c:Dynamic) return PdBuiltins.groupbyRank(a, b, c));
+		Reflect.setField(f3, "pd_rank", function(a:Dynamic, b:Dynamic, c:Dynamic) return PdBuiltins.rankOf(a, b, c));
+		Reflect.setField(f3, "pd_xs_rank", function(a:Dynamic, b:Dynamic, c:Dynamic) return PdBuiltins.xsRank(a, b, c));
+		Reflect.setField(f3, "pd_rolling_std", function(a:Dynamic, b:Dynamic, c:Dynamic) return PdBuiltins.rollingStdOf(a, b, c));
+		// M3 reshape / multi-key / corr
+		Reflect.setField(f1, "pd_corr", function(a:Dynamic) return PdBuiltins.corrOf(a));
+		Reflect.setField(f1, "pd_cov", function(a:Dynamic) return PdBuiltins.covOf(a));
+		Reflect.setField(f1, "pd_melt", function(a:Dynamic) return PdBuiltins.meltOf(a));
+		Reflect.setField(f2, "pd_cov", function(a:Dynamic, b:Dynamic) return PdBuiltins.covOf(a, b));
+		Reflect.setField(f2, "pd_melt", function(a:Dynamic, b:Dynamic) return PdBuiltins.meltOf(a, b));
+		Reflect.setField(f2, "pd_groupby_keys_agg", function(a:Dynamic, b:Dynamic) return PdBuiltins.groupbyKeysAgg(a, b));
+		Reflect.setField(f3, "pd_melt", function(a:Dynamic, b:Dynamic, c:Dynamic) return PdBuiltins.meltOf(a, b, c));
+		Reflect.setField(f3, "pd_groupby_keys_agg", function(a:Dynamic, b:Dynamic, c:Dynamic) return PdBuiltins.groupbyKeysAgg(a, b, c));
+		Reflect.setField(f4, "pd_pivot", function(a:Dynamic, b:Dynamic, c:Dynamic, d:Dynamic) return PdBuiltins.pivotOf(a, b, c, d));
+		Reflect.setField(f4, "pd_melt", function(a:Dynamic, b:Dynamic, c:Dynamic, d:Dynamic) return PdBuiltins.meltOf(a, b, c, d));
+		// pd_melt 5-arg (valueName) falls through FLAT_NAMES / dispatchBuiltin
 	}
 
 	static function installCachedIndicators(
@@ -853,11 +1016,21 @@ class JsBackend {
 	}
 
 	static function dispatchBuiltin(harness:HarnessContext, name:String, args:Array<Dynamic>):Dynamic {
+		if (StringTools.startsWith(name, "np_")) {
+			var fn:Dynamic = NpBuiltins.FLAT_NAMES.get(name);
+			if (fn != null) return Reflect.callMethod(null, fn, args);
+		}
+		if (StringTools.startsWith(name, "pd_")) {
+			if (name == "pd_read_csv")
+				return PdBuiltins.readCsv(harness.ioGrants, args.length > 0 ? args[0] : "");
+			var pfn:Dynamic = PdBuiltins.FLAT_NAMES.get(name);
+			if (pfn != null) return Reflect.callMethod(null, pfn, args);
+		}
 		return switch (name) {
 			case "sma": TradeBuiltins.sma(harness, args[0], Std.int(args[1]));
 			case "ema": TradeBuiltins.ema(harness, args[0], Std.int(args[1]));
 			case "rsi": TradeBuiltins.rsi(harness, args[0], Std.int(args[1]));
-			case "atr": builtinAtr(harness, args[0], Std.int(args[1]));
+			case "atr": args.length > 1 ? builtinAtr(harness, args[0], Std.int(args[1])) : builtinAtr(harness, null, Std.int(args[0]));
 			case "bbands":
 				TradeBuiltins.bbands(
 					harness,
@@ -939,6 +1112,68 @@ class JsBackend {
 			case "str_to_bool": StringBuiltins.toBool(args[0]);
 			case "str_from_float": StringBuiltins.fromFloat(args[0]);
 			case "str_from_bool": StringBuiltins.fromBool(args[0]);
+			case "str_fmt":
+				StringBuiltins.fmt(args[0], args.length > 1 ? args[1] : null);
+			case "path_join":
+				PathBuiltins.joinParts([for (a in args) a == null ? "" : Std.string(a)]);
+			case "path_normalize": PathBuiltins.normalize(args[0]);
+			case "path_basename": PathBuiltins.basename(args[0]);
+			case "path_dirname": PathBuiltins.dirname(args[0]);
+			case "path_ext": PathBuiltins.ext(args[0]);
+			case "path_is_absolute": PathBuiltins.isAbsolute(args[0]);
+			case "re_compile":
+				RegexBuiltins.compile(args[0], args.length > 1 ? args[1] : null);
+			case "re_test": RegexBuiltins.test(args[0], args[1]);
+			case "re_match": RegexBuiltins.matchOne(args[0], args[1]);
+			case "re_find_all":
+				RegexBuiltins.findAll(args[0], args[1], args.length > 2 ? args[2] : null);
+			case "re_replace":
+				RegexBuiltins.replace(args[0], args[1], args[2], args.length > 3 ? args[3] : null);
+			case "re_split":
+				RegexBuiltins.split(args[0], args[1], args.length > 2 ? args[2] : null);
+			case "fs_read_text": FsBuiltins.readText(harness.ioGrants, args[0]);
+			case "fs_write_text": FsBuiltins.writeText(harness.ioGrants, args[0], args[1]);
+			case "fs_append_text": FsBuiltins.appendText(harness.ioGrants, args[0], args[1]);
+			case "fs_exists": FsBuiltins.exists(harness.ioGrants, args[0]);
+			case "fs_is_dir": FsBuiltins.isDir(harness.ioGrants, args[0]);
+			case "fs_is_file": FsBuiltins.isFile(harness.ioGrants, args[0]);
+			case "fs_list": FsBuiltins.list(harness.ioGrants, args[0]);
+			case "fs_mkdir":
+				FsBuiltins.mkdir(harness.ioGrants, args[0], args.length > 1 ? args[1] : null);
+			case "http_request": HttpBuiltins.request(harness.ioGrants, harness, args[0]);
+			case "http_get":
+				HttpBuiltins.get(harness.ioGrants, harness, args[0], args.length > 1 ? args[1] : null);
+			case "http_post":
+				HttpBuiltins.post(
+					harness.ioGrants,
+					harness,
+					args[0],
+					args.length > 1 ? args[1] : null,
+					args.length > 2 ? args[2] : null
+				);
+			case "diag_running_max": DiagPack.runningMax(args[0]);
+			case "diag_drawdown": DiagPack.drawdownSeries(args[0]);
+			case "diag_acf":
+				DiagPack.acf(args[0], args.length > 1 && args[1] != null
+					? Std.int(args[1]) : DiagPack.DEFAULT_MAX_LAG);
+			case "diag_rolling_acf":
+				DiagPack.rollingAcf(
+					args[0],
+					args.length > 1 && args[1] != null ? Std.int(args[1]) : 40,
+					args.length > 2 && args[2] != null ? Std.int(args[2]) : 1);
+			case "diag_kiss":
+				DiagPack.toSummary(DiagPack.emitKiss(harness.chart,
+					args.length > 0 && args[0] != null ? args[0] : harness.orders.equity.toArray()));
+			case "diag_underwater":
+				DiagPack.toSummary(DiagPack.emitUnderwater(harness.chart,
+					args.length > 0 && args[0] != null ? args[0] : harness.orders.equity.toArray()));
+			case "diag_pack":
+				DiagPack.toSummary(DiagPack.emit(harness.chart,
+					args.length > 0 && args[0] != null ? args[0] : harness.orders.equity.toArray(),
+					{
+						maxLag: args.length > 1 && args[1] != null ? Std.int(args[1]) : null,
+						rollingWindow: args.length > 2 && args[2] != null ? Std.int(args[2]) : null
+					}));
 			case "ml_dot": MlBuiltins.dot(args[0], args[1]);
 			case "ml_sigmoid": MlBuiltins.sigmoid(args[0]);
 			case "ml_softmax": MlBuiltins.softmax(args[0]);
@@ -1185,6 +1420,22 @@ class JsBackend {
 				var biS = harness.currentBar != null ? harness.currentBar.index : -1;
 				harness.portfolio.sellAll(args[0], harness.panelPrice(args[0]), biS);
 				null;
+			case "portfolio_long":
+				musescript.builtins.PortfolioBuiltins.submitPanel(harness, "long", args[0],
+					args.length > 1 ? args[1] : null);
+				null;
+			case "portfolio_short":
+				musescript.builtins.PortfolioBuiltins.submitPanel(harness, "short", args[0],
+					args.length > 1 ? args[1] : null);
+				null;
+			case "portfolio_flat":
+				musescript.builtins.PortfolioBuiltins.submitPanel(harness, "flat", args[0],
+					args.length > 1 ? args[1] : null);
+				null;
+			case "portfolio_orders_pending":
+				harness.portfolio.pendingCount(args.length > 0 ? args[0] : null);
+			case "portfolio_orders_cancel_all":
+				harness.portfolio.cancelAll(args.length > 0 ? args[0] : null);
 			case "pos": harness.portfolio.positionOf(args[0]);
 			case "entry_of": harness.portfolio.entryOf(args[0]);
 			case "weight_of": harness.portfolio.weightOf(args[0], harness.panelPrices);
@@ -1346,8 +1597,8 @@ class JsBackend {
 			case "find": IterDriver.find(MuseIters.from(args[0]), Callables.asHost1(args[1], harness));
 			case "sum": IterDriver.sum(MuseIters.from(args[0]));
 			case "count": IterDriver.count(MuseIters.from(args[0]));
-			case "min": IterDriver.min(MuseIters.from(args[0]));
-			case "max": IterDriver.max(MuseIters.from(args[0]));
+			case "min": { if (args.length == 1) IterDriver.min(MuseIters.from(args[0])); else { var m:Float = args[0]; for (i in 1...args.length) { var v:Float = args[i]; if (v < m) m = v; } m; } };
+			case "max": { if (args.length == 1) IterDriver.max(MuseIters.from(args[0])); else { var m:Float = args[0]; for (i in 1...args.length) { var v:Float = args[i]; if (v > m) m = v; } m; } };
 			case "avg": IterDriver.avg(MuseIters.from(args[0]));
 			default:
 				// Ported Wickra indicators (musescript/indicators/lib/, ROADMAP.md

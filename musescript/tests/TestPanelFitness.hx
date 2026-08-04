@@ -190,6 +190,107 @@ class TestPanelFitness extends Test {
 		Fitness.preferNma = false;
 	}
 
+	/** Hand template: percentile xs_rank → target_weight on planted AAA↑/BBB↓ panel. */
+	static function pdRankTargetWeightGenome():StrategyGenome {
+		var pd = KPd("xs_rank", "mom", 5, "AAA", ["AAA", "BBB"]);
+		return {
+			name: "PdXsRankTw",
+			params: [],
+			entryLong: BCmp(">", pd, KConst(0.5)),
+			entryShort: BCmp(">", KConst(0.0), KConst(1.0)),
+			exitLong: BCmp("<=", pd, KConst(0.5)),
+			exitShort: BCmp(">", KConst(0.0), KConst(1.0)),
+			size: pd,
+			panelAction: PATargetWeight("AAA")
+		};
+	}
+
+	public function testPdXsRankPanelFitnessNonDegenerate() {
+		var panel = plantedPanel(80);
+		Fitness.configurePanel(panel);
+		var g = pdRankTargetWeightGenome();
+		Assert.isTrue(Fitness.usesPanelFitness(g));
+		var src = Expand.expand(g);
+		Assert.isTrue(src.indexOf("pd_xs_rank(") >= 0, src);
+		Assert.isTrue(src.indexOf("target_weight(") >= 0, src);
+		Assert.isTrue(src.indexOf("long(") < 0, src);
+		var fr = Fitness.evaluate(g, panel.all(), "js");
+		Assert.isTrue(fr.ok, fr.error + "\n" + src);
+		Assert.isTrue(fr.trades > 0, 'expected portfolio trades, got ${fr.trades}');
+		Assert.isTrue(Math.isFinite(fr.finalEquity));
+		Assert.isTrue(fr.finalEquity != 100000, 'equity should move off cash=${fr.finalEquity}');
+		Assert.isTrue(fr.backend != "nma");
+	}
+
+	public function testPdXsRankCoercesWithoutExplicitPanelAction() {
+		var panel = plantedPanel(60);
+		Fitness.configurePanel(panel);
+		var pd = KPd("xs_rank", "mom", 5, "AAA", ["AAA", "BBB"]);
+		var g:StrategyGenome = {
+			name: "PdCoerce",
+			params: [],
+			entryLong: BCmp(">", pd, KConst(0.5)),
+			entryShort: BCmp(">", KConst(0.0), KConst(1.0)),
+			exitLong: BCmp("<=", pd, KConst(0.5)),
+			exitShort: BCmp(">", KConst(0.0), KConst(1.0)),
+			size: pd
+			// no panelAction — Expand + Fitness still take panel path
+		};
+		Assert.isTrue(Fitness.usesPanelFitness(g));
+		Assert.isTrue(Expand.expand(g).indexOf("target_weight(") >= 0);
+		var fr = Fitness.evaluate(g, panel.all(), "js");
+		Assert.isTrue(fr.ok, fr.error);
+		Assert.isTrue(fr.trades > 0);
+	}
+
+	public function testEnginePdPlusPanelScoresGrownGenomes() {
+		var panel = plantedPanel(60);
+		var engine = new EvolutionEngine(13, 6, 1, 2);
+		engine.configureForPanel(panel);
+		engine.configureForPd(["xs_rank"]);
+		var pop = engine.seedPopulation(2);
+		var hit = false;
+		for (g in pop) {
+			var src = Expand.expand(g);
+			if (src.indexOf("pd_xs_rank(") < 0) continue;
+			hit = true;
+			Assert.isTrue(src.indexOf("long(") < 0, src);
+			var fr = Fitness.evaluate(g, panel.all(), "js");
+			Assert.isTrue(fr.ok, fr.error + "\n" + src);
+			Assert.isTrue(Math.isFinite(fr.finalEquity) || fr.trades >= 0);
+			break;
+		}
+		// seedPopulation(6) may miss PD; grow explicitly via Variation under same gates.
+		if (!hit) {
+			var v = new musescript.evo.Variation(13);
+			v.configureForUniverse(panel.symbols);
+			v.configureForPd(["xs_rank"]);
+			for (_ in 0...80) {
+				var g = v.randomGenome(2);
+				var src = Expand.expand(g);
+				if (src.indexOf("pd_xs_rank(") < 0) continue;
+				hit = true;
+				Assert.isTrue(src.indexOf("long(") < 0, src);
+				var fr = Fitness.evaluate(g, panel.all(), "js");
+				Assert.isTrue(fr.ok, fr.error + "\n" + src);
+				break;
+			}
+		}
+		Assert.isTrue(hit, "expected grown PD genome under configureForPanel + configureForPd");
+		Fitness.configurePanel(null);
+	}
+
+	public function testPdNmaFallsThroughToExpand() {
+		var panel = plantedPanel(50);
+		Fitness.configurePanel(panel);
+		Fitness.preferNma = true;
+		var fr = Fitness.evaluate(pdRankTargetWeightGenome(), panel.all(), "js");
+		Assert.isTrue(fr.ok, fr.error);
+		Assert.isTrue(fr.backend != "nma" && fr.backend.indexOf("nma") < 0, fr.backend);
+		Assert.isTrue(fr.trades > 0);
+		Fitness.preferNma = false;
+	}
+
 	#if (js || python)
 	public function testExpandPanelWasmAgreesWithInterp() {
 		if (!StrategyWasmBackend.hostReady()) return;

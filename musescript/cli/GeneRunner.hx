@@ -41,11 +41,16 @@ import musescript.murmuration.MurmurationTape;
  *   node build/js/gene-runner.js --optimize --source strat.ms --tape tape.csv
  *   node build/js/gene-runner.js --source scan.ms --panel data/fund_panel.json
  *   node build/js/gene-runner.js --source scan.ms --tapes AAPL=a.csv,MSFT=b.csv
+ *   node build/js/gene-runner.js --ingest --source ingest.ms --fs-root ./sandbox \
+ *     --fixture-dir ./fixtures --http replay --allow-hosts api.example.com
  *   echo "<src>" | node build/js/gene-runner.js --target wasm
  *
  * Panel mode (`--panel` / `--tapes`): portfolio `runPanelBacktest` via MuseRuntime.runPanel.
  * Offline only — JSON bySym (fund_panel_loader), long CSV with symbol column, dir of CSVs,
  * or SYM=path tapes. Attach the same PanelFeed in evo with EvolutionEngine.configureForPanel.
+ *
+ * Ingest mode (`--ingest`): FsGrant+NetGrant IO loop via `MuseRuntime.runIngest` — never the
+ * default fitness path. Write PIT CSVs under `--fs-root`, then re-run offline with grants null.
  */
 class GeneRunner {
 	static function argVal(name:String, def:String):String {
@@ -118,6 +123,12 @@ class GeneRunner {
 
 		var batchPath = argVal("--batch", "");
 		var panelMode = panelPath != "" || tapesArg != "";
+		var ingestMode = argFlag("--ingest");
+		var httpMode = argVal("--http", "");
+		var fsRoot = argVal("--fs-root", "");
+		var fixtureDir = argVal("--fixture-dir", "");
+		var allowHosts = argVal("--allow-hosts", "");
+		var grantsPath = argVal("--grants", "");
 
 		// --extract-cond: Forge's reverse projection (MuseAST -> Forge graph). Parses only -- no
 		// tape/backtest needed -- and returns the JSON-serialized condition expression of the
@@ -237,6 +248,10 @@ class GeneRunner {
 
 		var source = sourcePath != "" ? readFile(sourcePath) : readStdin();
 		try {
+			if (ingestMode) {
+				emit(runIngestCli(source, grantsPath, fsRoot, fixtureDir, allowHosts, httpMode));
+				return;
+			}
 			if (panelMode) {
 				if (optimizeFlag) {
 					emit({ ok: false, error: "GeneRunner: --optimize with --panel/--tapes is not supported yet" });
@@ -305,13 +320,49 @@ class GeneRunner {
 			fillNextOpen: fillNextOpen,
 			initialCash: startCapital,
 			instrument: instrument,
-			seed: seed
+			seed: seed,
+			fitness: true
 		});
 		Reflect.setField(res, "costBps", costBps);
 		Reflect.setField(res, "fillNextOpen", fillNextOpen);
 		Reflect.setField(res, "seed", seed);
 		Reflect.setField(res, "panelSymbols", panel.symbols);
 		return res;
+	}
+
+	/** `--ingest` → MuseRuntime.runIngest with CLI-built grants. */
+	static function runIngestCli(
+		source:String, grantsPath:String, fsRoot:String, fixtureDir:String,
+		allowHosts:String, httpMode:String
+	):Dynamic {
+		if (StringTools.trim(source) == "")
+			return { ok: false, error: "GeneRunner --ingest: empty source" };
+		var grantOpts:Dynamic = {};
+		if (grantsPath != "") {
+			try {
+				Reflect.setField(grantOpts, "grants", musescript.io.CliIoGrants.parseJson(readFile(grantsPath)));
+			} catch (e:Dynamic) {
+				return { ok: false, error: "GeneRunner --grants: " + Std.string(e) };
+			}
+		}
+		if (fsRoot != "") Reflect.setField(grantOpts, "fsRoot", sys.FileSystem.absolutePath(fsRoot));
+		if (fixtureDir != "") Reflect.setField(grantOpts, "fixtureDir", sys.FileSystem.absolutePath(fixtureDir));
+		if (allowHosts != "") Reflect.setField(grantOpts, "allowHosts", allowHosts);
+		if (httpMode != "") Reflect.setField(grantOpts, "http", httpMode);
+		var grants = musescript.io.CliIoGrants.fromOpts(grantOpts);
+		if (grants == null)
+			return {
+				ok: false,
+				error: "GeneRunner --ingest requires --grants JSON and/or --fs-root / --fixture-dir"
+			};
+		var opts:Dynamic = {
+			grants: grants,
+			kind: "ingest",
+			isBacktest: false,
+			fitness: false
+		};
+		if (httpMode != "") Reflect.setField(opts, "http", httpMode);
+		return MuseRuntime.runIngest(source, opts);
 	}
 
 	/** Default-true boolean flag: absent → def; bare `--flag` → true; `--flag false` → false. */
@@ -354,6 +405,8 @@ class GeneRunner {
 		}
 
 		var harness = new HarnessContext();
+		// Fitness / GeneRunner scoring path: never carry IO grants.
+		MuseRuntime.applyIoGrants(harness, { fitness: true });
 		harness.symbol = symbol;
 		harness.assetClass = assetClass;
 		harness.orders.executionMode = executionMode;

@@ -113,10 +113,10 @@ class TestNmaEval extends Test {
 		var rose = new NmaBCmp(">", delta, new NmaKConst(0.0));
 		assertColEquals([0.0, 1.0, 1.0, 0.0, 1.0], NmaEval.evalBool(rose, ctx), "rose>0 (NaN=>false)");
 
-		// min/max are single-arg reducers in MuseScript; Expand's 2-arg render drops the 2nd operand,
-		// so `min(11, close)` == 11 (the first operand), NOT Math.min. See NmaEval.arith's comment.
+		// min/max are now arity-aware: 2-arg `min(11, close)` is the true element-wise minimum
+		// (matching WASM + Simplify). close = [10, 11, 12, 11.5, 13], so min(11, close) clamps at 11.
 		var mn = new NmaKArith("min", new NmaKConst(11.0), new NmaKSeries(new NmaSPrice("close")));
-		assertColEquals([11.0, 11.0, 11.0, 11.0, 11.0], NmaEval.evalScalar(mn, ctx), "min(11,close)=first operand");
+		assertColEquals([10.0, 11.0, 11.0, 11.0, 11.0], NmaEval.evalScalar(mn, ctx), "min(11,close)=element-wise min");
 	}
 
 	public function testBooleanLogic() {

@@ -1,0 +1,26 @@
+{
+  "left_time": [
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    5.0
+  ],
+  "right_time": [
+    2.0,
+    4.0
+  ],
+  "right_value": [
+    10.0,
+    20.0
+  ],
+  "expected_value": [
+    null,
+    10.0,
+    10.0,
+    20.0,
+    20.0
+  ],
+  "direction": "backward",
+  "note": "matches fund_panel_loader._forward_fill_onto_bars"
+}

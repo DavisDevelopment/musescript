@@ -1,0 +1,41 @@
+[
+  {
+    "name": "digit_groups",
+    "pattern": "(\\d+)-(\\d+)",
+    "flags": "",
+    "input": "a12-34b",
+    "match": { "matched": "12-34", "start": 1, "end": 6, "groups": ["12", "34"] },
+    "replace": { "repl": "$1/$2", "expected": "a12/34b" },
+    "split": { "input": "1-2-3", "pattern": "-", "flags": "", "limit": 0, "expected": ["1", "2", "3"] }
+  },
+  {
+    "name": "case_insensitive",
+    "pattern": "foo",
+    "flags": "i",
+    "input": "xxFOOyy",
+    "match": { "matched": "FOO", "start": 2, "end": 5, "groups": [] },
+    "test": true
+  },
+  {
+    "name": "dotall",
+    "pattern": "a.b",
+    "flags": "s",
+    "input": "a\nb",
+    "match": { "matched": "a\nb", "start": 0, "end": 3, "groups": [] }
+  },
+  {
+    "name": "multiline_anchors",
+    "pattern": "^x",
+    "flags": "m",
+    "input": "a\nx",
+    "match": { "matched": "x", "start": 2, "end": 3, "groups": [] }
+  },
+  {
+    "name": "no_match",
+    "pattern": "zzz",
+    "flags": "",
+    "input": "hello",
+    "match": null,
+    "test": false
+  }
+]

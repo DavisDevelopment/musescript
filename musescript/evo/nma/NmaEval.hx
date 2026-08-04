@@ -315,12 +315,13 @@ class NmaEval {
 			// reducers over an iterable (`function(xs) return IterDriver.min(from(xs))`, see
 			// TradeBuiltins). The second rendered operand is silently dropped, so `min(a,b)`
 			// reduces the one-element iterable `a` -> `a`. Both interp and JS backend do this
-			// identically, so NMA must too (return the FIRST operand) to stay bit-exact. This is a
+			// identically. FIXED 2026-08: the bare min/max builtins are now arity-aware (true 2-arg element-wise,
+				// matching WASM's f64.min/max and Simplify's folder), so this case computes real min/max too. Was a
 			// latent Expand/builtin mismatch surfaced by the A/B -- flagged, not silently "fixed"
 			// here (fixing Expand would change live production behavior).
 			case "min" | "max":
 				while (i < n) {
-					col.setAt(i, a.at(i));
+					col.setAt(i, op == "min" ? Math.min(a.at(i), b.at(i)) : Math.max(a.at(i), b.at(i)));
 					i++;
 				}
 			default:

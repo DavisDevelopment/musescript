@@ -17,11 +17,13 @@ import musescript.builtins.MuseHost;
  *
  * Capability classes:
  *   - compute  — default, always allowed for plugin kinds
- *   - chart    — plot / plotshape / hline / bgcolor (+ muse.chart.*)
+ *   - chart    — plot / plotshape / hline / bgcolor (+ muse.chart.*) + muse.diag emitters
  *   - panel    — display helpers (`log`)
  *   - scanner  — scan_top / scan_bottom (kind reserved; currently denied)
  *   - orders   — long/short/flat/close/buy/sell_all/rebalance/portfolio mutate
- *   - denied   — filesystem / network / Reflect / eval aliases (never)
+ *   - io_fs    — filesystem / db flats (`fs_*`, `db_*`); always deny plugins
+ *   - io_net   — http flats (`http_*`); always deny plugins
+ *   - denied   — Reflect / eval / Sys / File / fetch host-escape aliases (never)
  */
 class PluginCapabilities {
 	/** Named buckets for table rows / error messages. */
@@ -30,6 +32,8 @@ class PluginCapabilities {
 	public static inline var CAP_PANEL = "panel";
 	public static inline var CAP_SCANNER = "scanner";
 	public static inline var CAP_ORDERS = "orders";
+	public static inline var CAP_IO_FS = "io_fs";
+	public static inline var CAP_IO_NET = "io_net";
 	public static inline var CAP_DENIED = "denied";
 
 	static var classOf:Map<String, String>;
@@ -41,6 +45,11 @@ class PluginCapabilities {
 		if (name == null || name == "") return CAP_COMPUTE;
 		// portfolio_* is always an order/portfolio surface for plugins.
 		if (StringTools.startsWith(name, "portfolio_")) return CAP_ORDERS;
+		// Future / stub IO flats — classified even before MuseHost install.
+		if (StringTools.startsWith(name, "fs_") || StringTools.startsWith(name, "db_"))
+			return CAP_IO_FS;
+		if (name == "pd_read_csv") return CAP_IO_FS;
+		if (StringTools.startsWith(name, "http_")) return CAP_IO_NET;
 		var c = classOf.get(name);
 		return c != null ? c : CAP_COMPUTE;
 	}
@@ -49,7 +58,8 @@ class PluginCapabilities {
 	public static function allows(kind:PluginKind, name:String):Bool {
 		ensure();
 		var cap = capabilityOf(name);
-		if (cap == CAP_DENIED || cap == CAP_ORDERS) return false;
+		if (cap == CAP_DENIED || cap == CAP_ORDERS || cap == CAP_IO_FS || cap == CAP_IO_NET)
+			return false;
 		var allow = kindAllows.get(kind);
 		return allow != null && allow.exists(cap);
 	}
@@ -57,7 +67,7 @@ class PluginCapabilities {
 	/** True when this name is permanently forbidden for every plugin kind. */
 	public static function isAlwaysDenied(name:String):Bool {
 		var c = capabilityOf(name);
-		return c == CAP_DENIED || c == CAP_ORDERS;
+		return c == CAP_DENIED || c == CAP_ORDERS || c == CAP_IO_FS || c == CAP_IO_NET;
 	}
 
 	/**
@@ -244,8 +254,8 @@ class PluginCapabilities {
 			return Reflect.compare(an, bn);
 		});
 		return {
-			schema: "musescript.plugin-kinds/1",
-			alwaysDenied: [CAP_ORDERS, CAP_DENIED],
+			schema: "musescript.plugin-kinds/2",
+			alwaysDenied: [CAP_ORDERS, CAP_IO_FS, CAP_IO_NET, CAP_DENIED],
 			kinds: kinds,
 			builtins: classified
 		};
@@ -292,12 +302,25 @@ class PluginCapabilities {
 			"buy", "sell", "sell_all",
 			"rebalance_equal", "target_weight",
 			"orders_cancel_all",
+			"portfolio_long", "portfolio_short", "portfolio_flat",
+			"portfolio_orders_pending", "portfolio_orders_cancel_all",
 			"portfolio_apply", "portfolio_add", "portfolio_sub", "portfolio_mask",
 			"portfolio_bag", "portfolio_equity", "portfolio_cash", "portfolio_unrealized"
 		]);
-		mark(CAP_CHART, ["plot", "plotshape", "hline", "bgcolor"]);
+		mark(CAP_CHART, [
+			"plot", "plotshape", "hline", "bgcolor",
+			"diag_kiss", "diag_underwater", "diag_pack"
+		]);
+		// Pure series helpers stay compute (default); emitters above need CAP_CHART.
 		mark(CAP_PANEL, ["log"]);
 		mark(CAP_SCANNER, ["scan_top", "scan_bottom"]);
+		mark(CAP_IO_FS, [
+			"fs_read_text", "fs_write_text", "fs_append_text", "fs_exists",
+			"fs_is_dir", "fs_is_file", "fs_list", "fs_mkdir", "fs_read_bytes",
+			"pd_read_csv",
+			"db_open", "db_query", "db_exec", "db_close"
+		]);
+		mark(CAP_IO_NET, ["http_request", "http_get", "http_post"]);
 		mark(CAP_DENIED, [
 			"Reflect", "reflect", "eval", "__js__",
 			"Sys", "File", "FileSystem", "Http", "http",

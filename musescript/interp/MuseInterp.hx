@@ -192,6 +192,74 @@ class MuseInterp {
 	}
 
 	/**
+	 * Ingest / CLI tier: register non-strategy decls, then run strategy body
+	 * **linearly once** (assigns + calls in source order). Refuses `@on(bar)`.
+	 *
+	 * Unlike backtest setup, we do **not** defer assigns into the per-bar
+	 * prelude — otherwise `var resp = http.get(...); write(resp.body_text)` would
+	 * write before `resp` exists.
+	 */
+	public function executeIngest(prog:MuseProgram):Dynamic {
+		prog = musescript.compile.CallsiteIds.assign(prog);
+		onBarHandlers = [];
+		onPositionHandlers = [];
+		onTickHandlers = [];
+		onEventHandlers = [];
+		preludeStmts = [];
+		strategyName = null;
+
+		var self = this;
+		harness.invokeUserFn = function(f:Dynamic, args:Array<Dynamic>):Dynamic {
+			return self.callValue(f, args != null ? args : []);
+		};
+
+		for (d in prog.decls) {
+			switch (d) {
+				case StrategyDecl(name, body):
+					if (bodyHasOnBar(body))
+						throw 'ingest programs must not declare on(bar); write the tape then use MuseRuntime.run / runPanel';
+					strategyName = name;
+					execIngestBody(body);
+				default:
+					registerDecl(d);
+			}
+		}
+		for (s in prog.stmts) {
+			switch (s) {
+				case OnBar(_):
+					throw 'ingest programs must not declare on(bar); write the tape then use MuseRuntime.run / runPanel';
+				default:
+					execStmt(s);
+			}
+		}
+		return lastValue;
+	}
+
+	function bodyHasOnBar(body:Array<Stmt>):Bool {
+		if (body == null) return false;
+		for (s in body) {
+			switch (s) {
+				case OnBar(_): return true;
+				case Block(inner) if (bodyHasOnBar(inner)): return true;
+				default:
+			}
+		}
+		return false;
+	}
+
+	function execIngestBody(body:Array<Stmt>):Void {
+		if (body == null) return;
+		for (s in body) {
+			switch (s) {
+				case Block(inner):
+					execIngestBody(inner);
+				default:
+					execStmt(s);
+			}
+		}
+	}
+
+	/**
 	 * Run a program under a declared plugin *kind* (`compute` / `chart` /
 	 * `panel` / reserved `scanner`). Audits the AST against
 	 * `PluginCapabilities` and throws an honest error on the first violation

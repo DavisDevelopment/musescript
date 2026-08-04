@@ -10,6 +10,7 @@ import musescript.ast.ConstructOnce;
 import musescript.types.BuiltinSigs;
 import musescript.builtins.MlBuiltins;
 import musescript.builtins.StatsBuiltins;
+import musescript.ew.mcmc.DetMath;
 import musescript.evo.Palette;
 
 /**
@@ -34,6 +35,10 @@ import musescript.evo.Palette;
  * Literal `buy`/`sell_all`/`target_weight`/`rebalance_equal([...])` are HostABI
  * imports. Bags / computed bags / graph bags / `symbols()` / scan / portfolio
  * queries stay `host_eval` or whole-module fallback.
+ *
+ * muse.np / flat `np_*` (after MuseHostLower): documented packed-f64 subset is
+ * native on VEC_SCRATCH (`WasmNpEligibility`); everything else is per-statement
+ * `host_eval` (H), not whole-module fallback — see docs/WASM_NP.md.
  */
 class StrategyWasmEmitter {
 	var locals:Map<String, String> = new Map();
@@ -932,7 +937,8 @@ class StrategyWasmEmitter {
 	static function isOpaqueObjectType(t:musescript.types.MuseType):Bool {
 		return switch (t) {
 			case TProbCloud | TGraph | TGraphPath | TGraphRanks | TModel | TTree
-			   | TStringArray | TDict | TSet | TBag: true;
+			   | TStringArray | TDict | TSet | TBag
+			   | TDataFrame | TPdSeries | TIndex: true;
 			case TObject(_): true;
 			default: false;
 		};
@@ -975,12 +981,17 @@ class StrategyWasmEmitter {
 			case Order(kind, args):
 				switch (kind) {
 					case Long:
+						// Spec objects / tags stay host_eval — HostABI is qty-only.
+						if (args.length > 0 && isOrderSpecArg(args[0])) throw new EmitUnsupported();
 						needImport("long", "(param f64)");
 						(args.length > 0 ? coerceF64(args[0]) : "f64.const nan") + "\n    call $long";
 					case Short:
+						if (args.length > 0 && isOrderSpecArg(args[0])) throw new EmitUnsupported();
 						needImport("short", "(param f64)");
 						(args.length > 0 ? coerceF64(args[0]) : "f64.const nan") + "\n    call $short";
 					case Flat | Close:
+						// bare flat() is native; tags / {qty|frac|type...} → host_eval
+						if (args.length > 0) throw new EmitUnsupported();
 						needImport("flat", "");
 						"call $flat";
 				}
@@ -1212,12 +1223,15 @@ class StrategyWasmEmitter {
 		};
 		return switch (name) {
 			case "long":
+				if (args.length > 0 && isOrderSpecArg(args[0])) throw new EmitUnsupported();
 				needImport("long", "(param f64)");
 				(args.length > 0 ? coerceF64(args[0]) : "f64.const nan") + "\n    call $long\n    f64.const 0";
 			case "short":
+				if (args.length > 0 && isOrderSpecArg(args[0])) throw new EmitUnsupported();
 				needImport("short", "(param f64)");
 				(args.length > 0 ? coerceF64(args[0]) : "f64.const nan") + "\n    call $short\n    f64.const 0";
 			case "flat" | "close":
+				if (args.length > 0) throw new EmitUnsupported();
 				needImport("flat", "");
 				"call $flat\n    f64.const 0";
 			case "buy":
@@ -1469,12 +1483,31 @@ class StrategyWasmEmitter {
 			case "ml_matrix" | "ml_matrix_rows" | "ml_matrix_cols" | "ml_matrix_data" | "ml_matrix_get"
 			   | "ml_ridge_fit" | "ml_ridge_fit_matrix":
 				throw new EmitUnsupported();
+			// muse.np scalar subset — 1-D packed scratch / window (WasmNpEligibility).
+			case "np_dot":
+				if (args.length != 2) throw new EmitUnsupported();
+				assertNpVecOperandCap(args[0]);
+				assertNpVecOperandCap(args[1]);
+				emitMlPairOrFold(args, "vec_dot", function(xs, ys) return MlBuiltins.dot(xs, ys));
+			case "np_mean":
+				assertNpAxis0Ok(args);
+				emitNpMean(args);
+			case "np_sum":
+				assertNpAxis0Ok(args);
+				emitNpSum(args);
+			// Vector-producing muse.np — assign/nest via lowerVecOperand only.
+			case "np_asarray" | "np_array" | "np_zeros" | "np_ones" | "np_full"
+			   | "np_add" | "np_subtract" | "np_multiply" | "np_divide"
+			   | "np_cumsum" | "np_diff" | "np_exp" | "np_log" | "np_matmul":
+				throw new EmitUnsupported();
 			// Dynamic graph objects/results have no Strategy-WASM ABI yet. Refuse
 			// emission explicitly so MuseCompiler selects its documented host fallback.
 			case "graph_neighbors" | "graph_degree" | "graph_has_edge" | "graph_bfs"
 			   | "graph_reachable" | "graph_shortest_path" | "graph_pagerank":
 				throw new EmitUnsupported();
 			default:
+				// Any other np_* is documented H/U (fail closed → host_eval).
+				if (StringTools.startsWith(name, "np_")) throw new EmitUnsupported();
 				throw new EmitUnsupported();
 		};
 	}
@@ -1506,10 +1539,30 @@ class StrategyWasmEmitter {
 		"bag_add", "bag_sub", "bag_mask", "bag_scale", "bag_norm",
 		"scan_top", "scan_bottom",
 		"pos", "entry_of", "weight_of", "holdings",
-		"portfolio_equity", "portfolio_cash", "portfolio_unrealized"
+		"portfolio_equity", "portfolio_cash", "portfolio_unrealized",
+		// Pending books / brackets / cross-sym OCO object specs → host_eval
+		// (HostABI buy/sell_all stay qty-only).
+		"portfolio_long", "portfolio_short", "portfolio_flat",
+		"portfolio_orders_pending", "portfolio_orders_cancel_all"
 		// buy / sell_all / target_weight / rebalance_equal(literal[]): HostABI, not host_eval
 		// ema_of / rsi_of: native panel series slots (removed from escape)
 	];
+
+	/** muse.np ops documented as WASM host_eval / U — alias of `WasmNpEligibility.HOST_ESCAPE`. */
+	public static final NP_HOST_ESCAPE:Array<String> = WasmNpEligibility.HOST_ESCAPE;
+
+	/** muse.pd ops — all H/U / opaque fallback; alias of `WasmPdEligibility.HOST_ESCAPE`. */
+	public static final PD_HOST_ESCAPE:Array<String> = WasmPdEligibility.HOST_ESCAPE;
+
+	/** Object / string order args (specs, tags, qty/frac flats) — HostABI is scalar qty only. */
+	static function isOrderSpecArg(e:Expr):Bool {
+		return switch (e) {
+			case EObject(_): true;
+			case EConst(CString(_)): true;
+			case EParent(inner): isOrderSpecArg(inner);
+			default: false;
+		};
+	}
 
 	function featureSlot(key:String):Int {
 		var i = featureKeys.indexOf(key);
@@ -1569,6 +1622,7 @@ class StrategyWasmEmitter {
 		return switch (e) {
 			case EConst(CInt(i)): i;
 			case EConst(CFloat(f)): Std.int(f);
+			case EUnop("-", true, inner): -constIntKey(inner);
 			case EParent(inner): constIntKey(inner);
 			default: throw new EmitUnsupported();
 		};
@@ -1726,10 +1780,12 @@ class StrategyWasmEmitter {
 	function vecTransformHelper(name:String):Null<String> {
 		return switch (name) {
 			case "stat_zscore": "vec_zscore";
-			case "sci_cumsum": "vec_cumsum";
-			case "sci_diff": "vec_diff";
+			case "sci_cumsum" | "np_cumsum": "vec_cumsum";
+			case "sci_diff" | "np_diff": "vec_diff";
 			case "sci_normalize": "vec_normalize";
 			case "ml_softmax": "vec_softmax";
+			case "np_exp": "vec_exp";
+			case "np_log": "vec_log";
 			default: null;
 		};
 	}
@@ -1737,10 +1793,12 @@ class StrategyWasmEmitter {
 	function foldVecTransform(name:String, xs:Array<Float>):Null<Array<Float>> {
 		return switch (name) {
 			case "stat_zscore": StatsBuiltins.zScores(xs);
-			case "sci_cumsum": StatsBuiltins.cumulativeSum(xs);
-			case "sci_diff": StatsBuiltins.difference(xs);
+			case "sci_cumsum" | "np_cumsum": StatsBuiltins.cumulativeSum(xs);
+			case "sci_diff" | "np_diff": StatsBuiltins.difference(xs);
 			case "sci_normalize": StatsBuiltins.normalize(xs);
 			case "ml_softmax": MlBuiltins.softmax(xs);
+			case "np_exp": [for (x in xs) DetMath.exp(x)];
+			case "np_log": [for (x in xs) DetMath.log(x)];
 			default: null;
 		};
 	}
@@ -1749,6 +1807,8 @@ class StrategyWasmEmitter {
 		if (args.length < 1) throw new EmitUnsupported();
 		var consts = tryConstVector(args[0]);
 		if (consts != null) {
+			if (!WasmNpEligibility.fitsVecLen(consts.length) && StringTools.startsWith(name, "np_"))
+				throw new EmitUnsupported();
 			var folded = foldVecTransform(name, consts);
 			if (folded == null) throw new EmitUnsupported();
 			return spillConstFloats(folded);
@@ -1757,7 +1817,10 @@ class StrategyWasmEmitter {
 		if (helper == null) throw new EmitUnsupported();
 		var src = lowerVecOperand(args[0]);
 		if (src.maxLen == null) throw new EmitUnsupported();
-		var allocLen = name == "sci_diff" ? (src.maxLen < 1 ? 1 : src.maxLen) : src.maxLen;
+		if (StringTools.startsWith(name, "np_") && !WasmNpEligibility.fitsVecLen(src.maxLen))
+			throw new EmitUnsupported();
+		var isDiff = name == "sci_diff" || name == "np_diff";
+		var allocLen = isDiff ? (src.maxLen < 1 ? 1 : src.maxLen) : src.maxLen;
 		if (allocLen <= 0)
 			return {prelude: src.prelude, baseExpr: "i32.const 0", lenExpr: "i32.const 0", maxLen: 0};
 		var dst = allocScratch(allocLen);
@@ -1770,7 +1833,7 @@ class StrategyWasmEmitter {
 		parts.push("i32.const " + dst);
 		parts.push("call $" + helper);
 		parts.push("local.set $" + lenLocal);
-		var outMax:Null<Int> = name == "sci_diff"
+		var outMax:Null<Int> = isDiff
 			? (src.maxLen < 1 ? 0 : src.maxLen - 1)
 			: src.maxLen;
 		return {
@@ -1797,12 +1860,308 @@ class StrategyWasmEmitter {
 				};
 			case ECall(EIdent(name), args)
 				if (name == "stat_zscore" || name == "sci_cumsum" || name == "sci_diff"
-					|| name == "sci_normalize" || name == "ml_softmax"):
+					|| name == "sci_normalize" || name == "ml_softmax"
+					|| name == "np_cumsum" || name == "np_diff"
+					|| name == "np_exp" || name == "np_log"):
 				lowerVecTransform(name, args);
+			case ECall(EIdent(name), args) if (WasmNpEligibility.isNativeVec(name)):
+				lowerNpVecOp(name, args);
 			default:
 				var window = asWindowArg(e);
 				if (window == null) throw new EmitUnsupported();
 				spillWindow(window);
+		};
+	}
+
+	function emitNpMean(args:Array<Expr>):String {
+		assertNpVecOperandCap(args[0]);
+		return emitStatWindowOrLiteral(args, "stat_window_mean", "vec_mean", null, function(xs) {
+			if (!WasmNpEligibility.fitsVecLen(xs.length)) throw new EmitUnsupported();
+			return StatsBuiltins.mean(xs);
+		});
+	}
+
+	function emitNpSum(args:Array<Expr>):String {
+		if (args.length < 1) throw new EmitUnsupported();
+		assertNpVecOperandCap(args[0]);
+		var window = asWindowArg(args[0]);
+		if (window != null) {
+			var spill = spillWindow(window);
+			var parts:Array<String> = [];
+			if (spill.prelude.length > 0) parts.push(spill.prelude);
+			parts.push(spill.baseExpr);
+			parts.push(spill.lenExpr);
+			parts.push("call $vec_sum");
+			return parts.join("\n    ");
+		}
+		var consts = tryConstVector(args[0]);
+		if (consts != null) {
+			var s = 0.0;
+			for (x in consts) s += x;
+			return "f64.const " + watFloat(s);
+		}
+		var vec = lowerVecOperand(args[0]);
+		var parts:Array<String> = [];
+		if (vec.prelude.length > 0) parts.push(vec.prelude);
+		parts.push(vec.baseExpr);
+		parts.push(vec.lenExpr);
+		parts.push("call $vec_sum");
+		return parts.join("\n    ");
+	}
+
+	/**
+	 * Native 1-D scratch path: bare reduce, or literal axis ∈ {0,-1} with
+	 * keepdims absent/false. Other axis/keepdims forms stay host_eval.
+	 */
+	function assertNpAxis0Ok(args:Array<Expr>):Void {
+		if (args.length < 1) throw new EmitUnsupported();
+		if (args.length == 1) return;
+		if (args.length > 3) throw new EmitUnsupported();
+		var ax = try {
+			constIntKey(args[1]);
+		} catch (_:EmitUnsupported) {
+			throw new EmitUnsupported();
+		};
+		if (ax != 0 && ax != -1) throw new EmitUnsupported();
+		if (args.length >= 3) {
+			var kd = tryConstBool(args[2]);
+			if (kd == null || kd == true) throw new EmitUnsupported();
+		}
+	}
+
+	function tryConstBool(e:Expr):Null<Bool> {
+		return switch (e) {
+			case EConst(CBool(b)): b;
+			case EParent(inner): tryConstBool(inner);
+			default: null;
+		};
+	}
+
+	/** Fail closed when a claimed-native np_* operand exceeds the documented cap. */
+	function assertNpVecOperandCap(e:Expr):Void {
+		var window = asWindowArg(e);
+		if (window != null && window.lenConst != null && !WasmNpEligibility.fitsVecLen(window.lenConst))
+			throw new EmitUnsupported();
+		var consts = tryConstVector(e);
+		if (consts != null && !WasmNpEligibility.fitsVecLen(consts.length))
+			throw new EmitUnsupported();
+	}
+
+	function lowerNpVecOp(name:String, args:Array<Expr>):{prelude:String, baseExpr:String, lenExpr:String, maxLen:Null<Int>} {
+		return switch (name) {
+			case "np_asarray" | "np_array":
+				if (args.length != 1) throw new EmitUnsupported(); // shaped form → H
+				assertNpVecOperandCap(args[0]);
+				var out = lowerVecOperand(args[0]);
+				if (out.maxLen != null && !WasmNpEligibility.fitsVecLen(out.maxLen))
+					throw new EmitUnsupported();
+				out;
+			case "np_zeros" | "np_ones":
+				lowerNpFilled(name == "np_ones" ? 1.0 : 0.0, args);
+			case "np_full":
+				if (args.length < 2) throw new EmitUnsupported();
+				lowerNpFilled(constNumber(args[1]), [args[0]]);
+			case "np_add" | "np_subtract" | "np_multiply" | "np_divide":
+				lowerNpBinop(name, args);
+			case "np_matmul":
+				lowerNpMatmul(args);
+			default:
+				throw new EmitUnsupported();
+		};
+	}
+
+	function lowerNpFilled(value:Float, args:Array<Expr>):{prelude:String, baseExpr:String, lenExpr:String, maxLen:Null<Int>} {
+		if (args.length < 1) throw new EmitUnsupported();
+		var n = constShape1dLen(args[0]);
+		if (n == null || !WasmNpEligibility.fitsVecLen(n)) throw new EmitUnsupported();
+		var data:Array<Float> = [for (_ in 0...n) value];
+		return spillConstFloats(data);
+	}
+
+	/** Literal 1-D shape `[n]` only — multi-dim / dynamic → null (host_eval). */
+	function constShape1dLen(e:Expr):Null<Int> {
+		return switch (e) {
+			case EParent(inner): constShape1dLen(inner);
+			case EArrayDecl(vs) if (vs.length == 1):
+				try constIntKey(vs[0]) catch (_:EmitUnsupported) null;
+			default: null;
+		};
+	}
+
+	function npBinopHelper(name:String):String {
+		return switch (name) {
+			case "np_add": "vec_add";
+			case "np_subtract": "vec_sub";
+			case "np_multiply": "vec_mul";
+			case "np_divide": "vec_div";
+			default: throw new EmitUnsupported();
+		};
+	}
+
+	function foldNpBinop(name:String, xs:Array<Float>, ys:Array<Float>):Array<Float> {
+		if (xs.length != ys.length) throw new EmitUnsupported();
+		var out:Array<Float> = [];
+		for (i in 0...xs.length) {
+			out.push(switch (name) {
+				case "np_add": xs[i] + ys[i];
+				case "np_subtract": xs[i] - ys[i];
+				case "np_multiply": xs[i] * ys[i];
+				case "np_divide": xs[i] / ys[i];
+				default: throw new EmitUnsupported();
+			});
+		}
+		return out;
+	}
+
+	function lowerNpBinop(name:String, args:Array<Expr>):{prelude:String, baseExpr:String, lenExpr:String, maxLen:Null<Int>} {
+		if (args.length != 2) throw new EmitUnsupported();
+		var leftConst = tryConstVector(args[0]);
+		var rightConst = tryConstVector(args[1]);
+		if (leftConst != null && rightConst != null) {
+			if (!WasmNpEligibility.fitsVecLen(leftConst.length)) throw new EmitUnsupported();
+			return spillConstFloats(foldNpBinop(name, leftConst, rightConst));
+		}
+		var left = lowerVecOperand(args[0]);
+		var right = lowerVecOperand(args[1]);
+		if (left.maxLen == null || right.maxLen == null) throw new EmitUnsupported();
+		if (left.maxLen != right.maxLen) throw new EmitUnsupported(); // no general broadcast
+		if (!WasmNpEligibility.fitsVecLen(left.maxLen)) throw new EmitUnsupported();
+		var dst = allocScratch(left.maxLen);
+		var lenLocal = "_vlen_" + (nextTmp++);
+		ensureLocal(lenLocal, "i32");
+		var parts:Array<String> = [];
+		if (left.prelude.length > 0) parts.push(left.prelude);
+		if (right.prelude.length > 0) parts.push(right.prelude);
+		parts.push(left.baseExpr);
+		parts.push(left.lenExpr);
+		parts.push(right.baseExpr);
+		parts.push(right.lenExpr);
+		parts.push("i32.const " + dst);
+		parts.push("call $" + npBinopHelper(name));
+		parts.push("local.set $" + lenLocal);
+		return {
+			prelude: parts.join("\n    "),
+			baseExpr: "i32.const " + dst,
+			lenExpr: "local.get $" + lenLocal,
+			maxLen: left.maxLen
+		};
+	}
+
+	/**
+	 * Packed row-major matmul for rectangular array-decls with compile-time
+	 * shape and side ≤ MAX_MATMUL_SIDE. Result spilled as flat length m*p.
+	 */
+	function lowerNpMatmul(args:Array<Expr>):{prelude:String, baseExpr:String, lenExpr:String, maxLen:Null<Int>} {
+		if (args.length != 2) throw new EmitUnsupported();
+		var a = asPackedMatrix(args[0]);
+		var b = asPackedMatrix(args[1]);
+		if (a.cols != b.rows) throw new EmitUnsupported();
+		if (!WasmNpEligibility.fitsMatmulSide(a.rows) || !WasmNpEligibility.fitsMatmulSide(a.cols)
+			|| !WasmNpEligibility.fitsMatmulSide(b.cols))
+			throw new EmitUnsupported();
+		var outLen = a.rows * b.cols;
+		if (!WasmNpEligibility.fitsVecLen(outLen)) throw new EmitUnsupported();
+		// Const fold when both packs are literal floats.
+		if (a.constData != null && b.constData != null) {
+			var out:Array<Float> = [];
+			for (i in 0...a.rows) for (j in 0...b.cols) {
+				var s = 0.0;
+				for (k in 0...a.cols)
+					s += a.constData[i * a.cols + k] * b.constData[k * b.cols + j];
+				out.push(s);
+			}
+			return spillConstFloats(out);
+		}
+		var aBase = a;
+		var bBase = b;
+		if (a.constData != null) {
+			var spilled = spillConstFloats(a.constData);
+			aBase = {
+				prelude: spilled.prelude, baseExpr: spilled.baseExpr,
+				rows: a.rows, cols: a.cols, constData: null
+			};
+		}
+		if (b.constData != null) {
+			var spilled = spillConstFloats(b.constData);
+			bBase = {
+				prelude: spilled.prelude, baseExpr: spilled.baseExpr,
+				rows: b.rows, cols: b.cols, constData: null
+			};
+		}
+		var dst = allocScratch(outLen);
+		var lenLocal = "_vlen_" + (nextTmp++);
+		ensureLocal(lenLocal, "i32");
+		var parts:Array<String> = [];
+		if (aBase.prelude.length > 0) parts.push(aBase.prelude);
+		if (bBase.prelude.length > 0) parts.push(bBase.prelude);
+		parts.push(aBase.baseExpr);
+		parts.push("i32.const " + aBase.rows);
+		parts.push("i32.const " + aBase.cols);
+		parts.push(bBase.baseExpr);
+		parts.push("i32.const " + bBase.cols);
+		parts.push("i32.const " + dst);
+		parts.push("call $nd_matmul");
+		parts.push("local.set $" + lenLocal);
+		return {
+			prelude: parts.join("\n    "),
+			baseExpr: "i32.const " + dst,
+			lenExpr: "local.get $" + lenLocal,
+			maxLen: outLen
+		};
+	}
+
+	function asPackedMatrix(e:Expr):{
+		prelude:String, baseExpr:String, rows:Int, cols:Int, constData:Null<Array<Float>>
+	} {
+		return switch (e) {
+			case EParent(inner): asPackedMatrix(inner);
+			case EArrayDecl(rowsExpr):
+				if (rowsExpr.length == 0) throw new EmitUnsupported();
+				var rows = rowsExpr.length;
+				var cols = -1;
+				var flat:Array<Expr> = [];
+				var allConst = true;
+				var constData:Array<Float> = [];
+				for (rowE in rowsExpr) {
+					var cells = switch (rowE) {
+						case EParent(inner):
+							switch (inner) {
+								case EArrayDecl(vs): vs;
+								default: throw new EmitUnsupported();
+							};
+						case EArrayDecl(vs): vs;
+						default: throw new EmitUnsupported();
+					};
+					if (cols < 0) cols = cells.length;
+					else if (cells.length != cols) throw new EmitUnsupported();
+					for (c in cells) {
+						flat.push(c);
+						try constData.push(constNumber(c)) catch (_:EmitUnsupported) allConst = false;
+					}
+				}
+				if (cols <= 0) throw new EmitUnsupported();
+				if (!WasmNpEligibility.fitsMatmulSide(rows) || !WasmNpEligibility.fitsMatmulSide(cols))
+					throw new EmitUnsupported();
+				if (allConst && constData.length == rows * cols) {
+					// Defer spill: pure-const matmul folds without touching scratch.
+					return {
+						prelude: "",
+						baseExpr: "i32.const 0",
+						rows: rows,
+						cols: cols,
+						constData: constData
+					};
+				}
+				var spilled = spillArrayDecl(flat);
+				{
+					prelude: spilled.prelude,
+					baseExpr: spilled.baseExpr,
+					rows: rows,
+					cols: cols,
+					constData: null
+				};
+			default:
+				throw new EmitUnsupported();
 		};
 	}
 

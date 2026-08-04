@@ -162,8 +162,92 @@ class StringBuiltins {
 		return value ? "true" : "false";
 	}
 
+	/**
+	 * Restricted mini-format: `{0}` / `{1}` … and `{name}` tokens only.
+	 * `values` may be a positional array, a single scalar (`{0}`), or an object
+	 * of named fields. Unknown tokens are left unchanged (no printf / locale).
+	 */
+	public static function fmt(template:StringLike, ?values:Dynamic):String {
+		var s = text(template);
+		var positional:Array<String> = [];
+		var named = new Map<String, String>();
+		if (values != null) {
+			if (Std.isOfType(values, Array)) {
+				var arr:Array<Dynamic> = cast values;
+				for (v in arr) positional.push(text(v));
+			} else if (isNamedBag(values)) {
+				for (k in Reflect.fields(values))
+					named.set(k, text(Reflect.field(values, k)));
+			} else {
+				positional.push(text(values));
+			}
+		}
+		var out = new StringBuf();
+		var i = 0;
+		while (i < s.length) {
+			var c = s.charCodeAt(i);
+			if (c == 123 /* { */) {
+				var close = s.indexOf("}", i + 1);
+				if (close > i + 1) {
+					var key = s.substr(i + 1, close - i - 1);
+					if (isFmtKey(key)) {
+						var repl = lookupFmt(key, positional, named);
+						if (repl != null) {
+							out.add(repl);
+							i = close + 1;
+							continue;
+						}
+					}
+				}
+			}
+			out.addChar(c);
+			i++;
+		}
+		return out.toString();
+	}
+
 	static inline function text(value:StringLike):String {
 		return value == null ? "" : Std.string(value);
+	}
+
+	static function isNamedBag(values:Dynamic):Bool {
+		if (values == null || Std.isOfType(values, String) || Std.isOfType(values, Array)) return false;
+		#if js
+		return js.Syntax.typeof(values) == "object";
+		#else
+		return Reflect.isObject(values);
+		#end
+	}
+
+	static function isFmtKey(key:String):Bool {
+		if (key.length == 0) return false;
+		var code = key.charCodeAt(0);
+		if (code != null && code >= 48 && code <= 57) {
+			for (i in 0...key.length) {
+				var c = key.charCodeAt(i);
+				if (c == null || c < 48 || c > 57) return false;
+			}
+			return true;
+		}
+		if (!((code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95))
+			return false;
+		for (i in 1...key.length) {
+			var c = key.charCodeAt(i);
+			if (c == null) return false;
+			if (!((c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 95))
+				return false;
+		}
+		return true;
+	}
+
+	static function lookupFmt(key:String, positional:Array<String>, named:Map<String, String>):Null<String> {
+		var code = key.charCodeAt(0);
+		if (code != null && code >= 48 && code <= 57) {
+			var idx = Std.parseInt(key);
+			if (idx != null && idx >= 0 && idx < positional.length) return positional[idx];
+			return null;
+		}
+		return named.exists(key) ? named.get(key) : null;
 	}
 
 	static function normalizeIndex(index:Int, length:Int):Int {

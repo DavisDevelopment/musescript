@@ -22,11 +22,13 @@ import musescript.vm.MuseBytecodeCompiler.VmUnsupported;
  * and falls back to Expand→compile→run on `KFeature` / NMA errors — see `muse_nse_spec.md` §8 P1c.
  *
  * **Panel fitness:** when `panelFeed` is attached (via `configurePanel` /
- * `EvolutionEngine.configureForPanel`) and the genome carries a `PanelAction`, evaluation runs
+ * `EvolutionEngine.configureForPanel`) and the genome carries a `PanelAction`
+ * **or** closed `KPd` (Expand coerces xs_rank → `target_weight`), evaluation runs
  * `HarnessContext.runPanelBacktest` / compiled `ctx.panel` portfolio path — equity/Sharpe from
- * `PortfolioSim`, not single-name `OrderSim`. Classic genomes (`panelAction == null`) keep the
- * single-name BarFeed path even if a panel is attached. Columnar NMA / VM do **not** fake panel
- * fitness: `panelAction` / `SPanel` stay Expand→interp/WASM (`nma-unsupported` / `vm-unsupported`).
+ * `PortfolioSim`, not single-name `OrderSim`. Classic genomes (`panelAction == null` and no
+ * `KPd`) keep the single-name BarFeed path even if a panel is attached. Columnar NMA / VM do
+ * **not** fake panel fitness: `panelAction` / `SPanel` / `KPd` stay Expand→interp/WASM
+ * (`nma-unsupported` / `vm-unsupported`).
  *
  * «εὑρήκαμεν, συγκάθομεν· Βάκχος ἡγεῖται.»
  */
@@ -50,9 +52,12 @@ class Fitness {
 		panelFeed = panel;
 	}
 
-	/** True when this genome must be scored on the portfolio panel path (`PanelAction` set). */
+	/**
+	 * True when this genome must be scored on the portfolio panel path: explicit `PanelAction`,
+	 * or closed `KPd` (Expand coerces xs_rank → `target_weight` so selection sees cross-section).
+	 */
 	public static inline function usesPanelFitness(g:StrategyGenome):Bool {
-		return g.panelAction != null;
+		return g.panelAction != null || Expand.hasKPd(g);
 	}
 
 	/**
@@ -417,6 +422,9 @@ class Fitness {
 			if (usesPanelFitness(g) || hasPanelOf(g))
 				return new FitnessResult(false, 0, 0, 0, "vm-unsupported",
 					"panelAction / SPanel -- bytecode VM has no portfolio panel path; Expand→interp/WASM");
+			if (hasClosedNpPd(g))
+				return new FitnessResult(false, 0, 0, 0, "vm-unsupported",
+					"KNp/KPd — bytecode VM has no muse.np/muse.pd subset; Expand→interp/JS");
 			if (projectionProvider != null && ProjectionProvider.hostProjRefs(g).length > 0)
 				return new FitnessResult(false, 0, 0, 0, "vm-unsupported");
 			var key = Canonical.structuralKey(g);
@@ -530,9 +538,10 @@ class Fitness {
 		function wsc(n:ScalarNode):Bool {
 			return switch (n) {
 				case KSeries(s) | KLookback(s, _): ws(s);
+				case KNp(_, a, _, b): ws(a) || (b != null && ws(b));
 				case KArith(_, a, b): wsc(a) || wsc(b);
 				case KHole(inner): wsc(inner);
-				case KConst(_) | KParam(_) | KFeature(_): false;
+				case KConst(_) | KParam(_) | KFeature(_) | KPd(_, _, _, _, _): false;
 			};
 		}
 		function wb(n:BoolNode):Bool {
@@ -543,6 +552,27 @@ class Fitness {
 				case BAnd(a, b) | BOr(a, b): wb(a) || wb(b);
 				case BNot(a) | BHole(a): wb(a);
 				case BFeature(_): false;
+			};
+		}
+		return wb(g.entryLong) || wb(g.entryShort) || wb(g.exitLong) || wb(g.exitShort) || wsc(g.size);
+	}
+
+	/** True when any policy root contains a closed `KNp` / `KPd` leaf. */
+	static function hasClosedNpPd(g:StrategyGenome):Bool {
+		function wsc(n:ScalarNode):Bool {
+			return switch (n) {
+				case KNp(_, _, _, _) | KPd(_, _, _, _, _): true;
+				case KArith(_, a, b): wsc(a) || wsc(b);
+				case KHole(inner): wsc(inner);
+				case KSeries(_) | KLookback(_, _) | KConst(_) | KParam(_) | KFeature(_): false;
+			};
+		}
+		function wb(n:BoolNode):Bool {
+			return switch (n) {
+				case BCmp(_, a, b): wsc(a) || wsc(b);
+				case BAnd(a, b) | BOr(a, b): wb(a) || wb(b);
+				case BNot(a) | BHole(a): wb(a);
+				case BCross(_, _, _) | BTrend(_, _, _) | BFeature(_): false;
 			};
 		}
 		return wb(g.entryLong) || wb(g.entryShort) || wb(g.exitLong) || wb(g.exitShort) || wsc(g.size);
@@ -566,6 +596,10 @@ class Fitness {
 		if (hasPanelOf(nmaGenome) || g.panelAction != null)
 			return new FitnessResult(false, -999, 0, 0, "nma-unsupported",
 				"genome uses panel *_of / panelAction -- columnar NMA does not score panels; Expand→interp/WASM panel fitness");
+		// Closed NP/PD palette nodes need muse.np / muse.pd host paths — not columnar columns.
+		if (hasClosedNpPd(nmaGenome))
+			return new FitnessResult(false, -999, 0, 0, "nma-unsupported",
+				"genome uses closed KNp/KPd palette -- Expand→interp/JS (WASM-honest for NP subset; PD all-U)");
 		if (nmaDirtySpine && nmaWorking != null) {
 			try {
 				var key = Canonical.structuralKey(g);
@@ -696,7 +730,7 @@ class Fitness {
 			// JsEmitter hot path + eval on JS; MuseInterp elsewhere" fallback contract.
 			if (usesPanelFitness(g) && panelFeed == null)
 				return new FitnessResult(false, -999, 0, 0, "error",
-					"panelAction genome requires Fitness.configurePanel / EvolutionEngine.configureForPanel");
+					"panelAction / KPd genome requires Fitness.configurePanel / EvolutionEngine.configureForPanel");
 			var usePanel = usesPanelFitness(g) && panelFeed != null;
 			var evalBars = bars;
 			if (!usePanel && projectionProvider != null && ProjectionProvider.hostProjRefs(g).length > 0)
@@ -729,6 +763,10 @@ class Fitness {
 			}
 			var tRun = musescript.evo.nma.NmaSignalProbe.stamp();
 			var harness = new HarnessContext();
+			// Fitness law: io always null; refuse HTTP record / fs even if a grant sneaks in.
+			harness.isFitness = true;
+			harness.isBacktest = true;
+			harness.ioGrants = null;
 			var seed = new MuseInterp(harness);
 			for (d in decls) seed.registerDeclPublic(d);
 			TradeBuiltins.resetCrossState();

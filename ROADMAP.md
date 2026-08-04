@@ -55,10 +55,39 @@ Richer order semantics compose as **rules on the sim side**, not new AST verbs
   no-op parity, and interp↔js parity through the real language surface.
   `orders_pending()` / `orders_cancel_all()` builtins added; `slippageBps`
   exposed via `MuseRuntime.run` opts.
-- **Next**: order-book support for panel/portfolio strategies (today
-  single-symbol `OrderSim` only — `PortfolioSim` fills immediately;
-  GeneRunner/`PanelLoader` `--panel` offline loaders shipped, but pending
-  limit/stop books are still per-`OrderSim`); market-impact models (pluggable fn of
+- ✅ **Groups + partial flat DONE (2026-08-03)**: `PendingOrder.groupId` +
+  `onFill: "cancel_group"` — first fill cancels siblings (OCO / cancel-rest;
+  same-bar: placement order wins). Immediate `flat({qty})` / `flat({frac})`
+  scale-out via `OrderSim.submit` → `executeFlat`. Wired through interp,
+  `muse.orders`, and JsBackend `api.long/short/flat` (all route `submit`).
+  WASM keeps HostABI qty-only; object specs / partial flats / tags stay
+  `host_eval`. Tests in `TestOrderBook` cover OCO stop→TP cancel, partial
+  scale-out, and legacy empty-book parity.
+- ✅ **Bracket sugar DONE (2026-08-03)**:
+  `long|short({ qty, bracket: { stop:{px|dist}, limit:{px|dist}, link:"oco" } })`
+  expands in `OrderSim.submit` to a pending entry plus OCO exit flats
+  (shared `groupId` + `onFill:"cancel_group"` on stop/TP only). `dist` is
+  resolved against place-time close (long: stop=ref−d / limit=ref+d; short
+  mirrors). Same-bar protect: `OrderBook.evalBar` tracks running position so
+  co-placed exits see the entry fill. WASM object specs stay `host_eval`.
+- ✅ **Panel pending books DONE (2026-08-03)**: per-symbol `OrderBook` map on
+  `PortfolioSim` (`bookOf` / `submit` / `beginBar` before panel handlers —
+  same t+1 latency). Verbs: `portfolio_long|short|flat(sym, spec)` +
+  `portfolio_orders_pending|cancel_all(?sym)`; `muse.portfolio.long/short/flat/
+  pending/cancel_all`. Shared cash stays coherent; legacy `buy`/`rebalance_equal`
+  immediate path unchanged. WASM pending/bracket object specs stay on
+  `PANEL_HOST_ESCAPE` / `host_eval` (HostABI is qty-only).
+- ✅ **Cross-symbol OCO + panel brackets DONE (2026-08-03)**: `groupId` is
+  portfolio-global under `PortfolioSim` (`allocGroupId` / `observeGroupId`).
+  `beginBar` fans out `onFill: "cancel_group"` to every symbol book after each
+  fill (sorted symbol order → deterministic same-bar competition). Distinct
+  groupIds keep independent multi-name OCOs isolated. Bracket sugar via
+  `portfolio_long|short(..., { bracket: { stop, limit, link:"oco" } })` uses
+  portfolio `allocGroupId` for exit legs. Tests in `TestPortfolioPanel`:
+  cross-sym cancel-rest, per-sym independent groups, bracket expand+fill,
+  interp surface, WASM `host_eval` for complex specs. Single-name `OrderSim`
+  OCO unchanged (book-local).
+- **Next**: market-impact models (pluggable fn of
   size/bar-volume/spread) layered on top of the same book once a real
   cost-calibration source exists — don't invent impact numbers speculatively
   (the turnover-cost-bug lesson: eval-side cost models must be validated

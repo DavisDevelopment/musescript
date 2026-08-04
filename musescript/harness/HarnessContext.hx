@@ -42,6 +42,21 @@ class HarnessContext implements IHarness {
 	public var barIndicators:musescript.indicators.BarIndicatorCache;
 	/** Per-bar console output from the strategy's `log()`/`trace` calls (IDE console pane). */
 	public var logs:Array<{bar:Int, msg:String}>;
+	/**
+	 * Host IO capability token for `muse.fs` / `muse.http` / future db (default **null** → IoDenied).
+	 * Set from `MuseRuntime.run(…, { grants })` or `runIngest`; fitness / evo leave null
+	 * (`applyIoGrants` strips grants when `fitness:true`).
+	 */
+	public var ioGrants:Null<musescript.io.IoGrant>;
+	/**
+	 * When true (default for `MuseRuntime.run` / `runPanel`), HTTP `strict` live is refused.
+	 * Replay fixtures are allowed under NetGrant; record needs an explicit CLI mode.
+	 */
+	public var isBacktest:Bool = true;
+	/** Fitness / evo evaluate path — deny live and record HTTP even if a grant sneaks in. */
+	public var isFitness:Bool = false;
+	/** Count of `muse.http` calls this run (enforces NetGrant.max_requests_per_run). */
+	public var httpRequests:Int = 0;
 
 	/**
 	 * Identity of the instrument this single-tape backtest is running on -- run-CONSTANT metadata
@@ -53,6 +68,12 @@ class HarnessContext implements IHarness {
 	 */
 	public var symbol:String = "";
 	public var assetClass:String = "";
+
+	/** When true (default), `runBacktest`/`runPanelBacktest` clear static callsite-keyed state
+	 * (crossover/rising/falling/bars_since slots) at the start of each run, so a fresh run never
+	 * inherits stale slots from a prior backtest in the same process. Set false only for a genuinely
+	 * CONTINUED/streaming session that wants that state to carry across successive run calls. */
+	public var autoResetCrossState:Bool = true;
 
 	public function new() {
 		universe = new SymbolUniverse();
@@ -75,6 +96,10 @@ class HarnessContext implements IHarness {
 		indCols = new musescript.runtime.IndicatorColumns();
 		barIndicators = new musescript.indicators.BarIndicatorCache();
 		logs = [];
+		ioGrants = null;
+		isBacktest = true;
+		isFitness = false;
+		httpRequests = 0;
 	}
 
 	/** Latest panel close for `sym`, or NaN. */
@@ -90,6 +115,11 @@ class HarnessContext implements IHarness {
 	}
 
 	public function runBacktest(onBar:Bar->Void, feed:BarFeed):BacktestResult {
+		// Clear static callsite-keyed state (crossover/rising/falling/bars_since slots) so a fresh
+		// run never inherits stale slots from a PRIOR backtest in the same process -- previously a
+		// manual pre-call ritual (~70 sites) every new caller had to remember. Set
+		// `autoResetCrossState = false` only for a genuinely CONTINUED/streaming session.
+		if (autoResetCrossState) musescript.builtins.TradeBuiltins.resetCrossState();
 		panel = null;
 		panelSymbols = [];
 		panelPrices = new Map();
@@ -113,11 +143,14 @@ class HarnessContext implements IHarness {
 	}
 
 	/**
-	 * Multi-symbol panel backtest: each session pushes per-symbol series
-	 * (`close@SYM`, …), exposes `panelPrices` / `symbols()`, and marks the
-	 * shared `portfolio` book. Single-symbol `orders` is left untouched.
+	 * Multi-symbol panel backtest: each session evaluates per-symbol pending
+	 * books (`portfolio.beginBar`, t+1 latency), pushes per-symbol series
+	 * (`close@SYM`, …), exposes `panelPrices` / `symbols()`, runs strategy
+	 * handlers, and marks the shared `portfolio` book. Single-symbol `orders`
+	 * is left untouched.
 	 */
 	public function runPanelBacktest(onBar:Bar->Void, panelFeed:PanelFeed):BacktestResult {
+		if (autoResetCrossState) musescript.builtins.TradeBuiltins.resetCrossState(); // see runBacktest
 		this.panel = panelFeed;
 		this.panelSymbols = panelFeed.symbols.copy();
 		this.panelPrices = new Map();
@@ -138,6 +171,14 @@ class HarnessContext implements IHarness {
 			bL.push(bar.low);
 			bC.push(bar.close);
 			bV.push(bar.volume);
+			// Pending fills before handlers (same order as BacktestEngine → OrderSim.beginBar).
+			var emptyPx = new Map<String, Float>();
+			portfolio.beginBar(
+				t < panelFeed.opens.length ? panelFeed.opens[t] : emptyPx,
+				t < panelFeed.highs.length ? panelFeed.highs[t] : emptyPx,
+				t < panelFeed.lows.length ? panelFeed.lows[t] : emptyPx,
+				bar.index
+			);
 			musescript.builtins.PortfolioBuiltins.observePanel(this, panelFeed, t);
 			pushAuxData(bar, bC.data.length);
 			onBar(bar);

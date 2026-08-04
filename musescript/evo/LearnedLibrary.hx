@@ -118,6 +118,10 @@ class LearnedLibrary {
 			case KFeature(name): KFeature(name);
 			case KSeries(s): KSeries(cloneSeries(s));
 			case KLookback(s, k): KLookback(cloneSeries(s), k);
+			case KNp(op, a, w, b):
+				KNp(op, cloneSeries(a), w, b != null ? cloneSeries(b) : null);
+			case KPd(op, kind, w, sym, syms):
+				KPd(op, kind, w, sym, syms.copy());
 			case KArith(op, a, b): KArith(op, cloneScalar(a), cloneScalar(b));
 			case KHole(inner): KHole(cloneScalar(inner));
 		};

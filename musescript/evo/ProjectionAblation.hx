@@ -42,6 +42,10 @@ class ProjectionAblation {
 				case KFeature(name): KFeature(name);
 				case KSeries(s): KSeries(ws(s));
 				case KLookback(s, k): KLookback(ws(s), k);
+				case KNp(op, a, w, b):
+					KNp(op, ws(a), w, b != null ? ws(b) : null);
+				case KPd(op, kind, w, sym, syms):
+					KPd(op, kind, w, sym, syms.copy());
 				case KArith(op, a, b): KArith(op, wsc(a), wsc(b));
 				case KHole(inner): KHole(wsc(inner));
 			};

@@ -1,0 +1,79 @@
+./musescript/compile/MuseCompiler.hx:92: MuseCompiler: target "native" not implemented — MuseInterp fallback
+./musescript/tests/TestVmParityCorpus.hx:87: [evolved] VM parity: 2430 progs -> identical=2260 fallback=125 interpError=45 diverged=0
+
+./musescript/tests/TestVmParityCorpus.hx:48: VM parity: 83 progs -> identical=83 fallback=0 interpError=0 diverged=0
+
+utest/ui/text/PrintReport.hx:52: 
+assertations: 77511
+successes: 77498
+errors: 4
+failures: 9
+warnings: 0
+execution time: 53.92
+
+results: SOME TESTS FAILURES (success: false)
+musescript.tests.TestWatAssembler
+  testAtrAndParamsParity: ERROR E
+    WatAssembler: unsupported value type i64
+Called from .new haxe_ValueException (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 994 column 3)
+Called from haxe_Exception.thrown (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 757 column 12)
+Called from musescript_compile__$WatAssembler_ModuleEncoder.valType (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 49950 column 25)
+Called from musescript_compile__$WatAssembler_ModuleEncoder.parseFunc (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 49723 column 64)
+Called from musescript_compile__$WatAssembler_ModuleEncoder.collect (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 49624 column 19)
+Called from musescript_compile__$WatAssembler_ModuleEncoder.encode (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 49517 column 8)
+Called from musescript_compile_WatAssembler.assemble (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 49470 column 70)
+Called from musescript_tests_TestWatAssembler.runWasm (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 165554 column 51)
+Called from musescript_tests_TestWatAssembler.checkParity (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 165568 column 19)
+Called from musescript_tests_TestWatAssembler.testAtrAndParamsParity (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 165584 column 8)
+  testEmaCrossWithBoolLogicParity: ERROR E
+    WatAssembler: unsupported value type i64
+Called from .new haxe_ValueException (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 994 column 3)
+Called from haxe_Exception.thrown (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 757 column 12)
+Called from musescript_compile__$WatAssembler_ModuleEncoder.valType (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 49950 column 25)
+Called from musescript_compile__$WatAssembler_ModuleEncoder.parseFunc (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 49723 column 64)
+Called from musescript_compile__$WatAssembler_ModuleEncoder.collect (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 49624 column 19)
+Called from musescript_compile__$WatAssembler_ModuleEncoder.encode (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 49517 column 8)
+Called from musescript_compile_WatAssembler.assemble (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 49470 column 70)
+Called from musescript_tests_TestWatAssembler.runWasm (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 165554 column 51)
+Called from musescript_tests_TestWatAssembler.checkParity (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 165568 column 19)
+Called from musescript_tests_TestWatAssembler.testEmaCrossWithBoolLogicParity (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 165581 column 8)
+  testRsiMeanRevParity: ERROR E
+    WatAssembler: unsupported value type i64
+Called from .new haxe_ValueException (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 994 column 3)
+Called from haxe_Exception.thrown (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 757 column 12)
+Called from musescript_compile__$WatAssembler_ModuleEncoder.valType (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 49950 column 25)
+Called from musescript_compile__$WatAssembler_ModuleEncoder.parseFunc (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 49723 column 64)
+Called from musescript_compile__$WatAssembler_ModuleEncoder.collect (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 49624 column 19)
+Called from musescript_compile__$WatAssembler_ModuleEncoder.encode (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 49517 column 8)
+Called from musescript_compile_WatAssembler.assemble (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 49470 column 70)
+Called from musescript_tests_TestWatAssembler.runWasm (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 165554 column 51)
+Called from musescript_tests_TestWatAssembler.checkParity (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 165568 column 19)
+Called from musescript_tests_TestWatAssembler.testRsiMeanRevParity (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 165578 column 8)
+  testSmaCrossParity: ERROR E
+    WatAssembler: unsupported value type i64
+Called from .new haxe_ValueException (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 994 column 3)
+Called from haxe_Exception.thrown (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 757 column 12)
+Called from musescript_compile__$WatAssembler_ModuleEncoder.valType (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 49950 column 25)
+Called from musescript_compile__$WatAssembler_ModuleEncoder.parseFunc (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 49723 column 64)
+Called from musescript_compile__$WatAssembler_ModuleEncoder.collect (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 49624 column 19)
+Called from musescript_compile__$WatAssembler_ModuleEncoder.encode (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 49517 column 8)
+Called from musescript_compile_WatAssembler.assemble (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 49470 column 70)
+Called from musescript_tests_TestWatAssembler.runWasm (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 165554 column 51)
+Called from musescript_tests_TestWatAssembler.checkParity (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 165568 column 19)
+Called from musescript_tests_TestWatAssembler.testSmaCrossParity (C:\Users\epiki\Documents\Development\kalshai\muse-lab\muse-script\build\js\tests.js line 165575 column 8)
+musescript.tests.TestTier1Builtins
+  testDonchianUpperEqualsHighestHigh: FAILURE ..F
+    line: 52, donchian mid must lie within [lower, upper]
+musescript.tests.TestTypes
+  testRuntimeBuiltinsHaveTypedSignatures: FAILURE ..............................................................................................................................................................................................................................F......................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................F...............................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................
+    line: 3358, missing BuiltinSig for fs_read_bytes
+    line: 3397, JsBackend missing dispatch for installed fs_read_bytes
+musescript.tests.TestStrategyKinds
+  testStrategyKindsTypeCheckAndRun: FAILURE ..........................................................................FF....FF......FF......
+    line: 4240, 37_atr_trailing_stop.ms: error: param atrLen: expected Window, got Scalar
+    line: 4240, 37_atr_trailing_stop.ms: error: Window param atrLen default 14 is not on the Fib ladder
+    line: 4240, 39_candle_reversal.ms: error: examples/strategy-kinds/39_candle_reversal.ms:7:32: sma arg 2: Window value 50 not on Fib ladder
+    line: 4240, 39_candle_reversal.ms: error: examples/strategy-kinds/39_candle_reversal.ms:9:29: sma arg 2: Window value 50 not on Fib ladder
+    line: 4240, 42_tagged_exits.ms: error: examples/strategy-kinds/42_tagged_exits.ms:7:44: sma arg 2: Window value 50 not on Fib ladder
+    line: 4240, 42_tagged_exits.ms: error: examples/strategy-kinds/42_tagged_exits.ms:11:31: atr arg 2: Window value 14 not on Fib ladder
+

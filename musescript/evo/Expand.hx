@@ -44,11 +44,14 @@ class Expand {
 			}
 		}
 		lines.push("  onBar {");
-		if (g.panelAction != null) {
+		// PanelActions emit HostABI portfolio verbs. Closed `KPd` (xs_rank) genomes also take
+		// this path — never a classic long/short skeleton that ignores the cross-section.
+		var action = g.panelAction != null ? g.panelAction : inferPanelActionForPd(g);
+		if (action != null) {
 			// Panel genomes v1: HostABI portfolio verbs with literal symbols (WASM-native).
 			// No `position()`/`pos()` guards — `pos` is PANEL_HOST_ESCAPE; panel smokes leave
 			// apply unguarded. Short slot unused under these templates.
-			emitPanelActionBody(lines, g.panelAction, g, size);
+			emitPanelActionBody(lines, action, g, size);
 		} else {
 			// Guarded on `position()` so a STICKY entry condition (BCmp/BTrend-based, e.g. `rsi(...) <
 			// 55` staying true for many consecutive bars -- unlike a transient crossover, which only
@@ -116,9 +119,11 @@ class Expand {
 				var baseE = scalar(KSeries(node), params);
 				if (field == "spread") return "0";
 				if (field == "prob_up")
-					// Owed: the strategy surface has no ternary/bool→float, so prob_up needs a dedicated
-					// builtin (deliberately avoided to keep fan reductions pure arithmetic). See plan §6.
-					throw 'Expand: prob_up is not yet renderable (needs a builtin) for "${decl.name}"';
+					// K=1 fan: P(up move) = whether the single forecast sample exceeds the current close
+					// (0 or 1). `count_true(x)` is the bool->0/1 coercion the strategy surface now has
+					// (was the missing primitive that blocked this). Reference = `close`, matching
+					// ForecastCloud.probUp's "probability price rises from here" semantics.
+					return 'count_true((${baseE}) > close)';
 				if (StringTools.startsWith(field, "sample_")) {
 					var i = Std.parseInt(field.substr(7));
 					if (i != 0)
@@ -149,9 +154,11 @@ class Expand {
 					case "p95": loc(McFan.quantile(zs, 0.95));
 					case "spread": '(${num(McFan.quantile(zs, 0.95) - McFan.quantile(zs, 0.05))}) * (${volE})';
 					case "prob_up":
-						// Owed: a K-term count needs ternary/bool→float, which the strategy surface lacks;
-						// this reduction wants a dedicated builtin (fan reductions stay pure arithmetic). §6.
-						throw 'Expand: prob_up is not yet renderable (needs a builtin) for "${decl.name}"';
+						// Fraction of the K fan samples above the current close = P(up move), in [0,1].
+						// `count_true(...)` counts the up samples (the bool->float coercion the surface now
+						// has); `/K` normalizes. Replaces the old hard throw. Reference = `close`.
+						var ups = [for (i in 0...K) '(${loc(z[i])}) > close'];
+						'(count_true(${ups.join(", ")})) / ${num(K)}';
 					default:
 						throw 'Expand: unknown projection field "$field" for projection "${decl.name}"';
 				};
@@ -182,9 +189,12 @@ class Expand {
 		}
 		function addScalar(sc:ScalarNode):Void {
 			switch (sc) {
-				case KConst(_) | KParam(_) | KFeature(_):
+				case KConst(_) | KParam(_) | KFeature(_) | KPd(_, _, _, _, _):
 				case KSeries(s): addSeries(s);
 				case KLookback(s, _): addSeries(s);
+				case KNp(_, a, _, b):
+					addSeries(a);
+					if (b != null) addSeries(b);
 				case KArith(_, a, b): addScalar(a); addScalar(b);
 				case KHole(inner): addScalar(inner);
 			}
@@ -235,6 +245,114 @@ class Expand {
 		return '${kind}_of("$sym")';
 	}
 
+	/**
+	 * Series expression usable as `window(<expr>, n)` / nesting operand — bare field
+	 * for `SPrice`, full call for indicators / panel-of / proj refs.
+	 */
+	public static function seriesForWindow(s:SeriesNode):String {
+		return switch (s) {
+			case SPrice(f): f;
+			case SInd(name, field, window, src):
+				src != null ? '${name}(${series(src)}, $window)' : '${name}("$field", $window)';
+			case SProj(pn, pf): projRef(pn, pf);
+			case SPanel(kind, sym, field, window): panelOfExpr(kind, sym, field, window);
+		};
+	}
+
+	/** Clamp genome window into the NP size cap (fail-closed vs WasmNpEligibility). */
+	public static function clampNpWindow(window:Int):Int {
+		var w = window < 1 ? 1 : window;
+		return w > Palette.NP_MAX_WIN ? Palette.NP_MAX_WIN : w;
+	}
+
+	/**
+	 * Closed NP Expand: `np_mean(window(close, 5))`, `np_dot(window(a,w), window(b,w))`.
+	 * Never open muse.np trees — flat names only, size-capped windows.
+	 */
+	public static function npExpr(op:String, a:SeriesNode, window:Int, ?b:SeriesNode):String {
+		var w = clampNpWindow(window);
+		var wa = 'window(${seriesForWindow(a)}, $w)';
+		return switch (op) {
+			case "mean": 'np_mean($wa)';
+			case "sum": 'np_sum($wa)';
+			case "dot":
+				var bb = b != null ? b : a;
+				'np_dot($wa, window(${seriesForWindow(bb)}, $w))';
+			default: throw 'Expand: unknown NP op "$op" (closed Palette.NP_OPS only)';
+		};
+	}
+
+	/**
+	 * Closed PD Expand: one-row percentile `pd_xs_rank(..., true)` over literal panel
+	 * scores for a fixed universe. Cell extract via `np_get_flat(pd_series_values(...), 0)`
+	 * (NdArray is not Muse-subscriptable). No groupby/merge/HTTP.
+	 */
+	public static function pdExpr(op:String, kind:String, window:Int, sym:String, syms:Array<String>):String {
+		if (op != "xs_rank")
+			throw 'Expand: unknown PD op "$op" (closed Palette.PD_OPS only)';
+		if (syms == null || syms.length == 0)
+			throw 'Expand: PD xs_rank needs a non-empty universe';
+		var cols = [for (s in syms) '${s}: [${panelOfExpr(kind, s, null, window)}]'];
+		// pd_series_values → NdArray; Muse `[0]` does not scalarize it — use np_get_flat.
+		return 'np_get_flat(pd_series_values(pd_get(pd_xs_rank(pd_from_columns({${cols.join(", ")}}), true), "$sym")), 0)';
+	}
+
+	/** True when any policy root contains a closed `KPd` leaf. */
+	public static function hasKPd(g:StrategyGenome):Bool {
+		return firstKPd(g) != null;
+	}
+
+	/**
+	 * First `KPd` leaf in policy roots (entry/exit/size), or null.
+	 * Used to coerce PD-bearing genomes onto panel HostABI templates.
+	 */
+	public static function firstKPd(g:StrategyGenome):Null<ScalarNode> {
+		function wsc(n:ScalarNode):Null<ScalarNode> {
+			return switch (n) {
+				case KPd(_, _, _, _, _): n;
+				case KArith(_, a, b):
+					var xa = wsc(a);
+					xa != null ? xa : wsc(b);
+				case KHole(inner): wsc(inner);
+				case KSeries(_) | KLookback(_, _) | KConst(_) | KParam(_) | KFeature(_) | KNp(_, _, _, _): null;
+			};
+		}
+		function wb(n:BoolNode):Null<ScalarNode> {
+			return switch (n) {
+				case BCmp(_, a, b):
+					var xa = wsc(a);
+					xa != null ? xa : wsc(b);
+				case BAnd(a, b) | BOr(a, b):
+					var xa = wb(a);
+					xa != null ? xa : wb(b);
+				case BNot(a) | BHole(a): wb(a);
+				case BCross(_, _, _) | BTrend(_, _, _) | BFeature(_): null;
+			};
+		}
+		var hit = wb(g.entryLong);
+		if (hit != null) return hit;
+		hit = wb(g.entryShort);
+		if (hit != null) return hit;
+		hit = wb(g.exitLong);
+		if (hit != null) return hit;
+		hit = wb(g.exitShort);
+		if (hit != null) return hit;
+		return wsc(g.size);
+	}
+
+	/**
+	 * When a genome has `KPd` but no explicit `PanelAction`, emit `PATargetWeight` on the
+	 * ranked symbol so Expand→panel fitness sees the cross-section (not single-name long/short).
+	 */
+	public static function inferPanelActionForPd(g:StrategyGenome):Null<PanelAction> {
+		var pd = firstKPd(g);
+		if (pd == null) return null;
+		return switch (pd) {
+			case KPd(_, _, _, sym, _): PATargetWeight(sym);
+			default: null;
+		};
+	}
+
 	public static function scalar(n:ScalarNode, params:Array<EvoParam>):String {
 		return switch (n) {
 			case KConst(v): num(v);
@@ -257,6 +375,10 @@ class Expand {
 				}
 			case KFeature(name):
 				name;
+			case KNp(op, a, window, b):
+				npExpr(op, a, window, b);
+			case KPd(op, kind, window, sym, syms):
+				pdExpr(op, kind, window, sym, syms);
 			case KArith(op, a, b):
 				var as = scalar(a, params);
 				var bs = scalar(b, params);

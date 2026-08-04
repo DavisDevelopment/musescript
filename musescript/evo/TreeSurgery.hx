@@ -107,7 +107,7 @@ class TreeSurgery {
 	public static function collectScalar(n:ScalarNode, path:GPath, out:Array<{path:GPath, node:ScalarNode}>, ?armed:Bool = true):Void {
 		if (armed) out.push({ path: path.copy(), node: n });
 		switch (n) {
-			case KConst(_) | KParam(_) | KFeature(_) | KSeries(_) | KLookback(_, _):
+			case KConst(_) | KParam(_) | KFeature(_) | KSeries(_) | KLookback(_, _) | KNp(_, _, _, _) | KPd(_, _, _, _, _):
 			case KArith(_, a, b):
 				path.push(StepA); collectScalar(a, path, out, armed); path.pop();
 				path.push(StepB); collectScalar(b, path, out, armed); path.pop();
@@ -118,11 +118,14 @@ class TreeSurgery {
 
 	public static function collectSeriesInScalar(n:ScalarNode, path:GPath, out:Array<{path:GPath, node:SeriesNode}>, ?armed:Bool = true):Void {
 		switch (n) {
-			case KConst(_) | KParam(_) | KFeature(_):
+			case KConst(_) | KParam(_) | KFeature(_) | KPd(_, _, _, _, _):
 			case KSeries(s):
 				path.push(StepA); collectSeries(s, path, out, armed); path.pop();
 			case KLookback(s, _):
 				path.push(StepA); collectSeries(s, path, out, armed); path.pop();
+			case KNp(_, a, _, b):
+				path.push(StepA); collectSeries(a, path, out, armed); path.pop();
+				if (b != null) { path.push(StepB); collectSeries(b, path, out, armed); path.pop(); }
 			case KArith(_, a, b):
 				path.push(StepA); collectSeriesInScalar(a, path, out, armed); path.pop();
 				path.push(StepB); collectSeriesInScalar(b, path, out, armed); path.pop();
@@ -250,7 +253,7 @@ class TreeSurgery {
 		if (idx >= path.length) return repl;
 		var step = path[idx];
 		return switch (n) {
-			case KConst(_) | KParam(_) | KFeature(_) | KSeries(_) | KLookback(_, _):
+			case KConst(_) | KParam(_) | KFeature(_) | KSeries(_) | KLookback(_, _) | KNp(_, _, _, _) | KPd(_, _, _, _, _):
 				throw "TreeSurgery.replaceScalarWithScalar: path ran past a scalar leaf";
 			case KArith(op, a, b):
 				step == StepA ? KArith(op, replaceScalarWithScalarAt(a, path, repl, idx + 1), b) : KArith(op, a, replaceScalarWithScalarAt(b, path, repl, idx + 1));
@@ -265,12 +268,16 @@ class TreeSurgery {
 	static function replaceSeriesInScalarWithSeriesAt(n:ScalarNode, path:GPath, repl:SeriesNode, idx:Int):ScalarNode {
 		var step = path[idx];
 		return switch (n) {
-			case KConst(_) | KParam(_) | KFeature(_):
+			case KConst(_) | KParam(_) | KFeature(_) | KPd(_, _, _, _, _):
 				throw "TreeSurgery.replaceSeriesInScalarWithSeries: no series child here";
 			case KSeries(s):
 				KSeries(replaceSeriesWithSeriesAt(s, path, repl, idx + 1));
 			case KLookback(s, k):
 				KLookback(replaceSeriesWithSeriesAt(s, path, repl, idx + 1), k);
+			case KNp(op, a, w, b):
+				if (step == StepA) KNp(op, replaceSeriesWithSeriesAt(a, path, repl, idx + 1), w, b);
+				else if (b != null) KNp(op, a, w, replaceSeriesWithSeriesAt(b, path, repl, idx + 1));
+				else throw "TreeSurgery.replaceSeriesInScalarWithSeries: KNp has no StepB child";
 			case KArith(op, a, b):
 				step == StepA ? KArith(op, replaceSeriesInScalarWithSeriesAt(a, path, repl, idx + 1), b) : KArith(op, a, replaceSeriesInScalarWithSeriesAt(b, path, repl, idx + 1));
 			case KHole(inner):

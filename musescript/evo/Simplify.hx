@@ -66,8 +66,10 @@ class Simplify {
 	 */
 	public static function containsIndicator(n:ScalarNode):Bool {
 		return switch (n) {
-			case KConst(_) | KParam(_) | KFeature(_): false;
+			case KConst(_) | KParam(_) | KFeature(_) | KPd(_, _, _, _, _): false;
 			case KSeries(s) | KLookback(s, _): seriesHasIndicator(s);
+			case KNp(_, a, _, b):
+				seriesHasIndicator(a) || (b != null && seriesHasIndicator(b));
 			case KArith(_, a, b): containsIndicator(a) || containsIndicator(b);
 			case KHole(inner): containsIndicator(inner);
 		};
@@ -100,9 +102,21 @@ class Simplify {
 			case [KFeature(x), KFeature(y)]: x == y;
 			case [KSeries(x), KSeries(y)]: seriesEq(x, y);
 			case [KLookback(x, kx), KLookback(y, ky)]: kx == ky && seriesEq(x, y);
+			case [KNp(ox, ax, wx, bx), KNp(oy, ay, wy, by)]:
+				ox == oy && wx == wy && seriesEq(ax, ay)
+				&& (bx == null && by == null || bx != null && by != null && seriesEq(bx, by));
+			case [KPd(ox, kx, wx, sx, ux), KPd(oy, ky, wy, sy, uy)]:
+				ox == oy && kx == ky && wx == wy && sx == sy && arrEq(ux, uy);
 			case [KArith(ox, ax, bx), KArith(oy, ay, by)]: ox == oy && scalarEq(ax, ay) && scalarEq(bx, by);
 			default: false;
 		};
+	}
+
+	static function arrEq(a:Array<String>, b:Array<String>):Bool {
+		if (a == null && b == null) return true;
+		if (a == null || b == null || a.length != b.length) return false;
+		for (i in 0...a.length) if (a[i] != b[i]) return false;
+		return true;
 	}
 
 	/**

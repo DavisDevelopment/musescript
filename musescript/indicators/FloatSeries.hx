@@ -184,4 +184,22 @@ class FloatSeries {
 		data = next;
 		#end
 	}
+
+	/**
+	 * Zero-copy NdArray view when backing is contig f64. On JS, `fromVector`
+	 * aliases use `Vector` (Array) — those copy once into owned NdArray storage.
+	 */
+	public function asNdArrayView():musescript.ndarray.NdArrayF64 {
+		#if js
+		if (owned) {
+			return musescript.ndarray.NdArrayF64.aliasBuffer(f64, [visibleLength], 0);
+		}
+		// Aliased Vector path — copy into owned NdArray (JS Vector is Array)
+		var out = musescript.ndarray.NdArrayF64.empty([visibleLength]);
+		for (i in 0...visibleLength) out.setFlat(i, vec[i]);
+		return out;
+		#else
+		return musescript.ndarray.NdArrayF64.aliasBuffer(data, [visibleLength], 0);
+		#end
+	}
 }

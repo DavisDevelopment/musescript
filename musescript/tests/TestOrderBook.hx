@@ -367,4 +367,201 @@ class TestOrderBook extends Test {
 		Assert.isFalse(sim.bankrupt);
 		Assert.floatEquals(500, sim.equityFloor);
 	}
+
+	// ── Groups (OCO) + partial flat ──────────────────────────────────────────
+
+	/** Stop-loss and take-profit share a group; stop fills first → TP cancelled. */
+	public function testOcoStopFillCancelsTakeProfit() {
+		var b = new OrderBook();
+		b.place("flat", { type: "stop", px: 90.0, groupId: 1, onFill: "cancel_group" }, 0);
+		b.place("flat", { type: "limit", px: 110.0, groupId: 1, onFill: "cancel_group" }, 0);
+		Assert.equals(2, b.pendingCount());
+		// Both touch: low through stop, high to TP — placement order: stop wins, TP cancelled
+		var fills = b.evalBar(100.0, 112.0, 88.0, 1, 10);
+		Assert.equals(1, fills.length);
+		Assert.equals("stop", fills[0].orderType);
+		Assert.floatEquals(90.0, fills[0].price);
+		Assert.equals(0, b.pendingCount());
+	}
+
+	/** Same-bar: later sibling would fill alone, but cancel_group drops it after the first fill. */
+	public function testOcoFirstFillCancelsSameBarSibling() {
+		var b = new OrderBook();
+		b.place("flat", { type: "limit", px: 110.0, groupId: 7, onFill: "cancel_group" }, 0);
+		b.place("flat", { type: "stop", px: 90.0, groupId: 7, onFill: "cancel_group" }, 0);
+		var fills = b.evalBar(100.0, 112.0, 88.0, 1, 10);
+		Assert.equals(1, fills.length);
+		Assert.equals("limit", fills[0].orderType);
+		Assert.equals(0, b.pendingCount());
+	}
+
+	public function testPartialFlatByQtyAndFrac() {
+		var sim = new OrderSim(100000);
+		sim.submit("long", 10.0, 100.0, 0);
+		sim.submit("flat", { qty: 4.0 }, 110.0, 1);
+		Assert.floatEquals(6.0, sim.position);
+		Assert.floatEquals(100.0, sim.entryPrice, "partial close keeps cost basis");
+		Assert.equals(2, sim.trades);
+		Assert.floatEquals(4.0, sim.fills[1].qty);
+		sim.submit("flat", { frac: 0.5 }, 120.0, 2);
+		Assert.floatEquals(3.0, sim.position);
+		Assert.floatEquals(3.0, Math.abs(sim.fills[2].qty));
+		sim.submit("flat", null, 120.0, 3);
+		Assert.floatEquals(0.0, sim.position);
+	}
+
+	/** Empty book + bare verbs: still immediate close-fill, never touches groups. */
+	public function testLegacyEmptyBookParityWithGroupsFeature() {
+		var sim = new OrderSim(100000);
+		sim.submit("long", 5.0, 100.0, 0);
+		Assert.equals(0, sim.book.pendingCount());
+		sim.submit("flat", null, 110.0, 1);
+		Assert.floatEquals(0.0, sim.position);
+		Assert.equals(0, sim.book.pendingCount());
+		Assert.equals(2, sim.trades);
+	}
+
+	/** Book-path flat with qty + OCO through OrderSim.beginBar. */
+	public function testOcoThroughOrderSimBeginBar() {
+		var sim = new OrderSim(100000);
+		sim.submit("long", 10.0, 100.0, 0);
+		sim.submit("flat", { type: "stop", px: 90.0, groupId: 3, onFill: "cancel_group" }, 100.0, 0);
+		sim.submit("flat", { type: "limit", px: 110.0, groupId: 3, onFill: "cancel_group", qty: 10.0 }, 100.0, 0);
+		Assert.equals(2, sim.book.pendingCount());
+		sim.beginBar(100.0, 1, 112.0, 88.0);
+		Assert.floatEquals(0.0, sim.position);
+		Assert.equals(0, sim.book.pendingCount());
+		Assert.equals(1, [for (f in sim.fills) if (f.kind == "flat") f].length);
+		Assert.floatEquals(90.0, sim.fills[sim.fills.length - 1].price);
+	}
+
+	// ── Bracket sugar ────────────────────────────────────────────────────────
+
+	/** Expands to market entry + stop + limit flats; exits share one OCO group. */
+	public function testBracketSugarPlacesEntryAndOcoExits() {
+		var sim = new OrderSim(100000);
+		sim.submit("long", {
+			qty: 10.0,
+			bracket: { stop: { px: 90.0 }, limit: { px: 110.0 }, link: "oco" }
+		}, 100.0, 0);
+		Assert.equals(3, sim.book.pendingCount());
+		var pending = sim.book.pending;
+		Assert.equals("long", pending[0].kind);
+		Assert.equals("market", pending[0].type);
+		Assert.equals(null, pending[0].groupId);
+		Assert.equals("flat", pending[1].kind);
+		Assert.equals("stop", pending[1].type);
+		Assert.equals("flat", pending[2].kind);
+		Assert.equals("limit", pending[2].type);
+		Assert.equals(pending[1].groupId, pending[2].groupId);
+		Assert.equals("cancel_group", pending[1].onFill);
+		Assert.equals("cancel_group", pending[2].onFill);
+		Assert.floatEquals(90.0, pending[1].px);
+		Assert.floatEquals(110.0, pending[2].px);
+	}
+
+	/** `dist` resolves against place-time close; long stop below / TP above. */
+	public function testBracketDistResolvesFromClose() {
+		var sim = new OrderSim(100000);
+		sim.submit("long", {
+			qty: 5.0,
+			bracket: { stop: { dist: 10.0 }, limit: { dist: 15.0 }, link: "oco" }
+		}, 100.0, 0);
+		Assert.floatEquals(90.0, sim.book.pending[1].px);
+		Assert.floatEquals(115.0, sim.book.pending[2].px);
+		sim.reset();
+		sim.submit("short", {
+			qty: 5.0,
+			bracket: { stop: { dist: 10.0 }, limit: { dist: 15.0 }, link: "oco" }
+		}, 100.0, 0);
+		Assert.floatEquals(110.0, sim.book.pending[1].px);
+		Assert.floatEquals(85.0, sim.book.pending[2].px);
+	}
+
+	/**
+	 * Bracket on bar 0 → t+1: market entry fills, stop also touches, TP
+	 * cancelled (OCO). Running position unlocks co-placed flats same bar.
+	 */
+	public function testBracketOcoStopWinsOnProtectBar() {
+		var sim = new OrderSim(100000);
+		sim.submit("long", {
+			qty: 10.0,
+			bracket: { stop: { px: 90.0 }, limit: { px: 110.0 }, link: "oco" }
+		}, 100.0, 0);
+		Assert.equals(0, sim.position);
+		sim.beginBar(100.0, 1, 112.0, 88.0);
+		Assert.floatEquals(0.0, sim.position);
+		Assert.equals(0, sim.book.pendingCount());
+		Assert.equals(2, sim.fills.length); // entry + stop flat
+		Assert.equals("long", sim.fills[0].kind);
+		Assert.equals("flat", sim.fills[1].kind);
+		Assert.floatEquals(90.0, sim.fills[1].price);
+	}
+
+	/** Take-profit wins when only the limit touches (stop stays cancelled via OCO). */
+	public function testBracketOcoLimitWinsWhenOnlyTpTouches() {
+		var sim = new OrderSim(100000);
+		sim.submit("long", {
+			qty: 10.0,
+			bracket: { stop: { px: 90.0 }, limit: { px: 110.0 }, link: "oco" }
+		}, 100.0, 0);
+		// Entry at open 100; high reaches TP, low stays above stop
+		sim.beginBar(100.0, 1, 112.0, 95.0);
+		Assert.floatEquals(0.0, sim.position);
+		Assert.equals(0, sim.book.pendingCount());
+		Assert.equals("flat", sim.fills[1].kind);
+		Assert.floatEquals(110.0, sim.fills[1].price);
+	}
+
+	public function testBracketInvalidSpecsThrow() {
+		var sim = new OrderSim(100000);
+		Assert.raises(function() sim.submit("flat", {
+			bracket: { stop: { px: 90.0 }, link: "oco" }
+		}, 100.0, 0));
+		Assert.raises(function() sim.submit("long", {
+			bracket: { link: "oco" }
+		}, 100.0, 0));
+		Assert.raises(function() sim.submit("long", {
+			bracket: { stop: { px: 90.0, dist: 5.0 }, link: "oco" }
+		}, 100.0, 0));
+		Assert.raises(function() sim.submit("long", {
+			bracket: { stop: { px: 90.0 }, link: "fok" }
+		}, 100.0, 0));
+	}
+
+	/** Language surface + muse.orders both expand brackets via submit. */
+	public function testBracketSugarThroughInterp() {
+		var source = '
+			@strategy("bracket")
+			@on(bar) {
+				if (bar_index == 1 && position() == 0 && orders_pending() == 0)
+					long({ qty: 10.0, bracket: { stop: { px: 90.0 }, limit: { px: 110.0 }, link: "oco" } });
+			}
+		';
+		var bars = [
+			bar(0, 100, 101, 99, 100),
+			bar(1, 100, 101, 99, 100),
+			bar(2, 100, 112, 88, 100)
+		];
+		var harness = new HarnessContext();
+		var result = new MuseInterp(harness).runBacktest(
+			new MuseParser().parse(source), new BarFeed(bars));
+		Assert.equals(2, result.trades);
+		Assert.floatEquals(0.0, harness.orders.positionSize());
+		Assert.equals(0, harness.orders.book.pendingCount());
+		Assert.floatEquals(90.0, harness.orders.fills[1].price);
+
+		var nsSource = '
+			@strategy("bracket_ns")
+			@on(bar) {
+				if (bar_index == 1 && muse.orders.position() == 0 && muse.orders.pending() == 0)
+					muse.orders.long({ qty: 10.0, bracket: { stop: { dist: 10.0 }, limit: { dist: 10.0 }, link: "oco" } });
+			}
+		';
+		var nsHarness = new HarnessContext();
+		new MuseInterp(nsHarness).runBacktest(
+			new MuseParser().parse(nsSource), new BarFeed(bars));
+		Assert.equals(2, nsHarness.orders.fills.length);
+		Assert.floatEquals(90.0, nsHarness.orders.fills[1].price);
+	}
 }

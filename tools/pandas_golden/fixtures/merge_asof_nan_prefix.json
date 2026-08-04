@@ -1,0 +1,19 @@
+{
+  "left_time": [
+    10.0,
+    11.0,
+    12.0
+  ],
+  "right_time": [
+    11.5
+  ],
+  "right_value": [
+    7.0
+  ],
+  "expected_value": [
+    null,
+    null,
+    7.0
+  ],
+  "direction": "backward"
+}

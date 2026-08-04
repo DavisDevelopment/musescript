@@ -18,8 +18,24 @@ StrategyGenome (Haxe enums)
 `EvolutionEngine.configureForPanel(panel)` (also gates Variation universe growth).
 Genomes with `panelAction` score through the portfolio path (`buy` /
 `rebalance_equal` / `target_weight` → `PortfolioSim`). Classic genomes
-(`panelAction == null`) stay on single-name `OrderSim` even if a panel is
-attached. Compose with `configureForTape` for aux field pools.
+(`panelAction == null` and no `KPd`) stay on single-name `OrderSim` even if a
+panel is attached. Compose with `configureForTape` for aux field pools.
+
+**Closed NP / PD palette (gated, default off):** host `muse.np` / `muse.pd` are
+not open-world Expand trees. Opt in with:
+
+```text
+engine.configureForPanel(panel)   # PanelFeed → Fitness.configurePanel + universe
+engine.configureForUniverse([...]) # if panel not used; required for xs_rank
+engine.configureForPd(null)       # KPd → percentile pd_xs_rank → target_weight
+engine.configureForNp(null)       # or ["mean","dot","sum"] — KNp → np_mean/np_dot/np_sum
+```
+
+PD genomes Expand to runnable panel MS (`target_weight` / HostABI), not a rank
+scalar inside a long/short skeleton. Fitness uses `runPanelBacktest` when
+`configureForPanel` is set. NMA / VM refuse closed NP/PD (`nma-unsupported` /
+`vm-unsupported` → Expand→interp/JS). WASM may claim native for the NP scalar
+subset; PD remains all-U (honest fallback).
 
 **Offline loaders / CLI:** `PanelLoader` (`json` bySym, long CSV + `symbol`,
 `--tapes SYM=path`, dir of CSVs). GeneRunner:
