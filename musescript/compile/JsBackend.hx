@@ -463,6 +463,14 @@ class JsBackend {
 		Reflect.setField(api, "donchian", function(a:Dynamic) return TradeBuiltins.donchian(harness, Std.int(a)));
 		Reflect.setField(api, "any_of", function(cs:haxe.Rest<Dynamic>) { for (c in cs) if (c == true) return true; return false; });
 		Reflect.setField(api, "all_of", function(cs:haxe.Rest<Dynamic>) { for (c in cs) if (c != true) return false; return true; });
+		Reflect.setField(api, "candle_body", function(i:Dynamic) return TradeBuiltins.candleBody(harness, Std.int(i)));
+		Reflect.setField(api, "candle_body_abs", function(i:Dynamic) return TradeBuiltins.candleBodyAbs(harness, Std.int(i)));
+		Reflect.setField(api, "candle_upper_wick", function(i:Dynamic) return TradeBuiltins.candleUpperWick(harness, Std.int(i)));
+		Reflect.setField(api, "candle_lower_wick", function(i:Dynamic) return TradeBuiltins.candleLowerWick(harness, Std.int(i)));
+		Reflect.setField(api, "candle_dir", function(i:Dynamic) return TradeBuiltins.candleDir(harness, Std.int(i)));
+		Reflect.setField(api, "candle_range_atr", function(i:Dynamic, ?n:Dynamic) return TradeBuiltins.candleRangeAtr(harness, Std.int(i), n == null ? 14 : Std.int(n)));
+		Reflect.setField(api, "candle_gap", function(i:Dynamic, ?n:Dynamic) return TradeBuiltins.candleGap(harness, Std.int(i), n == null ? 14 : Std.int(n)));
+		Reflect.setField(api, "bars_since", function(cond:Dynamic) return TradeBuiltins.barsSince(harness, cond));
 		Reflect.setField(api, "unrealized_pnl", function() {
 			var px = harness.currentBar != null ? harness.currentBar.close : 0.0;
 			return harness.orders.unrealizedPnl(px);
@@ -553,6 +561,14 @@ class JsBackend {
 		Reflect.setField(f0, "symbol_in", function(ss:haxe.Rest<Dynamic>) { for (x in ss) if (x != null && Std.string(x) == harness.symbol) return true; return false; });
 		Reflect.setField(f0, "any_of", function(cs:haxe.Rest<Dynamic>) { for (c in cs) if (c == true) return true; return false; });
 		Reflect.setField(f0, "all_of", function(cs:haxe.Rest<Dynamic>) { for (c in cs) if (c != true) return false; return true; });
+		Reflect.setField(f0, "candle_body", function(i:Dynamic) return TradeBuiltins.candleBody(harness, Std.int(i)));
+		Reflect.setField(f0, "candle_body_abs", function(i:Dynamic) return TradeBuiltins.candleBodyAbs(harness, Std.int(i)));
+		Reflect.setField(f0, "candle_upper_wick", function(i:Dynamic) return TradeBuiltins.candleUpperWick(harness, Std.int(i)));
+		Reflect.setField(f0, "candle_lower_wick", function(i:Dynamic) return TradeBuiltins.candleLowerWick(harness, Std.int(i)));
+		Reflect.setField(f0, "candle_dir", function(i:Dynamic) return TradeBuiltins.candleDir(harness, Std.int(i)));
+		Reflect.setField(f0, "candle_range_atr", function(i:Dynamic, ?n:Dynamic) return TradeBuiltins.candleRangeAtr(harness, Std.int(i), n == null ? 14 : Std.int(n)));
+		Reflect.setField(f0, "candle_gap", function(i:Dynamic, ?n:Dynamic) return TradeBuiltins.candleGap(harness, Std.int(i), n == null ? 14 : Std.int(n)));
+		Reflect.setField(f0, "bars_since", function(cond:Dynamic) return TradeBuiltins.barsSince(harness, cond));
 		Reflect.setField(f0, "unrealized_pnl", function() return harness.orders.unrealizedPnl(harness.currentBar.close));
 		Reflect.setField(f0, "unrealized_pnl_pct", function() {
 			var pos = harness.orders.positionSize();
@@ -1112,6 +1128,14 @@ class JsBackend {
 				case "donchian": TradeBuiltins.donchian(harness, Std.int(args[0]));
 				case "any_of": { var hit = false; for (c in args) if (c == true) hit = true; hit; }
 				case "all_of": { var ok = true; for (c in args) if (c != true) ok = false; ok; }
+				case "candle_body": TradeBuiltins.candleBody(harness, Std.int(args[0]));
+				case "candle_body_abs": TradeBuiltins.candleBodyAbs(harness, Std.int(args[0]));
+				case "candle_upper_wick": TradeBuiltins.candleUpperWick(harness, Std.int(args[0]));
+				case "candle_lower_wick": TradeBuiltins.candleLowerWick(harness, Std.int(args[0]));
+				case "candle_dir": TradeBuiltins.candleDir(harness, Std.int(args[0]));
+				case "candle_range_atr": TradeBuiltins.candleRangeAtr(harness, Std.int(args[0]), args.length > 1 ? Std.int(args[1]) : 14);
+				case "candle_gap": TradeBuiltins.candleGap(harness, Std.int(args[0]), args.length > 1 ? Std.int(args[1]) : 14);
+				case "bars_since": TradeBuiltins.barsSince(harness, args[0]);
 			case "unrealized_pnl": harness.orders.unrealizedPnl(harness.currentBar.close);
 			case "unrealized_pnl_pct":
 				var pos = harness.orders.positionSize();

@@ -171,6 +171,17 @@ class BuiltinSigs {
 			{name: "lower", ty: TScalar},
 			{name: "mid", ty: TScalar}
 		]));
+		// Candle-pattern vocabulary (SPEC_CANDLE_PATTERN_DSL.md P0): scale-free per-bar features,
+		// `i` bars back (0 = current). Range-normalized; the last two are ATR-normalized (optional n).
+		fun("candle_body", [TScalar], TScalar);
+		fun("candle_body_abs", [TScalar], TScalar);
+		fun("candle_upper_wick", [TScalar], TScalar);
+		fun("candle_lower_wick", [TScalar], TScalar);
+		fun("candle_dir", [TScalar], TScalar);
+		fun("candle_range_atr", [TScalar, TWindow], TScalar, 1);
+		fun("candle_gap", [TScalar, TWindow], TScalar, 1);
+		// Setup memory: bars since a boolean condition was last true (large sentinel if never).
+		fun("bars_since", [TBool], TScalar);
 		// Peak-following trailing stop: true once price retraces `dist` (price units, e.g. k*atr(n))
 		// from the best level reached since entry. Inert while flat.
 		fun("trail", [TScalar], TBool);

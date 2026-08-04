@@ -67,6 +67,7 @@ class TestMain {
 		runner.addCase(new TestParamSweep());
 		runner.addCase(new TestMoreBuiltins());
 		runner.addCase(new TestTier1Builtins());
+		runner.addCase(new TestCandleAndBarsSince());
 		runner.addCase(new TestWatAssembler());
 		runner.addCase(new TestBuiltinDocs());
 		runner.addCase(new TestWalkForwardPipeline());

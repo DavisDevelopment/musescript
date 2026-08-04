@@ -147,6 +147,27 @@ class TradeBuiltins {
 		vars.set("percent_rank", function(src:Dynamic, len:Int) return percentRank(harness, src, len));
 		// Donchian channel struct: `donchian(20).upper` / `.lower` / `.mid` (reads high/low implicitly).
 		vars.set("donchian", function(len:Int) return donchian(harness, len));
+		// Candle-pattern vocabulary (SPEC_CANDLE_PATTERN_DSL.md P0): scale-free per-bar features, `i`
+		// bars back (0 = current). `when candle_dir(0) > 0 && candle_body_abs(0) > 0.6: long()`.
+		vars.set("candle_body", function(i:Int) return candleBody(harness, i));
+		vars.set("candle_body_abs", function(i:Int) return candleBodyAbs(harness, i));
+		vars.set("candle_upper_wick", function(i:Int) return candleUpperWick(harness, i));
+		vars.set("candle_lower_wick", function(i:Int) return candleLowerWick(harness, i));
+		vars.set("candle_dir", function(i:Int) return candleDir(harness, i));
+		vars.set("candle_range_atr", function(i:Int, ?n:Int) return candleRangeAtr(harness, i, n == null ? 14 : n));
+		vars.set("candle_gap", function(i:Int, ?n:Int) return candleGap(harness, i, n == null ? 14 : n));
+		// Temporal setup-memory: bars since `cond` was last true (large sentinel if never).
+		vars.set("bars_since", function(cond:Dynamic) return barsSince(harness, cond));
+		// Variadic instrument membership (extends asset_is/symbol_is): `when asset_in("crypto","forex"): ...`.
+		vars.set("asset_in", function(classes:haxe.Rest<Dynamic>) {
+			var a = harness.assetClass.toLowerCase();
+			for (c in classes) if (c != null && Std.string(c).toLowerCase() == a) return true;
+			return false;
+		});
+		vars.set("symbol_in", function(syms:haxe.Rest<Dynamic>) {
+			for (s in syms) if (s != null && Std.string(s) == harness.symbol) return true;
+			return false;
+		});
 		// Variadic instrument membership (extends asset_is/symbol_is): `when asset_in("crypto","forex"): ...`.
 		vars.set("asset_in", function(classes:haxe.Rest<Dynamic>) {
 			var a = harness.assetClass.toLowerCase();
@@ -573,6 +594,78 @@ class TradeBuiltins {
 	/** Donchian channel over the last `len` bars: `{upper, lower, mid}` = highest high / lowest low /
 	 * their midpoint. Multi-output like `bbands`/`macd`: `donchian(20).upper`. Reads high/low
 	 * implicitly (a Donchian channel is always on the bar extremes). NaN fields until `len` bars. */
+	/** OHLC value of the bar `i` bars back (0 = current), or NaN if out of range. */
+	static function barAt(harness:HarnessContext, field:String, i:Int):Float {
+		var a = resolveSeries(harness, field);
+		var idx = a.length - 1 - i;
+		return (idx >= 0 && idx < a.length) ? a[idx] : Math.NaN;
+	}
+
+	/** Range (high-low) of bar `i`, floored by a tiny epsilon so a doji (range~0) doesn't blow up the
+	 * range-normalized candle features below. */
+	static function candleRange(harness:HarnessContext, i:Int):Float {
+		var r = barAt(harness, "high", i) - barAt(harness, "low", i);
+		return r > 1e-12 ? r : 1e-12;
+	}
+
+	// --- Candle-pattern vocabulary (SPEC_CANDLE_PATTERN_DSL.md, P0). Scale-free per-bar features,
+	// each normalized to the bar's own range (or ATR), so a pattern transfers across instruments.
+	// Individual scalar builtins (not a multi-output struct) to sidestep the interp multi-field quirk.
+
+	/** Signed body of bar `i`: (close-open)/range, in [-1,1]. >0 bull, <0 bear. */
+	public static function candleBody(harness:HarnessContext, i:Int):Float {
+		return (barAt(harness, "close", i) - barAt(harness, "open", i)) / candleRange(harness, i);
+	}
+
+	/** Body magnitude of bar `i`: |close-open|/range, in [0,1]. */
+	public static function candleBodyAbs(harness:HarnessContext, i:Int):Float {
+		return Math.abs(barAt(harness, "close", i) - barAt(harness, "open", i)) / candleRange(harness, i);
+	}
+
+	/** Upper wick of bar `i`: (high-max(open,close))/range, in [0,1]. */
+	public static function candleUpperWick(harness:HarnessContext, i:Int):Float {
+		var o = barAt(harness, "open", i), c = barAt(harness, "close", i);
+		return (barAt(harness, "high", i) - Math.max(o, c)) / candleRange(harness, i);
+	}
+
+	/** Lower wick of bar `i`: (min(open,close)-low)/range, in [0,1]. */
+	public static function candleLowerWick(harness:HarnessContext, i:Int):Float {
+		var o = barAt(harness, "open", i), c = barAt(harness, "close", i);
+		return (Math.min(o, c) - barAt(harness, "low", i)) / candleRange(harness, i);
+	}
+
+	/** Direction of bar `i`: sign(close-open) in {-1,0,1}. */
+	public static function candleDir(harness:HarnessContext, i:Int):Float {
+		var d = barAt(harness, "close", i) - barAt(harness, "open", i);
+		return d > 0 ? 1.0 : (d < 0 ? -1.0 : 0.0);
+	}
+
+	/** Size of bar `i` in ATR units: range(i) / atr(close, n). Scale-free "how big is this candle". */
+	public static function candleRangeAtr(harness:HarnessContext, i:Int, ?n:Int = 14):Float {
+		var at = atr(harness, "close", n);
+		return (at > 0 && !Math.isNaN(at)) ? candleRange(harness, i) / at : Math.NaN;
+	}
+
+	/** Gap of bar `i` vs the prior close, in ATR units: (open(i) - close(i+1)) / atr(close, n). */
+	public static function candleGap(harness:HarnessContext, i:Int, ?n:Int = 14):Float {
+		var at = atr(harness, "close", n);
+		return (at > 0 && !Math.isNaN(at)) ? (barAt(harness, "open", i) - barAt(harness, "close", i + 1)) / at : Math.NaN;
+	}
+
+	// --- bars_since (SPEC_CANDLE_PATTERN_DSL.md L3 / wishlist "setup memory"). Slot-based per-callsite
+	// state (shares nextCallSlot with crossover/rising; reset per-run, not per-bar) so no compiler
+	// __cs wiring is needed. Returns a large sentinel when the condition has never been true.
+	static var barsSinceState:Array<Int> = [];
+
+	public static function barsSince(harness:HarnessContext, cond:Dynamic):Float {
+		var slot = nextCallSlot();
+		while (barsSinceState.length <= slot) barsSinceState.push(-1);
+		var cur = harness.currentBar != null ? harness.currentBar.index : 0;
+		if (cond == true) barsSinceState[slot] = cur;
+		var last = barsSinceState[slot];
+		return last < 0 ? 1e9 : (cur - last);
+	}
+
 	public static function donchian(harness:HarnessContext, len:Int, ?out:Dynamic):Dynamic {
 		var up = highest(harness, "high", len);
 		var lo = lowest(harness, "low", len);
@@ -1001,6 +1094,7 @@ class TradeBuiltins {
 		barCallSlot = 0;
 		prevPairs = [];
 		seriesHistory = [];
+		barsSinceState = [];
 	}
 
 	static function nextCallSlot():Int {
