@@ -133,12 +133,16 @@ engine treats them like `rising`/`falling` (already in the palette), so they're 
 
 ## 5. Phased plan
 
-- **P0 — the candle vocabulary.** `SCandle(i, feat)` scalar leaf + the ~7 normalized features, in
-  interp + JS + `BuiltinSigs` + a palette entry. Verify: hand-written `candle(0).body > 0.6` matches a
-  reference computed from OHLC; js/interp parity; one evo smoke run shows the leaf getting mutated.
-  *Ships value immediately* (scale-free candle features) with zero new grammar.
-- **P1 — `bars_since` / `count_recent` / `held`.** The temporal trio on the existing callsite-state
-  path. Verify: `bars_since` parity vs a brute-force scan; stateful-kind registration; palette entry.
+- **P0 — the candle vocabulary. ✅ SHIPPED (commit `7096108`).** The ~7 normalized features
+  (`candle_body`/`candle_body_abs`/`candle_upper_wick`/`candle_lower_wick`/`candle_dir`/
+  `candle_range_atr`/`candle_gap`) landed as **individual scalar builtins** (interp + JS +
+  `BuiltinSigs`), deliberately NOT the `candle(i).{…}` multi-output struct — that hits a MuseInterp
+  multi-field-access quirk, and candle patterns compare many fields of one bar. js/interp parity;
+  `TestCandleAndBarsSince`. The genome half (an `SCandle` leaf + palette entry, so the evo engine can
+  *mutate* these) is deferred until the genome tree settles (Cursor mid-edit on `ScalarNode`).
+- **P1 — `bars_since` ✅ SHIPPED (same commit)** via slot-based callsite state (shares `nextCallSlot`
+  with crossover/rising, reset per-run — no `__cs` compiler wiring). `count_recent` / `held` remain
+  to build on the same path. Verify done: never-true → large sentinel; js/interp identical.
 - **P2 — the `pattern { … }` block + `SPattern` genome node.** Parser (a new decl, like `template`),
   `Expand` render, `CorpusSeed` reverse-translate, soft-score reduce, the four mutation operators,
   MAP-Elites descriptor (e.g. sequence length × mean tolerance) so patterns niche apart. Verify:
