@@ -110,6 +110,8 @@
 
 **Shipped (Desktop, 2026-08-03):** `worldLayout.js` + WorldView mode toggle · workbench hosts Causal Sim / Light Muse / Evolve / Truth / Brier / reliability · Playwright `world-layout-*` · no default-landing change · no AGPL code.
 
+**Shipped (2026-08-04 UI follow-on):** persisted sim-run browser (`GET /world/simulate/runs` + local ring) · dual-lane scrub + feed pins (pattern **B**, reimplemented) · AIS/bridge honesty chrome · mobile manage strip under detail · nation/outlet/ops sheet. Still no AGPL vendor.
+
 **Optional tiny spike (&lt;1h):** ~~Desktop-only mode toggle on WorldView (Map / Split / Muse) mirroring MiroFish’s graph/split/workbench — no new packages, no AGPL code.~~ → **done**.
 ---
 
