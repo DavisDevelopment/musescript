@@ -38,20 +38,23 @@ PD `xs_rank` genomes Expand to runnable panel MS (`target_weight` / HostABI, or
 closed `portfolio_apply(bag_from_scan({…}, k))` /
 `portfolio_apply(bag_norm(bag_from_dict({…ranks…})))`). No open `bag_rank_*` /
 `symbols()` / `dict_new` loops in Expand. Size-safe `shift` stays on classic
-single-name fitness. Closed bags HostABI on WASM (`apply_bag_*`); open bags stay U.
+single-name fitness. Closed bags HostABI on WASM (`apply_bag_*` incl. bottom scan / raw dict /
+`bag_equal` / `bag_pair`); open bags / bag locals stay U.
 Fitness uses `runPanelBacktest` when `configureForPanel` is set for panel/xs_rank
 genomes. NMA columnarizes closed
 **NP** (`np_mean`/`np_sum`/`np_dot` of trailing `window` over SPrice/SInd) and cliff-3
 closed **SPanel** (`PanelInline` → `field@SYM`) with `PABuy`/`PARebalance`/`PATargetWeight`
 and closed bag templates **`PABagScanTop`** / **`PABagRankWeights`** (columnar scores →
 equal bag or percentile xs_rank → `bag_norm` → `applyBag`) on packed `PanelFeed` columns
-(`preferNma` → backend `nma`). Closed **PD** `KPd` stays `nma-unsupported`. Open
-`bag_rank_*` / `symbols()` stay out of Expand and NMA. Bytecode VM also runs closed NP
-(`VmNpEligibility`), packed `pd_rank1d`, and Series-lane `pd_series`/`pd_shift`/
-`pd_series_values` (`VmPdEligibility`); Expand `KPd("xs_rank")` / panel stay
-`vm-unsupported` while gated `KPd("shift")` may hit `--vm`. WASM may claim native for
+(`preferNma` → backend `nma`). Closed **PD** `KPd("shift")` is also columnar-NMA
+(lookback of OHLC field); `KPd("xs_rank")` stays `nma-unsupported` (panel/frame Expand).
+Open `bag_rank_*` / `symbols()` stay out of Expand and NMA. Bytecode VM also runs closed NP
+(`VmNpEligibility`), packed `pd_rank1d`, Series-lane `pd_series`/`pd_shift`/
+`pd_series_values`, and gated Frame-lane `pd_from_columns`/`pd_xs_rank`/groupby/`pd_join`
+(`VmPdEligibility`); Expand `KPd("xs_rank")` / panel stay `vm-unsupported` while gated
+`KPd("shift")` may hit `--vm`. WASM may claim native for
 the NP scalar subset and for size-capped Expand `pd_rank1d` (`WasmPdEligibility`);
-wide frame `pd_xs_rank` remains all-U (honest fallback).
+wide frame `pd_xs_rank` remains WASM-U (honest fallback).
 
 **Offline loaders / CLI:** `PanelLoader` (`json` bySym, long CSV + `symbol`,
 `--tapes SYM=path`, dir of CSVs). GeneRunner:
@@ -64,10 +67,11 @@ CorpusEvoRun --panel data/fund_panel.json   # configureForPanel + panel session 
 Pre-join DB panels with `tools/fund_panel_loader.py` (offline sqlite/duckdb → JSON).
 
 **NMA / VM:** closed `SPanel` + `PABuy`/`PARebalance`/`PATargetWeight`/`PABagScanTop`/
-`PABagRankWeights` are nma-fast via `PanelInline` + panel packing (`preferNma`). Open
-panel genomes and `KPd("xs_rank")` remain Expand→interp/WASM (`nma-unsupported` /
-`vm-unsupported`); Series `KPd("shift")` may hit bytecode VM. Open `bag_rank_*` /
-`symbols()` stay out of Expand and NMA.
+`PABagRankWeights` are nma-fast via `PanelInline` + panel packing (`preferNma`). Closed
+`KNp` and `KPd("shift")` are columnar-NMA. Open panel genomes and `KPd("xs_rank")`
+remain Expand→interp/WASM (`nma-unsupported` / `vm-unsupported`); Series `KPd("shift")`
+may also hit bytecode VM when NMA is off. Open `bag_rank_*` / `symbols()` stay out of
+Expand and NMA.
 
 Jenetics (`io.jenetics:jenetics:8.3.0`, Java 21) is the preferred host for
 Engine/selection when deploying on JVM; the Haxe `EvolutionEngine` is the

@@ -20,6 +20,8 @@ import musescript.evo.nma.NmaBool;
  *    trend window), and are differential-tested against it.
  *  - Closed `KNp` (mean/sum/dot of trailing `window`) is implemented HERE: short early windows
  *    match `TradeBuiltins.window` + `NpBuiltins` reduces — not SMA's full-window NaN warmup.
+ *  - Closed `KPd("shift")` is implemented HERE as lookback of an OHLC field (= Expand
+ *    `pd_shift` → last-cell extract). `KPd("xs_rank")` stays Expand (panel/frame).
  *  - Closed `SPanel` is hosted via `PanelInline` → `SPrice`/`SInd` over packed `field@SYM`
  *    columns (`NmaPanelPack` / `PanelFeed`). Closed bag templates (`PABagScanTop` /
  *    `PABagRankWeights`) build bag weights from those score columns in `NmaFitness`.
@@ -77,6 +79,9 @@ class NmaEval {
 				npWindowReduce(knp.op, evalSeries(knp.a, ctx),
 					knp.b != null ? evalSeries(knp.b, ctx) : null,
 					knp.window, ctx.n);
+			case KPd:
+				var kpd = (cast node : NmaKPd);
+				pdShiftColumn(kpd.pdKind, kpd.window, ctx);
 			default: throw 'NmaEval.evalScalar: non-scalar kind ${node.kind}';
 		};
 		popStore(node, ctx, () -> NmaCanonical.ensureWordsScalar(node), col);
@@ -354,6 +359,17 @@ class NmaEval {
 		}
 		col.commitLength(n);
 		return col;
+	}
+
+	/**
+	 * Closed `KPd("shift")` columnar path — bit-match Expand `pdShiftExpr`:
+	 * `np_get_flat(pd_series_values(pd_shift(pd_series(window(field, p+1)), p)), p)`
+	 * equals lookback `p` of the OHLC field (NaN before the lag fills).
+	 */
+	static function pdShiftColumn(kind:String, periods:Int, ctx:NmaEvalContext):GrowableVec<Float> {
+		var p = musescript.evo.Expand.clampPdShiftPeriods(periods);
+		var field = musescript.evo.Expand.pdShiftField(kind);
+		return lookback(ctx.priceColumn(field), p, ctx.n);
 	}
 
 	static function arith(op:String, a:GrowableVec<Float>, b:GrowableVec<Float>, n:Int):GrowableVec<Float> {

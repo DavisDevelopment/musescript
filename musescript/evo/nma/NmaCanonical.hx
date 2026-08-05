@@ -160,6 +160,15 @@ class NmaCanonical {
 				digestSeries(d, k.a);
 				d.int(k.window);
 				if (k.b != null) digestSeries(d, k.b) else d.tag(0);
+			case KPd:
+				var p = (cast n : NmaKPd);
+				d.tag("D".code); // match Canonical.digestScalar KPd
+				d.str(p.op);
+				d.str(p.pdKind);
+				d.int(p.window);
+				d.str(p.sym);
+				d.int(p.syms != null ? p.syms.length : 0);
+				if (p.syms != null) for (s in p.syms) d.str(s);
 			default: throw 'NmaCanonical.digestScalar: non-scalar kind ${n.kind}';
 		}
 	}
@@ -241,6 +250,9 @@ class NmaCanonical {
 			case KNp:
 				var k = (cast n : NmaKNp);
 				["Q", k.op, keySeries(k.a), k.window, k.b != null ? keySeries(k.b) : null];
+			case KPd:
+				var p = (cast n : NmaKPd);
+				["D", p.op, p.pdKind, p.window, p.sym, p.syms != null ? p.syms.copy() : []];
 			default: throw 'NmaCanonical.keyScalar: non-scalar kind ${n.kind}';
 		};
 	}
@@ -298,6 +310,7 @@ class NmaCanonical {
 			case KNp:
 				var k = (cast n : NmaKNp);
 				1 + countSeries(k.a) + (k.b != null ? countSeries(k.b) : 0);
+			case KPd: 1;
 			default: 0;
 		};
 	}

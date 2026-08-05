@@ -367,15 +367,29 @@ class Expand {
 	}
 
 	/**
+	 * Clamp `KPd("shift")` periods to the same envelope Expand emits / NMA evaluates
+	 * (`1..PD_SHIFT_MAX`, and `< NP_MAX_WIN` so `window(p+1)` stays size-safe).
+	 */
+	public static function clampPdShiftPeriods(periods:Int):Int {
+		var p = periods < 1 ? 1 : periods;
+		if (p > Palette.PD_SHIFT_MAX) p = Palette.PD_SHIFT_MAX;
+		if (p >= Palette.NP_MAX_WIN) p = Palette.NP_MAX_WIN - 1;
+		return p;
+	}
+
+	/** OHLC field for `pd_shift` — non-FIELDS kinds collapse to `close` (Expand honesty). */
+	public static function pdShiftField(kind:String):String {
+		return Palette.FIELDS.indexOf(kind) >= 0 ? kind : "close";
+	}
+
+	/**
 	 * Size-safe Series lag: `pd_shift(pd_series(window(field, w)), p)` then last-cell
 	 * extract. `w = clamp(p+1)` so index `w-1` is always defined and equals lookback `p`.
 	 */
 	public static function pdShiftExpr(kind:String, periods:Int):String {
-		var p = periods < 1 ? 1 : periods;
-		if (p > Palette.PD_SHIFT_MAX) p = Palette.PD_SHIFT_MAX;
-		if (p >= Palette.NP_MAX_WIN) p = Palette.NP_MAX_WIN - 1;
+		var p = clampPdShiftPeriods(periods);
 		var w = clampNpWindow(p + 1);
-		var field = Palette.FIELDS.indexOf(kind) >= 0 ? kind : "close";
+		var field = pdShiftField(kind);
 		var last = w - 1;
 		return 'np_get_flat(pd_series_values(pd_shift(pd_series(window($field, $w)), $p)), $last)';
 	}

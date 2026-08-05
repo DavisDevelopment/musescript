@@ -61,8 +61,11 @@ class NmaBijection {
 			case KHole(inner): new NmaKHole(scalarFromEnum(inner));
 			case KNp(op, a, window, b):
 				new NmaKNp(op, seriesFromEnum(a), window, b != null ? seriesFromEnum(b) : null);
-			case KPd(_, _, _, _, _):
-				throw "NmaBijection.scalarFromEnum: KPd is not columnar-NMA supported (nma-unsupported)";
+			case KPd(op, kind, window, sym, syms):
+				if (op != "shift")
+					throw 'NmaBijection.scalarFromEnum: KPd("$op") is not columnar-NMA supported (nma-unsupported)';
+				new NmaKPd("shift", kind, window, sym != null ? sym : "",
+					syms != null ? syms.copy() : []);
 		};
 	}
 
@@ -138,6 +141,9 @@ class NmaBijection {
 			case KNp:
 				var k = (cast n : NmaKNp);
 				KNp(k.op, seriesToEnum(k.a), k.window, k.b != null ? seriesToEnum(k.b) : null);
+			case KPd:
+				var p = (cast n : NmaKPd);
+				KPd(p.op, p.pdKind, p.window, p.sym, p.syms.copy());
 			default: throw 'NmaBijection.scalarToEnum: non-scalar kind ${n.kind}';
 		};
 	}

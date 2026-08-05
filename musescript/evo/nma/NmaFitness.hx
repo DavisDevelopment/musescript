@@ -214,8 +214,8 @@ class NmaFitness {
 	 * Columnar panel fitness (cliff 3): `PanelInline` genome + packed `field@SYM` columns from
 	 * `PanelFeed`, signals via `NmaEval`, apply via real `PortfolioSim` matching Expand's
 	 * closed `PABuy` / `PARebalance` / `PATargetWeight` / `PABagScanTop` / `PABagRankWeights`
-	 * templates (entryLong / exitLong only). Open bags, KPd, and sim-coupled roots stay Expand
-	 * (`nma-unsupported`).
+	 * templates (entryLong / exitLong only). Open bags, `KPd("xs_rank")`, and sim-coupled
+	 * roots stay Expand (`nma-unsupported`). `KPd("shift")` may appear in classic roots.
 	 *
 	 * «πολλαὶ νῆες, εἷς στόλος· κορυφαῖος Πορτοφόλιον.»
 	 */

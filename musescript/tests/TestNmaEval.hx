@@ -220,4 +220,22 @@ class TestNmaEval extends Test {
 		Assert.isFalse(Math.isNaN(expectMean[0]), "bar0 mean defined");
 		Assert.floatEquals(10.0, expectMean[0]);
 	}
+
+	/**
+	 * Closed KPd("shift"): Expand last-cell extract after pd_shift equals lookback `p`
+	 * of the OHLC field (NaN until the lag fills).
+	 */
+	public function testKPdShiftMatchesLookback() {
+		var close = [10.0, 12.0, 11.0, 13.0, 14.0, 12.5];
+		var n = close.length;
+		var p = 2;
+		var expect = new Array<Float>();
+		for (i in 0...n) expect.push(i - p >= 0 ? close[i - p] : Math.NaN);
+		var ctx = ctxOf(["close" => close], n);
+		var shift = new NmaKPd("shift", "close", p, "", []);
+		assertColEquals(expect, NmaEval.evalScalar(shift, ctx), "KPd shift ≡ lookback");
+		Assert.isTrue(Math.isNaN(expect[0]));
+		Assert.isTrue(Math.isNaN(expect[1]));
+		Assert.floatEquals(10.0, expect[2]);
+	}
 }

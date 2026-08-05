@@ -20,7 +20,7 @@ enum NmaKind {
 	// Series
 	SPrice; SInd;
 	// Scalar
-	KConst; KParam; KArith; KSeries; KLookback; KFeature; KHole; KNp;
+	KConst; KParam; KArith; KSeries; KLookback; KFeature; KHole; KNp; KPd;
 	// Bool
 	BCross; BCmp; BTrend; BAnd; BOr; BNot; BHole;
 }

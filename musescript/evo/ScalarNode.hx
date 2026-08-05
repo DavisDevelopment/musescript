@@ -15,7 +15,8 @@ enum ScalarNode {
 	 * Expand emits size-capped `np_mean` / `np_sum` / `np_dot` over `window(series, w)`.
 	 * `b` is required for `dot` (ignored for mean/sum). Columnar NMA evaluates trailing
 	 * window reduces over SPrice/SInd columns; WASM may claim native on the scalar subset;
-	 * bytecode VM is eligible (`VmNpEligibility`). Closed `KPd` remains Expand-only.
+	 * bytecode VM is eligible (`VmNpEligibility`). Closed `KPd("shift")` is likewise
+	 * NMA/VM-eligible; `KPd("xs_rank")` remains Expand-only (panel/frame).
 	 */
 	KNp(op:String, a:SeriesNode, window:Int, ?b:SeriesNode);
 	/**
@@ -25,7 +26,8 @@ enum ScalarNode {
 	 * `|syms| ≤ PD_RANK1D_MAX`, else one-row `pd_from_columns` + percentile
 	 * `pd_xs_rank` (coerces onto `PanelAction` / `target_weight`), or size-capped
 	 * `pd_shift` over `window(field, w)`. WASM: `pd_rank1d` N ≤64; frame path U.
-	 * NMA/VM: `nma-unsupported` / `vm-unsupported` for PD.
+	 * NMA: `KPd("shift")` columnar (lookback); `xs_rank` `nma-unsupported`.
+	 * VM: Series shift H (`VmPdEligibility`); xs_rank panel/frame U.
 	 */
 	KPd(op:String, kind:String, window:Int, sym:String, syms:Array<String>);
 }

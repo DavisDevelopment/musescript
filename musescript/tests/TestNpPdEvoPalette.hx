@@ -366,20 +366,40 @@ class TestNpPdEvoPalette extends Test {
 			"KNp VM finalEquity bits vs Expand→JS");
 	}
 
-	/** Closed KPd still refuses columnar NMA (gates / Expand-only). */
-	public function testKPdStillNmaUnsupported() {
+	/** Columnar NMA is the fast path for closed KPd("shift") — parity vs Expand→JS. */
+	public function testKPdShiftPreferNmaParityVsExpand() {
 		var g = genome(BCmp(">", KPd("shift", "close", 3, "", []), KConst(0.0)));
-		var bars = BarFeed.synthetic(30, 5).all();
+		var bars = BarFeed.synthetic(60, 11).all();
 		var prevNma = Fitness.preferNma;
 		var prevVm = Fitness.preferVm;
+		Fitness.preferNma = false;
+		Fitness.preferVm = false;
+		var ref = Fitness.evaluate(g, bars, "js", false);
+		Assert.isTrue(ref.ok, "ref " + ref.backend + " " + ref.error);
 		Fitness.preferNma = true;
 		Fitness.preferVm = false;
-		// PreferNma will fall through; compiled path must still work.
-		var r = Fitness.evaluate(g, bars, "js", false);
+		var nma = Fitness.evaluate(g, bars, "js", false);
 		Fitness.preferNma = prevNma;
 		Fitness.preferVm = prevVm;
-		Assert.isTrue(r.ok, "KPd fallthrough compile " + r.backend + " " + r.error);
-		Assert.notEquals("nma", r.backend, "KPd must not claim columnar NMA");
+		Assert.isTrue(nma.ok, "nma " + nma.backend + " " + nma.error);
+		Assert.equals("nma", nma.backend);
+		Assert.equals(ref.trades, nma.trades);
+		Assert.equals(
+			haxe.io.FPHelper.doubleToI64(ref.finalEquity),
+			haxe.io.FPHelper.doubleToI64(nma.finalEquity),
+			"KPd shift NMA finalEquity bits vs Expand→JS");
+	}
+
+	/** KPd("xs_rank") still refuses columnar NMA (panel/frame Expand). */
+	public function testKPdXsRankStillNmaUnsupported() {
+		var g = genome(BCmp(">",
+			KPd("xs_rank", "mom", 5, "AAA", ["AAA", "BBB"]),
+			KConst(0.5)));
+		g.panelAction = PATargetWeight("AAA");
+		var bars = BarFeed.synthetic(30, 5).all();
+		var fr = musescript.evo.nma.NmaFitness.evaluate(g, bars);
+		Assert.isFalse(fr.ok, "xs_rank NmaFitness must fail");
+		Assert.notEquals("nma", fr.backend, "KPd xs_rank must not claim columnar NMA");
 	}
 
 	/** Series-lane KPd("shift") is VM-eligible; xs_rank stays panel/frame U. */

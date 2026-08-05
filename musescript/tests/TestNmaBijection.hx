@@ -189,4 +189,29 @@ class TestNmaBijection extends Test {
 		Assert.equals(Canonical.structuralKey(g), NmaCanonical.structuralKey(nma), "KNp NmaCanonical key");
 		Assert.equals(Canonical.nodeCount(g), NmaCanonical.nodeCount(nma), "KNp NmaCanonical count");
 	}
+
+	public function testKPdShiftRoundTripAndCanonicalParity() {
+		var g = baseGenome(
+			BCmp(">", KPd("shift", "close", 3, "", []), KConst(0.0)),
+			KPd("shift", "high", 5, "", []));
+		var nma = NmaBijection.genomeFromEnum(g);
+		var back = NmaBijection.genomeToEnum(nma);
+		Assert.equals(Canonical.structuralKey(g), Canonical.structuralKey(back), "KPd shift structural round-trip");
+		Assert.equals(Expand.expand(g), Expand.expand(back), "KPd shift Expand round-trip");
+		Assert.equals(Canonical.structuralKey(g), NmaCanonical.structuralKey(nma), "KPd shift NmaCanonical key");
+		Assert.equals(Canonical.nodeCount(g), NmaCanonical.nodeCount(nma), "KPd shift NmaCanonical count");
+	}
+
+	public function testKPdXsRankBijectionThrows() {
+		var g = baseGenome(
+			BCmp(">", KPd("xs_rank", "mom", 5, "AAA", ["AAA", "BBB"]), KConst(0.5)),
+			KConst(1.0));
+		var threw = false;
+		try {
+			NmaBijection.genomeFromEnum(g);
+		} catch (e:Dynamic) {
+			threw = Std.string(e).indexOf("nma-unsupported") >= 0;
+		}
+		Assert.isTrue(threw, "xs_rank must stay nma-unsupported at bijection");
+	}
 }

@@ -33,7 +33,8 @@ import musescript.harness.Bar;
  * portfolio `runPanelBacktest` — not single-name Sharpe dressed up. Columnar NMA
  * (cliff 3) hosts closed `SPanel` → `field@SYM` + `PABuy`/`PARebalance`/`PATargetWeight`
  * / closed `PABagScanTop` / `PABagRankWeights` (`preferNma` → backend `nma`); open panel /
- * `KPd` stay Expand (`nma-unsupported`).
+ * `KPd("xs_rank")` stay Expand (`nma-unsupported`). `KPd("shift")` is columnar-NMA
+ * (lookback of OHLC field), analogous to closed `KNp`.
  * Open-world bag recipes / `symbols()` remain out of genome Expand.
  *
  * Closed NP / PD palette (not open-world muse.np / muse.pd in Expand):
@@ -46,10 +47,12 @@ import musescript.harness.Bar;
  * groupby/merge/HTTP. Coerces `KPd` xs_rank onto `PanelAction` / `target_weight`
  * so fitness uses `configureForPanel` → `runPanelBacktest`. Size-safe `pd_shift`
  * grows without a universe and stays single-name. NMA columnarizes closed NP
- * window reduces and cliff-3 closed SPanel/HostABI + bag templates (`PABagScanTop` /
- * `PABagRankWeights`); PD `KPd` stays `nma-unsupported`. Bytecode VM: closed NP scalar B
- * (`VmNpEligibility`), PD `vm-unsupported`. Enable trio: `configureForPanel` +
- * `configureForPd` + `configureForUniverse` (panel configures universe automatically).
+ * window reduces, closed `KPd("shift")`, and cliff-3 closed SPanel/HostABI + bag
+ * templates (`PABagScanTop` / `PABagRankWeights`); `KPd("xs_rank")` stays
+ * `nma-unsupported`. Bytecode VM: closed NP scalar B (`VmNpEligibility`), Series
+ * `KPd("shift")` H (`VmPdEligibility`); Expand xs_rank panel/frame U. Enable trio:
+ * `configureForPanel` + `configureForPd` + `configureForUniverse` (panel configures
+ * universe automatically).
  */
 class Palette {
 	public static final FIELDS:Array<String> = ["open", "high", "low", "close", "volume"];

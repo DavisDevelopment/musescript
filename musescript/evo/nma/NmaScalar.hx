@@ -3,7 +3,8 @@ package musescript.evo.nma;
 /**
  * NMA counterpart of `ScalarNode`. Family base `NmaScalar` (never instantiated) + concrete
  * `final` classes mirroring the enum constructors 1:1: `KConst`/`KParam`/`KArith`/`KSeries`/
- * `KLookback`/`KFeature`/`KHole`/`KNp`. Closed `KPd` stays Expand-only (`nma-unsupported`).
+ * `KLookback`/`KFeature`/`KHole`/`KNp`/`KPd`. Closed `KPd("shift")` is columnar (Series lag ≡
+ * lookback); `KPd("xs_rank")` stays Expand-only (`nma-unsupported` — panel/frame path).
  * See `NmaNode` for the per-node-state + GraalVM dispatch rationale (kind-switch hot path,
  * `final` leaves, allocation-free `childCount`/`childAt`).
  *
@@ -147,4 +148,34 @@ final class NmaKNp extends NmaScalar {
 
 	override public function childCount():Int return b != null ? 2 : 1;
 	override public function childAt(i:Int):NmaNode return i == 0 ? a : b;
+}
+
+/**
+ * `KPd(op, kind, window, sym, syms)` — closed PD palette leaf.
+ * Columnar NMA hosts `op == "shift"` only: size-capped Series lag of an OHLC field,
+ * bit-matching Expand `pd_shift(pd_series(window(field, p+1)), p)` → last-cell extract
+ * (= lookback `p`). `xs_rank` is refused upstream (`nma-unsupported`).
+ * Field name is `pdKind` (not `kind`) so it does not collide with `NmaNode.kind`.
+ *
+ * «ῥάβδος ἑπτάκλαδος· ὁδὸς μία πρὸς θέρος.»
+ */
+final class NmaKPd extends NmaScalar {
+	public final op:String;
+	/** Score/field kind from enum `KPd` (`close`/`mom`/…). */
+	public final pdKind:String;
+	public final window:Int;
+	public final sym:String;
+	public final syms:Array<String>;
+
+	public function new(op:String, pdKind:String, window:Int, sym:String, ?syms:Array<String>) {
+		super(NmaKind.KPd);
+		this.op = op;
+		this.pdKind = pdKind;
+		this.window = window;
+		this.sym = sym != null ? sym : "";
+		this.syms = syms != null ? syms : [];
+	}
+
+	/** Leaf — field/kind are string payloads, not series children. */
+	override public function childCount():Int return 0;
 }
