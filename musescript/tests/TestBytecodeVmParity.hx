@@ -64,7 +64,30 @@ class TestBytecodeVmParity extends Test {
 		"strategy S { onBar {\n  when np_get_flat(pd_rank1d([1.0, 2.0, 3.0], true), 1) > 0.5: { long(1); }\n  when np_get_flat(pd_rank1d([1.0, 2.0, 3.0], true), 0) < 0.5: { flat(); }\n} }",
 		// Cliff PD Series: pd_series / pd_shift → OBJ Series → pd_series_values → np_get_flat
 		"strategy S { onBar {\n  s = pd_series([1.0, 2.0, 3.0])\n  when np_get_flat(pd_series_values(s), 1) == 2.0: { long(1); }\n  when np_sum(pd_series_values(s)) != 6.0: { flat(); }\n} }",
-		"strategy S { onBar {\n  when np_get_flat(pd_series_values(pd_shift(pd_series(window(close, 4)), 1)), 3) > 0.0: { long(1); }\n  when np_get_flat(pd_series_values(pd_shift(pd_series([5.0, 6.0, 7.0]), 1)), 1) != 5.0: { flat(); }\n} }"
+		"strategy S { onBar {\n  when np_get_flat(pd_series_values(pd_shift(pd_series(window(close, 4)), 1)), 3) > 0.0: { long(1); }\n  when np_get_flat(pd_series_values(pd_shift(pd_series([5.0, 6.0, 7.0]), 1)), 1) != 5.0: { flat(); }\n} }",
+		// Cliff PD Frame: from_columns / xs_rank / get / groupby / join / frame shift
+		"strategy S { onBar {\n  df = pd_from_columns({a: [1.0, 3.0], b: [2.0, 4.0]})\n  when pd_nrows(df) == 2.0 && pd_ncols(df) == 2.0: { long(1); }\n  when np_get_flat(pd_series_values(pd_get(df, \"a\")), 1) != 3.0: { flat(); }\n} }",
+		"strategy S { onBar {\n  when np_get_flat(pd_series_values(pd_get(pd_xs_rank(pd_from_columns({x: [10.0, 30.0, 20.0]}), true), \"x\")), 1) > 0.5: { long(1); }\n} }",
+		"strategy S { onBar {\n  g = pd_groupby_mean(pd_from_columns({k: [1.0, 1.0, 2.0], v: [10.0, 20.0, 30.0]}), \"k\")\n  when pd_nrows(g) == 2.0: { long(1); }\n} }",
+		"strategy S { onBar {\n  L = pd_from_columns({id: [1.0, 2.0], x: [10.0, 20.0]})\n  R = pd_from_columns({id: [1.0, 2.0], y: [100.0, 200.0]})\n  when np_get_flat(pd_series_values(pd_get(pd_join(L, R, \"id\", \"inner\"), \"y\")), 0) == 100.0: { long(1); }\n} }",
+		"strategy S { onBar {\n  when np_get_flat(pd_series_values(pd_get(pd_shift(pd_from_columns({a: [1.0, 2.0, 3.0]}), 1), \"a\")), 1) == 1.0: { long(1); }\n} }",
+		// Cliff PD Series extras: ctor index/name + length/name scalars
+		"strategy S { onBar {\n  s = pd_series([1.0, 2.0, 3.0], [10.0, 20.0, 30.0], \"x\")\n  when pd_series_length(s) == 3.0 && pd_series_name(s) == \"x\": { long(1); }\n  when np_get_flat(pd_series_values(s), 0) != 1.0: { flat(); }\n} }",
+		"strategy S { onBar {\n  s = pd_series([4.0, 5.0], \"y\")\n  when pd_series_name(s) == \"y\" && pd_series_length(s) == 2.0: { long(1); }\n} }",
+		// Cliff-2 widen (vm-np): runtime asarray + DetMath exp/log + pairwise + cumsum + reshape + matmul
+		"strategy S { onBar {\n  xs = np_asarray([close, 1.0, 2.0])\n  when np_get_flat(xs, 1) == 1.0 && np_sum(xs) > 0.0: { long(1); }\n  when np_sum(xs) <= 0.0: { flat(); }\n} }",
+		"strategy S { onBar {\n  e = np_exp(np_asarray([0.0, 1.0]))\n  when np_sum(e) > 3.0: { long(1); }\n  when np_sum(np_log(np_add(e, np_full([2], 1.0)))) > 0.0: { flat(); }\n} }",
+		"strategy S { onBar {\n  ys = np_cumsum(np_add(np_asarray([1.0, close, 3.0]), np_ones(3)))\n  when np_sum(ys) > 0.0: { long(1); }\n} }",
+		"strategy S { onBar {\n  r = np_reshape(np_asarray([1.0, 2.0, 3.0, 4.0]), [4])\n  when np_get_flat(r, 2) == 3.0: { long(1); }\n} }",
+		"strategy S { onBar {\n  p = np_matmul([[1.0, 2.0], [3.0, 4.0]], [[5.0, 6.0], [7.0, 8.0]])\n  when np_sum(p) == 70.0: { long(1); }\n} }",
+		// VM↔WASM NP close: unary/pairwise ufuncs + reduce/size/ndim (WASM N twin → VM H/B)
+		"strategy S { onBar {\n  a = np_abs(np_negative(np_asarray([close, -1.0, 2.0])))\n  when np_sum(a) > 0.0: { long(1); }\n  when np_sum(a) <= 0.0: { flat(); }\n} }",
+		"strategy S { onBar {\n  s = np_sign(np_asarray([-2.0, 0.0, 3.0]))\n  when np_sum(np_square(np_sqrt(np_asarray([4.0, 9.0])))) == 13.0 && np_get_flat(s, 0) == -1.0: { long(1); }\n} }",
+		"strategy S { onBar {\n  c = np_clip(np_asarray([-2.0, 0.5, 3.0]), 0.0, 1.0)\n  when np_sum(c) == 1.5: { long(1); }\n} }",
+		"strategy S { onBar {\n  m = np_minimum(np_asarray([1.0, 5.0]), np_asarray([3.0, 2.0]))\n  when np_sum(m) == 3.0 && np_sum(np_maximum(np_asarray([1.0, 5.0]), np_asarray([3.0, 2.0]))) == 8.0: { long(1); }\n} }",
+		"strategy S { onBar {\n  xs = np_asarray([3.0, 1.0, 2.0])\n  when np_min(xs) == 1.0 && np_max(xs) == 3.0 && np_prod(np_asarray([2.0, 3.0])) == 6.0: { long(1); }\n} }",
+		"strategy S { onBar {\n  when np_std(np_asarray([1.0, 1.0, 1.0])) == 0.0 && np_var(np_asarray([1.0, 1.0, 1.0])) == 0.0: { long(1); }\n} }",
+		"strategy S { onBar {\n  xs = np_asarray([1.0, 2.0, 3.0])\n  when np_size(xs) == 3.0 && np_ndim(xs) == 1.0: { long(1); }\n} }"
 	];
 
 	public function testInterpVsVmByteParity() {
@@ -90,22 +113,35 @@ class TestBytecodeVmParity extends Test {
 		Assert.isTrue(threw, "indicator program should throw VmUnsupported, not compile");
 	}
 
-	/** Cliff 2/4/PD: opaque / over-cap / non-1-D np_* and frame pd_* refuse with VmUnsupported. */
+	/** Cliff 2/4/PD: opaque / over-cap / non-1-D np_* and ungated frame pd_* refuse with VmUnsupported. */
 	public function testNpPdOpaqueRefused() {
 		var cases = [
 			"strategy S { onBar {\n  when np_zeros(65) != null: { long(1); }\n} }",
 			"strategy S { onBar {\n  when np_zeros([2, 2]) != null: { long(1); }\n} }",
-			"strategy S { onBar {\n  when np_reshape(np_zeros(3), [3]) != null: { long(1); }\n} }",
+			"strategy S { onBar {\n  when np_reshape(np_zeros(3), [65]) != null: { long(1); }\n} }",
 			"strategy S { onBar {\n  when np_mean(window(close, 5), 0) > 0.0: { long(1); }\n} }",
-			"strategy S { onBar {\n  when np_asarray([close, 1.0]) != null: { long(1); }\n} }",
-			"strategy S { onBar {\n  when pd_nrows(pd_from_columns({a: [1.0]})) > 0.0: { long(1); }\n} }",
-			"strategy S { onBar {\n  when pd_xs_rank(pd_from_columns({a: [1.0]}), true) != null: { long(1); }\n} }",
+			"strategy S { onBar {\n  when np_asarray([[1.0, 2.0], [3.0, 4.0]]) != null: { long(1); }\n} }",
+			"strategy S { onBar {\n  when np_cumsum(np_asarray([1.0, 2.0]), 0) != null: { long(1); }\n} }",
+			"strategy S { onBar {\n  when np_matmul([[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]], [[1.0]]) != null: { long(1); }\n} }",
+			"strategy S { onBar {\n  when np_min(np_asarray([1.0, 2.0]), 0) != null: { long(1); }\n} }",
+			"strategy S { onBar {\n  when np_clip(np_asarray([1.0]), close, 1.0) != null: { long(1); }\n} }",
+			"strategy S { onBar {\n  when np_equal(np_asarray([1.0]), np_asarray([1.0])) != null: { long(1); }\n} }",
+			"strategy S { onBar {\n  when np_vol_target_qty(np_asarray([0.01]), 0.1, 1.0) != null: { long(1); }\n} }",
 			"strategy S { onBar {\n  when pd_rank1d([1.0], true, false) != null: { long(1); }\n} }",
 			"strategy S { onBar {\n  when np_get_flat(pd_rank1d([close, 1.0]), 0) > 0.0: { long(1); }\n} }",
 			"strategy S { onBar {\n  when pd_series([1.0], pd_index_range(1)) != null: { long(1); }\n} }",
-			"strategy S { onBar {\n  when pd_shift(pd_from_columns({a: [1.0, 2.0]}), 1) != null: { long(1); }\n} }",
+			"strategy S { onBar {\n  when pd_series([1.0, 2.0], [1.0]) != null: { long(1); }\n} }",
 			"strategy S { onBar {\n  when pd_series_values(pd_from_columns({a: [1.0]})) != null: { long(1); }\n} }",
-			"strategy S { onBar {\n  when np_get_flat(pd_series_values(pd_shift(pd_series(window(close, 4)), close)), 0) > 0.0: { long(1); }\n} }"
+			"strategy S { onBar {\n  when np_get_flat(pd_series_values(pd_shift(pd_series(window(close, 4)), close)), 0) > 0.0: { long(1); }\n} }",
+			// Frame lane U: index/columns arity, over-cap, keys-agg, merge_asof, transform, Index
+			"strategy S { onBar {\n  when pd_from_columns({a: [1.0]}, pd_index_range(1)) != null: { long(1); }\n} }",
+			"strategy S { onBar {\n  when pd_nrows(pd_from_columns({a: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0, 25.0, 26.0, 27.0, 28.0, 29.0, 30.0, 31.0, 32.0, 33.0, 34.0, 35.0, 36.0, 37.0, 38.0, 39.0, 40.0, 41.0, 42.0, 43.0, 44.0, 45.0, 46.0, 47.0, 48.0, 49.0, 50.0, 51.0, 52.0, 53.0, 54.0, 55.0, 56.0, 57.0, 58.0, 59.0, 60.0, 61.0, 62.0, 63.0, 64.0, 65.0]})) > 0.0: { long(1); }\n} }",
+			"strategy S { onBar {\n  when pd_groupby_keys_agg(pd_from_columns({a: [1.0]}), [\"a\"]) != null: { long(1); }\n} }",
+			"strategy S { onBar {\n  when pd_merge_asof(pd_from_columns({t: [1.0]}), pd_from_columns({t: [1.0]}), \"t\") != null: { long(1); }\n} }",
+			"strategy S { onBar {\n  when pd_groupby_transform(pd_from_columns({k: [1.0], v: [2.0]}), \"k\") != null: { long(1); }\n} }",
+			"strategy S { onBar {\n  when pd_xs_rank(pd_from_columns({a: [1.0]}), true, false) != null: { long(1); }\n} }",
+			"strategy S { onBar {\n  when pd_join(pd_from_columns({id: [1.0]}), pd_from_columns({id: [1.0]}), \"id\", \"left\", true) != null: { long(1); }\n} }",
+			"strategy S { onBar {\n  when pd_from_columns({a: [close]}) != null: { long(1); }\n} }"
 		];
 		for (src in cases) {
 			var threw = false;
@@ -121,40 +157,100 @@ class TestBytecodeVmParity extends Test {
 	public function testVmNpEligibilityCatalog() {
 		Assert.isTrue(musescript.vm.VmNpEligibility.isScalarB("np_mean"));
 		Assert.isTrue(musescript.vm.VmNpEligibility.isScalarB("np_sum"));
+		Assert.isTrue(musescript.vm.VmNpEligibility.isScalarB("np_min"));
+		Assert.isTrue(musescript.vm.VmNpEligibility.isScalarB("np_max"));
+		Assert.isTrue(musescript.vm.VmNpEligibility.isScalarB("np_prod"));
+		Assert.isTrue(musescript.vm.VmNpEligibility.isScalarB("np_std"));
+		Assert.isTrue(musescript.vm.VmNpEligibility.isScalarB("np_var"));
+		Assert.isTrue(musescript.vm.VmNpEligibility.isScalarB("np_size"));
+		Assert.isTrue(musescript.vm.VmNpEligibility.isScalarB("np_ndim"));
 		Assert.isTrue(musescript.vm.VmNpEligibility.isScalarB("np_dot"));
 		Assert.isTrue(musescript.vm.VmNpEligibility.isScalarB("np_get_flat"));
 		Assert.isTrue(musescript.vm.VmNpEligibility.isHeapProducer("window"));
 		Assert.isTrue(musescript.vm.VmNpEligibility.isHeapNd("np_zeros"));
 		Assert.isTrue(musescript.vm.VmNpEligibility.isHeapNd("np_asarray"));
+		Assert.isTrue(musescript.vm.VmNpEligibility.isHeapNd("np_full"));
+		Assert.isTrue(musescript.vm.VmNpEligibility.isHeapNd("np_exp"));
+		Assert.isTrue(musescript.vm.VmNpEligibility.isHeapNd("np_log"));
+		Assert.isTrue(musescript.vm.VmNpEligibility.isHeapNd("np_abs"));
+		Assert.isTrue(musescript.vm.VmNpEligibility.isHeapNd("np_sqrt"));
+		Assert.isTrue(musescript.vm.VmNpEligibility.isHeapNd("np_negative"));
+		Assert.isTrue(musescript.vm.VmNpEligibility.isHeapNd("np_square"));
+		Assert.isTrue(musescript.vm.VmNpEligibility.isHeapNd("np_sign"));
+		Assert.isTrue(musescript.vm.VmNpEligibility.isHeapNd("np_clip"));
+		Assert.isTrue(musescript.vm.VmNpEligibility.isHeapNd("np_minimum"));
+		Assert.isTrue(musescript.vm.VmNpEligibility.isHeapNd("np_maximum"));
+		Assert.isTrue(musescript.vm.VmNpEligibility.isHeapNd("np_add"));
+		Assert.isTrue(musescript.vm.VmNpEligibility.isHeapNd("np_cumsum"));
+		Assert.isTrue(musescript.vm.VmNpEligibility.isHeapNd("np_matmul"));
+		Assert.isTrue(musescript.vm.VmNpEligibility.isHeapNd("np_reshape"));
 		Assert.isFalse(musescript.vm.VmNpEligibility.isDocumentedUnsupported("np_zeros"));
-		Assert.isTrue(musescript.vm.VmNpEligibility.isDocumentedUnsupported("np_reshape"));
+		Assert.isFalse(musescript.vm.VmNpEligibility.isDocumentedUnsupported("np_exp"));
+		Assert.isFalse(musescript.vm.VmNpEligibility.isDocumentedUnsupported("np_abs"));
+		Assert.isFalse(musescript.vm.VmNpEligibility.isDocumentedUnsupported("np_min"));
+		Assert.isFalse(musescript.vm.VmNpEligibility.isDocumentedUnsupported("np_reshape"));
+		Assert.isTrue(musescript.vm.VmNpEligibility.isDocumentedUnsupported("np_equal"));
+		Assert.isTrue(musescript.vm.VmNpEligibility.isDocumentedUnsupported("np_transpose"));
+		Assert.isTrue(musescript.vm.VmNpEligibility.isDocumentedUnsupported("np_vol_target_qty"));
 		Assert.isFalse(musescript.vm.VmNpEligibility.isScalarB("np_zeros"));
+		Assert.isTrue(musescript.vm.VmNpEligibility.arityOk("np_full", 2));
+		Assert.isFalse(musescript.vm.VmNpEligibility.arityOk("np_cumsum", 2));
+		Assert.isTrue(musescript.vm.VmNpEligibility.arityOk("np_clip", 3));
+		Assert.isFalse(musescript.vm.VmNpEligibility.arityOk("np_min", 2));
+		Assert.isTrue(musescript.vm.VmNpEligibility.fitsMatmulSide(8));
+		Assert.isFalse(musescript.vm.VmNpEligibility.fitsMatmulSide(9));
 		Assert.isTrue(musescript.vm.VmPdEligibility.isPdBuiltin("pd_xs_rank"));
 		Assert.isTrue(musescript.vm.VmPdEligibility.isHeapPd("pd_rank1d"));
 		Assert.isTrue(musescript.vm.VmPdEligibility.isHeapPd("pd_series"));
 		Assert.isTrue(musescript.vm.VmPdEligibility.isHeapPd("pd_shift"));
 		Assert.isTrue(musescript.vm.VmPdEligibility.isHeapPd("pd_series_values"));
+		Assert.isTrue(musescript.vm.VmPdEligibility.isHeapPd("pd_from_columns"));
+		Assert.isTrue(musescript.vm.VmPdEligibility.isHeapPd("pd_get"));
+		Assert.isTrue(musescript.vm.VmPdEligibility.isHeapPd("pd_xs_rank"));
+		Assert.isTrue(musescript.vm.VmPdEligibility.isHeapPd("pd_groupby_mean"));
+		Assert.isTrue(musescript.vm.VmPdEligibility.isHeapPd("pd_join"));
 		Assert.isTrue(musescript.vm.VmPdEligibility.isHeapSeries("pd_series"));
-		Assert.isTrue(musescript.vm.VmPdEligibility.isHeapSeries("pd_shift"));
+		Assert.isTrue(musescript.vm.VmPdEligibility.isHeapSeries("pd_get"));
+		Assert.isFalse(musescript.vm.VmPdEligibility.isHeapSeries("pd_shift"));
 		Assert.isFalse(musescript.vm.VmPdEligibility.isHeapSeries("pd_rank1d"));
+		Assert.isTrue(musescript.vm.VmPdEligibility.isHeapFrame("pd_from_columns"));
+		Assert.isTrue(musescript.vm.VmPdEligibility.isHeapFrame("pd_xs_rank"));
+		Assert.isTrue(musescript.vm.VmPdEligibility.isHeapFrame("pd_join"));
+		Assert.isFalse(musescript.vm.VmPdEligibility.isHeapFrame("pd_series"));
 		Assert.isFalse(musescript.vm.VmPdEligibility.isDocumentedUnsupported("pd_rank1d"));
 		Assert.isFalse(musescript.vm.VmPdEligibility.isDocumentedUnsupported("pd_series"));
 		Assert.isFalse(musescript.vm.VmPdEligibility.isDocumentedUnsupported("pd_shift"));
 		Assert.isFalse(musescript.vm.VmPdEligibility.isDocumentedUnsupported("pd_series_values"));
-		Assert.isFalse(musescript.vm.VmPdEligibility.isScalarB("pd_nrows"));
-		Assert.isTrue(musescript.vm.VmPdEligibility.isDocumentedUnsupported("pd_from_columns"));
-		Assert.isTrue(musescript.vm.VmPdEligibility.isDocumentedUnsupported("pd_xs_rank"));
-		Assert.isTrue(musescript.vm.VmPdEligibility.isDocumentedUnsupported("pd_series_length"));
+		Assert.isFalse(musescript.vm.VmPdEligibility.isDocumentedUnsupported("pd_from_columns"));
+		Assert.isFalse(musescript.vm.VmPdEligibility.isDocumentedUnsupported("pd_xs_rank"));
+		Assert.isFalse(musescript.vm.VmPdEligibility.isDocumentedUnsupported("pd_join"));
+		Assert.isTrue(musescript.vm.VmPdEligibility.isScalarB("pd_nrows"));
+		Assert.isTrue(musescript.vm.VmPdEligibility.isScalarB("pd_ncols"));
+		Assert.isTrue(musescript.vm.VmPdEligibility.isScalarB("pd_series_length"));
+		Assert.isTrue(musescript.vm.VmPdEligibility.isScalarB("pd_series_name"));
+		Assert.isFalse(musescript.vm.VmPdEligibility.isDocumentedUnsupported("pd_series_length"));
+		Assert.isTrue(musescript.vm.VmPdEligibility.isDocumentedUnsupported("pd_merge_asof"));
+		Assert.isTrue(musescript.vm.VmPdEligibility.isDocumentedUnsupported("pd_groupby_keys_agg"));
 		Assert.isTrue(musescript.vm.VmPdEligibility.arityOk("pd_rank1d", 1));
 		Assert.isTrue(musescript.vm.VmPdEligibility.arityOk("pd_rank1d", 2));
 		Assert.isFalse(musescript.vm.VmPdEligibility.arityOk("pd_rank1d", 3));
 		Assert.isTrue(musescript.vm.VmPdEligibility.arityOk("pd_series", 1));
-		Assert.isFalse(musescript.vm.VmPdEligibility.arityOk("pd_series", 2));
+		Assert.isTrue(musescript.vm.VmPdEligibility.arityOk("pd_series", 2));
+		Assert.isTrue(musescript.vm.VmPdEligibility.arityOk("pd_series", 3));
+		Assert.isFalse(musescript.vm.VmPdEligibility.arityOk("pd_series", 4));
 		Assert.isTrue(musescript.vm.VmPdEligibility.arityOk("pd_shift", 1));
 		Assert.isTrue(musescript.vm.VmPdEligibility.arityOk("pd_shift", 2));
 		Assert.isFalse(musescript.vm.VmPdEligibility.arityOk("pd_shift", 3));
 		Assert.isTrue(musescript.vm.VmPdEligibility.arityOk("pd_series_values", 1));
 		Assert.isFalse(musescript.vm.VmPdEligibility.arityOk("pd_series_values", 2));
+		Assert.isTrue(musescript.vm.VmPdEligibility.arityOk("pd_from_columns", 1));
+		Assert.isFalse(musescript.vm.VmPdEligibility.arityOk("pd_from_columns", 2));
+		Assert.isTrue(musescript.vm.VmPdEligibility.arityOk("pd_xs_rank", 1));
+		Assert.isTrue(musescript.vm.VmPdEligibility.arityOk("pd_xs_rank", 2));
+		Assert.isFalse(musescript.vm.VmPdEligibility.arityOk("pd_xs_rank", 3));
+		Assert.isTrue(musescript.vm.VmPdEligibility.arityOk("pd_join", 3));
+		Assert.isTrue(musescript.vm.VmPdEligibility.arityOk("pd_join", 4));
+		Assert.isFalse(musescript.vm.VmPdEligibility.arityOk("pd_join", 5));
 	}
 
 	function assertParity(src:String, a:BacktestResult, b:BacktestResult) {

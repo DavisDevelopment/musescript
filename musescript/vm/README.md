@@ -41,17 +41,17 @@ job is `continue-on-error` / manual / weekly — not a required gate.
 | `__scr` SERIES | macd/bbands/stoch + EField |
 | LOOKBACK | bar-field/`ident[n]` **and** call/expr lookback via `WITH_OFFSET` |
 | **NP scalar B** | `np_mean` / `np_sum` / `np_dot` / `np_get_flat` → Float on nums |
-| **NP handle H** | `window` → OBJ `Array<Float>`; cliff-2 `np_zeros` / `np_ones` / `np_asarray` → OBJ `NdArrayF64` (1-D, `len ≤ 64`, const shape/data) |
-| **PD handle H** | `pd_rank1d` → OBJ `NdArrayF64`; Series lane `pd_series` / `pd_shift` → OBJ `Series`; `pd_series_values` → OBJ `NdArrayF64` (all `len ≤ 64`); cell extract via `np_get_flat` |
+| **NP handle H** | `window` → OBJ `Array<Float>`; cliff-2 `np_zeros`/`ones`/`full`/`asarray` (+ runtime elems) / pairwise / `cumsum`·`diff` / DetMath `exp`·`log` / `reshape` / `matmul`≤8 → OBJ `NdArrayF64` (`len ≤ 64`) |
+| **PD handle H** | `pd_rank1d` → OBJ `NdArrayF64`; Series lane `pd_series` / Series `pd_shift` / `pd_get` → OBJ `Series`; `pd_series_values` → OBJ `NdArrayF64`; Frame lane `pd_from_columns` / `pd_xs_rank` / single-key groupby / `pd_join` / frame `pd_shift` → OBJ `DataFrame` (dims ≤64); cell extract via `np_get_flat` / `pd_nrows`·`pd_ncols` |
 
 ## Still tree-walk (Expand→interp)
 
 arrays/objects/classes/match/loops/generators · multi-arg orders · method calls ·
 user-`@indicator` `__cs` · locals shadowing bar fields · panel / host-projection genomes ·
 opaque registry indicators stay `CALL_BUILTIN` (not `IND`) but still run on the VM ·
-frame / Index `pd_*` (groupby, merge, `pd_xs_rank`, `pd_from_columns`, …) ·
-Series extras (`pd_series_name` / `pd_series_length` / index·name ctor args) ·
-other `np_*` (ufuncs, reshape, axis/keepdims, runtime-element asarray, `len > 64`)
+Index / merge_asof / keys-agg / transform·rank groupby / rolling·pivot·IO `pd_*` ·
+Index-heap Series ctor index (`pd_index_range`, …) ·
+other `np_*` (comparisons / risk helpers / axis·keepdims·ddof / multi-dim create / `len > 64` / matmul side >8)
 
 ## NP / PD eligibility (cliff 2 + 4 + PD)
 
@@ -59,20 +59,24 @@ Source: `VmNpEligibility` / `VmPdEligibility`.
 
 | Tag | Engine | Ops |
 |---|---|---|
-| **B** | VM | `np_mean`/`np_sum` (1-arg) · `np_dot` · `np_get_flat` |
-| **H** | VM | `window` · `np_zeros`/`np_ones`/`np_asarray`/`np_array` · `pd_rank1d` · `pd_series` · `pd_shift` (Series) · `pd_series_values` |
-| **U** | VM | frame/Index `pd_*` · frame `pd_shift` · other `np_*` · axis/keepdims · over-cap / multi-dim create · descending `pd_rank1d` |
+| **B** | VM | `np_mean`/`np_sum`/`np_min`/`max`/`prod`/`std`/`var` (1-arg) · `np_size`/`ndim` · `np_dot` · `np_get_flat` · `pd_nrows`/`pd_ncols` · `pd_series_length`/`pd_series_name` |
+| **H** | VM | `window` · `np_zeros`/`ones`/`full`/`asarray`/`array` · pairwise ±*/`minimum`/`maximum` · `cumsum`/`diff` · `exp`/`log` · `negative`/`abs`/`sqrt`/`square`/`sign` · `clip` · `reshape` · `matmul`≤8 · `pd_rank1d` · `pd_series` · `pd_shift` · `pd_series_values` · `pd_from_columns` · `pd_get` · `pd_xs_rank` · `pd_groupby_{mean,sum,std,agg}` · `pd_join` |
+| **U** | VM | Index / merge_asof / keys-agg / transform·rank groupby · comparisons/risk `np_*` · axis/keepdims/ddof · over-cap / multi-dim create · matmul side >8 · descending `pd_rank1d` / `pd_xs_rank` arity-3 |
 
 Closed evo: `KNp` and gated `KPd("shift")` may hit `--vm`; Expand `KPd("xs_rank")` still
-`vm-unsupported` (panel / frame) — hand-written packed `pd_rank1d` pipelines stay eligible.
+`vm-unsupported` (panel honesty) — hand-written packed `pd_rank1d` + gated frame shapes stay eligible.
 
 ### Cliff-2 handle ABI (OBJ lane)
 
 ```
-create:  np_zeros(n|[n]) | np_ones(...) | np_asarray([const…]) | np_asarray(window(s,n))
+create:  np_zeros(n|[n]) | np_ones(...) | np_full([n], v) | np_asarray([const…|runtime scalars…]) | np_asarray(window(s,n))
+ufunc:   np_add/sub/mul/div | np_minimum/maximum | np_cumsum/diff | np_exp/log (DetMath)
+         | np_negative/abs/sqrt/square/sign | np_clip(…, const lo/hi)
+         | np_reshape(…, const shape≤64) | np_matmul(…, sides≤8)
          → NdArrayF64 on OBJ (never nums)
-use:     np_mean / np_sum / np_get_flat / np_dot → Float on nums
-cap:     len ≤ 64, contiguous 1-D only
+use:     np_mean / np_sum / np_min / np_max / np_prod / np_std / np_var / np_size / np_ndim
+         / np_get_flat / np_dot → Float on nums
+cap:     len ≤ 64, contiguous 1-D (matmul sides ≤ 8); axis·keepdims·ddof stay **U**
 ```
 
 WASM twin: packed `(i32 base, i32 len)` vector locals over `VEC_SCRATCH` (already native;
@@ -82,27 +86,35 @@ see `docs/WASM_NP.md` § Handle ABI). No second invent — same logical handle, 
 
 ```
 create:  pd_rank1d([const…], pct?) | pd_rank1d(window(s,n), pct?) | pd_rank1d(ND-handle, pct?)
-         → NdArrayF64 on OBJ (never nums; never AnyDataFrame)
-series:  pd_series([const…]|window|ND) → Series on OBJ
-         pd_shift(series-handle, const periods?) → Series on OBJ  (frame form → U)
+         → NdArrayF64 on OBJ (never nums; never Index)
+series:  pd_series([const…]|window|ND [, const index|name [, const name]]) → Series on OBJ
+         pd_shift(series|frame-handle, const periods?) → same-kind handle on OBJ
+         pd_get(frame, const col) → Series on OBJ
          pd_series_values(series-handle) → NdArrayF64 on OBJ
-use:     np_get_flat / np_mean / np_sum → Float on nums
-cap:     len ≤ 64; pct const bool; periods const int `|p|≤64`; series ctor arity 1 (no index/name)
+         pd_series_length(series) → Float; pd_series_name(series) → String
+frame:   pd_from_columns({col: [const…]…}) → DataFrame (arity 1; nrows/ncols ≤64)
+         pd_xs_rank(frame [, const pct]) → DataFrame (no descending 3rd arg)
+         pd_groupby_{mean,sum,std}(frame, const by) | pd_groupby_agg(…, const fn?)
+         pd_join(left, right, const on [, const how])  (no validate)
+use:     np_get_flat / np_mean / np_sum / pd_nrows / pd_ncols / pd_series_length → Float on nums
+         pd_series_name → String on OBJ
+cap:     dims ≤ 64; pct const bool; periods const int `|p|≤64`; series ctor arity 1–3 (const index/name)
 ```
 
 WASM twin for packed rank: `$vec_rank` / `$vec_rank_pct` on `VEC_SCRATCH` (`docs/WASM_PD.md`).
-Series lane is **VM H only** today (WASM Series still opaque **U**).
+Series lane WASM twin: packed `(base,len)` + `$vec_shift` (`WasmPdEligibility`).
+Frame lane remains **VM H only** (WASM frames still opaque **U**).
 
-**Deferred:** `AnyDataFrame` / Index heap handles (`pd_from_columns`, groupby, merge,
-one-row `pd_xs_rank`, frame `pd_shift`); Series ctor index/name; `pd_series_length` / name.
-`Fitness.preferVm` defaults ON (Expand→interp on U).
+**Deferred:** Index heap handles; `pd_merge_asof`; groupby transform/rank/keys-agg;
+`from_columns` index/columns arity; runtime (non-const) column objects.
+Expand `KPd("xs_rank")` still Fitness-refused. `Fitness.preferVm` defaults ON.
 
 ## Parity gates
 
 - `TestBytecodeVmParity` / `TestVmParityCorpus` — diverged==0
 - `DetParityDump` — `-- MuseVm vs MuseInterp … match=1` + `-- MuseVm np_mean(window) … match=1`
   + `-- MuseVm np handle … match=1` + `-- MuseVm pd_rank1d handle … match=1`
-  + `-- MuseVm pd_series/shift handle … match=1`
+  + `-- MuseVm pd_series/shift handle … match=1` + `-- MuseVm pd_frame handle … match=1`
 - JVM preferVm startup `Fitness.vmParityCheck` (`--no-vm` opts out)
 - **preferVm soak** (`TestPreferVmSoak` / `tools/prefer_vm_soak.*`) — Fitness-path bit-drift
   regression; default remains ON

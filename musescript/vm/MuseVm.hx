@@ -334,6 +334,15 @@ class MuseVm {
 					var f:String = consts[code[pc++]];
 					var o = popDyn();
 					pushDyn(o == null ? null : Reflect.getProperty(o, f));
+				case Op.PACK_ARRAY:
+					var n = code[pc++];
+					var arr:Array<Dynamic> = [for (_ in 0...n) null];
+					var i = n - 1;
+					while (i >= 0) {
+						arr[i] = popDyn();
+						i--;
+					}
+					pushObj(arr);
 				case Op.SERIES:
 					var scrId = code[pc++];
 					var fnCode = code[pc++];

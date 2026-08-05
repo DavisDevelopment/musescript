@@ -42,6 +42,8 @@ enum abstract Op(Int) from Int to Int {
 	                  //   P1.1+broaden: ELookback of ECall/non-series (interp's withSeriesOffset re-entrancy).
 	var GET_FIELD;    // + Int fieldConst -> pop o; push o==null ? null : Reflect.getProperty(o, field)  (obj.field)
 	var SERIES;       // + Int scrId + Int fnCode + Int argc -> multi-output indicator -> push scratch object
+	var PACK_ARRAY;   // + Int n -> pop n values (top = last elem); push Array<Dynamic> of length n
+	                  //   Cliff-2 runtime-element asarray / nested matmul rows (never free-standing EArrayDecl).
 	var POP;                                       // discard top
 	var HALT;
 

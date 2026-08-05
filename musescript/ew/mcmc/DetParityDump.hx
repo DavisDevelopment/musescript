@@ -207,6 +207,57 @@ class DetParityDump {
 			&& fbits(serInterp.finalEquity) == fbits(serVm.finalEquity);
 		buf.add("match=" + (serMatch ? "1" : "0") + "\n");
 
+
+		// Cliff PD Series extras — length/name + gated ctor index/name.
+		buf.add("-- MuseVm pd_series length/name vs MuseInterp --\n");
+		var serXSrc = "strategy S { onBar {\n"
+			+ "  s = pd_series([1.0, 2.0, 3.0], [10.0, 20.0, 30.0], \"x\")\n"
+			+ "  when pd_series_length(s) == 3.0 && pd_series_name(s) == \"x\": { long(1); }\n"
+			+ "  when np_get_flat(pd_series_values(s), 0) != 1.0: { flat(); }\n"
+			+ "} }";
+		var serXFeed = musescript.harness.BarFeed.synthetic(200, 11);
+		var serXProg = new musescript.parse.MuseParser().parse(serXSrc);
+		musescript.builtins.TradeBuiltins.resetCrossState();
+		var serXInterp = new musescript.interp.MuseInterp(new musescript.harness.HarnessContext())
+			.runBacktest(serXProg, serXFeed);
+		serXFeed.reset();
+		musescript.builtins.TradeBuiltins.resetCrossState();
+		var serXVm = musescript.vm.MuseVm.runBacktest(
+			new musescript.harness.HarnessContext(),
+			new musescript.parse.MuseParser().parse(serXSrc),
+			serXFeed
+		);
+		buf.add("interp trades=" + serXInterp.trades + " eq=" + fbits(serXInterp.finalEquity) + "\n");
+		buf.add("vm trades=" + serXVm.trades + " eq=" + fbits(serXVm.finalEquity) + "\n");
+		var serXMatch = serXInterp.trades == serXVm.trades
+			&& fbits(serXInterp.finalEquity) == fbits(serXVm.finalEquity);
+		buf.add("match=" + (serXMatch ? "1" : "0") + "\n");
+
+		// Cliff PD Frame — from_columns / xs_rank / get / groupby / join / frame shift.
+		buf.add("-- MuseVm pd_frame handle vs MuseInterp --\n");
+		var frSrc = "strategy S { onBar {\n"
+			+ "  df = pd_from_columns({a: [1.0, 3.0], b: [2.0, 4.0]})\n"
+			+ "  when pd_nrows(df) == 2.0 && np_get_flat(pd_series_values(pd_get(df, \"a\")), 1) == 3.0: { long(1); }\n"
+			+ "  when np_get_flat(pd_series_values(pd_get(pd_shift(df, 1), \"a\")), 1) != 1.0: { flat(); }\n"
+			+ "} }";
+		var frFeed = musescript.harness.BarFeed.synthetic(200, 11);
+		var frProg = new musescript.parse.MuseParser().parse(frSrc);
+		musescript.builtins.TradeBuiltins.resetCrossState();
+		var frInterp = new musescript.interp.MuseInterp(new musescript.harness.HarnessContext())
+			.runBacktest(frProg, frFeed);
+		frFeed.reset();
+		musescript.builtins.TradeBuiltins.resetCrossState();
+		var frVm = musescript.vm.MuseVm.runBacktest(
+			new musescript.harness.HarnessContext(),
+			new musescript.parse.MuseParser().parse(frSrc),
+			frFeed
+		);
+		buf.add("interp trades=" + frInterp.trades + " eq=" + fbits(frInterp.finalEquity) + "\n");
+		buf.add("vm trades=" + frVm.trades + " eq=" + fbits(frVm.finalEquity) + "\n");
+		var frMatch = frInterp.trades == frVm.trades
+			&& fbits(frInterp.finalEquity) == fbits(frVm.finalEquity);
+		buf.add("match=" + (frMatch ? "1" : "0") + "\n");
+
 		return buf.toString();
 	}
 

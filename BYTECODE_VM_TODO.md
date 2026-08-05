@@ -127,18 +127,29 @@
   handles: `np_zeros`/`np_ones`/`np_asarray` (const 1-D, `len ≤ 64`) → `np_mean`/`sum`/`get_flat`/`dot`.
   Honest **U** for reshape / multi-dim / over-cap / runtime-element asarray. WASM twin remains
   packed `(base,len)` in VEC_SCRATCH (documented in `docs/WASM_NP.md`). preferVm later defaulted ON.
+  **Widen (2026-08-05 / vm-np):** HEAP_ND adds WASM `NATIVE_VEC` twin + capped `reshape` +
+  runtime-element `asarray` via `PACK_ARRAY`; residual **U** = comparisons / risk /
+  axis·keepdims / multi-dim create / over-cap.
+  **Close (2026-08-05 / vm-np asymmetric twin):** WASM-N unary/pairwise (`negative`/`abs`/
+  `sqrt`/`square`/`sign`/`clip`/`minimum`/`maximum`) → VM **H**; WASM-N scalar
+  (`min`/`max`/`prod`/`std`/`var`/`size`/`ndim`) → VM **B** (bare arity; axis·keepdims·ddof **U**).
 - [x] **Cliff PD — packed `pd_rank1d` OBJ handle. DONE.** `VmPdEligibility.HEAP_PD`:
   `pd_rank1d` (constvec/window/ND-handle, `len ≤ 64`, pct const bool) → OBJ `NdArrayF64` →
-  `np_get_flat`/`mean`/`sum`. Frame construct / groupby / merge / Series / descending → **U**.
-  Expand `KPd` still `evaluateVm` refuse (panel xs_rank / Series shift). Docs: `vm/README`,
-  `WASM_PD`, `ENGINE_MATRIX`. preferVm later defaulted ON.
+  `np_get_flat`/`mean`/`sum`. Descending / Index → **U**.
+- [x] **Cliff PD Series + Frame lanes. DONE.** Series: `pd_series` / `pd_shift` /
+  `pd_series_values` (+ gated ctor index/name, length/name scalars). Frame: const
+  `pd_from_columns` / `pd_get` / `pd_xs_rank` / single-key groupby mean·sum·std·agg /
+  `pd_join` / frame `pd_shift` / `pd_nrows`·`ncols` (dims ≤64). Expand `KPd("xs_rank")`
+  still Fitness-refused (panel honesty); `KPd("shift")` may hit Series H. Deferred:
+  Index / merge_asof / keys-agg·transform·rank / from_columns index·columns /
+  runtime column objects. Docs: `vm/README`, `WASM_PD`, `ENGINE_MATRIX`.
 - [x] **preferVm soak / optional CI gate.** `TestPreferVmSoak` + `tools/prefer_vm_soak.*` +
   engine-matrix `--soak` run DetParity (cheap) + MuseVm corpus/evolved + Fitness `vmParityCheck` /
   preferVm `evaluate()` routes. Soak green → **default ON** (`Fitness.preferVm = true`;
   CorpusEvoRun `--no-vm` opts out). CI job `prefer-vm-soak` remains `continue-on-error` +
   weekly/manual — never blocks required PR CI. See `docs/ENGINE_MATRIX.md`.
 - [x] **preferVm default ON.** Soak + standing diverged=0 gates cleared; library default flipped.
-  Unsupported / panel / Expand `KPd` still `vm-unsupported` → Expand→interp; `preferNma` still
+  Unsupported / panel / Expand `KPd("xs_rank")` still `vm-unsupported` → Expand→interp; `preferNma` still
   first when armed.
 
 ## P1 — only after V6 shows a real win

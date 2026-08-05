@@ -112,3 +112,11 @@ match=1
 interp trades=197 eq=40F85AAD78E61297
 vm trades=197 eq=40F85AAD78E61297
 match=1
+-- MuseVm pd_series length/name vs MuseInterp --
+interp trades=200 eq=40F85B04F97D715C
+vm trades=200 eq=40F85B04F97D715C
+match=1
+-- MuseVm pd_frame handle vs MuseInterp --
+interp trades=200 eq=40F85B04F97D715C
+vm trades=200 eq=40F85B04F97D715C
+match=1

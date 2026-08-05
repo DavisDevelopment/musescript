@@ -247,9 +247,10 @@ class MuseBytecodeCompiler {
 	}
 
 	function emitBuiltinCall(name:String, args:Array<Expr>):Void {
-		// Cliff 4/2/PD — ND create + packed pd_rank1d + Series H are OBJ-lane;
-		// scalar mean/sum/dot/get_flat are B onto nums. Frames / Index → U.
-		// No NdArray / AnyDataFrame / Dynamic on the nums lane.
+		// Cliff 4/2/PD — ND create + packed pd_rank1d + Series/Frame H are OBJ-lane;
+		// scalar mean/sum/min/max/prod/std/var/size/ndim/dot/get_flat / pd_nrows/ncols
+		// are B onto nums. Index / merge_asof / over-cap / open forms → U.
+		// No NdArray / DataFrame / Dynamic on the nums lane.
 		if (VmPdEligibility.isHeapPd(name)) {
 			if (!VmPdEligibility.arityOk(name, args.length))
 				throw new VmUnsupported('heap PD "$name" arity ${args.length}');
@@ -258,8 +259,21 @@ class MuseBytecodeCompiler {
 			emit(Op.CALL_BUILTIN); emit(constIndex(name)); emit(args.length);
 			return;
 		}
+		if (VmPdEligibility.isScalarB(name)) {
+			if (!VmPdEligibility.arityOk(name, args.length))
+				throw new VmUnsupported('scalar PD "$name" arity ${args.length}');
+			switch (name) {
+				case "pd_series_length" | "pd_series_name":
+					assertSeriesHandleOk(args[0], name);
+				default:
+					assertFrameHandleOk(args[0], name);
+			}
+			for (a in args) expr(a);
+			emit(Op.CALL_BUILTIN); emit(constIndex(name)); emit(args.length);
+			return;
+		}
 		if (VmPdEligibility.isPdBuiltin(name))
-			throw new VmUnsupported('pd builtin "$name" (TDataFrame/TIndex / opaque Series — VM U)');
+			throw new VmUnsupported('pd builtin "$name" (TIndex / opaque / ungated frame — VM U)');
 		if (VmNpEligibility.isHeapNd(name)) {
 			if (!VmNpEligibility.arityOk(name, args.length))
 				throw new VmUnsupported('heap ND "$name" arity ${args.length}');
@@ -287,9 +301,8 @@ class MuseBytecodeCompiler {
 	}
 
 	/**
-	 * Cliff-PD: packed `pd_rank1d` + Series (`pd_series` / `pd_shift` /
-	 * `pd_series_values`) with len ≤ MAX_WIN. Constvec / window / ND·Series
-	 * handle; frames **U**.
+	 * Cliff-PD: packed `pd_rank1d` + Series / Frame lane with len ≤ MAX_WIN.
+	 * Constvec / window / ND·Series·Frame handles; Index / open forms **U**.
 	 */
 	function assertHeapPdShapeOk(name:String, args:Array<Expr>):Void {
 		switch (name) {
@@ -304,8 +317,9 @@ class MuseBytecodeCompiler {
 				}
 			case "pd_series":
 				assertPdPackedDataOk(args[0], "pd_series");
+				assertPdSeriesCtorExtrasOk(args);
 			case "pd_shift":
-				assertSeriesHandleOk(args[0], "pd_shift");
+				assertShiftHandleOk(args[0], "pd_shift");
 				if (args.length >= 2) {
 					switch (unwrapParent(args[1])) {
 						case EConst(CInt(k)):
@@ -317,6 +331,44 @@ class MuseBytecodeCompiler {
 				}
 			case "pd_series_values":
 				assertSeriesHandleOk(args[0], "pd_series_values");
+			case "pd_from_columns":
+				assertFromColumnsOk(args[0]);
+			case "pd_get":
+				assertFrameHandleOk(args[0], "pd_get");
+				assertConstStringOk(args[1], "pd_get col");
+			case "pd_xs_rank":
+				assertFrameHandleOk(args[0], "pd_xs_rank");
+				if (args.length >= 2) {
+					switch (unwrapParent(args[1])) {
+						case EConst(CBool(_)) | EIdent("true") | EIdent("false"):
+						default:
+							throw new VmUnsupported('pd_xs_rank pct needs const bool (VM U)');
+					}
+				}
+			case "pd_groupby_mean" | "pd_groupby_sum" | "pd_groupby_std":
+				assertFrameHandleOk(args[0], name);
+				assertConstStringOk(args[1], '$name by');
+			case "pd_groupby_agg":
+				assertFrameHandleOk(args[0], "pd_groupby_agg");
+				assertConstStringOk(args[1], "pd_groupby_agg by");
+				if (args.length >= 3) {
+					var fn = constStringValue(args[2]);
+					if (fn == null)
+						throw new VmUnsupported('pd_groupby_agg fn needs const string (VM U)');
+					if (!VmPdEligibility.isGroupbyAggFn(fn))
+						throw new VmUnsupported('pd_groupby_agg fn "$fn" (VM U)');
+				}
+			case "pd_join":
+				assertFrameHandleOk(args[0], "pd_join");
+				assertFrameHandleOk(args[1], "pd_join");
+				assertConstStringOk(args[2], "pd_join on");
+				if (args.length >= 4) {
+					var how = constStringValue(args[3]);
+					if (how == null)
+						throw new VmUnsupported('pd_join how needs const string (VM U)');
+					if (!VmPdEligibility.isJoinHow(how))
+						throw new VmUnsupported('pd_join how "$how" (VM U)');
+				}
 			default:
 				null;
 		}
@@ -356,37 +408,114 @@ class MuseBytecodeCompiler {
 		}
 	}
 
-	/** Series OBJ handle: local, `pd_series`, or `pd_shift` (never frame). */
+	/** Series OBJ handle: local, `pd_series` / `pd_get`, or Series-shaped `pd_shift`. */
 	function assertSeriesHandleOk(data:Expr, op:String):Void {
 		switch (unwrapParent(data)) {
 			case EIdent(_):
 				null;
 			case ECall(EIdent(inner), _) if (VmPdEligibility.isHeapSeries(inner)):
 				null;
+			case ECall(EIdent("pd_shift"), sargs) if (sargs.length >= 1):
+				assertSeriesHandleOk(sargs[0], op);
 			default:
-				throw new VmUnsupported('$op needs Series handle (pd_series/pd_shift) (VM U)');
+				throw new VmUnsupported('$op needs Series handle (pd_series/pd_get/Series pd_shift) (VM U)');
 		}
 	}
 
-	/** Emit PD heap args: const array → CONST pool; pct/periods → CONST; else expr. */
+	/** Frame OBJ handle: local, frame HEAP_PD, or frame-shaped `pd_shift`. */
+	function assertFrameHandleOk(data:Expr, op:String):Void {
+		switch (unwrapParent(data)) {
+			case EIdent(_):
+				null;
+			case ECall(EIdent(inner), _) if (VmPdEligibility.isHeapFrame(inner)):
+				null;
+			case ECall(EIdent("pd_shift"), sargs) if (sargs.length >= 1):
+				assertFrameHandleOk(sargs[0], op);
+			default:
+				throw new VmUnsupported('$op needs Frame handle (pd_from_columns/xs_rank/groupby/join) (VM U)');
+		}
+	}
+
+	/** Series or Frame handle for dual `pd_shift`. */
+	function assertShiftHandleOk(data:Expr, op:String):Void {
+		switch (unwrapParent(data)) {
+			case EIdent(_):
+				null;
+			case ECall(EIdent(inner), _) if (
+				VmPdEligibility.isHeapSeries(inner) || VmPdEligibility.isHeapFrame(inner)
+			):
+				null;
+			case ECall(EIdent("pd_shift"), sargs) if (sargs.length >= 1):
+				assertShiftHandleOk(sargs[0], op);
+			default:
+				throw new VmUnsupported('$op needs Series or Frame handle (VM U)');
+		}
+	}
+
+	/** Const `{col: [f64…], …}` for `pd_from_columns` (nrows/ncols ≤ MAX_WIN). */
+	function assertFromColumnsOk(data:Expr):Void {
+		switch (unwrapParent(data)) {
+			case EObject(fields):
+				if (fields.length == 0)
+					throw new VmUnsupported('pd_from_columns empty object (VM U)');
+				if (!VmPdEligibility.fitsWin(fields.length))
+					throw new VmUnsupported('pd_from_columns ncols ${fields.length} > ${VmPdEligibility.MAX_WIN} (VM U)');
+				var nrows = -1;
+				for (f in fields) {
+					switch (unwrapParent(f.e)) {
+						case EArrayDecl(vs):
+							if (!VmPdEligibility.fitsWin(vs.length))
+								throw new VmUnsupported('pd_from_columns col "${f.name}" len ${vs.length} > ${VmPdEligibility.MAX_WIN} (VM U)');
+							if (!isConstScalarArray(vs))
+								throw new VmUnsupported('pd_from_columns col "${f.name}" needs const 1-D data (VM U)');
+							if (nrows < 0) nrows = vs.length;
+							else if (vs.length != nrows)
+								throw new VmUnsupported('pd_from_columns ragged columns (VM U)');
+						default:
+							throw new VmUnsupported('pd_from_columns col "${f.name}" needs const array (VM U)');
+					}
+				}
+			default:
+				throw new VmUnsupported('pd_from_columns needs const column object (VM U)');
+		}
+	}
+
+	static function assertConstStringOk(e:Expr, label:String):Void {
+		if (constStringValue(e) == null)
+			throw new VmUnsupported('$label needs const string (VM U)');
+	}
+
+	static function constStringValue(e:Expr):Null<String> {
+		return switch (unwrapParent(e)) {
+			case EConst(CString(s)): s;
+			default: null;
+		};
+	}
+
+	/** Const column object → anonymous Dynamic map for PdBuiltins.fromColumns. */
+	static function constColumnObject(fields:Array<{name:String, e:Expr}>):Dynamic {
+		var o:Dynamic = {};
+		for (f in fields) {
+			switch (unwrapParent(f.e)) {
+				case EArrayDecl(vs):
+					Reflect.setField(o, f.name, constScalarArray(vs));
+				default:
+					throw new VmUnsupported('pd_from_columns non-const col');
+			}
+		}
+		return o;
+	}
+
+	/** Emit PD heap args: const array/object → CONST pool; pct/periods/strings → CONST; else expr. */
 	function emitHeapPdArgs(name:String, args:Array<Expr>):Void {
 		switch (name) {
 			case "pd_rank1d":
 				emitHeapNdArg(args[0]);
-				if (args.length >= 2) {
-					switch (unwrapParent(args[1])) {
-						case EConst(CBool(b)):
-							emit(Op.CONST); emit(constIndex(b));
-						case EIdent("true"):
-							emit(Op.CONST); emit(constIndex(true));
-						case EIdent("false"):
-							emit(Op.CONST); emit(constIndex(false));
-						default:
-							expr(args[1]);
-					}
-				}
+				if (args.length >= 2) emitConstBoolArg(args[1]);
 			case "pd_series":
 				emitHeapNdArg(args[0]);
+				if (args.length >= 2) emitPdSeriesIndexOrNameArg(args[1]);
+				if (args.length >= 3) emitPdSeriesNameArg(args[2]);
 			case "pd_shift":
 				expr(args[0]);
 				if (args.length >= 2) {
@@ -399,14 +528,169 @@ class MuseBytecodeCompiler {
 				}
 			case "pd_series_values":
 				expr(args[0]);
+			case "pd_from_columns":
+				switch (unwrapParent(args[0])) {
+					case EObject(fields):
+						emit(Op.CONST); emit(constIndex(constColumnObject(fields)));
+					default:
+						expr(args[0]);
+				}
+			case "pd_get":
+				expr(args[0]);
+				emitConstStringArg(args[1]);
+			case "pd_xs_rank":
+				expr(args[0]);
+				if (args.length >= 2) emitConstBoolArg(args[1]);
+			case "pd_groupby_mean" | "pd_groupby_sum" | "pd_groupby_std":
+				expr(args[0]);
+				emitConstStringArg(args[1]);
+			case "pd_groupby_agg":
+				expr(args[0]);
+				emitConstStringArg(args[1]);
+				if (args.length >= 3) emitConstStringArg(args[2]);
+			case "pd_join":
+				expr(args[0]);
+				expr(args[1]);
+				emitConstStringArg(args[2]);
+				if (args.length >= 4) emitConstStringArg(args[3]);
 			default:
 				for (a in args) expr(a);
 		}
 	}
 
+	function emitConstBoolArg(e:Expr):Void {
+		switch (unwrapParent(e)) {
+			case EConst(CBool(b)):
+				emit(Op.CONST); emit(constIndex(b));
+			case EIdent("true"):
+				emit(Op.CONST); emit(constIndex(true));
+			case EIdent("false"):
+				emit(Op.CONST); emit(constIndex(false));
+			default:
+				expr(e);
+		}
+	}
+
+	function emitConstStringArg(e:Expr):Void {
+		switch (unwrapParent(e)) {
+			case EConst(CString(s)):
+				emit(Op.CONST); emit(constIndex(s));
+			default:
+				expr(e);
+		}
+	}
+
 	/**
-	 * Cliff-2: const 1-D shape/data for ND-handle create (len ≤ MAX_WIN).
-	 * Runtime-element asarrays / multi-dim shapes stay **U** (WASM coveres those via scratch).
+	 * Gated Series ctor extras (arity 2–3):
+	 *   • index = `null` | const F64/Str array whose len matches known data len ≤64
+	 *   • 2-arg bare const string = name-only (host `series` treats String middle as name)
+	 *   • name (3rd) = const string
+	 * Index-heap (`pd_index_range`, …) / runtime / ragged → **U**.
+	 */
+	function assertPdSeriesCtorExtrasOk(args:Array<Expr>):Void {
+		if (args.length <= 1) return;
+		var knownLen = knownPackedDataLen(args[0]);
+		if (args.length == 2) {
+			switch (unwrapParent(args[1])) {
+				case EConst(CNull) | EIdent("null"):
+					null;
+				case EConst(CString(_)):
+					null; // name-only
+				case EArrayDecl(vs):
+					assertPdSeriesIndexArrayOk(vs, knownLen);
+				default:
+					throw new VmUnsupported('pd_series index/name needs const array|string|null (VM U)');
+			}
+			return;
+		}
+		// arity 3: index + name
+		switch (unwrapParent(args[1])) {
+			case EConst(CNull) | EIdent("null"):
+				null;
+			case EArrayDecl(vs):
+				assertPdSeriesIndexArrayOk(vs, knownLen);
+			default:
+				throw new VmUnsupported('pd_series index needs const array|null (VM U)');
+		}
+		assertConstStringOk(args[2], "pd_series name");
+	}
+
+	function assertPdSeriesIndexArrayOk(vs:Array<Expr>, knownLen:Null<Int>):Void {
+		if (!VmPdEligibility.fitsWin(vs.length))
+			throw new VmUnsupported('pd_series index len ${vs.length} > ${VmPdEligibility.MAX_WIN} (VM U)');
+		if (!(isConstScalarArray(vs) || isConstStringArray(vs)))
+			throw new VmUnsupported('pd_series index needs const F64/Str array (VM U)');
+		if (knownLen == null)
+			throw new VmUnsupported('pd_series index needs known data len (constvec/window) (VM U)');
+		if (vs.length != knownLen)
+			throw new VmUnsupported('pd_series index len ${vs.length} != data len $knownLen (VM U)');
+	}
+
+	/** Known 1-D length for constvec / window Series data; null for bare handles. */
+	static function knownPackedDataLen(data:Expr):Null<Int> {
+		return switch (unwrapParent(data)) {
+			case EArrayDecl(vs): vs.length;
+			case ECall(EIdent("window"), wargs) if (wargs.length == 2):
+				switch (unwrapParent(wargs[1])) {
+					case EConst(CInt(k)): k;
+					default: null;
+				};
+			default: null;
+		};
+	}
+
+	function emitPdSeriesIndexOrNameArg(e:Expr):Void {
+		switch (unwrapParent(e)) {
+			case EConst(CNull) | EIdent("null"):
+				emit(Op.CONST); emit(constIndex(null));
+			case EConst(CString(s)):
+				emit(Op.CONST); emit(constIndex(s));
+			case EArrayDecl(vs) if (isConstScalarArray(vs)):
+				emit(Op.CONST); emit(constIndex(constScalarArray(vs)));
+			case EArrayDecl(vs) if (isConstStringArray(vs)):
+				emit(Op.CONST); emit(constIndex(constStringArray(vs)));
+			default:
+				expr(e);
+		}
+	}
+
+	function emitPdSeriesNameArg(e:Expr):Void {
+		switch (unwrapParent(e)) {
+			case EConst(CString(s)):
+				emit(Op.CONST); emit(constIndex(s));
+			case EConst(CNull) | EIdent("null"):
+				emit(Op.CONST); emit(constIndex(null));
+			default:
+				expr(e);
+		}
+	}
+
+	static function isConstStringArray(vs:Array<Expr>):Bool {
+		if (vs.length == 0) return true;
+		for (v in vs) {
+			switch (unwrapParent(v)) {
+				case EConst(CString(_)):
+				default: return false;
+			}
+		}
+		return true;
+	}
+
+	static function constStringArray(vs:Array<Expr>):Array<String> {
+		var out:Array<String> = [];
+		for (v in vs) {
+			out.push(switch (unwrapParent(v)) {
+				case EConst(CString(s)): s;
+				default: throw new VmUnsupported("non-const string array elem");
+			});
+		}
+		return out;
+	}
+
+	/**
+	 * Cliff-2: ND-handle create / vec ufuncs / reshape / matmul (len ≤ MAX_WIN,
+	 * matmul side ≤ MAX_MATMUL_SIDE). Runtime-element 1-D asarray allowed; multi-dim
+	 * create / axis·keepdims / mismatched reshape product stay **U**.
 	 */
 	function assertHeapNdShapeOk(name:String, args:Array<Expr>):Void {
 		switch (name) {
@@ -416,44 +700,196 @@ class MuseBytecodeCompiler {
 					throw new VmUnsupported('$name needs const 1-D shape (VM U)');
 				if (!VmNpEligibility.fitsWin(n))
 					throw new VmUnsupported('$name len $n > ${VmNpEligibility.MAX_WIN} (VM U)');
+			case "np_full":
+				var fn = constShape1dLen(args[0]);
+				if (fn == null)
+					throw new VmUnsupported('np_full needs const 1-D shape (VM U)');
+				if (!VmNpEligibility.fitsWin(fn))
+					throw new VmUnsupported('np_full len $fn > ${VmNpEligibility.MAX_WIN} (VM U)');
+				assertHeapNdScalarExpr(args[1], "np_full value");
 			case "np_asarray" | "np_array":
-				switch (unwrapParent(args[0])) {
-					case EArrayDecl(vs):
-						if (!VmNpEligibility.fitsWin(vs.length))
-							throw new VmUnsupported('$name len ${vs.length} > ${VmNpEligibility.MAX_WIN} (VM U)');
-						if (!isConstScalarArray(vs))
-							throw new VmUnsupported('$name needs const 1-D data (VM U)');
-					case ECall(EIdent("window"), wargs):
-						if (wargs.length != 2)
-							throw new VmUnsupported('asarray(window) arity (VM U)');
-						switch (unwrapParent(wargs[1])) {
-							case EConst(CInt(k)):
-								if (!VmNpEligibility.fitsWin(k))
-									throw new VmUnsupported('asarray(window) len $k > ${VmNpEligibility.MAX_WIN} (VM U)');
-							default:
-								throw new VmUnsupported('asarray(window) needs const len (VM U)');
-						}
-					case EIdent(_):
-						// Existing OBJ-lane ND / Array handle — length checked at NpBuiltins.
-						null;
-					case ECall(EIdent(inner), _) if (VmNpEligibility.isHeapNd(inner) || VmNpEligibility.isHeapProducer(inner)):
-						null;
-					default:
-						throw new VmUnsupported('$name operand not a constvec/window/handle (VM U)');
+				assertAsarray1dOk(args[0], name);
+			case "np_add" | "np_subtract" | "np_multiply" | "np_divide"
+				| "np_minimum" | "np_maximum":
+				assertVec1dOperandOk(args[0], name);
+				assertVec1dOperandOk(args[1], name);
+			case "np_cumsum" | "np_diff" | "np_exp" | "np_log"
+				| "np_negative" | "np_abs" | "np_sqrt" | "np_square" | "np_sign":
+				assertVec1dOperandOk(args[0], name);
+			case "np_clip":
+				assertVec1dOperandOk(args[0], name);
+				assertConstNumOk(args[1], "np_clip lo");
+				assertConstNumOk(args[2], "np_clip hi");
+			case "np_matmul":
+				assertMatmulOperandOk(args[0], name);
+				assertMatmulOperandOk(args[1], name);
+			case "np_reshape":
+				assertVec1dOperandOk(args[0], "np_reshape");
+				var sh = constShapeDims(args[1]);
+				if (sh == null)
+					throw new VmUnsupported('np_reshape needs const shape (VM U)');
+				var prod = 1;
+				for (d in sh) {
+					if (d < 0)
+						throw new VmUnsupported('np_reshape negative dim (VM U)');
+					prod *= d;
 				}
+				if (!VmNpEligibility.fitsWin(prod))
+					throw new VmUnsupported('np_reshape size $prod > ${VmNpEligibility.MAX_WIN} (VM U)');
 			default:
 				null;
 		}
 	}
 
-	/** Emit a HEAP_ND arg: const array decl → CONST pool Array; else normal expr. */
+	/** Literal Int/Float for ops that mirror WASM const-bound gates (`np_clip`). */
+	function assertConstNumOk(e:Expr, label:String):Void {
+		switch (unwrapParent(e)) {
+			case EConst(CInt(_)) | EConst(CFloat(_)):
+				null;
+			default:
+				throw new VmUnsupported('$label needs const number (VM U)');
+		}
+	}
+
+	/** 1-D asarray / array: const or runtime scalar elems / window / handle (len ≤ MAX_WIN). */
+	function assertAsarray1dOk(data:Expr, op:String):Void {
+		switch (unwrapParent(data)) {
+			case EArrayDecl(vs):
+				if (!VmNpEligibility.fitsWin(vs.length))
+					throw new VmUnsupported('$op len ${vs.length} > ${VmNpEligibility.MAX_WIN} (VM U)');
+				for (v in vs) {
+					switch (unwrapParent(v)) {
+						case EArrayDecl(_):
+							throw new VmUnsupported('$op nested array / multi-dim (VM U)');
+						default:
+							assertHeapNdScalarExpr(v, '$op elem');
+					}
+				}
+			case ECall(EIdent("window"), wargs):
+				if (wargs.length != 2)
+					throw new VmUnsupported('asarray(window) arity (VM U)');
+				switch (unwrapParent(wargs[1])) {
+					case EConst(CInt(k)):
+						if (!VmNpEligibility.fitsWin(k))
+							throw new VmUnsupported('asarray(window) len $k > ${VmNpEligibility.MAX_WIN} (VM U)');
+					default:
+						throw new VmUnsupported('asarray(window) needs const len (VM U)');
+				}
+			case EIdent(_):
+				null;
+			case ECall(EIdent(inner), _) if (VmNpEligibility.isHeapNd(inner) || VmNpEligibility.isHeapProducer(inner)):
+				null;
+			default:
+				throw new VmUnsupported('$op operand not a vec/window/handle (VM U)');
+		}
+	}
+
+	/** Same-length 1-D vec operand for add/exp/cumsum/reshape src. */
+	function assertVec1dOperandOk(data:Expr, op:String):Void {
+		switch (unwrapParent(data)) {
+			case EArrayDecl(vs):
+				if (!VmNpEligibility.fitsWin(vs.length))
+					throw new VmUnsupported('$op len ${vs.length} > ${VmNpEligibility.MAX_WIN} (VM U)');
+				for (v in vs) {
+					switch (unwrapParent(v)) {
+						case EArrayDecl(_):
+							throw new VmUnsupported('$op nested array (VM U)');
+						default:
+							assertHeapNdScalarExpr(v, '$op elem');
+					}
+				}
+			case ECall(EIdent("window"), wargs):
+				if (wargs.length != 2)
+					throw new VmUnsupported('$op(window) arity (VM U)');
+				switch (unwrapParent(wargs[1])) {
+					case EConst(CInt(k)):
+						if (!VmNpEligibility.fitsWin(k))
+							throw new VmUnsupported('$op(window) len $k > ${VmNpEligibility.MAX_WIN} (VM U)');
+					default:
+						throw new VmUnsupported('$op(window) needs const len (VM U)');
+				}
+			case EIdent(_):
+				null;
+			case ECall(EIdent(inner), _) if (VmNpEligibility.isHeapNd(inner) || VmNpEligibility.isHeapProducer(inner)):
+				null;
+			default:
+				throw new VmUnsupported('$op operand not a vec/window/handle (VM U)');
+		}
+	}
+
+	/** Matmul side: nested ≤8×8 row decl (const or runtime scalar cells) or ND handle. */
+	function assertMatmulOperandOk(data:Expr, op:String):Void {
+		switch (unwrapParent(data)) {
+			case EArrayDecl(rows):
+				if (rows.length == 0)
+					throw new VmUnsupported('$op empty matrix (VM U)');
+				if (!VmNpEligibility.fitsMatmulSide(rows.length))
+					throw new VmUnsupported('$op rows ${rows.length} > ${VmNpEligibility.MAX_MATMUL_SIDE} (VM U)');
+				var ncols = -1;
+				for (r in rows) {
+					switch (unwrapParent(r)) {
+						case EArrayDecl(cells):
+							if (!VmNpEligibility.fitsMatmulSide(cells.length))
+								throw new VmUnsupported('$op cols ${cells.length} > ${VmNpEligibility.MAX_MATMUL_SIDE} (VM U)');
+							if (ncols < 0) ncols = cells.length;
+							else if (cells.length != ncols)
+								throw new VmUnsupported('$op ragged matrix (VM U)');
+							for (c in cells) assertHeapNdScalarExpr(c, '$op cell');
+						default:
+							throw new VmUnsupported('$op needs row array decls (VM U)');
+					}
+				}
+			case EIdent(_):
+				null;
+			case ECall(EIdent(inner), _) if (VmNpEligibility.isHeapNd(inner)):
+				null;
+			default:
+				throw new VmUnsupported('$op operand not a matrix/handle (VM U)');
+		}
+	}
+
+	/** Scalar emitable on the VM expr subset (bar fields / locals / arith / const). */
+	function assertHeapNdScalarExpr(e:Expr, label:String):Void {
+		switch (unwrapParent(e)) {
+			case EConst(CInt(_)) | EConst(CFloat(_)):
+				null;
+			case EBarField(_):
+				null;
+			case EIdent(name) if (BAR_FIELDS.exists(name) || localSlots.exists(name)):
+				null;
+			case EBinop(_, a, b):
+				assertHeapNdScalarExpr(a, label);
+				assertHeapNdScalarExpr(b, label);
+			case EUnop(_, _, x):
+				assertHeapNdScalarExpr(x, label);
+			case EParent(x):
+				assertHeapNdScalarExpr(x, label);
+			case ECall(EIdent(n), cargs) if (VmNpEligibility.isScalarB(n)):
+				if (!VmNpEligibility.arityOk(n, cargs.length))
+					throw new VmUnsupported('$label nested $n arity (VM U)');
+			default:
+				throw new VmUnsupported('$label needs scalar expr (VM U)');
+		}
+	}
+
+	/**
+	 * HEAP_ND arg: const 1-D / nested matrix → CONST pool; runtime scalars /
+	 * nested rows → PACK_ARRAY; else normal expr.
+	 */
 	function emitHeapNdArg(e:Expr):Void {
 		switch (unwrapParent(e)) {
 			case EArrayDecl(vs):
-				if (!isConstScalarArray(vs))
-					throw new VmUnsupported("non-const array literal (VM U)");
-				emit(Op.CONST);
-				emit(constIndex(constScalarArray(vs)));
+				if (isConstScalarArray(vs)) {
+					emit(Op.CONST);
+					emit(constIndex(constScalarArray(vs)));
+				} else if (isConstNestedMatrix(vs)) {
+					emit(Op.CONST);
+					emit(constIndex(constNestedMatrix(vs)));
+				} else {
+					for (v in vs) emitHeapNdArg(v);
+					emit(Op.PACK_ARRAY);
+					emit(vs.length);
+				}
 			default:
 				expr(e);
 		}
@@ -481,6 +917,32 @@ class MuseBytecodeCompiler {
 		return out;
 	}
 
+	static function isConstNestedMatrix(rows:Array<Expr>):Bool {
+		if (rows.length == 0) return false;
+		for (r in rows) {
+			switch (unwrapParent(r)) {
+				case EArrayDecl(cells):
+					if (!isConstScalarArray(cells)) return false;
+				default:
+					return false;
+			}
+		}
+		return true;
+	}
+
+	static function constNestedMatrix(rows:Array<Expr>):Array<Dynamic> {
+		var out:Array<Dynamic> = [];
+		for (r in rows) {
+			switch (unwrapParent(r)) {
+				case EArrayDecl(cells):
+					out.push(constScalarArray(cells));
+				default:
+					throw new VmUnsupported("non-const matrix row");
+			}
+		}
+		return out;
+	}
+
 	/** Literal 1-D shape `n` or `[n]` — multi-dim / dynamic → null (**U**). */
 	static function constShape1dLen(e:Expr):Null<Int> {
 		return switch (unwrapParent(e)) {
@@ -490,6 +952,23 @@ class MuseBytecodeCompiler {
 					case EConst(CInt(n)): n;
 					default: null;
 				};
+			default: null;
+		};
+	}
+
+	/** Const shape `n` / `[n,…]` — ints only; dynamic → null. */
+	static function constShapeDims(e:Expr):Null<Array<Int>> {
+		return switch (unwrapParent(e)) {
+			case EConst(CInt(n)): [n];
+			case EArrayDecl(vs):
+				var dims:Array<Int> = [];
+				for (v in vs) {
+					switch (unwrapParent(v)) {
+						case EConst(CInt(d)): dims.push(d);
+						default: return null;
+					}
+				}
+				dims;
 			default: null;
 		};
 	}
