@@ -283,9 +283,11 @@ Only if useful later; keep each &lt;1 day:
 - [ ] Roads: **A style-only** vs **A+B analytic metro**?
 - [ ] Traffic: **E skip**, **C estimated**, or **A paid metro**?
 - [ ] Population: **Kontur** resolution ladder (22 km → 3 km → 400 m metros)?
-- [ ] CRE: **hybrid vs scrape-only vs API-only**?
-- [ ] CRE v1 markets: e.g. **DFW, Atlanta, Phoenix, Chicago, LA** (pick 2–3)?
-- [ ] CRE legal gate before LoopNet/Crexi parsers?
+- [x] CRE: **hybrid vs scrape-only vs API-only**? → **hybrid** (locked 2026-08-05)
+- [x] CRE v1 markets: **Lafayette LA, New Orleans LA, Baton Rouge LA** (locked)
+- [x] CRE legal gate before LoopNet/Crexi parsers? → proceed carefully: adapters behind `CRE_SCRAPE=0` default OFF; fixtures ON; `tos_risk: elevated` on scrape rows; scrape ≠ license
+
+**CRE ship status (body):** schema + fixtures + `/world/cre*` + Desktop legend/dossier + flag-gated adapters — see `WORLD_DATA_PLATFORM.md`.
 
 ---
 
