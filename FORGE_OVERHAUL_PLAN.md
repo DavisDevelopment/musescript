@@ -3,7 +3,8 @@
 > **Status:** Phase 0 + Phase 1 vertical slice **shipped** (2026-08-04); Phase 2
 > (palette + Logic Lane materialization + richer `@on(bar)` + canvas UX) **landed in
 > code** (2026-08-04); Phase **3.1** chart-native tape stage + S polish **landed**
-> (2026-08-05) — Prove Marketplace gate still Phase **3.2**. MuseLab / Studio Blueprints.
+> (2026-08-05); Phase **3.2** Prove latch + **3.3** Optimize/Autoresearch deep-link
+> **landed** (2026-08-05). MuseLab / Studio Blueprints.
 > Distill Forge UI **not** rewritten (Distill-only + → Blueprints importer handoff).
 > **Home for Forge / Blueprints next-gen work.** Web vendoring / surface parity stays in
 > [`WEB_SURFACE_PARITY_PLAN.md`](./WEB_SURFACE_PARITY_PLAN.md); Forge *product*
@@ -458,17 +459,29 @@ Split for ship cadence:
   nodes with **Open in Studio**; inspector typed selects + delete; canvas Delete.
 - [x] Selftests green; mobile → web sync via `tools/sync-mobile-views.ps1`.
 
-**Prove latch policy this slice:** still Decision 2 / toast-only on Prove button —
-**not** a Marketplace disable gate yet.
+**Prove latch policy this slice:** Decision 2 toast-only on Prove — Marketplace
+gate shipped in Phase **3.2**.
 
-#### Phase 3.2 — Prove latch (Marketplace / live deploy) (next)
+#### Phase 3.2 — Prove latch (Marketplace / live deploy) ✅ (2026-08-05)
 
 **DoD**
 
-- [ ] **Prove** runs Truth Report + optional seed robustness; **Marketplace Publish /
+- [x] **Prove** runs Truth Report + optional seed robustness; **Marketplace Publish /
   Live Deploy** disabled until latch satisfied. Library / Swarm save stay allowed
   with honest “not proven” badge (already in 3.1).
-- [ ] Deep-link to Studio Autoresearch / Optimize with the same source.
+  → `blueprintProve.js` / `ProveLatchPanel.jsx` / `truth.proof` receipt
+- [x] Accept policy matches Studio HonestOptimize: **Robust | Fragile** (Coin-flip /
+  Overfit block publish/deploy). Documented in panel + `PROVE_ACCEPT_POLICY_NOTE`.
+- [x] Auto-invalidate proof on graph/source edit; explicit Clear proof on edit.
+
+#### Phase 3.3 — Optimize / Autoresearch deep-link ✅ (2026-08-05)
+
+**DoD**
+
+- [x] Deep-link to Studio Autoresearch / Optimize with the same source
+  (+ synth tape context via session handoff).
+  → `blueprintStudioHandoff.js`; Studio consumes on mount; Evolve / Autoresearch
+  stash **Apply to Blueprints** for lift / honest re-lift.
 
 **Deps:** Phase 3.1; charts vendoring · **Effort:** M–L
 
