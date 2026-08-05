@@ -2,8 +2,9 @@
 
 > **Status:** Phase 0 + Phase 1 vertical slice **shipped** (2026-08-04); Phase 2
 > (palette + Logic Lane materialization + richer `@on(bar)` + canvas UX) **landed in
-> code** (2026-08-04) — MuseLab / Studio Blueprints. Distill Forge UI **not** rewritten
-> (Distill-only + → Blueprints importer handoff).
+> code** (2026-08-04); Phase **3.1** chart-native tape stage + S polish **landed**
+> (2026-08-05) — Prove Marketplace gate still Phase **3.2**. MuseLab / Studio Blueprints.
+> Distill Forge UI **not** rewritten (Distill-only + → Blueprints importer handoff).
 > **Home for Forge / Blueprints next-gen work.** Web vendoring / surface parity stays in
 > [`WEB_SURFACE_PARITY_PLAN.md`](./WEB_SURFACE_PARITY_PLAN.md); Forge *product*
 > overhaul + Blueprints IDE placement is tracked here.
@@ -440,16 +441,36 @@ engine TemplateExpand compounds remain deferred polish under this phase’s spir
 
 ### Phase 3 — Chart-native stage + Prove latch (publish/deploy) (L)
 
+Split for ship cadence:
+
+#### Phase 3.1 — Chart-native tape stage (+ S polish) ✅ (2026-08-05)
+
 **DoD**
 
-- Center Blueprints stage embeds GlChart / forecast overlays driven by the graph’s
-  series + signal markers.
-- **Prove** runs Truth Report + optional seed robustness; **Marketplace Publish /
-  Live Deploy** disabled until latch satisfied. Library / Swarm save stay allowed
-  with honest “not proven” badge if desired.
-- Deep-link to Studio Autoresearch / Optimize with the same source.
+- [x] Center Blueprints stage embeds GlChart tape driven by Run: densified `chart[]`
+  series overlays (or derived sma/ema preview when chart empty) + long/flat/short
+  fill markers + equity spark. → `BlueprintsTapeStage.jsx` / `blueprintTape.js`
+- [x] Truth preview strip: verdict + key gates (not raw JSON); non-blocking for
+  Library / Swarm save. → `TruthPreviewStrip.jsx`
+- [x] Library light save shows **unproven** badge; Prove / Publish remains
+  **message/toast only** (Marketplace gate deferred to 3.2).
+- [x] Selection edge pulse (`bp-edge-animated`); ghost VIEW_ONLY / unsupported
+  nodes with **Open in Studio**; inspector typed selects + delete; canvas Delete.
+- [x] Selftests green; mobile → web sync via `tools/sync-mobile-views.ps1`.
 
-**Deps:** Phase 1; charts vendoring · **Effort:** L
+**Prove latch policy this slice:** still Decision 2 / toast-only on Prove button —
+**not** a Marketplace disable gate yet.
+
+#### Phase 3.2 — Prove latch (Marketplace / live deploy) (next)
+
+**DoD**
+
+- [ ] **Prove** runs Truth Report + optional seed robustness; **Marketplace Publish /
+  Live Deploy** disabled until latch satisfied. Library / Swarm save stay allowed
+  with honest “not proven” badge (already in 3.1).
+- [ ] Deep-link to Studio Autoresearch / Optimize with the same source.
+
+**Deps:** Phase 3.1; charts vendoring · **Effort:** M–L
 
 ### Phase 4 — Artifacts, Swarm, Marketplace (L)
 
