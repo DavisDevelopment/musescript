@@ -153,6 +153,13 @@ class NmaCanonical {
 			// Transparent, exactly as Canonical.digestScalar's KHole case.
 			case KHole:
 				digestScalar(d, (cast n : NmaKHole).inner);
+			case KNp:
+				var k = (cast n : NmaKNp);
+				d.tag("Q".code); // match Canonical.digestScalar KNp
+				d.str(k.op);
+				digestSeries(d, k.a);
+				d.int(k.window);
+				if (k.b != null) digestSeries(d, k.b) else d.tag(0);
 			default: throw 'NmaCanonical.digestScalar: non-scalar kind ${n.kind}';
 		}
 	}
@@ -231,6 +238,9 @@ class NmaCanonical {
 			// Transparent, exactly as Canonical.keyScalar's KHole case: a hole-wrapped subtree
 			// compiles to byte-identical source as its bare inner, so they share ONE cache entry.
 			case KHole: keyScalar((cast n : NmaKHole).inner);
+			case KNp:
+				var k = (cast n : NmaKNp);
+				["Q", k.op, keySeries(k.a), k.window, k.b != null ? keySeries(k.b) : null];
 			default: throw 'NmaCanonical.keyScalar: non-scalar kind ${n.kind}';
 		};
 	}
@@ -285,6 +295,9 @@ class NmaCanonical {
 				1 + countScalar(a.a) + countScalar(a.b);
 			// No +1: the wrapper is template scaffolding, not logical complexity (matches Canonical).
 			case KHole: countScalar((cast n : NmaKHole).inner);
+			case KNp:
+				var k = (cast n : NmaKNp);
+				1 + countSeries(k.a) + (k.b != null ? countSeries(k.b) : 0);
 			default: 0;
 		};
 	}

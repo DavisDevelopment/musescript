@@ -181,4 +181,43 @@ class TestNmaEval extends Test {
 		Assert.isTrue(ctx.priceColumn("close") == ctx.priceColumn("close"),
 			"same field returns one shared, content-addressed column");
 	}
+
+	/**
+	 * Closed KNp columnar: `np_mean`/`np_sum`/`np_dot` of `window` use SHORT early
+	 * windows (mean of available), matching Expand→TradeBuiltins.window + NpBuiltins —
+	 * not SMA's full-window NaN warmup.
+	 */
+	public function testKNpWindowReduceMatchesExpandSemantics() {
+		var close = [10.0, 12.0, 11.0, 13.0, 14.0, 12.5];
+		var high = [11.0, 13.0, 12.0, 14.0, 15.0, 13.5];
+		var n = close.length;
+		var w = 3;
+		// Hand formula mirroring window(src,w) then reduce (short when i+1 < w).
+		var expectMean = new Array<Float>();
+		var expectSum = new Array<Float>();
+		var expectDot = new Array<Float>();
+		for (i in 0...n) {
+			var avail = i + 1 < w ? i + 1 : w;
+			var sum = 0.0, acc = 0.0;
+			var j = i + 1 - avail;
+			while (j <= i) {
+				sum += close[j];
+				acc += close[j] * high[j];
+				j++;
+			}
+			expectMean.push(sum / avail);
+			expectSum.push(sum);
+			expectDot.push(acc);
+		}
+		var ctx = ctxOf(["close" => close, "high" => high], n);
+		var mean = new NmaKNp("mean", new NmaSPrice("close"), w, null);
+		var sum = new NmaKNp("sum", new NmaSPrice("close"), w, null);
+		var dot = new NmaKNp("dot", new NmaSPrice("close"), w, new NmaSPrice("high"));
+		assertColEquals(expectMean, NmaEval.evalScalar(mean, ctx), "np_mean(window)");
+		assertColEquals(expectSum, NmaEval.evalScalar(sum, ctx), "np_sum(window)");
+		assertColEquals(expectDot, NmaEval.evalScalar(dot, ctx), "np_dot(window,window)");
+		// Early bar is a real mean-of-available, not NaN (unlike sma).
+		Assert.isFalse(Math.isNaN(expectMean[0]), "bar0 mean defined");
+		Assert.floatEquals(10.0, expectMean[0]);
+	}
 }

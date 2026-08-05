@@ -176,4 +176,17 @@ class TestNmaBijection extends Test {
 				'idempotent round-trip i=$i');
 		}
 	}
+
+	public function testKNpRoundTripAndCanonicalParity() {
+		var g = baseGenome(
+			BCmp(">", KNp("mean", SPrice("close"), 5, null),
+				KNp("dot", SPrice("close"), 3, SPrice("high"))),
+			KNp("sum", SInd("sma", "close", 8, null), 4, null));
+		var nma = NmaBijection.genomeFromEnum(g);
+		var back = NmaBijection.genomeToEnum(nma);
+		Assert.equals(Canonical.structuralKey(g), Canonical.structuralKey(back), "KNp structural round-trip");
+		Assert.equals(Expand.expand(g), Expand.expand(back), "KNp Expand round-trip");
+		Assert.equals(Canonical.structuralKey(g), NmaCanonical.structuralKey(nma), "KNp NmaCanonical key");
+		Assert.equals(Canonical.nodeCount(g), NmaCanonical.nodeCount(nma), "KNp NmaCanonical count");
+	}
 }

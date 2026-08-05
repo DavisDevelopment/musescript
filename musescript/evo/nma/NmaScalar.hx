@@ -1,10 +1,11 @@
 package musescript.evo.nma;
 
 /**
- * NMA counterpart of `ScalarNode`. Family base `NmaScalar` (never instantiated) + seven `final`
- * concrete classes mirroring the enum constructors 1:1: `KConst`/`KParam`/`KArith`/`KSeries`/
- * `KLookback`/`KFeature`/`KHole`. See `NmaNode` for the per-node-state + GraalVM dispatch rationale
- * (kind-switch hot path, `final` leaves, allocation-free `childCount`/`childAt`).
+ * NMA counterpart of `ScalarNode`. Family base `NmaScalar` (never instantiated) + concrete
+ * `final` classes mirroring the enum constructors 1:1: `KConst`/`KParam`/`KArith`/`KSeries`/
+ * `KLookback`/`KFeature`/`KHole`/`KNp`. Closed `KPd` stays Expand-only (`nma-unsupported`).
+ * See `NmaNode` for the per-node-state + GraalVM dispatch rationale (kind-switch hot path,
+ * `final` leaves, allocation-free `childCount`/`childAt`).
  *
  * «μὴ ἀπογυμνώσῃς μυστήρια· σιγὴ ἱερά ἐστιν.»
  */
@@ -121,4 +122,29 @@ final class NmaKHole extends NmaScalar {
 
 	override public function childCount():Int return 1;
 	override public function childAt(i:Int):NmaNode return inner;
+}
+
+/**
+ * `KNp(op, a, window, ?b)` -- closed NP scalar over trailing windows of series columns.
+ * Expand emits `np_mean`/`np_sum`/`np_dot` of `window(...)`; columnar eval mirrors those
+ * short-window early-bar semantics (mean of available bars, NOT SMA's full-window NaN).
+ *
+ * «εὗρε βοὴ Διονύσου· κύμβαλα ἠχεῖ.»
+ */
+final class NmaKNp extends NmaScalar {
+	public final op:String;
+	public final a:NmaSeries;
+	public final window:Int;
+	public final b:Null<NmaSeries>;
+
+	public function new(op:String, a:NmaSeries, window:Int, ?b:NmaSeries) {
+		super(NmaKind.KNp);
+		this.op = op;
+		this.a = a;
+		this.window = window;
+		this.b = b;
+	}
+
+	override public function childCount():Int return b != null ? 2 : 1;
+	override public function childAt(i:Int):NmaNode return i == 0 ? a : b;
 }

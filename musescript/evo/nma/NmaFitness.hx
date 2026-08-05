@@ -2,8 +2,19 @@ package musescript.evo.nma;
 
 import musescript.evo.StrategyGenome;
 import musescript.evo.FitnessResult;
+import musescript.evo.PanelAction;
+import musescript.evo.PanelInline;
+import musescript.evo.Expand;
+import musescript.evo.Palette;
+import musescript.evo.SeriesNode;
+import musescript.builtins.PortfolioBuiltins;
+import musescript.builtins.BagBuiltins;
+import musescript.dataframe.GroupBy;
+import musescript.ndarray.NdArrayF64;
 import musescript.harness.Bar;
 import musescript.harness.OrderSim;
+import musescript.harness.PanelFeed;
+import musescript.harness.PortfolioSim;
 import musescript.harness.Metrics;
 import musescript.indicators.GrowableVec;
 import musescript.evo.nma.NmaBool;   // secondary types for the roots
@@ -200,12 +211,83 @@ class NmaFitness {
 	}
 
 	/**
+	 * Columnar panel fitness (cliff 3): `PanelInline` genome + packed `field@SYM` columns from
+	 * `PanelFeed`, signals via `NmaEval`, apply via real `PortfolioSim` matching Expand's
+	 * closed `PABuy` / `PARebalance` / `PATargetWeight` / `PABagScanTop` / `PABagRankWeights`
+	 * templates (entryLong / exitLong only). Open bags, KPd, and sim-coupled roots stay Expand
+	 * (`nma-unsupported`).
+	 *
+	 * «πολλαὶ νῆες, εἷς στόλος· κορυφαῖος Πορτοφόλιον.»
+	 */
+	public static function evaluatePanel(g:StrategyGenome, bars:Array<Bar>, panel:PanelFeed,
+			action:PanelAction, pack:Map<String, Array<Float>>,
+			?costBps:Float = 0.0, ?initialCash:Float = 100000):FitnessResult {
+		try {
+			if (panel == null)
+				return new FitnessResult(false, -999, 0, 0, "nma-unsupported",
+					"panel NMA requires Fitness.configurePanel / PanelFeed");
+			if (!PanelInline.isNmaPanelAction(action))
+				return new FitnessResult(false, -999, 0, 0, "nma-unsupported",
+					"panel NMA supports PABuy/PARebalance/PATargetWeight/"
+					+ "PABagScanTop/PABagRankWeights (open bag_rank_* stay Expand)");
+			var built = prepare(g, bars, pack);
+			if (built == null)
+				return new FitnessResult(false, -999, 0, 0, "nma-unsupported",
+					"panel NMA prepare failed");
+			var nma = built.nma;
+			var ctx = built.ctx;
+			// Panel Expand templates ignore short + position() — refuse sim-coupled roots so we
+			// never invent PortfolioSim-coupled KFeature semantics under OrderSim helpers.
+			if (NmaPositionEval.isCoupled(nma.entryLong) || NmaPositionEval.isCoupled(nma.exitLong)
+					|| NmaPositionEval.isCoupled(nma.size))
+				return new FitnessResult(false, -999, 0, 0, "nma-unsupported",
+					"panel NMA refuses sim-coupled roots (no PortfolioSim position features yet)");
+			var cols = evalColumns(nma, ctx);
+			musescript.evo.Fitness.addNmaPopMemoHits(ctx.popMemoHits);
+			ctx.popMemoHits = 0;
+			var eL = cols.eL, xL = cols.xL, sz = cols.sz;
+			if (eL == null || xL == null || sz == null)
+				return new FitnessResult(false, -999, 0, 0, "nma-unsupported",
+					"panel NMA needs columnar entryLong/exitLong/size");
+			var bagScores:Null<Map<String, GrowableVec<Float>>> = null;
+			switch (action) {
+				case PABagScanTop(kind, window, _, syms) | PABagRankWeights(kind, window, syms):
+					bagScores = bagScanScoreColumns(ctx, kind, window, syms);
+					if (bagScores == null)
+						return new FitnessResult(false, -999, 0, 0, "nma-unsupported",
+							'bag panelAction kind "$kind" not columnar on NMA');
+				default:
+			}
+			var keepCurve = musescript.evo.Fitness.equityCurveNeeded;
+			var port = panelSimFromColumns(panel, action, eL, xL, sz, costBps, initialCash, keepCurve,
+				bagScores);
+			var eqArr = keepCurve ? port.equity.toArray() : null;
+			var finalEq = keepCurve
+				? (eqArr != null && eqArr.length > 0 ? eqArr[eqArr.length - 1] : port.cash)
+				: (port.equity.length > 0 ? port.equity[port.equity.length - 1] : port.cash);
+			var sharpe = eqArr != null
+				? Metrics.sharpe(Metrics.returnsFromEquity(eqArr), 0)
+				: sharpeOfEquity(port.equity);
+			var fr = new FitnessResult(true, sharpe, port.trades, finalEq, "nma");
+			fr.fills = port.fills;
+			fr.bankrupt = false;
+			fr.equity = eqArr;
+			return fr;
+		} catch (e:Dynamic) {
+			return new FitnessResult(false, -999, 0, 0, "nma-error", Std.string(e));
+		}
+	}
+
+	/**
 	 * Build NMA working copy + eval context (shared SInd cache). Null if `KFeature` present.
 	 * Used by `NmaAttr` to keep one session across ablations.
+	 * Optional `panelPack` merges calendar-aligned `field@SYM` columns into the tape fields
+	 * (cliff 3 — SPanel via PanelInline).
 	 *
 	 * «ῥεῦμα μέλιτος ῥεῖ· ἀθάνατοι πίνουσιν ἐκεῖ.»
 	 */
-	public static function prepare(g:StrategyGenome, bars:Array<Bar>):Null<{nma:NmaGenome, ctx:NmaEvalContext}> {
+	public static function prepare(g:StrategyGenome, bars:Array<Bar>,
+			?panelPack:Map<String, Array<Float>>):Null<{nma:NmaGenome, ctx:NmaEvalContext}> {
 		// Feed-cadence vs Expand short-circuit (genericIndsAlwaysFed) deliberately NOT gated:
 		// under --nma the columnar every-bar feed IS the search oracle. Refusing those genomes
 		// forced ~40% of the pop through Expand→parse→compile (measured). Bit-parity with JVM
@@ -221,14 +303,160 @@ class NmaFitness {
 		var tConverted = NmaSignalProbe.stamp();
 
 		var t = tapeStateFor(bars);
+		var fields = t.fields;
+		var key = t.key;
+		var keyA = t.keyA;
+		var keyB = t.keyB;
+		var columns = t.columns;
+		if (panelPack != null && panelPack.keys().hasNext()) {
+			fields = new Map();
+			for (k => v in t.fields) fields.set(k, v);
+			NmaPanelPack.mergeInto(fields, panelPack);
+			var dig = NmaPanelPack.digest(panelPack);
+			key = t.key + "|pnl|" + dig.hex;
+			keyA = t.keyA ^ dig.a;
+			keyB = t.keyB ^ dig.b;
+			// Fresh share so panel-key columns don't collide with OHLCV-only peers on the same bars.
+			columns = new NmaColumnCache();
+		}
 		var params = [for (p in g.params) p.defaultValue];
-		var ctx = new NmaEvalContext(t.n, NmaEpoch.of(t.key, g.params, t.keyA, t.keyB), t.fields, null, params,
-			new EngineIndicatorProvider(t.fields, t.columns, t.times), musescript.evo.Fitness.nmaPopMemo);
-		ctx.sharedPriceColumns = t.columns;
+		var ctx = new NmaEvalContext(t.n, NmaEpoch.of(key, g.params, keyA, keyB), fields, null, params,
+			new EngineIndicatorProvider(fields, columns, t.times), musescript.evo.Fitness.nmaPopMemo);
+		ctx.sharedPriceColumns = columns;
 		ctx.barColumns = t.barCols;
 		if (NmaSignalProbe.on)
 			NmaSignalProbe.observePrepare(tConverted - tEnter, NmaSignalProbe.wall() - tConverted);
 		return { nma: nma, ctx: ctx };
+	}
+
+	/**
+	 * Drive `PortfolioSim` from columnar entryLong / exitLong / size — mirrors Expand
+	 * `emitPanelActionBody` + `HarnessContext.runPanelBacktest` ordering (beginBar → apply → mark).
+	 * Optional `bagScores` supplies per-symbol score columns for closed bag templates
+	 * (`PABagScanTop` → equal bag; `PABagRankWeights` → percentile xs_rank → `bag_norm`).
+	 */
+	static function panelSimFromColumns(panel:PanelFeed, action:PanelAction,
+			eL:GrowableVec<Float>, xL:GrowableVec<Float>, sz:GrowableVec<Float>,
+			costBps:Float, initialCash:Float, keepCurve:Bool,
+			?bagScores:Map<String, GrowableVec<Float>>):PortfolioSim {
+		var n = panel.length();
+		var port = new PortfolioSim();
+		if (costBps != 0) port.tradingCostBps = costBps;
+		if (initialCash != 100000) port.reset(initialCash);
+		var emptyPx = new Map<String, Float>();
+		var i = 0;
+		while (i < n) {
+			var opens = i < panel.opens.length ? panel.opens[i] : emptyPx;
+			var highs = i < panel.highs.length ? panel.highs[i] : emptyPx;
+			var lows = i < panel.lows.length ? panel.lows[i] : emptyPx;
+			var prices = panel.pricesAt(i);
+			var idx = i < panel.all().length ? panel.all()[i].index : i;
+			port.beginBar(opens, highs, lows, idx);
+			if (eL.at(i) >= 0.5)
+				applyPanelEntry(port, action, prices, sz.at(i), idx, i, bagScores);
+			if (xL.at(i) >= 0.5)
+				applyPanelExit(port, action, prices, idx);
+			port.mark(prices);
+			i++;
+		}
+		if (!keepCurve) {
+			// Equity already streamed into GrowableVec for sharpeOfEquity; callers that skip
+			// the array still read the last mark via port.equity.
+		}
+		return port;
+	}
+
+	/**
+	 * Per-symbol score columns matching Expand `panelScoreDict` / `*_of` for closed bag templates.
+	 * Null when `kind` is outside the packed OHLCV/ind/fund subset.
+	 */
+	static function bagScanScoreColumns(ctx:NmaEvalContext, kind:String, window:Int,
+			syms:Array<String>):Null<Map<String, GrowableVec<Float>>> {
+		if (!PanelInline.bagScoreKindSupported(kind) || syms == null) return null;
+		var out = new Map<String, GrowableVec<Float>>();
+		var w = window > 0 ? window : 14;
+		for (sym in syms) {
+			if (sym == null || sym.length == 0) continue;
+			var leaf:SeriesNode = if (kind == "fund") {
+				SPrice(PortfolioBuiltins.seriesKey("revenue", sym));
+			} else if (Palette.PANEL_OF_INDS.indexOf(kind) >= 0) {
+				SInd(kind, PortfolioBuiltins.seriesKey("close", sym), w, null);
+			} else {
+				SPrice(PortfolioBuiltins.seriesKey(kind, sym));
+			};
+			out.set(sym, NmaEval.evalSeries(NmaBijection.seriesFromEnum(leaf), ctx));
+		}
+		return out;
+	}
+
+	/**
+	 * Percentile xs_rank (ascending, average ties) in `syms` order → `bag_norm` weight map.
+	 * Matches Expand `bag_norm(bag_from_dict({SYM: pd_rank1d|pd_xs_rank…}))` when scores
+	 * pack in the same order (tie-break by universe index).
+	 */
+	static function bagRankNormWeights(bagScores:Null<Map<String, GrowableVec<Float>>>,
+			syms:Array<String>, barI:Int):Map<String, Float> {
+		if (bagScores == null || syms == null || syms.length == 0) return new Map();
+		var packed:Array<Float> = [];
+		for (s in syms) {
+			var col = bagScores.get(s);
+			packed.push(col != null ? col.at(barI) : Math.NaN);
+		}
+		var ranks = GroupBy.rank1d(NdArrayF64.asarray1d(packed), true, true);
+		var dict = new Map<String, Float>();
+		for (i in 0...syms.length) {
+			var r = ranks.getFlat(i);
+			if (!Math.isNaN(r) && Math.isFinite(r) && r != 0)
+				dict.set(syms[i], r);
+		}
+		return BagBuiltins.bagNorm(BagBuiltins.bagFromDict(dict)).weights;
+	}
+
+	static function applyPanelEntry(port:PortfolioSim, action:PanelAction,
+			prices:Map<String, Float>, size:Float, barIndex:Int, barI:Int,
+			bagScores:Null<Map<String, GrowableVec<Float>>>):Void {
+		switch (action) {
+			case PABuy(sym):
+				var px = prices != null && prices.exists(sym) ? prices.get(sym) : Math.NaN;
+				port.buy(sym, px, size, barIndex);
+			case PARebalance(syms):
+				port.rebalanceEqual(syms, prices, barIndex);
+			case PATargetWeight(sym):
+				port.targetWeight(sym, size, prices, barIndex);
+			case PABagScanTop(_, _, topK, syms):
+				var scores = new Map<String, Float>();
+				if (bagScores != null && syms != null) {
+					for (s in syms) {
+						var col = bagScores.get(s);
+						if (col == null) continue;
+						scores.set(s, col.at(barI));
+					}
+				}
+				var k = Expand.clampBagTopK(topK, syms);
+				var picks = PortfolioBuiltins.rankPick(scores, k, false);
+				port.applyBag(BagBuiltins.bagEqual(picks).weights, prices, barIndex, true);
+			case PABagRankWeights(_, _, syms):
+				port.applyBag(bagRankNormWeights(bagScores, syms, barI), prices, barIndex, true);
+		}
+	}
+
+	static function applyPanelExit(port:PortfolioSim, action:PanelAction,
+			prices:Map<String, Float>, barIndex:Int):Void {
+		switch (action) {
+			case PABuy(sym) | PATargetWeight(sym):
+				var px = prices != null && prices.exists(sym) ? prices.get(sym) : Math.NaN;
+				port.sellAll(sym, px, barIndex);
+			case PARebalance(syms):
+				if (syms != null) for (s in syms) {
+					var p = prices != null && prices.exists(s) ? prices.get(s) : Math.NaN;
+					port.sellAll(s, p, barIndex);
+				}
+			case PABagScanTop(_, _, _, syms) | PABagRankWeights(_, _, syms):
+				if (syms != null) for (s in syms) {
+					var p = prices != null && prices.exists(s) ? prices.get(s) : Math.NaN;
+					port.sellAll(s, p, barIndex);
+				}
+		}
 	}
 
 	/** Content signature used by dirty-spine working-copy guards. */

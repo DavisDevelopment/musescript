@@ -335,10 +335,13 @@ class TestEvoVariation extends Test {
 	 * backend/behavior path. */
 	public function testFitnessCacheKeyIncludesTargetAndStrict() {
 		Fitness.clearFnCache();
+		var prevVm = Fitness.preferVm;
+		Fitness.preferVm = false; // exercise Expand→compile target paths, not VM oracle
 		var g = baseGenome(BCmp(">", KSeries(SPrice("close")), KConst(1.0)));
 		var bars = BarFeed.synthetic(200, 5).all();
 		var jsResult = Fitness.evaluate(g, bars, "js", false);
 		var nativeResult = Fitness.evaluate(g, bars, "native", false); // MuseCompiler's documented interp-fallback target
+		Fitness.preferVm = prevVm;
 		Assert.isTrue(jsResult.ok && nativeResult.ok);
 		Assert.equals("interp", nativeResult.backend);
 		Assert.equals(jsResult.trades, nativeResult.trades);

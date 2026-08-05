@@ -18,6 +18,11 @@ import musescript.evo.nma.NmaBool;
  *    MuseScript semantics exactly: `crossover`/`crossunder`/`rising`/`falling` mirror
  *    `TradeBuiltins`' contract line-for-line (NaN handling, "first bar is false", the `n+1`-sample
  *    trend window), and are differential-tested against it.
+ *  - Closed `KNp` (mean/sum/dot of trailing `window`) is implemented HERE: short early windows
+ *    match `TradeBuiltins.window` + `NpBuiltins` reduces — not SMA's full-window NaN warmup.
+ *  - Closed `SPanel` is hosted via `PanelInline` → `SPrice`/`SInd` over packed `field@SYM`
+ *    columns (`NmaPanelPack` / `PanelFeed`). Closed bag templates (`PABagScanTop` /
+ *    `PABagRankWeights`) build bag weights from those score columns in `NmaFitness`.
  *  - `SInd` (indicator math) is the ONLY delegated case -- see `NmaIndicatorProvider`.
  *
  * GraalVM shape: every dispatch is a central `switch (node.kind)` + typed `cast` (a `tableswitch`,
@@ -67,6 +72,11 @@ class NmaEval {
 				var a = (cast node : NmaKArith);
 				arith(a.op, evalScalar(a.a, ctx), evalScalar(a.b, ctx), ctx.n);
 			case KHole: evalScalar((cast node : NmaKHole).inner, ctx); // transparent
+			case KNp:
+				var knp = (cast node : NmaKNp);
+				npWindowReduce(knp.op, evalSeries(knp.a, ctx),
+					knp.b != null ? evalSeries(knp.b, ctx) : null,
+					knp.window, ctx.n);
 			default: throw 'NmaEval.evalScalar: non-scalar kind ${node.kind}';
 		};
 		popStore(node, ctx, () -> NmaCanonical.ensureWordsScalar(node), col);
@@ -278,6 +288,69 @@ class NmaEval {
 		while (i < n) {
 			col.setAt(i, i - k >= 0 ? src.at(i - k) : Math.NaN);
 			i++;
+		}
+		col.commitLength(n);
+		return col;
+	}
+
+	/**
+	 * Closed `KNp` columnar path — bit-match Expand → `np_mean`/`np_sum`/`np_dot` of
+	 * `window(series, w)`.
+	 *
+	 * Critical: `TradeBuiltins.window` returns a *short* trailing slice when fewer than `w`
+	 * bars exist, and `Np.mean`/`sum`/`dot` reduce that slice. This is NOT `sma` (which
+	 * yields NaN until the full window fills). Early bars use `avail = min(w, i+1)`.
+	 *
+	 * IEEE `+`/`*`/`/` only (DetMath discipline; no libm). Window clamped like Expand.
+	 */
+	static function npWindowReduce(op:String, a:GrowableVec<Float>, b:Null<GrowableVec<Float>>,
+			window:Int, n:Int):GrowableVec<Float> {
+		var w = musescript.evo.Expand.clampNpWindow(window);
+		var col = new GrowableVec<Float>(n > 0 ? n : 8);
+		var i = 0;
+		switch (op) {
+			case "mean":
+				while (i < n) {
+					var avail = i + 1 < w ? i + 1 : w;
+					var sum = 0.0;
+					var j = i + 1 - avail;
+					while (j <= i) {
+						sum += a.at(j);
+						j++;
+					}
+					col.setAt(i, sum / avail);
+					i++;
+				}
+			case "sum":
+				while (i < n) {
+					var availS = i + 1 < w ? i + 1 : w;
+					var sumS = 0.0;
+					var jS = i + 1 - availS;
+					while (jS <= i) {
+						sumS += a.at(jS);
+						jS++;
+					}
+					col.setAt(i, sumS);
+					i++;
+				}
+			case "dot":
+				var bb = b != null ? b : a;
+				while (i < n) {
+					var availD = i + 1 < w ? i + 1 : w;
+					var acc = 0.0;
+					var jD = i + 1 - availD;
+					while (jD <= i) {
+						acc += a.at(jD) * bb.at(jD);
+						jD++;
+					}
+					col.setAt(i, acc);
+					i++;
+				}
+			default:
+				while (i < n) {
+					col.setAt(i, Math.NaN);
+					i++;
+				}
 		}
 		col.commitLength(n);
 		return col;

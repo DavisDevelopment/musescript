@@ -115,6 +115,19 @@ class Canonical {
 			case PATargetWeight(sym):
 				d.str("tw");
 				d.str(sym);
+			case PABagScanTop(kind, window, topK, syms):
+				d.str("bagscan");
+				d.str(kind);
+				d.int(window);
+				d.int(topK);
+				d.int(syms.length);
+				for (s in syms) d.str(s);
+			case PABagRankWeights(kind, window, syms):
+				d.str("bagrw");
+				d.str(kind);
+				d.int(window);
+				d.int(syms.length);
+				for (s in syms) d.str(s);
 		}
 	}
 

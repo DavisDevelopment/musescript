@@ -72,7 +72,7 @@ class Expand {
 		return lines.join("\n");
 	}
 
-	/** Emit HostABI panel apply lines for a panel-action template. */
+	/** Emit HostABI / closed-bag panel apply lines for a panel-action template. */
 	static function emitPanelActionBody(
 		lines:Array<String>, action:PanelAction, g:StrategyGenome, size:String
 	):Void {
@@ -85,12 +85,54 @@ class Expand {
 			case PARebalance(syms):
 				var list = [for (s in syms) '"$s"'].join(", ");
 				lines.push('    when ($entry): { rebalance_equal([$list]) }');
-				var sells = [for (s in syms) 'sell_all("$s")'].join("; ");
-				lines.push('    when ($exit): { $sells }');
+				lines.push('    when ($exit): { ${sellAllUniverse(syms)} }');
 			case PATargetWeight(sym):
 				lines.push('    when ($entry): { target_weight("$sym", $size) }');
 				lines.push('    when ($exit): { sell_all("$sym") }');
+			case PABagScanTop(kind, window, topK, syms):
+				var k = clampBagTopK(topK, syms);
+				var bag = 'bag_from_scan(${panelScoreDict(kind, window, syms)}, $k)';
+				lines.push('    when ($entry): { portfolio_apply($bag) }');
+				lines.push('    when ($exit): { ${sellAllUniverse(syms)} }');
+			case PABagRankWeights(kind, window, syms):
+				var bag = 'bag_norm(bag_from_dict(${panelRankWeightDict(kind, window, syms)}))';
+				lines.push('    when ($entry): { portfolio_apply($bag) }');
+				lines.push('    when ($exit): { ${sellAllUniverse(syms)} }');
 		}
+	}
+
+	static inline function sellAllUniverse(syms:Array<String>):String
+		return [for (s in syms) 'sell_all("$s")'].join("; ");
+
+	/** Clamp top-k into `1..|syms|` for closed bag scan templates. */
+	public static function clampBagTopK(topK:Int, syms:Array<String>):Int {
+		var n = syms != null ? syms.length : 0;
+		if (n < 1) return 1;
+		var k = topK < 1 ? 1 : topK;
+		return k > n ? n : k;
+	}
+
+	/**
+	 * Fixed-universe score object literal `{SYM: panel_of…, …}` — closed alternative to
+	 * `dict_new`/`symbols()` loops. Keys must be safe object-literal idents
+	 * (`^[A-Za-z_][A-Za-z0-9_]*$`).
+	 */
+	public static function panelScoreDict(kind:String, window:Int, syms:Array<String>):String {
+		if (syms == null || syms.length == 0)
+			throw 'Expand: panel score dict needs a non-empty universe';
+		var parts = [for (s in syms) '${s}: ${panelOfExpr(kind, s, null, window > 0 ? window : null)}'];
+		return '{${parts.join(", ")}}';
+	}
+
+	/**
+	 * Object literal of percentile xs_rank cells for each symbol (same dual path as
+	 * `pdXsRankExpr`: packed `pd_rank1d` when `|syms| ≤ PD_RANK1D_MAX`, else frame).
+	 */
+	public static function panelRankWeightDict(kind:String, window:Int, syms:Array<String>):String {
+		if (syms == null || syms.length == 0)
+			throw 'Expand: panel rank-weight dict needs a non-empty universe';
+		var parts = [for (s in syms) '${s}: ${pdXsRankExpr(kind, window, s, syms)}'];
+		return '{${parts.join(", ")}}';
 	}
 
 	static function num(x:Float):String {
@@ -283,23 +325,74 @@ class Expand {
 	}
 
 	/**
-	 * Closed PD Expand: one-row percentile `pd_xs_rank(..., true)` over literal panel
-	 * scores for a fixed universe. Cell extract via `np_get_flat(pd_series_values(...), 0)`
-	 * (NdArray is not Muse-subscriptable). No groupby/merge/HTTP.
+	 * Closed PD Expand: percentile cross-section rank of a fixed-universe score
+	 * vector, or size-capped Series `pd_shift` → scalar extract.
+	 *
+	 * Dual xs_rank path (no open groupby/merge/HTTP):
+	 * - `|syms| ≤ Palette.PD_RANK1D_MAX` (= WASM `pd_rank1d` cap): pack panel
+	 *   scores into a 1-D literal and emit `pd_rank1d(..., true)` so gated genomes
+	 *   can hit claimed-native `$vec_rank_pct` when eligible.
+	 * - Wider / oversized universe: one-row frame `pd_xs_rank` (opaque U on WASM).
+	 *
+	 * Cell extract via `np_get_flat(..., i)` (NdArray is not Muse-subscriptable).
 	 */
 	public static function pdExpr(op:String, kind:String, window:Int, sym:String, syms:Array<String>):String {
-		if (op != "xs_rank")
-			throw 'Expand: unknown PD op "$op" (closed Palette.PD_OPS only)';
+		return switch (op) {
+			case "xs_rank":
+				pdXsRankExpr(kind, window, sym, syms);
+			case "shift":
+				pdShiftExpr(kind, window);
+			default:
+				throw 'Expand: unknown PD op "$op" (closed Palette.PD_OPS only)';
+		};
+	}
+
+	/**
+	 * Percentile xs_rank → scalar for `sym`. Prefers packed `pd_rank1d` when the
+	 * universe fits the WASM N cap; otherwise the opaque one-row frame path.
+	 */
+	public static function pdXsRankExpr(kind:String, window:Int, sym:String, syms:Array<String>):String {
 		if (syms == null || syms.length == 0)
 			throw 'Expand: PD xs_rank needs a non-empty universe';
+		var idx = syms.indexOf(sym);
+		if (idx < 0)
+			throw 'Expand: PD xs_rank symbol "$sym" not in universe';
+		if (syms.length <= Palette.PD_RANK1D_MAX) {
+			var scores = [for (s in syms) panelOfExpr(kind, s, null, window)];
+			return 'np_get_flat(pd_rank1d([${scores.join(", ")}], true), $idx)';
+		}
 		var cols = [for (s in syms) '${s}: [${panelOfExpr(kind, s, null, window)}]'];
-		// pd_series_values → NdArray; Muse `[0]` does not scalarize it — use np_get_flat.
+		// Frame path: pd_series_values → NdArray; Muse `[0]` does not scalarize it.
 		return 'np_get_flat(pd_series_values(pd_get(pd_xs_rank(pd_from_columns({${cols.join(", ")}}), true), "$sym")), 0)';
+	}
+
+	/**
+	 * Size-safe Series lag: `pd_shift(pd_series(window(field, w)), p)` then last-cell
+	 * extract. `w = clamp(p+1)` so index `w-1` is always defined and equals lookback `p`.
+	 */
+	public static function pdShiftExpr(kind:String, periods:Int):String {
+		var p = periods < 1 ? 1 : periods;
+		if (p > Palette.PD_SHIFT_MAX) p = Palette.PD_SHIFT_MAX;
+		if (p >= Palette.NP_MAX_WIN) p = Palette.NP_MAX_WIN - 1;
+		var w = clampNpWindow(p + 1);
+		var field = Palette.FIELDS.indexOf(kind) >= 0 ? kind : "close";
+		var last = w - 1;
+		return 'np_get_flat(pd_series_values(pd_shift(pd_series(window($field, $w)), $p)), $last)';
 	}
 
 	/** True when any policy root contains a closed `KPd` leaf. */
 	public static function hasKPd(g:StrategyGenome):Bool {
 		return firstKPd(g) != null;
+	}
+
+	/** True when any policy root has `KPd("xs_rank", …)` (panel fitness / target_weight coerce). */
+	public static function hasKPdXsRank(g:StrategyGenome):Bool {
+		var pd = firstKPd(g);
+		if (pd == null) return false;
+		return switch (pd) {
+			case KPd("xs_rank", _, _, _, _): true;
+			default: false;
+		};
 	}
 
 	/**
@@ -341,14 +434,15 @@ class Expand {
 	}
 
 	/**
-	 * When a genome has `KPd` but no explicit `PanelAction`, emit `PATargetWeight` on the
-	 * ranked symbol so Expand→panel fitness sees the cross-section (not single-name long/short).
+	 * When a genome has `KPd("xs_rank")` but no explicit `PanelAction`, emit `PATargetWeight`
+	 * on the ranked symbol so Expand→panel fitness sees the cross-section (not single-name
+	 * long/short). Size-safe `shift` leaves classic / single-name templates alone.
 	 */
 	public static function inferPanelActionForPd(g:StrategyGenome):Null<PanelAction> {
 		var pd = firstKPd(g);
 		if (pd == null) return null;
 		return switch (pd) {
-			case KPd(_, _, _, sym, _): PATargetWeight(sym);
+			case KPd("xs_rank", _, _, sym, _): PATargetWeight(sym);
 			default: null;
 		};
 	}

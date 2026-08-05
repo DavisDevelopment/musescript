@@ -13,17 +13,19 @@ enum ScalarNode {
 	 * Closed gated NP palette leaf (`Palette.NP_OPS`). Grown only when
 	 * `Variation.configureForNp` opens the gate — never open-world muse.np trees.
 	 * Expand emits size-capped `np_mean` / `np_sum` / `np_dot` over `window(series, w)`.
-	 * `b` is required for `dot` (ignored for mean/sum). WASM may claim native on the
-	 * scalar subset; NMA is `nma-unsupported` → Expand→interp/WASM (honest fallback).
+	 * `b` is required for `dot` (ignored for mean/sum). Columnar NMA evaluates trailing
+	 * window reduces over SPrice/SInd columns; WASM may claim native on the scalar subset;
+	 * bytecode VM is eligible (`VmNpEligibility`). Closed `KPd` remains Expand-only.
 	 */
 	KNp(op:String, a:SeriesNode, window:Int, ?b:SeriesNode);
 	/**
 	 * Closed gated PD palette leaf (`Palette.PD_OPS`). Grown only when
-	 * `Variation.configureForPd` is open **and** a fixed universe is set — no
-	 * open groupby/merge/HTTP. Expand emits literal-safe one-row
-	 * `pd_from_columns` + percentile `pd_xs_rank` cell extract, and coerces
-	 * onto `PanelAction` / `target_weight` for panel fitness. WASM/NMA: all-U /
-	 * `nma-unsupported` → Expand→interp/JS only.
+	 * `Variation.configureForPd` is open; `xs_rank` also needs a fixed universe —
+	 * no open groupby/merge/HTTP. Expand emits size-capped `pd_rank1d` (pct) when
+	 * `|syms| ≤ PD_RANK1D_MAX`, else one-row `pd_from_columns` + percentile
+	 * `pd_xs_rank` (coerces onto `PanelAction` / `target_weight`), or size-capped
+	 * `pd_shift` over `window(field, w)`. WASM: `pd_rank1d` N ≤64; frame path U.
+	 * NMA/VM: `nma-unsupported` / `vm-unsupported` for PD.
 	 */
 	KPd(op:String, kind:String, window:Int, sym:String, syms:Array<String>);
 }

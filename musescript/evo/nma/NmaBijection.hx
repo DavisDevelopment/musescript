@@ -42,10 +42,10 @@ class NmaBijection {
 			case SInd(name, field, window, src):
 				new NmaSInd(name, field, window, src != null ? seriesFromEnum(src) : null);
 			case SProj(_, _):
-				// Columnar NMA has no projection column yet; a genome with SProj is detected upstream
-				// (Fitness.evaluateNma) and routed to the Expand→interp fallback. Defensive net.
+				// Prefer `ProjInline.forNma` upstream. Defensive net for PSHost/PSNoise leaks.
 				throw "NmaBijection.seriesFromEnum: SProj is not columnar-NMA supported (nma-unsupported)";
 			case SPanel(_, _, _, _):
+				// Prefer `PanelInline.forNma` upstream (closed of-subset → field@SYM).
 				throw "NmaBijection.seriesFromEnum: SPanel is not columnar-NMA supported (nma-unsupported)";
 		};
 	}
@@ -59,8 +59,8 @@ class NmaBijection {
 			case KLookback(s, k): new NmaKLookback(seriesFromEnum(s), k);
 			case KFeature(name): new NmaKFeature(name);
 			case KHole(inner): new NmaKHole(scalarFromEnum(inner));
-			case KNp(_, _, _, _):
-				throw "NmaBijection.scalarFromEnum: KNp is not columnar-NMA supported (nma-unsupported)";
+			case KNp(op, a, window, b):
+				new NmaKNp(op, seriesFromEnum(a), window, b != null ? seriesFromEnum(b) : null);
 			case KPd(_, _, _, _, _):
 				throw "NmaBijection.scalarFromEnum: KPd is not columnar-NMA supported (nma-unsupported)";
 		};
@@ -135,6 +135,9 @@ class NmaBijection {
 				KLookback(seriesToEnum(l.s), l.n);
 			case KFeature: KFeature((cast n : NmaKFeature).name);
 			case KHole: KHole(scalarToEnum((cast n : NmaKHole).inner));
+			case KNp:
+				var k = (cast n : NmaKNp);
+				KNp(k.op, seriesToEnum(k.a), k.window, k.b != null ? seriesToEnum(k.b) : null);
 			default: throw 'NmaBijection.scalarToEnum: non-scalar kind ${n.kind}';
 		};
 	}

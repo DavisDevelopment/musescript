@@ -24,23 +24,32 @@ import musescript.harness.Bar;
  * Panel genomes v1: same gate also grows constrained `PanelAction` templates
  * (`PABuy` / `PARebalance` / `PATargetWeight`) so Expand emits HostABI
  * `buy`/`sell_all`/`rebalance_equal`/`target_weight` instead of `long`/`short`/`flat`.
+ * Under `configureForPd` + universe: also closed rank→bag templates
+ * (`PABagScanTop` / `PABagRankWeights`) → `bag_from_scan` / `bag_norm(bag_from_dict(ranks))`
+ * + `portfolio_apply` (no open `bag_rank_*` / `symbols()` loops). Closed bags are
+ * WASM HostABI (`apply_bag_*`); open bags stay escape/U. Fitness uses `runPanelBacktest`.
  * Fitness: attach a `PanelFeed` (`Fitness.configurePanel` /
  * `EvolutionEngine.configureForPanel`) so `PanelAction` genomes score via
- * portfolio `runPanelBacktest` — not single-name Sharpe dressed up. NMA does
- * not columnarize panels (`nma-unsupported` → Expand→interp/WASM).
- * Dynamic bags / `symbols()` remain out of genome Expand.
+ * portfolio `runPanelBacktest` — not single-name Sharpe dressed up. Columnar NMA
+ * (cliff 3) hosts closed `SPanel` → `field@SYM` + `PABuy`/`PARebalance`/`PATargetWeight`
+ * / closed `PABagScanTop` / `PABagRankWeights` (`preferNma` → backend `nma`); open panel /
+ * `KPd` stay Expand (`nma-unsupported`).
+ * Open-world bag recipes / `symbols()` remain out of genome Expand.
  *
  * Closed NP / PD palette (not open-world muse.np / muse.pd in Expand):
  * `Variation.configureForNp` / `configureForPd` gate `KNp` / `KPd` growth
  * analogous to AUX_FIELDS + tape presence. Default off ⇒ single-name genomes
  * unchanged. NP Expand emits size-capped `np_mean`/`np_sum`/`np_dot` (WASM may
- * claim native on that scalar subset). PD Expand emits literal one-row
- * percentile `pd_xs_rank` under a fixed universe — no groupby/merge/HTTP — and
- * coerces `KPd` genomes onto `PanelAction` / `target_weight` so fitness uses
- * `configureForPanel` → `runPanelBacktest` (not single-name long/short that
- * ignores the cross-section). WASM/NMA stay U / `nma-unsupported`
- * (Expand→interp/JS). Enable trio: `configureForPanel` + `configureForPd` +
- * `configureForUniverse` (panel configures universe automatically).
+ * claim native on that scalar subset). PD Expand (`xs_rank`) prefers packed
+ * percentile `pd_rank1d` when `|universe| ≤ PD_RANK1D_MAX` (WASM `$vec_rank_pct`
+ * path); wider universes keep one-row frame `pd_xs_rank` (opaque U) — no
+ * groupby/merge/HTTP. Coerces `KPd` xs_rank onto `PanelAction` / `target_weight`
+ * so fitness uses `configureForPanel` → `runPanelBacktest`. Size-safe `pd_shift`
+ * grows without a universe and stays single-name. NMA columnarizes closed NP
+ * window reduces and cliff-3 closed SPanel/HostABI + bag templates (`PABagScanTop` /
+ * `PABagRankWeights`); PD `KPd` stays `nma-unsupported`. Bytecode VM: closed NP scalar B
+ * (`VmNpEligibility`), PD `vm-unsupported`. Enable trio: `configureForPanel` +
+ * `configureForPd` + `configureForUniverse` (panel configures universe automatically).
  */
 class Palette {
 	public static final FIELDS:Array<String> = ["open", "high", "low", "close", "volume"];
@@ -59,12 +68,28 @@ class Palette {
 	 */
 	public static final NP_OPS:Array<String> = ["mean", "dot", "sum"];
 	/**
-	 * Closed PD ops for `KPd` when `configureForPd` + universe. No open
-	 * groupby/merge — `xs_rank` over a fixed-universe one-row score frame only.
-	 * Fitness: pair with `configureForPanel` so Expand→`target_weight` scores
-	 * via portfolio `runPanelBacktest`.
+	 * Closed PD ops for `KPd` when `configureForPd` (+ universe for `xs_rank`).
+	 * No open groupby/merge — `xs_rank` packs scores → `pd_rank1d` when
+	 * `|universe| ≤ PD_RANK1D_MAX`, else one-row frame `pd_xs_rank`;
+	 * `shift` is size-capped Series lag (`window` ≤ NP_MAX_WIN). Fitness: pair
+	 * `xs_rank` with `configureForPanel` so Expand→`target_weight` / closed bags
+	 * scores via portfolio `runPanelBacktest`.
 	 */
-	public static final PD_OPS:Array<String> = ["xs_rank"];
+	public static final PD_OPS:Array<String> = ["xs_rank", "shift"];
+	/**
+	 * Closed bag-scan top-k pool (clamped to `|universe|` at grow/Expand time).
+	 * Order is load-bearing for deterministic growth.
+	 */
+	public static final PD_BAG_TOP_KS:Array<Int> = [1, 2, 3, 5];
+	/**
+	 * Max universe width for Expand→`pd_rank1d` (mirror of
+	 * `WasmPdEligibility.MAX_VEC_LEN`). Larger → frame `pd_xs_rank`.
+	 */
+	public static final PD_RANK1D_MAX:Int = 64;
+	/**
+	 * Max shift periods for `KPd("shift")` (leaves room for a size-safe window).
+	 */
+	public static final PD_SHIFT_MAX:Int = 34;
 	/**
 	 * Max `window(...)` length for NP genomes (≤ WasmNpEligibility.MAX_VEC_LEN).
 	 * WINDOWS entries above this are filtered out of NP growth.
@@ -88,6 +113,11 @@ class Palette {
 	/** WINDOWS entries allowed as NP operand lengths (≤ NP_MAX_WIN). */
 	public static function npWindows():Array<Int> {
 		return [for (w in WINDOWS) if (w > 0 && w <= NP_MAX_WIN) w];
+	}
+
+	/** WINDOWS entries allowed as `pd_shift` periods (1..PD_SHIFT_MAX, < NP_MAX_WIN). */
+	public static function pdShiftPeriods():Array<Int> {
+		return [for (w in WINDOWS) if (w > 0 && w <= PD_SHIFT_MAX && w < NP_MAX_WIN) w];
 	}
 
 	/**
@@ -149,6 +179,8 @@ class Palette {
 			auxFields: AUX_FIELDS,
 			npOps: NP_OPS,
 			pdOps: PD_OPS,
+			pdRank1dMax: PD_RANK1D_MAX,
+			pdShiftMax: PD_SHIFT_MAX,
 			npMaxWin: NP_MAX_WIN,
 			panelOfInds: PANEL_OF_INDS,
 			windows: WINDOWS,

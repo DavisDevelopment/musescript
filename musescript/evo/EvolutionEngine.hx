@@ -106,7 +106,8 @@ class EvolutionEngine {
 	}
 
 	/** Gate fixed-universe symbols so Variation can grow `SPanel` → Expand `*_of("SYM",…)`
-	 * and constrained `PanelAction` templates → HostABI `buy`/`rebalance_equal`/`target_weight`.
+	 * and constrained `PanelAction` templates → HostABI `buy`/`rebalance_equal`/`target_weight`
+	 * (plus closed rank→bags when `configureForPd` opens `xs_rank`).
 	 * Does not attach a panel tape — pair with `configureForPanel` (or `Fitness.configurePanel`)
 	 * so `PanelAction` genomes are scored via portfolio `runPanelBacktest`. */
 	public function configureForUniverse(?syms:Array<String>):Void {
@@ -122,9 +123,11 @@ class EvolutionEngine {
 	}
 
 	/**
-	 * Gate closed PD palette (`KPd` → Expand `pd_xs_rank` + panel HostABI). Needs universe
-	 * for xs_rank. Pair with `configureForPanel` so genomes score via `runPanelBacktest`.
-	 * Pass `null` for full catalog; `[]` clears. WASM/NMA stay unsupported.
+	 * Gate closed PD palette (`KPd` → Expand `pd_rank1d` / frame `pd_xs_rank` /
+	 * size-safe `pd_shift` / closed rank→bag `PanelAction`s). Needs universe for
+	 * xs_rank (shift does not). Pair xs_rank with `configureForPanel` so genomes
+	 * score via `runPanelBacktest`. Pass `null` for full catalog; `[]` clears.
+	 * Frame PD stays WASM U; packed `pd_rank1d` may claim N ≤64; bags → host_eval.
 	 */
 	public function configureForPd(?ops:Array<String>):Void {
 		variation.configureForPd(ops);

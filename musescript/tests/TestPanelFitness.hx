@@ -2,22 +2,27 @@ package musescript.tests;
 
 import utest.Assert;
 import utest.Test;
+import musescript.compile.MuseHostLower;
 import musescript.compile.StrategyWasmBackend;
 import musescript.evo.BoolNode;
 import musescript.evo.EvolutionEngine;
 import musescript.evo.Expand;
 import musescript.evo.Fitness;
 import musescript.evo.PanelAction;
+import musescript.evo.PanelInline;
 import musescript.evo.ScalarNode;
 import musescript.evo.SeriesNode;
 import musescript.evo.StrategyGenome;
 import musescript.harness.Bar;
 import musescript.harness.PanelFeed;
+import musescript.parse.MuseParser;
 
 /**
  * Panel portfolio fitness on the evo hot path: `Fitness.configurePanel` /
  * `EvolutionEngine.configureForPanel` + `PanelAction` → `runPanelBacktest`
- * metrics. Classic genomes stay single-name. NMA does not invent columnar panels.
+ * metrics. Classic genomes stay single-name. Cliff-3 NMA hosts closed
+ * `SPanel` + `PABuy`/`PARebalance`/`PATargetWeight`/`PABagScanTop`/`PABagRankWeights`
+ * (`preferNma` → backend `nma`); `KPd` / open `bag_rank_*` stay Expand.
  */
 class TestPanelFitness extends Test {
 	function teardown() {
@@ -183,10 +188,107 @@ class TestPanelFitness extends Test {
 		var panel = plantedPanel(50);
 		Fitness.configurePanel(panel);
 		Fitness.preferNma = true;
-		var fr = Fitness.evaluate(buyMomGenome(), panel.all(), "js");
+		// OHLCV lookback SPanel is outside PanelInline rewrite → Expand panel path.
+		var bag:StrategyGenome = {
+			name: "LookbackPanelNmaRefuse",
+			params: [],
+			entryLong: BCmp(">",
+				KLookback(SPanel("close", "AAA", null, null), 2),
+				KLookback(SPanel("close", "BBB", null, null), 2)),
+			entryShort: BCmp(">", KConst(0.0), KConst(1.0)),
+			exitLong: BCmp(">", KConst(0.0), KConst(1.0)),
+			exitShort: BCmp(">", KConst(0.0), KConst(1.0)),
+			size: KConst(1.0),
+			panelAction: PABuy("AAA")
+		};
+		var fr = Fitness.evaluate(bag, panel.all(), "js");
 		Assert.isTrue(fr.ok, fr.error);
 		Assert.isTrue(fr.backend != "nma" && fr.backend.indexOf("nma") < 0, fr.backend);
 		Assert.isTrue(fr.trades > 0);
+		Fitness.preferNma = false;
+	}
+
+	/** Cliff 3: closed SPanel + PABuy is preferNma-fast and bit-parity with Expand. */
+	public function testNmaPanelBuyParity() {
+		var panel = plantedPanel(60);
+		Fitness.configurePanel(panel);
+		var g = buyMomGenome();
+		Fitness.preferNma = true;
+		var frNma = Fitness.evaluate(g, panel.all(), "js");
+		Fitness.preferNma = false;
+		var frExpand = Fitness.evaluate(g, panel.all(), "js");
+		Assert.isTrue(frNma.ok, frNma.error);
+		Assert.isTrue(frExpand.ok, frExpand.error);
+		Assert.equals("nma", frNma.backend, frNma.backend);
+		Assert.equals(frExpand.trades, frNma.trades);
+		Assert.floatEquals(frExpand.finalEquity, frNma.finalEquity);
+		Assert.floatEquals(frExpand.sharpe, frNma.sharpe);
+	}
+
+	/** Closed PABagScanTop: columnar scores → equal bag → parity with Expand panel fitness. */
+	public function testNmaBagScanTopParity() {
+		var panel = plantedPanel(60);
+		Fitness.configurePanel(panel);
+		var g = pdBagScanTopGenome();
+		Assert.isTrue(PanelInline.isNmaPanelAction(g.panelAction));
+		var keys = PanelInline.seriesKeysForPanelAction(g.panelAction);
+		Assert.isTrue(keys.indexOf("close@AAA") >= 0, keys.join(","));
+		Assert.isTrue(keys.indexOf("close@BBB") >= 0, keys.join(","));
+		Fitness.preferNma = true;
+		var frNma = Fitness.evaluate(g, panel.all(), "js");
+		Fitness.preferNma = false;
+		var frExpand = Fitness.evaluate(g, panel.all(), "js");
+		Assert.isTrue(frNma.ok, frNma.error);
+		Assert.isTrue(frExpand.ok, frExpand.error);
+		Assert.equals("nma", frNma.backend, frNma.backend);
+		Assert.equals(frExpand.trades, frNma.trades);
+		Assert.floatEquals(frExpand.finalEquity, frNma.finalEquity);
+		Assert.floatEquals(frExpand.sharpe, frNma.sharpe);
+	}
+
+	/** Closed PABagRankWeights: columnar scores → percentile xs_rank → bag_norm parity. */
+	public function testNmaBagRankWeightsParity() {
+		var panel = plantedPanel(60);
+		Fitness.configurePanel(panel);
+		var g = pdBagRankWeightsGenome();
+		Assert.isTrue(PanelInline.isNmaPanelAction(g.panelAction));
+		var keys = PanelInline.seriesKeysForPanelAction(g.panelAction);
+		Assert.isTrue(keys.indexOf("close@AAA") >= 0, keys.join(","));
+		Assert.isTrue(keys.indexOf("close@BBB") >= 0, keys.join(","));
+		Fitness.preferNma = true;
+		var frNma = Fitness.evaluate(g, panel.all(), "js");
+		Fitness.preferNma = false;
+		var frExpand = Fitness.evaluate(g, panel.all(), "js");
+		Assert.isTrue(frNma.ok, frNma.error);
+		Assert.isTrue(frExpand.ok, frExpand.error);
+		Assert.equals("nma", frNma.backend, frNma.backend);
+		Assert.equals(frExpand.trades, frNma.trades);
+		Assert.floatEquals(frExpand.finalEquity, frNma.finalEquity);
+		Assert.floatEquals(frExpand.sharpe, frNma.sharpe);
+	}
+
+	/** PanelInline maps mom_of leaves onto close@SYM SInds. */
+	public function testPanelInlineRewritesMomOf() {
+		var g = buyMomGenome();
+		var inlined = PanelInline.forNma(g);
+		Assert.notNull(inlined);
+		Assert.isFalse(PanelInline.hasPanel(inlined));
+		var keys = PanelInline.seriesKeys(g);
+		Assert.isTrue(keys.indexOf("close@AAA") >= 0, keys.join(","));
+		Assert.isTrue(keys.indexOf("close@BBB") >= 0, keys.join(","));
+		Assert.isTrue(PanelInline.isNmaPanelAction(g.panelAction));
+		Assert.isTrue(PanelInline.isNmaPanelAction(PABagScanTop("mom", 4, 1, ["AAA", "BBB"])));
+		Assert.isTrue(PanelInline.isNmaPanelAction(PABagRankWeights("mom", 4, ["AAA", "BBB"])));
+	}
+
+	/** KPd xs_rank still nma-unsupported (Expand panel path). */
+	public function testNmaKdPdStillUnsupported() {
+		var panel = plantedPanel(40);
+		Fitness.configurePanel(panel);
+		Fitness.preferNma = true;
+		var fr = Fitness.evaluate(pdRankTargetWeightGenome(), panel.all(), "js");
+		Assert.isTrue(fr.ok, fr.error);
+		Assert.isTrue(fr.backend != "nma", fr.backend);
 		Fitness.preferNma = false;
 	}
 
@@ -211,7 +313,8 @@ class TestPanelFitness extends Test {
 		var g = pdRankTargetWeightGenome();
 		Assert.isTrue(Fitness.usesPanelFitness(g));
 		var src = Expand.expand(g);
-		Assert.isTrue(src.indexOf("pd_xs_rank(") >= 0, src);
+		Assert.isTrue(src.indexOf("pd_rank1d(") >= 0, src);
+		Assert.isTrue(src.indexOf("pd_xs_rank(") < 0, src);
 		Assert.isTrue(src.indexOf("target_weight(") >= 0, src);
 		Assert.isTrue(src.indexOf("long(") < 0, src);
 		var fr = Fitness.evaluate(g, panel.all(), "js");
@@ -252,7 +355,7 @@ class TestPanelFitness extends Test {
 		var hit = false;
 		for (g in pop) {
 			var src = Expand.expand(g);
-			if (src.indexOf("pd_xs_rank(") < 0) continue;
+			if (src.indexOf("pd_rank1d(") < 0 && src.indexOf("pd_xs_rank(") < 0) continue;
 			hit = true;
 			Assert.isTrue(src.indexOf("long(") < 0, src);
 			var fr = Fitness.evaluate(g, panel.all(), "js");
@@ -268,7 +371,7 @@ class TestPanelFitness extends Test {
 			for (_ in 0...80) {
 				var g = v.randomGenome(2);
 				var src = Expand.expand(g);
-				if (src.indexOf("pd_xs_rank(") < 0) continue;
+				if (src.indexOf("pd_rank1d(") < 0 && src.indexOf("pd_xs_rank(") < 0) continue;
 				hit = true;
 				Assert.isTrue(src.indexOf("long(") < 0, src);
 				var fr = Fitness.evaluate(g, panel.all(), "js");
@@ -291,6 +394,66 @@ class TestPanelFitness extends Test {
 		Fitness.preferNma = false;
 	}
 
+	/** Closed bag scan: top-1 mom on planted AAA↑/BBB↓ → always long AAA sleeve. */
+	static function pdBagScanTopGenome():StrategyGenome {
+		return {
+			name: "PdBagScan",
+			params: [],
+			entryLong: BCmp(">", KConst(1.0), KConst(0.0)),
+			entryShort: BCmp(">", KConst(0.0), KConst(1.0)),
+			exitLong: BCmp(">", KConst(0.0), KConst(1.0)),
+			exitShort: BCmp(">", KConst(0.0), KConst(1.0)),
+			size: KConst(1.0),
+			panelAction: PABagScanTop("mom", 5, 1, ["AAA", "BBB"])
+		};
+	}
+
+	static function pdBagRankWeightsGenome():StrategyGenome {
+		return {
+			name: "PdBagRw",
+			params: [],
+			entryLong: BCmp(">", KConst(1.0), KConst(0.0)),
+			entryShort: BCmp(">", KConst(0.0), KConst(1.0)),
+			exitLong: BCmp(">", KConst(0.0), KConst(1.0)),
+			exitShort: BCmp(">", KConst(0.0), KConst(1.0)),
+			size: KConst(1.0),
+			panelAction: PABagRankWeights("mom", 5, ["AAA", "BBB"])
+		};
+	}
+
+	public function testBagScanTopPanelFitnessNonDegenerate() {
+		var panel = plantedPanel(80);
+		Fitness.configurePanel(panel);
+		var g = pdBagScanTopGenome();
+		Assert.isTrue(Fitness.usesPanelFitness(g));
+		var src = Expand.expand(g);
+		Assert.isTrue(src.indexOf("portfolio_apply(bag_from_scan(") >= 0, src);
+		Assert.isTrue(src.indexOf("bag_rank_mom(") < 0, src);
+		Assert.isTrue(src.indexOf("symbols()") < 0, src);
+		Assert.isTrue(src.indexOf("long(") < 0, src);
+		var fr = Fitness.evaluate(g, panel.all(), "js");
+		Assert.isTrue(fr.ok, fr.error + "\n" + src);
+		Assert.isTrue(fr.trades > 0, 'expected portfolio trades, got ${fr.trades}');
+		Assert.isTrue(Math.isFinite(fr.finalEquity));
+		Assert.isTrue(fr.finalEquity != 100000, 'equity should move off cash=${fr.finalEquity}');
+	}
+
+	public function testBagRankWeightsPanelFitnessNonDegenerate() {
+		var panel = plantedPanel(80);
+		Fitness.configurePanel(panel);
+		var g = pdBagRankWeightsGenome();
+		Assert.isTrue(Fitness.usesPanelFitness(g));
+		var src = Expand.expand(g);
+		Assert.isTrue(src.indexOf("portfolio_apply(bag_norm(bag_from_dict(") >= 0, src);
+		Assert.isTrue(src.indexOf("pd_rank1d(") >= 0, src);
+		Assert.isTrue(src.indexOf("bag_rank_mom(") < 0, src);
+		var fr = Fitness.evaluate(g, panel.all(), "js");
+		Assert.isTrue(fr.ok, fr.error + "\n" + src);
+		Assert.isTrue(fr.trades > 0, 'expected portfolio trades, got ${fr.trades}');
+		Assert.isTrue(Math.isFinite(fr.finalEquity));
+		Assert.isTrue(fr.finalEquity != 100000, 'equity should move off cash=${fr.finalEquity}');
+	}
+
 	#if (js || python)
 	public function testExpandPanelWasmAgreesWithInterp() {
 		if (!StrategyWasmBackend.hostReady()) return;
@@ -304,6 +467,26 @@ class TestPanelFitness extends Test {
 		Assert.equals(interp.trades, wasm.trades);
 		Assert.floatEquals(interp.finalEquity, wasm.finalEquity);
 		Assert.floatEquals(interp.sharpe, wasm.sharpe);
+	}
+
+	public function testBagTemplateWasmHostAbiOk() {
+		if (!StrategyWasmBackend.hostReady()) return;
+		var panel = plantedPanel(40);
+		Fitness.configurePanel(panel);
+		var g = pdBagScanTopGenome();
+		var src = Expand.expand(g);
+		var prog = MuseHostLower.lower(new MuseParser().parse(src));
+		var emitted = StrategyWasmBackend.emitOnBar(prog);
+		Assert.notNull(emitted, "closed bag Expand must emit WASM (not opaque whole-module)");
+		Assert.isTrue(emitted.wat.indexOf("call $apply_bag_scan") >= 0, emitted.wat);
+		Assert.isTrue(emitted.wat.indexOf("call $host_eval") < 0, emitted.wat);
+		var fr = Fitness.evaluate(g, panel.all(), "wasm");
+		Assert.isTrue(fr.ok, fr.error);
+		Assert.isTrue(fr.trades > 0);
+		// Standalone bag_* remain on escape list; closed HostABI nest does not whole-module bail.
+		Assert.isTrue(musescript.compile.StrategyWasmEmitter.PANEL_HOST_ESCAPE.indexOf("bag_from_scan") >= 0);
+		Assert.isTrue(musescript.compile.StrategyWasmEmitter.PANEL_HOST_ESCAPE.indexOf("bag_from_dict") >= 0);
+		Assert.isTrue(musescript.compile.StrategyWasmEmitter.PANEL_HOST_ESCAPE.indexOf("bag_norm") >= 0);
 	}
 	#end
 }

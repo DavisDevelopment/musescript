@@ -138,6 +138,9 @@ class TestPanelEvoGenomes extends Test {
 				case PATargetWeight(_):
 					twHit = true;
 					Assert.isTrue(src.indexOf("target_weight(") >= 0, src);
+				case PABagScanTop(_, _, _, _) | PABagRankWeights(_, _, _):
+					// Bags only under configureForPd — not expected from universe alone.
+					Assert.fail("unexpected bag PanelAction without configureForPd: " + src);
 			}
 			if (buyHit && rebalHit && twHit) break;
 		}

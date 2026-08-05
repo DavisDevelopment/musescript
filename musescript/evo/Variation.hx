@@ -73,7 +73,8 @@ class Variation {
 	var npOps:Array<String> = [];
 	/**
 	 * Closed PD ops open for `KPd` growth. Empty ⇒ off (default). Needs non-empty universe
-	 * for `xs_rank`. Filtered against `Palette.PD_OPS` — no open groupby/merge/HTTP.
+	 * for `xs_rank`; `shift` is single-name size-safe. Filtered against `Palette.PD_OPS` —
+	 * no open groupby/merge/HTTP.
 	 */
 	var pdOps:Array<String> = [];
 	/** Adaptive node-type-choice weights (see GrowthWeights.hx). Defaults to a fresh instance
@@ -200,11 +201,14 @@ class Variation {
 	}
 
 	/**
-	 * Gate closed PD palette ops into scalar growth (`KPd` → Expand one-row `pd_xs_rank`).
-	 * Requires `configureForUniverse` for `xs_rank`. Pass `null` for full `Palette.PD_OPS`;
-	 * `[]` clears. No open groupby/merge/HTTP in Expand.
-	 * When open, also biases `panelAction` toward `target_weight` so grown PD genomes score
-	 * via portfolio `runPanelBacktest` (pair with `Fitness.configurePanel` / `configureForPanel`).
+	 * Gate closed PD palette ops into scalar growth (`KPd` → Expand
+	 * `pd_rank1d` / frame `pd_xs_rank` / size-safe `pd_shift`). `xs_rank` requires
+	 * `configureForUniverse`. Pass `null` for full `Palette.PD_OPS`; `[]` clears.
+	 * No open groupby/merge/HTTP in Expand.
+	 * When `xs_rank` is open with a universe, also biases `panelAction` toward `target_weight`
+	 * and closed rank→bag templates (`bag_scan_top` / `bag_rank_weights`) so grown PD genomes
+	 * score via portfolio `runPanelBacktest` (pair with `Fitness.configurePanel` /
+	 * `configureForPanel`). No open-world `bag_rank_*` recipes.
 	 */
 	public function configureForPd(?ops:Array<String>):Void {
 		this.pdOps = Palette.pdOpsFor(ops);
@@ -212,11 +216,13 @@ class Variation {
 		if (this.pdOps.length > 0) {
 			tuner.ensureTag("scalarTerm", "pd", 0.08);
 			for (o in this.pdOps) tuner.ensureTag("pdOp", o, 1.0);
-			// Prefer rank→target_weight when PD is open (cross-section sizing on panel fitness).
-			if (universeSyms.length > 0) {
-				tuner.ensureTag("panelAction", "target_weight", 0.45);
-				tuner.ensureTag("panelAction", "buy", 0.35);
-				tuner.ensureTag("panelAction", "rebalance", 0.20);
+			// Prefer rank→target_weight / closed bags when xs_rank is open (cross-section on panel).
+			if (this.pdOps.indexOf("xs_rank") >= 0 && universeSyms.length > 0) {
+				tuner.ensureTag("panelAction", "target_weight", 0.30);
+				tuner.ensureTag("panelAction", "bag_scan_top", 0.25);
+				tuner.ensureTag("panelAction", "bag_rank_weights", 0.20);
+				tuner.ensureTag("panelAction", "buy", 0.15);
+				tuner.ensureTag("panelAction", "rebalance", 0.10);
 			}
 		}
 	}
@@ -380,14 +386,14 @@ class Variation {
 			var choice = tuner.pick("scalarTerm", rng);
 			if (choice == "param" && pool == null) choice = "series"; // no pool to mint from -- fall back
 			if (choice == "np" && npOps.length == 0) choice = "series";
-			if (choice == "pd" && (pdOps.length == 0 || universeSyms.length == 0)) choice = "series";
+			if (choice == "pd" && !pdGrowthAllowed()) choice = "series";
 			if (tagOut != null) tagOut.push('scalarTerm:$choice');
 			return switch (choice) {
 				case "param": mintParam(pool);
 				case "multiOutput": growMultiOutputField(tagOut);
 				case "panelOf" if (universeSyms.length > 0): KSeries(growPanelSeries(tagOut));
 				case "np" if (npOps.length > 0): growNp(tagOut);
-				case "pd" if (pdOps.length > 0 && universeSyms.length > 0): growPd(tagOut);
+				case "pd" if (pdGrowthAllowed()): growPd(tagOut);
 				default: KSeries(growSeries(0));
 			};
 		}
@@ -415,13 +421,27 @@ class Variation {
 	}
 
 	/**
-	 * Closed PD leaf — Expand emits one-row `pd_xs_rank` over literal panel scores.
-	 * Symbols must be safe object-literal keys (`^[A-Za-z_][A-Za-z0-9_]*$`).
+	 * Closed PD leaf — Expand emits packed percentile `pd_rank1d` when
+	 * `|universe| ≤ Palette.PD_RANK1D_MAX`, else one-row `pd_xs_rank` over
+	 * literal panel scores; or size-capped Series `pd_shift`. Symbols for
+	 * xs_rank must be safe object-literal / array-slot keys
+	 * (`^[A-Za-z_][A-Za-z0-9_]*$`).
 	 */
 	function growPd(?tagOut:Array<String>):ScalarNode {
 		var op = tuner.hasCategory("pdOp") ? tuner.pick("pdOp", rng) : rng.pick(pdOps);
 		if (pdOps.indexOf(op) < 0) op = pdOps[0];
+		// Prefer an op we can actually grow with current gates.
+		if (op == "xs_rank" && universeSyms.length == 0) {
+			if (pdOps.indexOf("shift") >= 0) op = "shift";
+			else return KSeries(growSeries(0));
+		}
 		if (tagOut != null) tagOut.push('pdOp:$op');
+		if (op == "shift") {
+			var periods = Palette.pdShiftPeriods();
+			var p = periods.length > 0 ? rng.pick(periods) : 1;
+			var field = rng.pick(Palette.FIELDS);
+			return KPd("shift", field, p, "", []);
+		}
 		var safe = [for (s in universeSyms) if (~/^[A-Za-z_][A-Za-z0-9_]*$/.match(s)) s];
 		if (safe.length == 0) return KSeries(growSeries(0));
 		var choice = tuner.hasCategory("panelOf") ? tuner.pick("panelOf", rng) : "mom";
@@ -442,7 +462,14 @@ class Variation {
 		}
 		var w = window != null && window > 0 ? window : 0;
 		var sym = rng.pick(safe);
-		return KPd(op, kind, w, sym, safe.copy());
+		return KPd("xs_rank", kind, w, sym, safe.copy());
+	}
+
+	/** True when configureForPd left any growable op (shift always; xs_rank needs universe). */
+	inline function pdGrowthAllowed():Bool {
+		if (pdOps.length == 0) return false;
+		if (pdOps.indexOf("shift") >= 0) return true;
+		return pdOps.indexOf("xs_rank") >= 0 && universeSyms.length > 0;
 	}
 
 	/**
@@ -575,25 +602,34 @@ class Variation {
 	 * always-false under those templates (Expand ignores them; growing real trees would inflate
 	 * structural keys without changing source).
 	 *
-	 * When `configureForPd` is open (+ universe): always attach a PanelAction, and with ~40%
-	 * plant an explicit xs_rank → `target_weight` template so panel fitness sees the cross-section. */
+	 * When `configureForPd` opens `xs_rank` (+ universe): always attach a PanelAction, and with ~40%
+	 * plant an explicit xs_rank → `target_weight` / closed bag template so panel fitness sees the
+	 * cross-section. */
 	public function randomGenome(depth:Int = 3):StrategyGenome {
 		var pool:Array<EvoParam> = [];
-		var pdOpen = pdOps.length > 0 && universeSyms.length > 0;
-		if (pdOpen && rng.float() < 0.40)
-			return ensurePdPanelAction(compactParams(plantPdRankTargetWeight(pool)));
-		// Under PD gate: force PanelAction so KPd never lands in a classic long/short skeleton.
-		var usePanelAction = universeSyms.length > 0 && (pdOpen || rng.float() < 0.45);
+		var xsOpen = pdOps.indexOf("xs_rank") >= 0 && universeSyms.length > 0;
+		if (xsOpen && rng.float() < 0.40) {
+			var plant = rng.float();
+			var planted:StrategyGenome;
+			if (plant < 0.40) planted = plantPdRankTargetWeight(pool);
+			else if (plant < 0.70) planted = plantPdBagScanTop(pool);
+			else planted = plantPdBagRankWeights(pool);
+			return ensurePdPanelAction(compactParams(planted));
+		}
+		// Under xs_rank gate: force PanelAction so KPd xs_rank never lands in a classic long/short skeleton.
+		var usePanelAction = universeSyms.length > 0 && (xsOpen || rng.float() < 0.45);
 		var action:Null<PanelAction> = usePanelAction ? growPanelAction() : null;
 		var sizeNode:ScalarNode;
-		if (actionIsTargetWeight(action) && pdOpen && rng.float() < 0.50) {
+		if (actionIsTargetWeight(action) && xsOpen && rng.float() < 0.50) {
 			var pdSize = growPd();
 			sizeNode = pdSize;
 			// Align target_weight symbol with the ranked KPd leaf when we planted rank-as-weight.
 			switch (pdSize) {
-				case KPd(_, _, _, sym, _): action = PATargetWeight(sym);
+				case KPd("xs_rank", _, _, sym, _): action = PATargetWeight(sym);
 				default:
 			}
+		} else if (actionIsBag(action)) {
+			sizeNode = KConst(1.0); // unused by bag Expand paths
 		} else {
 			sizeNode = actionIsTargetWeight(action) ? growTargetWeight(pool) : growScalar(1, pool);
 		}
@@ -614,10 +650,16 @@ class Variation {
 
 	/**
 	 * Hand template: percentile xs_rank of `sym` gates entry/exit; same rank drives
-	 * `target_weight(sym, rank)`. Expand emits runnable panel MS for `runPanelBacktest`.
+	 * `target_weight(sym, rank)`. Expand prefers `pd_rank1d` when the universe
+	 * fits `PD_RANK1D_MAX`, else frame `pd_xs_rank` — runnable panel MS for
+	 * `runPanelBacktest`.
 	 */
 	function plantPdRankTargetWeight(pool:Array<EvoParam>):StrategyGenome {
+		// Force xs_rank leaf (shift must not land in the rank→target_weight template).
+		var saved = pdOps;
+		pdOps = ["xs_rank"];
 		var pd = growPd();
+		pdOps = saved;
 		var sym = switch (pd) {
 			case KPd(_, _, _, s, _): s;
 			default: universeSyms[0];
@@ -637,8 +679,48 @@ class Variation {
 	}
 
 	/**
-	 * If growth introduced `KPd` without a `PanelAction`, attach `PATargetWeight` on the ranked
-	 * symbol so Expand→Fitness use the portfolio panel path.
+	 * Hand template: always-on entry applies closed top-k bag (`bag_from_scan` of
+	 * fixed-universe scores). Never emits `bag_rank_*` / `symbols()` / `dict_new`.
+	 */
+	function plantPdBagScanTop(pool:Array<EvoParam>):StrategyGenome {
+		var spec = growBagScoreSpec();
+		var topK = Expand.clampBagTopK(rng.pick(Palette.PD_BAG_TOP_KS), spec.syms);
+		return {
+			entryLong: BCmp(">", KConst(1.0), KConst(0.0)),
+			entryShort: alwaysFalse(),
+			exitLong: alwaysFalse(),
+			exitShort: alwaysFalse(),
+			size: KConst(1.0),
+			params: pool,
+			name: "musegene",
+			lineage: [],
+			seedOrigin: rng.seed,
+			panelAction: PABagScanTop(spec.kind, spec.window, topK, spec.syms)
+		};
+	}
+
+	/**
+	 * Hand template: always-on entry applies L1-normalized percentile-rank bag weights.
+	 */
+	function plantPdBagRankWeights(pool:Array<EvoParam>):StrategyGenome {
+		var spec = growBagScoreSpec();
+		return {
+			entryLong: BCmp(">", KConst(1.0), KConst(0.0)),
+			entryShort: alwaysFalse(),
+			exitLong: alwaysFalse(),
+			exitShort: alwaysFalse(),
+			size: KConst(1.0),
+			params: pool,
+			name: "musegene",
+			lineage: [],
+			seedOrigin: rng.seed,
+			panelAction: PABagRankWeights(spec.kind, spec.window, spec.syms)
+		};
+	}
+
+	/**
+	 * If growth introduced `KPd("xs_rank")` without a `PanelAction`, attach `PATargetWeight`
+	 * on the ranked symbol so Expand→Fitness use the portfolio panel path.
 	 */
 	function ensurePdPanelAction(g:StrategyGenome):StrategyGenome {
 		if (universeSyms.length == 0) return g;
@@ -647,7 +729,7 @@ class Variation {
 		if (pd == null) return g;
 		var o = copyGenome(g);
 		switch (pd) {
-			case KPd(_, _, _, sym, _):
+			case KPd("xs_rank", _, _, sym, _):
 				o.panelAction = PATargetWeight(sym);
 				o.entryShort = alwaysFalse();
 				o.exitShort = alwaysFalse();
@@ -663,6 +745,13 @@ class Variation {
 		return a != null && switch (a) { case PATargetWeight(_): true; default: false; };
 	}
 
+	static function actionIsBag(a:Null<PanelAction>):Bool {
+		return a != null && switch (a) {
+			case PABagScanTop(_, _, _, _) | PABagRankWeights(_, _, _): true;
+			default: false;
+		};
+	}
+
 	/** Weight in (0,1] for `target_weight` templates — avoids growScalar minting huge qtys. */
 	function growTargetWeight(pool:Array<EvoParam>):ScalarNode {
 		if (pool.length > 0 && rng.float() < 0.35) {
@@ -674,17 +763,55 @@ class Variation {
 	}
 
 	/**
+	 * Closed score-vector tip for bag templates: kind/window + safe universe symbols
+	 * (same constraints as `growPd` xs_rank — object-literal / Expand keys).
+	 */
+	function growBagScoreSpec():{kind:String, window:Int, syms:Array<String>} {
+		var safe = [for (s in universeSyms) if (~/^[A-Za-z_][A-Za-z0-9_]*$/.match(s)) s];
+		if (safe.length == 0) safe = universeSyms.copy();
+		var choice = tuner.hasCategory("panelOf") ? tuner.pick("panelOf", rng) : "mom";
+		var kind = "mom";
+		var window = 5;
+		if (choice == "fund") {
+			kind = "mom";
+			window = rng.pick(Palette.WINDOWS);
+		} else if (Palette.PANEL_OF_INDS.indexOf(choice) >= 0) {
+			kind = choice;
+			window = rng.pick(Palette.WINDOWS);
+		} else if (Palette.FIELDS.indexOf(choice) >= 0) {
+			kind = choice;
+			window = 0;
+		} else {
+			kind = "mom";
+			window = rng.pick(Palette.WINDOWS);
+		}
+		return { kind: kind, window: window, syms: safe.copy() };
+	}
+
+	/**
 	 * Constrained panel-action template from the configured universe (literal symbols only).
 	 * Rebalance always covers the full fixed universe (determinism, WASM-native array literal).
+	 * Bag templates only when `configureForPd` opened `xs_rank` (closed score dict → bags).
 	 */
 	function growPanelAction(?tagOut:Array<String>):PanelAction {
 		var choice = tuner.hasCategory("panelAction") ? tuner.pick("panelAction", rng) : "buy";
+		var xsOpen = pdOps.indexOf("xs_rank") >= 0 && universeSyms.length > 0;
+		// Bag tags are only meaningful under PD; degrade if somehow picked while closed.
+		if (!xsOpen && (choice == "bag_scan_top" || choice == "bag_rank_weights"))
+			choice = "buy";
 		if (tagOut != null) tagOut.push('panelAction:$choice');
 		return switch (choice) {
 			case "rebalance":
 				PARebalance(universeSyms.copy());
 			case "target_weight":
 				PATargetWeight(rng.pick(universeSyms));
+			case "bag_scan_top":
+				var spec = growBagScoreSpec();
+				var topK = Expand.clampBagTopK(rng.pick(Palette.PD_BAG_TOP_KS), spec.syms);
+				PABagScanTop(spec.kind, spec.window, topK, spec.syms);
+			case "bag_rank_weights":
+				var spec2 = growBagScoreSpec();
+				PABagRankWeights(spec2.kind, spec2.window, spec2.syms);
 			default:
 				PABuy(rng.pick(universeSyms));
 		};
@@ -701,6 +828,8 @@ class Variation {
 			o.exitShort = alwaysFalse();
 			if (actionIsTargetWeight(o.panelAction) && !actionIsTargetWeight(g.panelAction))
 				o.size = growTargetWeight(o.params);
+			else if (actionIsBag(o.panelAction))
+				o.size = KConst(1.0);
 		}
 		o.lineage = (g.lineage != null ? g.lineage.copy() : []).concat([Canonical.structuralKey(g)]);
 		return ensurePdPanelAction(compactParams(o));
@@ -1034,6 +1163,10 @@ class Variation {
 			case PABuy(sym): PABuy(sym);
 			case PARebalance(syms): PARebalance(syms.copy());
 			case PATargetWeight(sym): PATargetWeight(sym);
+			case PABagScanTop(kind, window, topK, syms):
+				PABagScanTop(kind, window, topK, syms.copy());
+			case PABagRankWeights(kind, window, syms):
+				PABagRankWeights(kind, window, syms.copy());
 		};
 	}
 
