@@ -33,13 +33,23 @@ class TestWasmNp extends Test {
 	public function testEligibilityTablesCoverNativeAndEscape() {
 		Assert.isTrue(WasmNpEligibility.isNativeScalar("np_dot"));
 		Assert.isTrue(WasmNpEligibility.isNativeScalar("np_get_flat"));
+		Assert.isTrue(WasmNpEligibility.isNativeScalar("np_min"));
+		Assert.isTrue(WasmNpEligibility.isNativeScalar("np_std"));
+		Assert.isTrue(WasmNpEligibility.isNativeScalar("np_size"));
 		Assert.isTrue(WasmNpEligibility.isNativeVec("np_matmul"));
 		Assert.isTrue(WasmNpEligibility.isNativeVec("np_exp"));
 		Assert.isTrue(WasmNpEligibility.isNativeVec("np_log"));
+		Assert.isTrue(WasmNpEligibility.isNativeVec("np_abs"));
+		Assert.isTrue(WasmNpEligibility.isNativeVec("np_clip"));
+		Assert.isTrue(WasmNpEligibility.isNativeVec("np_minimum"));
 		Assert.isTrue(WasmNpEligibility.isDocumentedEscape("np_reshape"));
+		Assert.isTrue(WasmNpEligibility.isDocumentedEscape("np_vol_target_qty"));
+		Assert.isTrue(WasmNpEligibility.isDocumentedEscape("np_any"));
 		Assert.isFalse(WasmNpEligibility.isDocumentedEscape("np_get_flat"));
+		Assert.isFalse(WasmNpEligibility.isDocumentedEscape("np_abs"));
 		Assert.isTrue(StrategyWasmEmitter.NP_HOST_ESCAPE.indexOf("np_reshape") >= 0);
 		Assert.isTrue(StrategyWasmEmitter.NP_HOST_ESCAPE.indexOf("np_exp") < 0);
+		Assert.isTrue(StrategyWasmEmitter.NP_HOST_ESCAPE.indexOf("np_abs") < 0);
 		Assert.isTrue(StrategyWasmEmitter.PANEL_HOST_ESCAPE.indexOf("bag_equal") >= 0);
 	}
 
@@ -82,6 +92,32 @@ class TestWasmNp extends Test {
 		Assert.isTrue(wat.indexOf("call $host_eval") < 0, wat);
 		Assert.isTrue(wat.indexOf("call $vec_sum") >= 0 || wat.indexOf("f64.const 6") >= 0, wat);
 		Assert.isTrue(wat.indexOf("call $vec_mean") >= 0 || wat.indexOf("f64.const 4") >= 0, wat);
+	}
+
+	public function testNativeUfuncsAndReductionsNoHostEval() {
+		var wat = emitWat('strategy NpUfuncReduce {
+			onBar {
+				xs = muse.np.asarray([close, -2, 3])
+				a = muse.np.abs(xs)
+				n = muse.np.negative(a)
+				q = muse.np.square(muse.np.sign(n))
+				c = muse.np.clip(q, 0, 1)
+				mn = muse.np.minimum(c, muse.np.full([3], 0.5))
+				mx = muse.np.maximum(mn, muse.np.zeros([3]))
+				lo = muse.np.min(mx)
+				hi = muse.np.max(mx, 0)
+				p = muse.np.prod([1, 2, 3])
+				sd = muse.np.std([1, 2, 3], 0, false, 0)
+				sz = muse.np.size(xs)
+				nd = muse.np.ndim(xs)
+				when lo == lo && hi == hi && p == 6 && sd == sd && sz == 3 && nd == 1: long()
+			}
+		}');
+		Assert.isTrue(wat.indexOf("call $host_eval") < 0, wat);
+		Assert.isTrue(wat.indexOf("call $vec_abs") >= 0, wat);
+		Assert.isTrue(wat.indexOf("call $vec_clip") >= 0 || wat.indexOf("f64.const") >= 0, wat);
+		Assert.isTrue(wat.indexOf("call $vec_min") >= 0 || wat.indexOf("f64.const") >= 0, wat);
+		Assert.isTrue(wat.indexOf("call $vec_prod") >= 0 || wat.indexOf("f64.const 6") >= 0, wat);
 	}
 
 	public function testNativeExpLogDetMath() {
@@ -199,11 +235,21 @@ class TestWasmNp extends Test {
 			}
 		}');
 		Assert.isTrue(keep.indexOf("call $host_eval") >= 0, keep);
+
+		// axis ≠ {0,-1} stays H on packed 1-D.
+		var badAxis = emitWat('strategy NpEscapeAxis {
+			onBar {
+				s = muse.np.sum(muse.np.asarray([1, 2, 3]), 1)
+				when s == s: long()
+			}
+		}');
+		Assert.isTrue(badAxis.indexOf("call $host_eval") >= 0, badAxis);
 	}
 
 	public function testEscapeVolTargetAndMaskQty() {
 		Assert.isTrue(WasmNpEligibility.isDocumentedEscape("np_vol_target_qty"));
 		Assert.isTrue(WasmNpEligibility.isDocumentedEscape("np_mask_qty"));
+		Assert.isTrue(WasmNpEligibility.isDocumentedEscape("np_rolling_log_vol"));
 		Assert.isTrue(StrategyWasmEmitter.NP_HOST_ESCAPE.indexOf("np_vol_target_qty") >= 0);
 		var wat = emitWat('strategy NpRiskEscape {
 			onBar {
@@ -224,6 +270,29 @@ class TestWasmNp extends Test {
 			}
 		}');
 		Assert.isTrue(wat.indexOf("call $host_eval") >= 0, wat);
+	}
+
+	public function testEscapeMatmulOverSideAndRank1dOverCap() {
+		// MAX_MATMUL_SIDE = 8 → 9×9 sides fail closed.
+		var row = [for (_ in 0...9) "1"].join(", ");
+		var mat = [for (_ in 0...9) '[${row}]'].join(", ");
+		var mm = emitWat('strategy NpMatmulOver {
+			onBar {
+				p = muse.np.matmul([${mat}], [${mat}])
+				when muse.np.sum(p) == muse.np.sum(p): long()
+			}
+		}');
+		Assert.isTrue(mm.indexOf("call $host_eval") >= 0, mm);
+
+		// B6 cap twin: pd_rank1d len>64 → H (same scratch budget as MAX_VEC_LEN).
+		var relems = [for (i in 0...65) Std.string(i)].join(", ");
+		var rank = emitWat('strategy NpRankOver {
+			onBar {
+				r = muse.pd.rank1d([${relems}])
+				when muse.np.sum(r) == muse.np.sum(r): long()
+			}
+		}');
+		Assert.isTrue(rank.indexOf("call $host_eval") >= 0, rank);
 	}
 
 	public function testEscapeZeros2d() {
@@ -249,6 +318,36 @@ class TestWasmNp extends Test {
 				xs = muse.np.add([1, 2, 3], [1, 1, 1])
 				total = muse.np.sum(xs, 0)
 				when score > 0 && avg == avg && total == 9: long()
+			}
+		}';
+		var prog = parse(source);
+		var wat = StrategyWasmBackend.emitWat(prog);
+		Assert.isTrue(wat.indexOf("call $host_eval") < 0, wat);
+
+		var feed = BarFeed.synthetic(40, 11);
+		var wasmFn = MuseCompiler.compile(prog, { target: "wasm" });
+		var wasmResult = wasmFn({ feed: feed });
+		TradeBuiltins.resetCrossState();
+		var interpResult = new MuseInterp(new HarnessContext()).runBacktest(parse(source), BarFeed.synthetic(40, 11));
+		Assert.equals(interpResult.trades, wasmResult.trades);
+		Assert.isTrue(Math.abs(interpResult.finalEquity - wasmResult.finalEquity) < 1e-6);
+	}
+
+	public function testInterpWasmParityUfuncsReductions() {
+		if (!StrategyWasmBackend.hostReady()) {
+			Assert.isTrue(true);
+			return;
+		}
+		var source = 'strategy NpUfuncParity {
+			onBar {
+				xs = muse.np.asarray([1, close, 3])
+				a = muse.np.abs(muse.np.subtract(xs, muse.np.full([3], 2)))
+				c = muse.np.clip(a, 0, 5)
+				lo = muse.np.min(c)
+				hi = muse.np.max(c, -1)
+				p = muse.np.prod([1, 2, 2])
+				sz = muse.np.size(c)
+				when lo == lo && hi == hi && p == 4 && sz == 3: long()
 			}
 		}';
 		var prog = parse(source);
