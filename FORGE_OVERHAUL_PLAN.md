@@ -5,7 +5,8 @@
 > code** (2026-08-04); Phase **3.1** chart-native tape stage + S polish **landed**
 > (2026-08-05); Phase **3.2** Prove latch + **3.3** Optimize/Autoresearch deep-link
 > **landed** (2026-08-05); Phase **4** Artifacts / Swarm / Marketplace / WASM+Forge seed
-> **landed** (2026-08-05). MuseLab / Studio Blueprints.
+> **landed** (2026-08-05); Phase **5** Evolve/pipeline typed lift + Distill pipelines → MS
+> + widget authoring **landed** (2026-08-05). MuseLab / Studio Blueprints.
 > Distill Forge UI **not** rewritten (Distill-only + → Blueprints importer handoff).
 > **Home for Forge / Blueprints next-gen work.** Web vendoring / surface parity stays in
 > [`WEB_SURFACE_PARITY_PLAN.md`](./WEB_SURFACE_PARITY_PLAN.md); Forge *product*
@@ -503,15 +504,23 @@ gate shipped in Phase **3.2**.
 
 **Deps:** Phase 1–3; social/durable APIs where publishing · **Effort:** L
 
-### Phase 5 — Compose with evolve / Distill / widgets (L)
+### Phase 5 — Compose with evolve / Distill / widgets (L) ✅ (2026-08-05)
 
 **DoD**
 
-- MuseGene / `optimize` results return as editable Blueprints (typed).
-- Distill pipelines can emit MS (parity vs distillEngine) into Logic Lane /
+- [x] MuseGene / `optimize` results return as editable Blueprints (typed).
+  → `blueprintLift.js` / `applyStudioResultToBlueprint` — full typed graph when subset lifts;
+  partial/failed lift keeps source + **unlifted** ghost markers (never silent loss).
+  Studio Optimize / Autoresearch Apply round-trips through this path.
+- [x] Distill pipelines can emit MS (parity vs distillEngine) into Logic Lane /
   Blueprints; Forge page-level Cmp/Bin save remains for Distill-only documents.
-- Widget authoring mode: Blueprints shell in Studio / MuseLab, `checkWidget`
+  → `distillPipelineImport.js` / DistillBench **→ Blueprints**; `studioDistill.winnerFitToMuseExpr`
+  projects pipeline decision trees; fitted ridge/pca marked unlifted. Forge Distill stays
+  Distill boolean whiteboard.
+- [x] Widget authoring mode: Blueprints shell in Studio / MuseLab, `checkWidget`
   capabilities, Terminal drop.
+  → `blueprintWidgetMode.js` / `WidgetAuthoringPanel.jsx` — filtered palette, `checkWidgetCapabilities`,
+  saveUserWidget + FlexLayout drop stash (`WIDGET_DROP_KEY`); ed25519 publish path reused.
 
 **Deps:** Phase 2–4; evo palette stability · **Effort:** L
 

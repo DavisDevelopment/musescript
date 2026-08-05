@@ -224,6 +224,7 @@ $files = @(
   "lab\distillFolds.js",
   "lab\distillSearch.js",
   "lab\forge\forgeGraph.js",
+  "lab\forge\treeProjection.js",    # Phase 5 — CART/pipeline → Distill boolean (Logic Lane / Blueprints)
   "lab\forge\forgeLlm.js",          # LLM composer — routes through onDeviceLlm/llmClient seams (honest manual mode)
   "lib\accountDialog.js",           # pub/sub account-dialog channel (web host subscribes)
   "lib\offlineError.js",
@@ -274,6 +275,7 @@ $files = @(
   "lab\labClient.js",               # dataserver-backed presets/server runs — degrade honestly (no LAN server on web)
   "lab\onDeviceRun.js",             # on-device run loop via pyRouter (jsExact/Pyodide tiers on web)
   "lab\distillRunner.js",
+  "lab\studioDistill.js",           # Phase 5 — pipeline/OBS → MuseScript projection (Blueprints + Studio distill)
   "lab\oosSplit.js",
   "lab\synthBars.js",
   "lab\canvas\fanCanvas.js",
