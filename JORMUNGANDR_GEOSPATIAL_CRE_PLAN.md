@@ -1,6 +1,6 @@
 # Jormungandr Geospatial + CRE Layers Plan
 
-*Feasibility + architecture for four Mederos Desktop World layers. Written 2026-08-05. Home: muse-script (this plan). Body: `kalshi-ai-advisor/python/worldfeed` + Desktop `mobile/src/world`. Cross-links: `WORLD_DATA_PLATFORM.md`, `JORMUNGANDR_MUSESCRIPT_INTEGRATION_PLAN.md`, constitution stance: honest provenance, no fake certainty; Brier/not P&L for forecast ranks — **CRE is a commercial data layer, not a P&L leaderboard**.*
+*Feasibility + architecture for four Mederos Desktop World layers. Written 2026-08-05. Home: muse-script (this plan). Body: `kalshi-ai-advisor/python/worldfeed` + Desktop `mobile/src/world`. Cross-links: `WORLD_DATA_PLATFORM.md`, `JORMUNGANDR_MUSESCRIPT_INTEGRATION_PLAN.md`, `JORMUNGANDR_BUSINESS_INTEREST_DASHBOARD_PLAN.md` (CRE listings as pinnable Business Interests), constitution stance: honest provenance, no fake certainty; Brier/not P&L for forecast ranks — **CRE is a commercial data layer, not a P&L leaderboard**.*
 
 **Status:** plan only. No large scrapers implemented. Tiny validation spikes OK later; none required to accept this doc.
 
@@ -288,6 +288,8 @@ Only if useful later; keep each &lt;1 day:
 - [x] CRE legal gate before LoopNet/Crexi parsers? → proceed carefully: adapters behind `CRE_SCRAPE=0` default OFF; fixtures ON; `tos_risk: elevated` on scrape rows; scrape ≠ license
 
 **CRE ship status (body):** schema + fixtures + `/world/cre*` + Desktop legend/dossier + flag-gated adapters — see `WORLD_DATA_PLATFORM.md`.
+
+**Product pivot (sibling plan):** CRE markers become pinnable **Business Interests** in the World dashboard (interest drawer P0 → alert feed → portfolio map → Muse scenarios) — see `JORMUNGANDR_BUSINESS_INTEREST_DASHBOARD_PLAN.md`.
 
 ---
 
