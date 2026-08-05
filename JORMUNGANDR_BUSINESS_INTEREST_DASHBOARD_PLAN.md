@@ -2,7 +2,7 @@
 
 *Product + architecture plan. Written 2026-08-05. Home: muse-script (this plan). Body: `kalshi-ai-advisor/python/worldfeed` + Desktop `mobile/src/world/`. Cross-links: `JORMUNGANDR_GEOSPATIAL_CRE_PLAN.md`, `JORMUNGANDR_MUSESCRIPT_INTEGRATION_PLAN.md`, `JORMUNGANDR_MIROFISH_INSPIRATION.md`, `kalshi-ai-advisor/python/WORLD_DATA_PLATFORM.md` §11.*
 
-**Status:** plan only. Soft, ambitious, implementation-ready. Do **not** build the full dashboard chrome in this turn — P0 is a thin interest drawer + pins on World. Constitution: honest provenance; Brier/calibration ranks — **never P&L leaderboards**; exposure scores are situational, not money PnL.
+**Status:** P0 shipped (interest drawer + pins). Soft, ambitious. Constitution: honest provenance; Brier/calibration ranks — **never P&L leaderboards**; exposure scores are situational, not money PnL.
 
 **Name collision (important):** `GET/POST /interests` on the advisor already stores a **string topic list** in `user_profile.db` (LLM/topic prefs). This plan’s **Business Interests** are first-class geo/CRE/market entities under `/world/interests`. Do not overload the topic string list.
 
@@ -259,22 +259,21 @@ P0–P1: **in-app alert rail only**. Push/email/desktop toast deferred to lock.
 
 ## 5. Phased roadmap (P0–P3) with DoD
 
-### P0 — Interest drawer on World (LA CRE triad + pin)
+### P0 — Interest drawer on World (LA CRE triad + pin) ✅
 
 **Goal:** Prove the lens without new notification infra.
 
-| Deliverable | DoD |
-| --- | --- |
-| Schema + SQLite table(s) for Business Interests | Rows survive restart; `owner_id=local` |
-| `GET/POST/PATCH/DELETE /world/interests` | CRUD works for kinds `cre_listing` + `region` |
-| Seed helpers | One-click pin for Lafayette / New Orleans / Baton Rouge metro regions + pin from CRE dossier/marker |
-| Desktop drawer | Collapsible interest list + “Pin interest” on CRE; map pins for pinned geos |
-| Honesty chrome | Provenance chip; no exposure scores yet (or stub `partial`) |
+| Deliverable | DoD | Status |
+| --- | --- | --- |
+| Schema + SQLite table(s) for Business Interests | Rows survive restart; `owner_id=local` | ✅ `business_interests` (+ empty `interest_alerts`) |
+| `GET/POST/PATCH/DELETE /world/interests` | CRUD works for kinds `cre_listing` + `region` | ✅ + pin CRE + seed LA triad |
+| Seed helpers | One-click pin for Lafayette / New Orleans / Baton Rouge metro regions + pin from CRE dossier/marker | ✅ |
+| Desktop drawer | Collapsible interest list + “Pin interest” on CRE; map pins for pinned geos | ✅ `WorldInterestDrawer` |
+| Honesty chrome | Provenance chip; no exposure scores yet (or stub `partial`) | ✅ exposure stub `quality=partial` |
 
 **Depends:** CRE P0 fixtures + legend (see Geospatial CRE plan) — triad markets already locked.
 
 **Effort:** S–M (mostly chrome + thin store).
-
 ### P1 — Alert feed
 
 | Deliverable | DoD |
@@ -491,12 +490,12 @@ No full dashboard shell rewrite until P0 DoD lands.
 
 ---
 
-## Open decisions checklist (for you)
+## Open decisions checklist (locked 2026-08-05)
 
-- [ ] D1 storage: **A worldfeed** (rec) vs B profile vs C hybrid?
-- [ ] D2 notifications: **A in-app** (rec) through P1?
-- [ ] D3 tenancy: **A local + owner_id column** (rec)?
-- [ ] D4 radius/weights: **A+C** defaults (rec)?
-- [ ] D5 topic rename schedule: **A now, B later** (rec)?
+- [x] D1 storage: **A worldfeed** + `owner_id` column
+- [x] D2 notifications: **A in-app** through P1
+- [x] D3 tenancy: **A local + owner_id column**
+- [x] D4 radius/weights: **A+C** metro defaults + kind priors (`interest_matcher.py`)
+- [x] D5 topic rename schedule: **A now** (keep `/user/interests`; UI = Topics), **B later**
 
 *End of plan.*
