@@ -4,6 +4,7 @@
 > (palette + Logic Lane materialization + richer `@on(bar)` + canvas UX) **landed in
 > code** (2026-08-04); Phase **3.1** chart-native tape stage + S polish **landed**
 > (2026-08-05); Phase **3.2** Prove latch + **3.3** Optimize/Autoresearch deep-link
+> **landed** (2026-08-05); Phase **4** Artifacts / Swarm / Marketplace / WASM+Forge seed
 > **landed** (2026-08-05). MuseLab / Studio Blueprints.
 > Distill Forge UI **not** rewritten (Distill-only + → Blueprints importer handoff).
 > **Home for Forge / Blueprints next-gen work.** Web vendoring / surface parity stays in
@@ -485,15 +486,20 @@ gate shipped in Phase **3.2**.
 
 **Deps:** Phase 3.1; charts vendoring · **Effort:** M–L
 
-### Phase 4 — Artifacts, Swarm, Marketplace (L)
+### Phase 4 — Artifacts, Swarm, Marketplace (L) ✅ (2026-08-05)
 
 **DoD**
 
-- Blueprints save emits Muse artifact refs; Swarm nodes store artifact ids; convert
+- [x] Blueprints save emits Muse artifact refs; Swarm nodes store artifact ids; convert
   warnings preserved for older beam/tree payloads.
-- Marketplace publish reuses widget publish pattern + **Truth receipt** (Prove latch).
-- Optional `/muse` compile for WASM when dataserver present; else js-tier + honest badge.
-- Forge Distill → Logic Lane import/export first-class in save/seed paths.
+  → `blueprintArtifacts.js` / `saveBlueprintArtifactToNode` / convert confirm UI
+- [x] Marketplace publish reuses widget publish pattern + **Truth receipt** (Prove latch).
+  → `blueprintPublish.js` / `publishBlueprint` in `social.js` (+ web shim dual store)
+- [x] Optional `/muse` compile for WASM when dataserver present; else js-tier + honest badge.
+  → `blueprintWasm.js` / tier badge on editor (never fake WASM)
+- [x] Forge Distill → Logic Lane import/export first-class in save/seed paths.
+  → `persistLogicLaneSeedRoundTrip` / `seedForgeFromLogicLaneExport` / provenance forge graph
+- [x] Capability matrix documented in `mobile/src/lab/blueprints/README.md` (+ this DoD).
 
 **Deps:** Phase 1–3; social/durable APIs where publishing · **Effort:** L
 
