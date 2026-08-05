@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from eval import run_gene, stitch_source, frequency_match, load_json, CONFIGS  # noqa: E402
 
 freqs = load_json(CONFIGS / "frequencies.json")
-st = stitch_source(ROOT / "examples/flagship-musescript-module/strategies/flagship_v6k.ms")
+st = stitch_source(ROOT / "examples/flagship-musescript-module/strategies/flagship_v6l.ms")
 SYMS = ["SPY", "QQQ", "IWM", "AAPL", "MSFT", "NVDA", "AMD", "AMZN", "GOOGL", "META"]
 print(f"{'sym':8} {'win':10} {'tr':>3} {'tpb':>6} {'pos':>4} {'swing':>5} note")
 for win in ["eval_3m", "wf_2022q1"]:

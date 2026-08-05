@@ -157,13 +157,16 @@ Richer order semantics compose as **rules on the sim side**, not new AST verbs
   dependency entirely). Panel WASM: literal-symbol
   `close_of`/`mom_of`/`sma_of`/`ema_of`/`rsi_of`/`sym_available`/`fund_of` on
   the feature tape (`field@SYM` from `PanelFeed`); HostABI
-  `buy`/`sell_all`/`target_weight`/`rebalance_equal([...])`. Bags / scan /
-  portfolio queries remain host_eval — see `PANEL_HOST_ESCAPE`,
-  `TestPanelWasmParity`. Panel evo genomes: `SPanel` +
+  `buy`/`sell_all`/`target_weight`/`rebalance_equal([...])` plus closed Expand
+  bags `portfolio_apply(bag_from_scan|{bag_norm(bag_from_dict)})` →
+  `apply_bag_scan`/`apply_bag_weights` (native scores, host `applyBag` — no
+  opaque whole-module bail). Open bags / scan / portfolio queries remain
+  host_eval / opaque U — see `PANEL_HOST_ESCAPE`, `TestPanelWasmParity`.
+  Panel evo genomes: `SPanel` +
   `Variation.configureForUniverse` → Expand `*_of`; `PanelAction`
-  (`PABuy`/`PARebalance`/`PATargetWeight`) → Expand HostABI
-  buy/rebalance/target_weight (`TestPanelEvoGenomes`). Without a universe,
-  Expand stays single-name `long`/`short`/`flat`. Bags/scan still escape.
+  (`PABuy`/`PARebalance`/`PATargetWeight`/`PABagScanTop`/`PABagRankWeights`) →
+  Expand HostABI buy/rebalance/target_weight/closed bags (`TestPanelEvoGenomes`).
+  Without a universe, Expand stays single-name `long`/`short`/`flat`.
 
 ## 5. Macro-specialized numeric kernels
 

@@ -26,8 +26,16 @@ haxelib dev musescript .
 .\run.ps1 07            # runtime stress: JS+WASM and Python+numba+WASM
 .\run.ps1 test          # utest on Node
 .\run.ps1 test-py       # utest on Python (.venv)
+.\run.ps1 engine-matrix # honesty gate: ndarray/host-evo/pd/VM/book/portfolio/io (docs/ENGINE_MATRIX.md)
 .\run.ps1 all           # JS + Python examples and both test suites
 ```
+
+**Engine matrix (op×engine honesty):** run `.\tools\engine_matrix.ps1` / `bash tools/engine_matrix.sh`
+(or `.\run.ps1 engine-matrix`). Optional preferVm soak (default ON; regression harness):
+`.\tools\prefer_vm_soak.ps1` / `bash tools/prefer_vm_soak.sh` / `.\run.ps1 prefer-vm-soak`.
+Suites and claimed N/B/H/U tags:
+[docs/ENGINE_MATRIX.md](docs/ENGINE_MATRIX.md) (detail: [WASM_NP.md](docs/WASM_NP.md),
+[WASM_PD.md](docs/WASM_PD.md)). CI job `engine-matrix` in `.github/workflows/pipeline-hardening.yml`.
 
 Current test status (verified 2026-07-21): `node build/js/tests.js` **58,740 assertions, 0
 errors, 0 failures**, cross-runtime gate (example 07) **identical value across all 4 hosts (max
@@ -227,18 +235,24 @@ region next to OHLCV. Live network/EDGAR fetch is intentionally out of strategy 
 `ema_of` / `rsi_of` / `sym_available` / `fund_of` / OHLCV `*_of`) lower natively onto dense
 feature slots keyed `field@SYM`, packed from a calendar-aligned `PanelFeed` (missing bars →
 NaN; PIT join stays host-side). Drive with `ctx.panel`. Literal `buy` / `sell_all` /
-`target_weight` / `rebalance_equal([...])` are HostABI imports. **Escape list** (host_eval
-or whole-module fallback): bags, computed bags, graph bags, `symbols()`,
-`scan_top`/`scan_bottom`, portfolio queries (`pos`/`holdings`/…). See
+`target_weight` / `rebalance_equal([...])` are HostABI imports. Closed Expand bags
+(`portfolio_apply(bag_from_scan({SYM: score…}, k))` /
+`portfolio_apply(bag_norm(bag_from_dict({…})))`) are HostABI `apply_bag_scan` /
+`apply_bag_weights` (native score reads + host `applyBag` — no opaque whole-module
+bail). **Escape list** (host_eval or whole-module fallback): open bags, computed bags,
+graph bags, `symbols()`, `scan_top`/`scan_bottom`, portfolio queries (`pos`/`holdings`/…). See
 `StrategyWasmEmitter.PANEL_HOST_ESCAPE`. Panel evo genomes: `SPanel` leaves under
 `Variation.configureForUniverse` → Expand `*_of("SYM",…)`; constrained `PanelAction`
-templates → HostABI `buy`/`sell_all`/`rebalance_equal([...])`/`target_weight` (not
-`long`/`short`/`flat`). Attach a panel tape with `Fitness.configurePanel` /
+templates → HostABI `buy`/`sell_all`/`rebalance_equal([...])`/`target_weight` / closed
+bags (not `long`/`short`/`flat`). Attach a panel tape with `Fitness.configurePanel` /
 `EvolutionEngine.configureForPanel` so evo scores `PanelAction` genomes on
 portfolio equity/Sharpe (`runPanelBacktest`); classic genomes stay single-name.
-NMA/VM leave panel genomes on Expand→interp/WASM (no fake columnar panel
-fitness). Still single-name-only without a universe: classic Expand skeleton.
-Dynamic bags / `symbols()` / `scan_*` remain panel-escape (not genome-grown).
+Columnar NMA (`preferNma`) hosts closed `SPanel` + `PABuy`/`PARebalance`/`PATargetWeight`
+/`PABagScanTop`/`PABagRankWeights` via `PanelInline`/`field@SYM` pack (equal bag or
+percentile xs_rank → `bag_norm` → `applyBag`); `KPd` / VM stay Expand→interp/WASM.
+Open `bag_rank_*` / `symbols()` remain out of genome Expand and NMA.
+Still single-name-only without a universe: classic Expand skeleton.
+Open bags / `symbols()` / `scan_*` remain panel-escape (not genome-grown).
 
 ## `musescript.evo` — typed genetic-programming engine
 
@@ -664,7 +678,8 @@ consumes the generated artifact and never requires Haxe or Python at runtime.
 - `musescript.evo` — typed GP genome engine (see MuseScript's own evo section above);
   `musescript.evo.graal` — GraalWasm-accelerated fitness evaluation
 - `musescript.cli.GeneRunner` — headless fitness CLI (see MuseGene, below)
-- `tools/` — `muse_math_runtime.py`, `wat2wasm_cli.py`
+- `tools/` — `muse_math_runtime.py`, `wat2wasm_cli.py`, `engine_matrix.mjs` (honesty gate)
+- `docs/ENGINE_MATRIX.md` — op×engine parity claims + how to run the matrix
 - `.venv/` — local Python env for tests / numba / wasmtime
 
 ## MuseGene — evolvable IR + GP harness

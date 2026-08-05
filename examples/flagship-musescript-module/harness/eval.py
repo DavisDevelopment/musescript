@@ -36,7 +36,7 @@ TAPES = FLAGSHIP / "tapes"
 RESULTS = FLAGSHIP / "results"
 RUNNER = ROOT / "build" / "js" / "gene-runner.js"
 SOURCE_TAPE = ROOT / "data" / "real" / "tape.csv"
-DEFAULT_STRATEGY = STRATEGIES / "flagship_v6k.ms"
+DEFAULT_STRATEGY = STRATEGIES / "flagship_v6l.ms"
 
 
 @dataclass
