@@ -98,7 +98,8 @@
   ConstFold/CSE/CallsiteIds pipeline) so `evaluateVm` consumes the SAME lowered AST the interp does —
   without it the VM saw raw `crossover("close", …)` string args (crash on JVM, divergence on JS).
   Self-check on real gen-0 seeds: **63/63 covered byte-identical to interp**, 1 fallback (invalid-param
-  genome that errors in interp too). Full JS suite green (75,093).
+  genome that errors in interp too). Full JS suite green (75,093). (Later: preferVm defaulted ON
+  after soak; `--no-vm` opts out.)
 - [x] **V6. Measured. Verdict: PARK at the flag (modest win, parity sound).** A/B at pop=80/gens=30/
   seed=42/NVDA: **warm s/gen 3.14 (baseline) → 2.97 (`--vm`), ~5% faster; total wall 163.8s → 151s.**
   - **Parity is SOUND.** The A/B's per-gen search lines diverge at ~gen 13 — but a 2× baseline
@@ -109,13 +110,36 @@
     controlled gates (self-check 63/63, corpus 83/83, evolved 2430 @ diverged=0), which are exact.
   - **Speed is modest and expected.** ~5% warm is exactly what the spec predicted: the oracle is
     already cache-dominated (§7), so the Dynamic-stack P0 VM can only attack the miss fraction. P0 was
-    never the speed milestone. Given a single nondeterministic A/B can't nail 5% tightly, **do NOT
-    promote `--vm` to default on this evidence — keep it behind the flag (default OFF).**
+    never the speed milestone. Given a single nondeterministic A/B can't nail 5% tightly, **V6 deferred
+    default-on** (kept behind the flag). Soak + standing gates later cleared the flip — see
+    **preferVm default ON** below.
   - **The real win is P1** (unboxed operand stack). V6 makes it justified: correctness + the plumbing
     are proven end-to-end; the speed is left on the table by the boxed Dynamic stack. Pursue P1 next.
 - [x] **DetParityDump VM tier. DONE (with P1.1).** `DetParityDump.render` dumps interp vs MuseVm
   trades + raw-f64 equity bits on a fixed sma-cross program (`match=1` locked in golden). Completes
   the SPEC §8 "fourth tier in the parity harness" P0 item that trailed V3–V6.
+- [x] **Cliff 4 — ND/PD scalar-return policy. DONE.** `VmNpEligibility` / `VmPdEligibility`:
+  `np_mean`/`np_sum`/`np_dot` of `window` → CALL_BUILTIN (Float on nums; window = temporary
+  OBJ-lane Array handle — no NdArray on the unboxed stack). Frame/Series `pd_*` →
+  `VmUnsupported`. Fitness.evaluateVm allows closed `KNp`, still refuses Expand `KPd`.
+  DetParityDump + TestBytecodeVmParity extended; preferVm later defaulted ON (soak green).
+- [x] **Cliff 2 — F64 ND handle ABI (VM vertical). DONE.** OBJ-lane contiguous `NdArrayF64`
+  handles: `np_zeros`/`np_ones`/`np_asarray` (const 1-D, `len ≤ 64`) → `np_mean`/`sum`/`get_flat`/`dot`.
+  Honest **U** for reshape / multi-dim / over-cap / runtime-element asarray. WASM twin remains
+  packed `(base,len)` in VEC_SCRATCH (documented in `docs/WASM_NP.md`). preferVm later defaulted ON.
+- [x] **Cliff PD — packed `pd_rank1d` OBJ handle. DONE.** `VmPdEligibility.HEAP_PD`:
+  `pd_rank1d` (constvec/window/ND-handle, `len ≤ 64`, pct const bool) → OBJ `NdArrayF64` →
+  `np_get_flat`/`mean`/`sum`. Frame construct / groupby / merge / Series / descending → **U**.
+  Expand `KPd` still `evaluateVm` refuse (panel xs_rank / Series shift). Docs: `vm/README`,
+  `WASM_PD`, `ENGINE_MATRIX`. preferVm later defaulted ON.
+- [x] **preferVm soak / optional CI gate.** `TestPreferVmSoak` + `tools/prefer_vm_soak.*` +
+  engine-matrix `--soak` run DetParity (cheap) + MuseVm corpus/evolved + Fitness `vmParityCheck` /
+  preferVm `evaluate()` routes. Soak green → **default ON** (`Fitness.preferVm = true`;
+  CorpusEvoRun `--no-vm` opts out). CI job `prefer-vm-soak` remains `continue-on-error` +
+  weekly/manual — never blocks required PR CI. See `docs/ENGINE_MATRIX.md`.
+- [x] **preferVm default ON.** Soak + standing diverged=0 gates cleared; library default flipped.
+  Unsupported / panel / Expand `KPd` still `vm-unsupported` → Expand→interp; `preferNma` still
+  first when armed.
 
 ## P1 — only after V6 shows a real win
 

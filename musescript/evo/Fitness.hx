@@ -23,12 +23,20 @@ import musescript.vm.MuseBytecodeCompiler.VmUnsupported;
  *
  * **Panel fitness:** when `panelFeed` is attached (via `configurePanel` /
  * `EvolutionEngine.configureForPanel`) and the genome carries a `PanelAction`
- * **or** closed `KPd` (Expand coerces xs_rank → `target_weight`), evaluation runs
+ * **or** closed `KPd("xs_rank")` (Expand coerces → `target_weight` / bags), evaluation runs
  * `HarnessContext.runPanelBacktest` / compiled `ctx.panel` portfolio path — equity/Sharpe from
  * `PortfolioSim`, not single-name `OrderSim`. Classic genomes (`panelAction == null` and no
- * `KPd`) keep the single-name BarFeed path even if a panel is attached. Columnar NMA / VM do
- * **not** fake panel fitness: `panelAction` / `SPanel` / `KPd` stay Expand→interp/WASM
- * (`nma-unsupported` / `vm-unsupported`).
+ * xs_rank `KPd`) keep the single-name BarFeed path even if a panel is attached. Columnar NMA
+ * (cliff 3): closed `SPanel` → `field@SYM` via `PanelInline` + packed `PanelFeed` columns;
+ * `PABuy`/`PARebalance`/`PATargetWeight`/`PABagScanTop`/`PABagRankWeights` score on
+ * `PortfolioSim` under `preferNma` (backend `nma`). Open panel genomes and `KPd` stay
+ * Expand→interp/WASM (`nma-unsupported` / `vm-unsupported`). `SProj` PSPoint inlines via
+ * `ProjInline`; PSHost/PSNoise stay Expand. Closed `KNp` scalar mean/sum/dot of window is
+ * columnar-NMA eligible (trailing window reduce over SPrice/SInd columns) and bytecode-VM
+ * eligible (`VmNpEligibility`); Expand `KPd` stays Expand→interp (panel/Series U —
+ * packed `pd_rank1d` alone is VM-eligible via `VmPdEligibility`). With `preferVm` (default ON;
+ * CorpusEvoRun `--no-vm` to opt out), KNp-only genomes that miss NMA fall through to the VM
+ * path before interp.
  *
  * «εὑρήκαμεν, συγκάθομεν· Βάκχος ἡγεῖται.»
  */
@@ -54,10 +62,11 @@ class Fitness {
 
 	/**
 	 * True when this genome must be scored on the portfolio panel path: explicit `PanelAction`,
-	 * or closed `KPd` (Expand coerces xs_rank → `target_weight` so selection sees cross-section).
+	 * or closed `KPd("xs_rank")` (Expand coerces → `target_weight` so selection sees cross-section).
+	 * Size-safe `KPd("shift")` alone does not force the panel path.
 	 */
 	public static inline function usesPanelFitness(g:StrategyGenome):Bool {
-		return g.panelAction != null || Expand.hasKPd(g);
+		return g.panelAction != null || Expand.hasKPdXsRank(g);
 	}
 
 	/**
@@ -109,14 +118,15 @@ class Fitness {
 	public static var preferNma:Bool = false;
 
 	/**
-	 * Tier-A bytecode-VM oracle path (CorpusEvoRun `--vm`, BYTECODE_VM_TODO.md V5). When true,
+	 * Tier-A bytecode-VM oracle path (BYTECODE_VM_TODO.md V5; default ON after soak green). When true,
 	 * `evaluate` tries `evaluateVm` first — parse once, compile to a `MuseChunk` (cached by structural
 	 * key so re-parse+compile is paid once per shape), run the tight VM — and falls back to the
 	 * interp-backed `evaluateCompiled` on `VmUnsupported`/`vm-error` (the ~7% out-of-subset tail; see
-	 * V4). Default OFF; A/B-gated (V6). Parity with the interp is proven byte-identical on the corpus
-	 * (JS gate) and self-checked on the JVM via `vmParityCheck` — a fast tier that lies never runs.
+	 * V4). CorpusEvoRun `--no-vm` opts out; `--vm` still forces on + JVM `vmParityCheck`. Parity with
+	 * the interp is proven byte-identical on the corpus (JS gate) and self-checked on the JVM —
+	 * a fast tier that lies never runs.
 	 */
-	public static var preferVm:Bool = false;
+	public static var preferVm:Bool = true;
 	// null value == known-out-of-subset for that structural key (cache the miss; don't retry compile).
 	static var vmChunkCache:Map<String, Null<MuseChunk>> = new Map();
 	static final vmCacheLock = new EvoLock();
@@ -422,9 +432,11 @@ class Fitness {
 			if (usesPanelFitness(g) || hasPanelOf(g))
 				return new FitnessResult(false, 0, 0, 0, "vm-unsupported",
 					"panelAction / SPanel -- bytecode VM has no portfolio panel path; Expand→interp/WASM");
-			if (hasClosedNpPd(g))
+			// Cliff 4/2/PD: closed KNp + hand-written packed pd_rank1d ≤64 are VM-eligible.
+			// Expand KPd stays U: xs_rank needs panel HostABI; shift needs Series handles.
+			if (hasClosedPd(g))
 				return new FitnessResult(false, 0, 0, 0, "vm-unsupported",
-					"KNp/KPd — bytecode VM has no muse.np/muse.pd subset; Expand→interp/JS");
+					"KPd — Expand panel xs_rank / Series shift still U on VM (packed pd_rank1d alone is eligible; Expand→interp/JS)");
 			if (projectionProvider != null && ProjectionProvider.hostProjRefs(g).length > 0)
 				return new FitnessResult(false, 0, 0, 0, "vm-unsupported");
 			var key = Canonical.structuralKey(g);
@@ -559,12 +571,38 @@ class Fitness {
 
 	/** True when any policy root contains a closed `KNp` / `KPd` leaf. */
 	static function hasClosedNpPd(g:StrategyGenome):Bool {
+		return hasClosedNp(g) || hasClosedPd(g);
+	}
+
+	/** True when any policy root contains a closed `KNp` leaf. */
+	static function hasClosedNp(g:StrategyGenome):Bool {
 		function wsc(n:ScalarNode):Bool {
 			return switch (n) {
-				case KNp(_, _, _, _) | KPd(_, _, _, _, _): true;
+				case KNp(_, _, _, _): true;
 				case KArith(_, a, b): wsc(a) || wsc(b);
 				case KHole(inner): wsc(inner);
-				case KSeries(_) | KLookback(_, _) | KConst(_) | KParam(_) | KFeature(_): false;
+				case KPd(_, _, _, _, _) | KSeries(_) | KLookback(_, _) | KConst(_) | KParam(_) | KFeature(_): false;
+			};
+		}
+		function wb(n:BoolNode):Bool {
+			return switch (n) {
+				case BCmp(_, a, b): wsc(a) || wsc(b);
+				case BAnd(a, b) | BOr(a, b): wb(a) || wb(b);
+				case BNot(a) | BHole(a): wb(a);
+				case BCross(_, _, _) | BTrend(_, _, _) | BFeature(_): false;
+			};
+		}
+		return wb(g.entryLong) || wb(g.entryShort) || wb(g.exitLong) || wb(g.exitShort) || wsc(g.size);
+	}
+
+	/** True when any policy root contains a closed `KPd` leaf. */
+	static function hasClosedPd(g:StrategyGenome):Bool {
+		function wsc(n:ScalarNode):Bool {
+			return switch (n) {
+				case KPd(_, _, _, _, _): true;
+				case KArith(_, a, b): wsc(a) || wsc(b);
+				case KHole(inner): wsc(inner);
+				case KNp(_, _, _, _) | KSeries(_) | KLookback(_, _) | KConst(_) | KParam(_) | KFeature(_): false;
 			};
 		}
 		function wb(n:BoolNode):Bool {
@@ -591,15 +629,57 @@ class Fitness {
 					"genome uses PSHost/PSNoise SProj -- Expand→decorate/compile path");
 			nmaGenome = inlined;
 		}
-		// Panel predicates / HostABI actions stay on Expand→interp/WASM. Do not invent a
-		// columnar multi-symbol OrderSim — PortfolioSim panel packing is the honest path.
-		if (hasPanelOf(nmaGenome) || g.panelAction != null)
+		// Closed PD stays Expand→interp/JS (opaque frames). Closed KNp is columnar-NMA via
+		// trailing window mean/sum/dot over series columns (matches Expand `np_*`/`window`).
+		if (hasClosedPd(nmaGenome))
 			return new FitnessResult(false, -999, 0, 0, "nma-unsupported",
-				"genome uses panel *_of / panelAction -- columnar NMA does not score panels; Expand→interp/WASM panel fitness");
-		// Closed NP/PD palette nodes need muse.np / muse.pd host paths — not columnar columns.
-		if (hasClosedNpPd(nmaGenome))
-			return new FitnessResult(false, -999, 0, 0, "nma-unsupported",
-				"genome uses closed KNp/KPd palette -- Expand→interp/JS (WASM-honest for NP subset; PD all-U)");
+				"genome uses closed KPd palette -- Expand→interp/JS (no columnar PD; panel/Series U on VM)");
+		// Cliff 3: closed SPanel → field@SYM (`PanelInline`) + packed PanelFeed columns.
+		// Closed PABuy/PARebalance/PATargetWeight/PABagScanTop/PABagRankWeights drive PortfolioSim
+		// from signal (+ bag score/rank) columns (backend `nma`). Open bag_rank_* stay Expand.
+		var panelKeys:Array<String> = null;
+		if (hasPanelOf(nmaGenome) || PanelInline.hasPanel(g)) {
+			var panelIn = PanelInline.forNma(nmaGenome);
+			if (panelIn == null)
+				return new FitnessResult(false, -999, 0, 0, "nma-unsupported",
+					"SPanel outside closed of-subset (OHLCV lookbacks / unknown kinds) -- Expand→interp/WASM");
+			panelKeys = PanelInline.seriesKeys(g);
+			nmaGenome = panelIn;
+		}
+		var action = g.panelAction != null ? g.panelAction : Expand.inferPanelActionForPd(g);
+		if (action != null) {
+			if (!PanelInline.isNmaPanelAction(action))
+				return new FitnessResult(false, -999, 0, 0, "nma-unsupported",
+					"open / unsupported panel genomes -- Expand→interp/WASM (bag_rank_* not NMA)");
+			if (panelFeed == null)
+				return new FitnessResult(false, -999, 0, 0, "nma-unsupported",
+					"panel NMA requires Fitness.configurePanel");
+			var keys = panelKeys != null ? panelKeys.copy() : PanelInline.seriesKeys(g);
+			for (k in PanelInline.seriesKeysForPanelAction(action)) {
+				if (keys.indexOf(k) < 0) keys.push(k);
+			}
+			var pack = musescript.evo.nma.NmaPanelPack.columns(panelFeed, keys);
+			return musescript.evo.nma.NmaFitness.evaluatePanel(
+				nmaGenome, bars, panelFeed, action, pack, costBps, initialCash);
+		}
+		// SPanel predicates without PanelAction: pack panel columns into classic OrderSim NMA
+		// when a PanelFeed is attached (CCEA / hand templates reading cross-section signals).
+		if (panelKeys != null && panelKeys.length > 0) {
+			if (panelFeed == null)
+				return new FitnessResult(false, -999, 0, 0, "nma-unsupported",
+					"SPanel NMA needs Fitness.configurePanel to pack field@SYM columns");
+			var packSn = musescript.evo.nma.NmaPanelPack.columns(panelFeed, panelKeys);
+			try {
+				var built = musescript.evo.nma.NmaFitness.prepare(nmaGenome, bars, packSn);
+				if (built == null)
+					return new FitnessResult(false, -999, 0, 0, "nma-unsupported",
+						"SPanel NMA prepare failed");
+				return musescript.evo.nma.NmaFitness.evaluatePrepared(
+					built.nma, built.ctx, bars, costBps, initialCash, equityFloor);
+			} catch (e:Dynamic) {
+				return new FitnessResult(false, -999, 0, 0, "nma-error", Std.string(e));
+			}
+		}
 		if (nmaDirtySpine && nmaWorking != null) {
 			try {
 				var key = Canonical.structuralKey(g);

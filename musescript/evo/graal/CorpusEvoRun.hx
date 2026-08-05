@@ -326,7 +326,13 @@ class CorpusEvoRun {
 		if (fitnessWindows > 1) Sys.println('ROBUSTNESS FITNESS: on -- $fitnessWindows windows, lambda=$fitnessWindowLambda (WASM+JS; --fitness-windows 1 restores plain whole-tape Sharpe)');
 		// P1c: `--nma` routes Fitness.evaluate through columnar NmaFitness (KFeature falls back to
 		// Expand→compile). Forces JS-fallback pop scoring so WASM doesn't bypass the strangler.
-		var vmOn = argFlag("--vm");
+		// preferVm defaults ON (Fitness); `--no-vm` opts out. `--vm` remains accepted for
+		// back-compat (no longer required to enable; still pairs with the JVM self-check below).
+		var noVm = argFlag("--no-vm");
+		var vmCompat = argFlag("--vm"); // historical enable flag; default is already on
+		var vmOn = !noVm;
+		if (noVm && vmCompat)
+			Sys.println("VM: --no-vm wins over --vm (preferVm off)");
 		var nmaOn = argFlag("--nma");
 		var nmaVerifyOn = argFlag("--nma-verify");
 		var nmaPopMemoOff = argFlag("--no-nma-pop-memo");
@@ -1014,10 +1020,9 @@ class CorpusEvoRun {
 		Sys.println('seeded generation 0: ${seedPop.length} real genomes (${tournament.genomes.length} corpus-derived + ${indicatorSeeds.length} indicator-derived + ${fibSeeds.length} fib-retracement + ${fourierSeeds.length} fourier-projection'
 			+ (ewHostOn ? ' + ${ewHostSeeds.length} ew-host' : "") + ")");
 
-		// `--vm` (BYTECODE_VM_TODO.md V5): route Fitness.evaluate through the Tier-A bytecode VM
-		// (fast path, interp fallback for the out-of-subset tail). Refuses to run unless a JVM-side
-		// parity self-check on the gen-0 seeds is byte-clean vs the interp — a fast tier that lies
-		// must never run. Default OFF; measured against ~4.35 s/gen warm (V6).
+		// Tier-A bytecode VM (BYTECODE_VM_TODO.md V5): Fitness.preferVm defaults ON — fast path with
+		// Expand→interp fallback on VmUnsupported. JVM still refuses to run unless a parity self-check
+		// on gen-0 seeds is byte-clean vs interp (`--no-vm` opts out of both).
 		if (vmOn) {
 			// Sample the in-subset-heavy seeds (indicator crossovers + fib + fourier) so the check
 			// exercises real VM coverage, plus a slice of the complex tournament genomes so the
@@ -1026,7 +1031,7 @@ class CorpusEvoRun {
 				.concat(tournament.genomes.length > 16 ? tournament.genomes.slice(0, 16) : tournament.genomes);
 			var check = checkPool.length > 64 ? checkPool.slice(0, 64) : checkPool;
 			var pc = Fitness.vmParityCheck(check, isBasket[0], costBps);
-			Sys.println('VM: on -- Tier-A bytecode oracle (--vm). parity self-check: ${pc.identical}/${pc.covered}'
+			Sys.println('VM: on -- Tier-A bytecode oracle (preferVm default). parity self-check: ${pc.identical}/${pc.covered}'
 				+ ' covered gen-0 genomes byte-identical to interp (${pc.fallback} fallback of ${check.length})');
 			if (pc.firstError != null) Sys.println('  first vm-error: ${pc.firstError}');
 			if (pc.firstMismatch != null) {
@@ -1034,6 +1039,9 @@ class CorpusEvoRun {
 				Sys.exit(3);
 			}
 			Fitness.preferVm = true;
+		} else {
+			Fitness.preferVm = false;
+			Sys.println("VM: off (--no-vm) — Expand→interp / NMA when armed");
 		}
 
 		// `--vm-bench`: isolate the WARM per-eval speedup of the Tier-A VM vs the interp-backed
