@@ -13,6 +13,10 @@ package musescript.compile;
  * the caps → `EmitUnsupported` → host_eval. Panel/aux feature packing is
  * unchanged (`PANEL_HOST_ESCAPE` / feature tape).
  *
+ * Cliff-2 handle twin: VM stores create results as OBJ-lane `NdArrayF64`
+ * (`VmNpEligibility.HEAP_ND`); this module keeps packed `(base,len)` scratch
+ * locals — same logical 1-D F64 handle, different encoding (docs/WASM_NP.md).
+ *
  * Source of truth for emit gates + docs/WASM_NP.md + TestWasmNp.
  */
 class WasmNpEligibility {
@@ -26,12 +30,14 @@ class WasmNpEligibility {
 	 * path (array literal / window / vector local / nest of native vec ops).
 	 * `np_sum` / `np_mean`: zero-arg form, or literal `axis` ∈ {0,-1} with
 	 * `keepdims` absent/false (native operands are always 1-D). Other axes /
-	 * keepdims → **H**.
+	 * keepdims → **H**. `np_get_flat`: literal index into a packed vec.
 	 */
 	public static final NATIVE_SCALAR:Array<String> = [
 		"np_dot",
 		"np_mean",
-		"np_sum"
+		"np_sum",
+		// Const flat index into a packed scratch vec (array lit / window / nest incl. pd_rank1d).
+		"np_get_flat"
 	];
 
 	/**
@@ -57,7 +63,7 @@ class WasmNpEligibility {
 		"np_concatenate", "np_stack",
 		"np_arange", "np_linspace", "np_eye", "np_identity", "np_empty",
 		"np_shape", "np_ndim", "np_size", "np_is_c_contiguous",
-		"np_get", "np_get_flat", "np_slice", "np_slice_axis",
+		"np_get", "np_slice", "np_slice_axis",
 		"np_take", "np_gather", "np_take_along",
 		"np_astype", "np_bool", "np_bool_to_f64",
 		"np_power", "np_minimum", "np_maximum",

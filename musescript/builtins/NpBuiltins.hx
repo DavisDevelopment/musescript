@@ -13,7 +13,8 @@ import musescript.ndarray.NdTypedOps;
 /**
  * Muse install surface for `muse.np` / flat `np_*`.
  *
- * Engine eligibility: Interp N | JS B | WASM N subset + H (`WasmNpEligibility`) | VM U
+ * Engine eligibility: Interp N | JS B | WASM N subset + H (`WasmNpEligibility`) |
+ * VM B scalar (`VmNpEligibility`: mean/sum/dot of window) else U
  * Dynamic only at this coercion boundary — typed callers use `Np` / `NdArrayF64`.
  *
  * M2: comparisons return `NdArrayBool`; `where` accepts Bool or F64 cond;

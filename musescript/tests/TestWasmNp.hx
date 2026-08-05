@@ -32,13 +32,28 @@ class TestWasmNp extends Test {
 
 	public function testEligibilityTablesCoverNativeAndEscape() {
 		Assert.isTrue(WasmNpEligibility.isNativeScalar("np_dot"));
+		Assert.isTrue(WasmNpEligibility.isNativeScalar("np_get_flat"));
 		Assert.isTrue(WasmNpEligibility.isNativeVec("np_matmul"));
 		Assert.isTrue(WasmNpEligibility.isNativeVec("np_exp"));
 		Assert.isTrue(WasmNpEligibility.isNativeVec("np_log"));
 		Assert.isTrue(WasmNpEligibility.isDocumentedEscape("np_reshape"));
+		Assert.isFalse(WasmNpEligibility.isDocumentedEscape("np_get_flat"));
 		Assert.isTrue(StrategyWasmEmitter.NP_HOST_ESCAPE.indexOf("np_reshape") >= 0);
 		Assert.isTrue(StrategyWasmEmitter.NP_HOST_ESCAPE.indexOf("np_exp") < 0);
 		Assert.isTrue(StrategyWasmEmitter.PANEL_HOST_ESCAPE.indexOf("bag_equal") >= 0);
+	}
+
+	public function testNativeGetFlatNoHostEval() {
+		var wat = emitWat('strategy NpGetFlat {
+			onBar {
+				r = muse.pd.rank1d([1, 3, 2], true)
+				x = muse.np.get_flat(r, 1)
+				when x == x: long()
+			}
+		}');
+		Assert.isTrue(wat.indexOf("call $host_eval") < 0, wat);
+		Assert.isTrue(wat.indexOf("call $vec_rank_pct") >= 0 || wat.indexOf("f64.const") >= 0, wat);
+		Assert.isTrue(wat.indexOf("f64.load") >= 0 || wat.indexOf("f64.const") >= 0, wat);
 	}
 
 	public function testNativeDotMeanSumNoHostEval() {
