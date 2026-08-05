@@ -524,6 +524,20 @@ gate shipped in Phase **3.2**.
 
 **Deps:** Phase 2–4; evo palette stability · **Effort:** L
 
+### Phase 3–4 product bets (polish slice — not Phase 6) ✅
+
+Shipped as commercial Trust latch value (chosen over Phase 6 interaction polish):
+
+- **Proven-on-your-tape** — Blueprints Run/Prove bind last Studio/Terminal instrument bars
+  via `terminalRunSession`; SYNTH seed-42 fallback always badged `SYNTH · not real-tape`.
+  Truth receipt stamps `tapeKind` / symbol / barRange / seed (`blueprintTapeBind.js`).
+- **Marketplace Open-in-Blueprints** — StrategyFeed special-cases `artifactKind: blueprint`
+  (Proven + verdict chip) and opens the artifact into Studio Blueprints via session handoff
+  (`blueprintMarketplaceOpen.js`) — not generic fork toast. Local latch stays unproven until
+  Prove on your tape. Library / Swarm light save UNPROVEN unchanged.
+
+→ See `mobile/src/lab/blueprints/README.md` capability matrix rows.
+
 ### Phase 6 — Premium interaction polish (M–L)
 
 **DoD**
