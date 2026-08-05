@@ -9,6 +9,14 @@ import musescript.harness.SymbolBag;
  * Bags default to **static** fixed weights. **Computed** bags carry a recipe
  * and/or zero-arg builder and rematerialize on `bag_resolve` / portfolio ops
  * from the live panel (mom/rsi/fund series) or a graph.
+ *
+ * Evo Expand closes a narrow subset only: fixed-universe score object literals →
+ * `bag_from_scan` / `bag_from_dict`+`bag_norm` → `portfolio_apply`
+ * (`PanelAction.PABagScanTop` / `PABagRankWeights`). WASM HostABI lowers those
+ * closed forms (`apply_bag_scan` / `apply_bag_weights`). NMA hosts both columnarily
+ * (`preferNma`): scan → equal bag; rank-weights → percentile xs_rank → `bag_norm`.
+ * Open recipes (`bag_rank_mom`, `bag_computed`, `bag_graph`, `symbols()` loops) stay
+ * authored surface — not genome Expand.
  */
 class BagBuiltins {
 	/**

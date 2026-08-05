@@ -91,6 +91,12 @@ class PortfolioBuiltins {
 		vars.set("portfolio_orders_cancel_all", function(?sym:String) {
 			return harness.portfolio.cancelAll(sym);
 		});
+		vars.set("portfolio_alloc_group_id", function() {
+			return harness.portfolio.allocGroupId();
+		});
+		vars.set("portfolio_cancel_group", function(gid:Dynamic, ?sym:String) {
+			return harness.portfolio.cancelGroup(Std.int(asFloat(gid)), sym);
+		});
 		vars.set("pos", function(sym:String) return harness.portfolio.positionOf(sym));
 		vars.set("entry_of", function(sym:String) return harness.portfolio.entryOf(sym));
 		vars.set("weight_of", function(sym:String) {

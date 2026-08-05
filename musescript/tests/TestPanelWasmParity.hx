@@ -17,7 +17,8 @@ import musescript.parse.MuseParser;
  * Panel linear-memory parity gate: literal-symbol panel reads lower natively
  * (no host_eval for close_of/mom_of/sma_of/ema_of/rsi_of/sym_available), pack from PanelFeed,
  * and match interp trades / equity / sharpe on synthetic universes. Literal
- * rebalance_equal / target_weight are HostABI; bags/scan still escape honestly.
+ * rebalance_equal / target_weight / closed Expand bag `portfolio_apply` are HostABI;
+ * open bags/scan still escape / whole-module-fallback honestly.
  */
 class TestPanelWasmParity extends Test {
 	/** Dual-name momentum flip — portfolio apply may HostABI; reads must be native. */
@@ -55,6 +56,30 @@ class TestPanelWasmParity extends Test {
 				rebalance_equal(["AAA"]);
 			if (sym_available("AAA") && sym_available("BBB") && mB > mA)
 				target_weight("BBB", 1.0);
+		}
+	';
+
+	/** Closed Expand bag template — scores native, apply HostABI (no whole-module / host_eval). */
+	static final PANEL_BAG_SCAN_SRC = '
+		strategy panel_bag_scan {
+			onBar {
+				when (sym_available("AAA") && sym_available("BBB")): {
+					portfolio_apply(bag_from_scan({AAA: mom_of("AAA", 5), BBB: mom_of("BBB", 5)}, 1))
+				}
+			}
+		}
+	';
+
+	static final PANEL_BAG_NORM_SRC = '
+		strategy panel_bag_norm {
+			onBar {
+				when (sym_available("AAA") && sym_available("BBB")): {
+					portfolio_apply(bag_norm(bag_from_dict({
+						AAA: mom_of("AAA", 4),
+						BBB: mom_of("BBB", 4)
+					})))
+				}
+			}
 		}
 	';
 
@@ -204,6 +229,28 @@ class TestPanelWasmParity extends Test {
 		Assert.isTrue(StrategyWasmEmitter.PANEL_HOST_ESCAPE.indexOf("target_weight") < 0);
 	}
 
+	public function testEmitClosedBagScanHostAbiNoWholeModule() {
+		var prog = MuseHostLower.lower(new MuseParser().parse(PANEL_BAG_SCAN_SRC));
+		var emitted = StrategyWasmBackend.emitOnBar(prog);
+		Assert.notNull(emitted, "closed bag_from_scan must emit (not whole-module null)");
+		Assert.isTrue(emitted.wat.indexOf("call $mom") >= 0, emitted.wat);
+		Assert.isTrue(emitted.wat.indexOf("call $apply_bag_scan") >= 0, emitted.wat);
+		Assert.isTrue(emitted.wat.indexOf("call $host_eval") < 0,
+			"closed bag hybrid must not host_eval; got:\n" + emitted.wat);
+		Assert.equals(0, emitted.escapeRegions.length);
+	}
+
+	public function testEmitClosedBagNormHostAbiNoWholeModule() {
+		var prog = MuseHostLower.lower(new MuseParser().parse(PANEL_BAG_NORM_SRC));
+		var emitted = StrategyWasmBackend.emitOnBar(prog);
+		Assert.notNull(emitted, "closed bag_norm must emit (not whole-module null)");
+		Assert.isTrue(emitted.wat.indexOf("call $mom") >= 0, emitted.wat);
+		Assert.isTrue(emitted.wat.indexOf("call $apply_bag_weights") >= 0, emitted.wat);
+		Assert.isTrue(emitted.wat.indexOf("call $host_eval") < 0,
+			"closed bag hybrid must not host_eval; got:\n" + emitted.wat);
+		Assert.equals(0, emitted.escapeRegions.length);
+	}
+
 	public function testDenseUniverseParity() {
 		assertParity(PANEL_SCAN_SRC, densePanel(80, 11));
 	}
@@ -214,6 +261,14 @@ class TestPanelWasmParity extends Test {
 
 	public function testRebalanceHybridParity() {
 		assertParity(PANEL_REBALANCE_SRC, densePanel(80, 23));
+	}
+
+	public function testClosedBagScanParity() {
+		assertParity(PANEL_BAG_SCAN_SRC, densePanel(80, 29));
+	}
+
+	public function testClosedBagNormParity() {
+		assertParity(PANEL_BAG_NORM_SRC, densePanel(80, 31));
 	}
 
 	public function testSparseSymAvailableParity() {
@@ -301,13 +356,9 @@ class TestPanelWasmParity extends Test {
 		';
 		var prog = MuseHostLower.lower(new MuseParser().parse(src));
 		var emitted = StrategyWasmBackend.emitOnBar(prog);
-		// Opaque bag return → whole-module null, or host_eval — both honest.
-		if (emitted == null) {
-			Assert.isTrue(StrategyWasmEmitter.PANEL_HOST_ESCAPE.indexOf("bag_equal") >= 0);
-			return;
-		}
-		Assert.isTrue(emitted.wat.indexOf("call $host_eval") >= 0
-			|| emitted.escapeRegions.length > 0);
+		// Opaque bag return assigned across statements → whole-module null.
+		Assert.isNull(emitted);
+		Assert.isTrue(StrategyWasmEmitter.PANEL_HOST_ESCAPE.indexOf("bag_equal") >= 0);
 	}
 
 	public function testEscapeListDocumented() {
@@ -316,6 +367,8 @@ class TestPanelWasmParity extends Test {
 		Assert.isTrue(StrategyWasmEmitter.PANEL_HOST_ESCAPE.indexOf("bag_graph") >= 0);
 		Assert.isTrue(StrategyWasmEmitter.PANEL_HOST_ESCAPE.indexOf("scan_top") >= 0);
 		Assert.isTrue(StrategyWasmEmitter.PANEL_HOST_ESCAPE.indexOf("pos") >= 0);
+		Assert.isTrue(StrategyWasmEmitter.PANEL_HOST_ESCAPE.indexOf("bag_from_scan") >= 0);
+		Assert.isTrue(StrategyWasmEmitter.PANEL_HOST_ESCAPE.indexOf("bag_norm") >= 0);
 		// Removed once native / HostABI: *_of ema/rsi + literal rebalance/target_weight
 		Assert.isTrue(StrategyWasmEmitter.PANEL_HOST_ESCAPE.indexOf("ema_of") < 0);
 		Assert.isTrue(StrategyWasmEmitter.PANEL_HOST_ESCAPE.indexOf("rsi_of") < 0);

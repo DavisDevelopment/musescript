@@ -10,8 +10,10 @@ import musescript.ast.ConstructOnce;
 import musescript.types.BuiltinSigs;
 import musescript.builtins.MlBuiltins;
 import musescript.builtins.StatsBuiltins;
+import musescript.dataframe.GroupBy;
 import musescript.ew.mcmc.DetMath;
 import musescript.evo.Palette;
+import musescript.ndarray.Np;
 
 /**
  * Emit on-bar strategies as WAT with exported linear memory.
@@ -33,12 +35,19 @@ import musescript.evo.Palette;
  * feature slots keyed `field@SYM` (same as `PortfolioBuiltins.seriesKey`) —
  * calendar-aligned panel columns packed by the host from `PanelFeed`.
  * Literal `buy`/`sell_all`/`target_weight`/`rebalance_equal([...])` are HostABI
- * imports. Bags / computed bags / graph bags / `symbols()` / scan / portfolio
- * queries stay `host_eval` or whole-module fallback.
+ * imports. Closed Expand bags — `portfolio_apply(bag_from_scan({SYM: score…}, k))`
+ * and `portfolio_apply(bag_norm(bag_from_dict({SYM: w…})))` with fixed literal
+ * universes — lower as HostABI `apply_bag_scan` / `apply_bag_weights` (native
+ * score reads + host `applyBag`; no opaque whole-module bail). Open bags /
+ * computed bags / graph bags / `symbols()` / scan / portfolio queries stay
+ * `host_eval` or whole-module fallback.
  *
  * muse.np / flat `np_*` (after MuseHostLower): documented packed-f64 subset is
  * native on VEC_SCRATCH (`WasmNpEligibility`); everything else is per-statement
  * `host_eval` (H), not whole-module fallback — see docs/WASM_NP.md.
+ *
+ * muse.pd tiny N: `pd_rank1d` ≤64 → `$vec_rank` / `$vec_rank_pct`
+ * (`WasmPdEligibility`). Frame-returning `pd_*` stay opaque whole-module U.
  */
 class StrategyWasmEmitter {
 	var locals:Map<String, String> = new Map();
@@ -919,16 +928,126 @@ class StrategyWasmEmitter {
 	/** True iff the strategy calls any builtin that RETURNS an opaque object type — such a value
 	 *  can't be lowered natively NOR reconstructed by an escape-region interp thunk, so the whole
 	 *  strategy must fall back to interp/js. Checks RETURN type only: a builtin consuming an opaque
-	 *  literal but returning a scalar (graph_degree) still escape-compiles, so it's not flagged. */
+	 *  literal but returning a scalar (graph_degree) still escape-compiles, so it's not flagged.
+	 *
+	 * Carve-out: closed Expand `portfolio_apply(bag_from_scan|{bag_norm(bag_from_dict)})`
+	 * HostABI patterns never materialize `TBag` on the WASM side (scores spill to scratch;
+	 * host `applyBag`), so nested `bag_*` there do **not** force whole-module fallback. */
 	function programProducesOpaqueBuiltin(stmts:Array<Stmt>):Bool {
-		var idents:Array<String> = [];
-		collectStmtIdents(stmts, idents);
-		for (name in idents) {
-			var sig = musescript.types.BuiltinSigs.get(name);
-			if (sig == null) continue;
-			if (isOpaqueObjectType(sig.ret)) return true;
-		}
+		for (s in stmts) if (stmtProducesOpaqueLeak(s)) return true;
 		return false;
+	}
+
+	function stmtProducesOpaqueLeak(s:Stmt):Bool {
+		return switch (s) {
+			case OnBar(b) | OnPosition(b) | OnTick(b) | OnEvent(_, b) | Block(b):
+				for (x in b) if (stmtProducesOpaqueLeak(x)) return true;
+				false;
+			case ExprStmt(e) | Assign(_, e) | Yield(e) | YieldStar(e):
+				exprProducesOpaqueLeak(e);
+			case ForIn(_, it, b):
+				if (exprProducesOpaqueLeak(it)) return true;
+				for (x in b) if (stmtProducesOpaqueLeak(x)) return true;
+				false;
+			case MatchFor(_, it, arms):
+				if (exprProducesOpaqueLeak(it)) return true;
+				for (a in arms) {
+					if (a.guard != null && exprProducesOpaqueLeak(a.guard)) return true;
+					if (exprProducesOpaqueLeak(a.body)) return true;
+				}
+				false;
+			case Return(e):
+				e != null && exprProducesOpaqueLeak(e);
+			case Order(_, args):
+				for (a in args) if (exprProducesOpaqueLeak(a)) return true;
+				false;
+			case When(c, b):
+				if (exprProducesOpaqueLeak(c)) return true;
+				for (x in b) if (stmtProducesOpaqueLeak(x)) return true;
+				false;
+			case Use(_, args):
+				for (a in args) if (exprProducesOpaqueLeak(a.value)) return true;
+				false;
+		};
+	}
+
+	function exprProducesOpaqueLeak(e:Expr):Bool {
+		return switch (e) {
+			case EParent(inner):
+				exprProducesOpaqueLeak(inner);
+			case ECall(EIdent("portfolio_apply"), args) if (args.length >= 1 && StrategyWasmEmitter.matchClosedBagApplyArg(args[0]) != null):
+				// HostABI-lowerable closed bag — only score/weight subexprs can leak opaques.
+				var m = StrategyWasmEmitter.matchClosedBagApplyArg(args[0]);
+				for (f in m.fields) if (exprProducesOpaqueLeak(f.e)) return true;
+				false;
+			case ECall(callee, args):
+				switch (callee) {
+					case EIdent(name):
+						var sig = musescript.types.BuiltinSigs.get(name);
+						if (sig != null && isOpaqueObjectType(sig.ret)) return true;
+					default:
+				}
+				if (exprProducesOpaqueLeak(callee)) return true;
+				for (a in args) if (exprProducesOpaqueLeak(a)) return true;
+				false;
+			case EIdent(n):
+				var sigI = musescript.types.BuiltinSigs.get(n);
+				sigI != null && isOpaqueObjectType(sigI.ret);
+			case EConst(_) | EBarField(_) | EThis:
+				false;
+			case EVar(_, init):
+				init != null && exprProducesOpaqueLeak(init);
+			case EBlock(es):
+				for (x in es) if (exprProducesOpaqueLeak(x)) return true;
+				false;
+			case EField(o, _):
+				exprProducesOpaqueLeak(o);
+			case EBinop(_, a, b):
+				exprProducesOpaqueLeak(a) || exprProducesOpaqueLeak(b);
+			case EUnop(_, _, x):
+				exprProducesOpaqueLeak(x);
+			case EIf(c, t, f):
+				if (exprProducesOpaqueLeak(c) || exprProducesOpaqueLeak(t)) return true;
+				f != null && exprProducesOpaqueLeak(f);
+			case EWhile(c, b):
+				exprProducesOpaqueLeak(c) || exprProducesOpaqueLeak(b);
+			case EFor(_, it, b):
+				exprProducesOpaqueLeak(it) || exprProducesOpaqueLeak(b);
+			case EFunction(_, body, _, _):
+				exprProducesOpaqueLeak(body);
+			case EReturn(r):
+				r != null && exprProducesOpaqueLeak(r);
+			case EArray(o, i):
+				exprProducesOpaqueLeak(o) || exprProducesOpaqueLeak(i);
+			case EArrayDecl(vals):
+				for (v in vals) if (exprProducesOpaqueLeak(v)) return true;
+				false;
+			case EObject(fs):
+				for (f in fs) if (exprProducesOpaqueLeak(f.e)) return true;
+				false;
+			case ETernary(c, a, b):
+				exprProducesOpaqueLeak(c) || exprProducesOpaqueLeak(a) || exprProducesOpaqueLeak(b);
+			case EMeta(_, metaArgs, inner):
+				for (a in metaArgs) if (exprProducesOpaqueLeak(a)) return true;
+				exprProducesOpaqueLeak(inner);
+			case ELookback(s, n):
+				exprProducesOpaqueLeak(s) || exprProducesOpaqueLeak(n);
+			case EMatch(scrut, arms):
+				if (exprProducesOpaqueLeak(scrut)) return true;
+				for (a in arms) {
+					if (a.guard != null && exprProducesOpaqueLeak(a.guard)) return true;
+					if (exprProducesOpaqueLeak(a.body)) return true;
+				}
+				false;
+			case EYield(x) | EYieldStar(x):
+				exprProducesOpaqueLeak(x);
+			case ENew(_, nargs):
+				for (a in nargs) if (exprProducesOpaqueLeak(a)) return true;
+				false;
+			case ESuper(_, sargs):
+				for (a in sargs) if (exprProducesOpaqueLeak(a)) return true;
+				false;
+		};
 	}
 
 	/** The object-carrying MuseTypes the WASM on-bar backend can neither lower nor round-trip through
@@ -1257,6 +1376,10 @@ class StrategyWasmEmitter {
 				if (args.length < 1) throw new EmitUnsupported();
 				needImport("rebalance_equal", "(param i32)");
 				"i32.const " + strId(literalSymListKey(args[0])) + "\n    call $rebalance_equal\n    f64.const 0";
+			case "portfolio_apply":
+				// Closed Expand templates only — open bags / vars stay EmitUnsupported
+				// (opaque whole-module or host_eval via escape).
+				emitClosedBagApply(args);
 			case "position":
 				needPositionImports();
 				"call $get_position";
@@ -1495,10 +1618,13 @@ class StrategyWasmEmitter {
 			case "np_sum":
 				assertNpAxis0Ok(args);
 				emitNpSum(args);
+			case "np_get_flat":
+				emitNpGetFlat(args);
 			// Vector-producing muse.np — assign/nest via lowerVecOperand only.
 			case "np_asarray" | "np_array" | "np_zeros" | "np_ones" | "np_full"
 			   | "np_add" | "np_subtract" | "np_multiply" | "np_divide"
-			   | "np_cumsum" | "np_diff" | "np_exp" | "np_log" | "np_matmul":
+			   | "np_cumsum" | "np_diff" | "np_exp" | "np_log" | "np_matmul"
+			   | "pd_rank1d":
 				throw new EmitUnsupported();
 			// Dynamic graph objects/results have no Strategy-WASM ABI yet. Refuse
 			// emission explicitly so MuseCompiler selects its documented host fallback.
@@ -1506,8 +1632,9 @@ class StrategyWasmEmitter {
 			   | "graph_reachable" | "graph_shortest_path" | "graph_pagerank":
 				throw new EmitUnsupported();
 			default:
-				// Any other np_* is documented H/U (fail closed → host_eval).
+				// Any other np_* / undocumented pd_* is H/U (fail closed → host_eval).
 				if (StringTools.startsWith(name, "np_")) throw new EmitUnsupported();
+				if (StringTools.startsWith(name, "pd_")) throw new EmitUnsupported();
 				throw new EmitUnsupported();
 		};
 	}
@@ -1526,10 +1653,12 @@ class StrategyWasmEmitter {
 	public static inline var FEATURE_SLOT_PREFIX = "feature-slot:";
 
 	/**
-	 * WASM panel escape list: these stay host_eval / whole-module fallback.
-	 * Native/hybrid subset: literal-symbol OHLCV `*_of` / `mom_of` / `sma_of` / `ema_of` /
-	 * `rsi_of` / `sym_available` / `fund_of`, plus HostABI `buy` / `sell_all` /
-	 * `target_weight` / literal-array `rebalance_equal`.
+	 * WASM panel escape list: these stay host_eval / whole-module fallback when used
+	 * as free-standing producers. Native/hybrid subset: literal-symbol OHLCV `*_of` /
+	 * `mom_of` / `sma_of` / `ema_of` / `rsi_of` / `sym_available` / `fund_of`, plus HostABI
+	 * `buy` / `sell_all` / `target_weight` / literal-array `rebalance_equal`, plus closed
+	 * `portfolio_apply(bag_from_scan|{bag_norm(bag_from_dict)})` → `apply_bag_scan` /
+	 * `apply_bag_weights` (nested bag_* in that form are NOT whole-module bail).
 	 */
 	public static final PANEL_HOST_ESCAPE:Array<String> = [
 		"symbols", "bag_new", "bag_set", "bag_get", "bag_has", "bag_delete", "bag_name",
@@ -1543,8 +1672,10 @@ class StrategyWasmEmitter {
 		// Pending books / brackets / cross-sym OCO object specs → host_eval
 		// (HostABI buy/sell_all stay qty-only).
 		"portfolio_long", "portfolio_short", "portfolio_flat",
-		"portfolio_orders_pending", "portfolio_orders_cancel_all"
-		// buy / sell_all / target_weight / rebalance_equal(literal[]): HostABI, not host_eval
+		"portfolio_orders_pending", "portfolio_orders_cancel_all",
+		"portfolio_alloc_group_id", "portfolio_cancel_group"
+		// buy / sell_all / target_weight / rebalance_equal(literal[]): HostABI
+		// closed portfolio_apply(bag_from_scan|bag_norm(bag_from_dict)): HostABI apply_bag_*
 		// ema_of / rsi_of: native panel series slots (removed from escape)
 	];
 
@@ -1607,6 +1738,100 @@ class StrategyWasmEmitter {
 
 	/** Pack literal `["AAA","BBB"]` into one string-table key (US unit sep). Dynamic lists escape. */
 	public static inline var REBALANCE_SYM_SEP = "\x1f";
+
+	/**
+	 * Closed Expand bag apply: literal-key object scores + `bag_from_scan` / `bag_norm(bag_from_dict)`.
+	 * Used by HostABI emit and by the opaque-bail carve-out.
+	 */
+	static function matchClosedBagApplyArg(e:Expr):Null<{kind:String, fields:Array<{sym:String, e:Expr}>, topK:Int}> {
+		return switch (unwrapParent(e)) {
+			case ECall(EIdent("bag_from_scan"), args) if (args.length >= 2):
+				if (args.length >= 4) {
+					switch (unwrapParent(args[3])) {
+						case EConst(CBool(true)): return null; // bottom scan stays opaque
+						default:
+					}
+				}
+				var fields = literalScoreObjectFields(args[0]);
+				if (fields == null) return null;
+				var k = tryConstInt(args[1]);
+				if (k == null || k < 1) return null;
+				if (!WasmNpEligibility.fitsVecLen(fields.length)) return null;
+				{ kind: "scan", fields: fields, topK: k };
+			case ECall(EIdent("bag_norm"), nargs) if (nargs.length >= 1):
+				switch (unwrapParent(nargs[0])) {
+					case ECall(EIdent("bag_from_dict"), dargs) if (dargs.length >= 1):
+						var fieldsN = literalScoreObjectFields(dargs[0]);
+						if (fieldsN == null) return null;
+						if (!WasmNpEligibility.fitsVecLen(fieldsN.length)) return null;
+						{ kind: "norm", fields: fieldsN, topK: 0 };
+					default: null;
+				};
+			default: null;
+		};
+	}
+
+	static function unwrapParent(e:Expr):Expr {
+		return switch (e) {
+			case EParent(inner): unwrapParent(inner);
+			default: e;
+		};
+	}
+
+	/** Object literal `{SYM: expr, …}` with non-empty string keys (Expand closed universe). */
+	static function literalScoreObjectFields(e:Expr):Null<Array<{sym:String, e:Expr}>> {
+		return switch (unwrapParent(e)) {
+			case EObject(fs):
+				if (fs.length == 0) return null;
+				var out:Array<{sym:String, e:Expr}> = [];
+				for (f in fs) {
+					if (f.name == null || f.name == "") return null;
+					out.push({ sym: f.name, e: f.e });
+				}
+				out;
+			default: null;
+		};
+	}
+
+	static function tryConstInt(e:Expr):Null<Int> {
+		return switch (unwrapParent(e)) {
+			case EConst(CInt(i)): i;
+			case EConst(CFloat(f)): Std.int(f);
+			case EUnop("-", true, inner):
+				var v = tryConstInt(inner);
+				v == null ? null : -v;
+			default: null;
+		};
+	}
+
+	/**
+	 * HostABI closed bag apply: spill native score/weight f64s into VEC_SCRATCH, pass
+	 * packed symbol list + ptr/len to host `applyBag` (scan → equal bag of top-k;
+	 * norm → bag_norm then replace apply).
+	 */
+	function emitClosedBagApply(args:Array<Expr>):String {
+		if (args.length < 1) throw new EmitUnsupported();
+		var m = matchClosedBagApplyArg(args[0]);
+		if (m == null || m.fields.length == 0) throw new EmitUnsupported();
+		var spill = spillArrayDecl([for (f in m.fields) f.e]);
+		var pack = [for (f in m.fields) f.sym].join(REBALANCE_SYM_SEP);
+		var sid = strId(pack);
+		if (m.kind == "scan") {
+			needImport("apply_bag_scan", "(param i32 i32 i32 i32)");
+			return spill.prelude
+				+ "\n    i32.const " + sid
+				+ "\n    i32.const " + m.topK
+				+ "\n    " + spill.baseExpr
+				+ "\n    " + spill.lenExpr
+				+ "\n    call $apply_bag_scan\n    f64.const 0";
+		}
+		needImport("apply_bag_weights", "(param i32 i32 i32)");
+		return spill.prelude
+			+ "\n    i32.const " + sid
+			+ "\n    " + spill.baseExpr
+			+ "\n    " + spill.lenExpr
+			+ "\n    call $apply_bag_weights\n    f64.const 0";
+	}
 
 	function literalSymListKey(e:Expr):String {
 		return switch (e) {
@@ -1864,6 +2089,8 @@ class StrategyWasmEmitter {
 					|| name == "np_cumsum" || name == "np_diff"
 					|| name == "np_exp" || name == "np_log"):
 				lowerVecTransform(name, args);
+			case ECall(EIdent(name), args) if (name == "pd_rank1d"):
+				lowerPdRank1d(args);
 			case ECall(EIdent(name), args) if (WasmNpEligibility.isNativeVec(name)):
 				lowerNpVecOp(name, args);
 			default:
@@ -1910,6 +2137,42 @@ class StrategyWasmEmitter {
 	}
 
 	/**
+	 * Native scalar extract: `np_get_flat(vec, i)` with literal `i`.
+	 * Operand must lower to packed scratch with known `maxLen`; `i ≥ maxLen` → H.
+	 * Used by Expand `pd_rank1d` / size-safe `pd_shift` cell extract.
+	 */
+	function emitNpGetFlat(args:Array<Expr>):String {
+		if (args.length != 2) throw new EmitUnsupported();
+		var idx = try {
+			constIntKey(args[1]);
+		} catch (_:EmitUnsupported) {
+			throw new EmitUnsupported();
+		};
+		if (idx < 0) throw new EmitUnsupported();
+		var consts = tryConstVector(args[0]);
+		if (consts != null) {
+			if (!WasmNpEligibility.fitsVecLen(consts.length)) throw new EmitUnsupported();
+			if (idx >= consts.length) throw new EmitUnsupported();
+			return "f64.const " + watFloat(consts[idx]);
+		}
+		var vec = lowerVecOperand(args[0]);
+		if (vec.maxLen == null) throw new EmitUnsupported();
+		if (!WasmNpEligibility.fitsVecLen(vec.maxLen)) throw new EmitUnsupported();
+		if (idx >= vec.maxLen) throw new EmitUnsupported();
+		var addr = "_vaddr_" + (nextTmp++);
+		ensureLocal(addr, "i32");
+		var parts:Array<String> = [];
+		if (vec.prelude.length > 0) parts.push(vec.prelude);
+		parts.push(vec.baseExpr);
+		parts.push("i32.const " + (idx * 8));
+		parts.push("i32.add");
+		parts.push("local.set $" + addr);
+		parts.push("local.get $" + addr);
+		parts.push("f64.load");
+		return parts.join("\n    ");
+	}
+
+	/**
 	 * Native 1-D scratch path: bare reduce, or literal axis ∈ {0,-1} with
 	 * keepdims absent/false. Other axis/keepdims forms stay host_eval.
 	 */
@@ -1934,6 +2197,48 @@ class StrategyWasmEmitter {
 			case EConst(CBool(b)): b;
 			case EParent(inner): tryConstBool(inner);
 			default: null;
+		};
+	}
+
+	/**
+	 * muse.pd tiny N: `pd_rank1d(xs)` / `pd_rank1d(xs, true|false)`.
+	 * Ascending average-tie only; non-literal pct or len>64 → EmitUnsupported (H).
+	 * Descending / third-arg forms stay H.
+	 */
+	function lowerPdRank1d(args:Array<Expr>):{prelude:String, baseExpr:String, lenExpr:String, maxLen:Null<Int>} {
+		if (args.length < 1 || args.length > 2) throw new EmitUnsupported();
+		var pct = false;
+		if (args.length >= 2) {
+			var b = tryConstBool(args[1]);
+			if (b == null) throw new EmitUnsupported();
+			pct = b;
+		}
+		var consts = tryConstVector(args[0]);
+		if (consts != null) {
+			if (!WasmPdEligibility.fitsVecLen(consts.length)) throw new EmitUnsupported();
+			var folded = GroupBy.rank1d(Np.asarray(consts), pct, true).toArray();
+			return spillConstFloats(folded);
+		}
+		var src = lowerVecOperand(args[0]);
+		if (src.maxLen == null) throw new EmitUnsupported();
+		if (!WasmPdEligibility.fitsVecLen(src.maxLen)) throw new EmitUnsupported();
+		if (src.maxLen <= 0)
+			return {prelude: src.prelude, baseExpr: "i32.const 0", lenExpr: "i32.const 0", maxLen: 0};
+		var dst = allocScratch(src.maxLen);
+		var lenLocal = "_vlen_" + (nextTmp++);
+		ensureLocal(lenLocal, "i32");
+		var parts:Array<String> = [];
+		if (src.prelude.length > 0) parts.push(src.prelude);
+		parts.push(src.baseExpr);
+		parts.push(src.lenExpr);
+		parts.push("i32.const " + dst);
+		parts.push("call $" + (pct ? "vec_rank_pct" : "vec_rank"));
+		parts.push("local.set $" + lenLocal);
+		return {
+			prelude: parts.join("\n    "),
+			baseExpr: "i32.const " + dst,
+			lenExpr: "local.get $" + lenLocal,
+			maxLen: src.maxLen
 		};
 	}
 

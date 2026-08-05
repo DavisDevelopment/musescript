@@ -30,8 +30,10 @@ import musescript.interp.MuseInterp;
  * `sym_available` / `fund_of` pack as dense `field@SYM` feature slots from
  * `PanelFeed` (calendar-aligned; missing bars → NaN). Drive via `ctx.panel` +
  * `runPanelBacktest`. HostABI portfolio apply: literal `buy` / `sell_all` /
- * `target_weight` / `rebalance_equal([...])`. Escape list (host_eval /
- * opaque whole-module fallback): bags, computed bags, graph bags, `symbols()`,
+ * `target_weight` / `rebalance_equal([...])`, plus closed Expand bags
+ * (`portfolio_apply(bag_from_scan({…},k))` / `bag_norm(bag_from_dict({…}))` →
+ * `apply_bag_scan` / `apply_bag_weights`). Escape list (host_eval /
+ * opaque whole-module fallback): open bags, computed bags, graph bags, `symbols()`,
  * scan / portfolio queries, and pending-book verbs (`portfolio_long` /
  * `portfolio_short` / `portfolio_flat` / pending cancel — object specs,
  * brackets, and cross-symbol OCO stay host_eval; HostABI is qty-only) —
@@ -228,6 +230,43 @@ class StrategyWasmBackend {
 					: packed.split(StrategyWasmEmitter.REBALANCE_SYM_SEP);
 				var bi = bar() != null ? bar().index : -1;
 				harness.portfolio.rebalanceEqual(list, harness.panelPrices, bi);
+			},
+			/** Closed bag scan: packed syms + f64 scores in linear memory → equal bag of top-k → applyBag. */
+			apply_bag_scan: function(sid:Int, topK:Int, base:Int, n:Int) {
+				var packed = str(sid);
+				var syms:Array<String> = packed.length == 0
+					? []
+					: packed.split(StrategyWasmEmitter.REBALANCE_SYM_SEP);
+				var count = n < 0 ? 0 : n;
+				if (count > syms.length) count = syms.length;
+				var scores = new Map<String, Dynamic>();
+				for (i in 0...count) {
+					var s = syms[i];
+					if (s == null || s == "") continue;
+					scores.set(s, frameGet(base + i * 8));
+				}
+				var bag = musescript.builtins.BagBuiltins.bagFromScan(scores, topK);
+				var bi = bar() != null ? bar().index : -1;
+				harness.portfolio.applyBag(bag.weights, harness.panelPrices, bi, true);
+			},
+			/** Closed bag weights: packed syms + f64s → bag_norm → applyBag (replace). */
+			apply_bag_weights: function(sid:Int, base:Int, n:Int) {
+				var packed = str(sid);
+				var syms:Array<String> = packed.length == 0
+					? []
+					: packed.split(StrategyWasmEmitter.REBALANCE_SYM_SEP);
+				var count = n < 0 ? 0 : n;
+				if (count > syms.length) count = syms.length;
+				var weights = new Map<String, Dynamic>();
+				for (i in 0...count) {
+					var s = syms[i];
+					if (s == null || s == "") continue;
+					weights.set(s, frameGet(base + i * 8));
+				}
+				var raw = musescript.builtins.BagBuiltins.bagFromDict(weights);
+				var bag = musescript.builtins.BagBuiltins.bagNorm(raw);
+				var bi = bar() != null ? bar().index : -1;
+				harness.portfolio.applyBag(bag.weights, harness.panelPrices, bi, true);
 			},
 			plot: function(v:Float, lid:Int) {
 				harness.chart.plot(v, str(lid), null, bar().index);

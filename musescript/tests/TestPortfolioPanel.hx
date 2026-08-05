@@ -530,5 +530,85 @@ strategy PanelPendCancel {
 		Assert.notNull(musescript.types.BuiltinSigs.get("portfolio_flat"));
 		Assert.notNull(musescript.types.BuiltinSigs.get("portfolio_orders_pending"));
 		Assert.notNull(musescript.types.BuiltinSigs.get("portfolio_orders_cancel_all"));
+		Assert.notNull(musescript.types.BuiltinSigs.get("portfolio_alloc_group_id"));
+		Assert.notNull(musescript.types.BuiltinSigs.get("portfolio_cancel_group"));
+		Assert.equals("portfolio_alloc_group_id",
+			musescript.builtins.MuseHost.resolveFlat("portfolio", "alloc_group_id"));
+		Assert.equals("portfolio_cancel_group",
+			musescript.builtins.MuseHost.resolveFlat("portfolio", "cancel_group"));
+	}
+
+	/**
+	 * Muse surface for portfolio-global OCO: alloc_group_id + cancel_group via
+	 * flat builtins and muse.portfolio.* — same cancel-rest as harness cancelGroup.
+	 * Cancel BBB same bar as place; AAA's limit still fills on the next bar.
+	 */
+	public function testAllocGroupIdCancelGroupThroughInterp() {
+		var src = '
+strategy PanelOcoAlloc {
+  onBar {
+    when bar_index == 0: {
+      portfolio_alloc_group_id()
+      portfolio_long("AAA", { type: "limit", px: 95.0, qty: 10.0, groupId: 1 })
+      portfolio_long("BBB", { type: "limit", px: 95.0, qty: 10.0, groupId: 1 })
+      portfolio_cancel_group(1, "BBB")
+    }
+  }
+}
+';
+		var prog = new MuseParser().parse(src, "panel-oco-alloc.ms");
+		var harness = new HarnessContext();
+		harness.resetForTrial(100000);
+		new MuseInterp(harness).runPanelBacktest(prog, panelTwoSymPending());
+		// BBB cancelled same-bar; AAA limit filled later (panel TwoSymPending bar1).
+		Assert.floatEquals(10.0, harness.portfolio.positionOf("AAA"));
+		Assert.equals(0.0, harness.portfolio.positionOf("BBB"));
+		Assert.equals(0, harness.portfolio.pendingCount("BBB"));
+		Assert.isTrue(harness.portfolio.allocGroupId() >= 2);
+	}
+
+	public function testAllocGroupIdMusePortfolioNamespace() {
+		var src = '
+strategy PanelOcoMuseNs {
+  onBar {
+    when bar_index == 0: {
+      muse.portfolio.alloc_group_id()
+      muse.portfolio.long("AAA", { type: "limit", px: 95.0, qty: 10.0, groupId: 1 })
+      muse.portfolio.long("BBB", { type: "limit", px: 95.0, qty: 10.0, groupId: 1 })
+      muse.portfolio.cancel_group(1)
+    }
+  }
+}
+';
+		var prog = new MuseParser().parse(src, "panel-oco-muse-ns.ms");
+		var harness = new HarnessContext();
+		harness.resetForTrial(100000);
+		new MuseInterp(harness).runPanelBacktest(prog, panelTwoSymPending());
+		Assert.equals(0, harness.portfolio.pendingCount());
+		Assert.equals(0.0, harness.portfolio.positionOf("AAA"));
+		Assert.equals(0.0, harness.portfolio.positionOf("BBB"));
+	}
+
+	/** Group alloc/cancel stay on PANEL_HOST_ESCAPE → host_eval. */
+	public function testAllocGroupWasmHostEval() {
+		var src = '
+strategy PanelOcoWasm {
+  onBar {
+    when bar_index == 0: {
+      var gid = portfolio_alloc_group_id()
+      portfolio_cancel_group(gid)
+    }
+  }
+}
+';
+		var prog = new MuseParser().parse(src, "panel-oco-wasm.ms");
+		var emitted = musescript.compile.StrategyWasmBackend.emitOnBar(prog);
+		Assert.notNull(emitted);
+		Assert.isTrue(StringTools.contains(emitted.wat, "host_eval"),
+			"portfolio_alloc_group_id / cancel_group must host_eval");
+		Assert.isTrue(
+			musescript.compile.StrategyWasmEmitter.PANEL_HOST_ESCAPE.indexOf("portfolio_alloc_group_id") >= 0);
+		Assert.isTrue(
+			musescript.compile.StrategyWasmEmitter.PANEL_HOST_ESCAPE.indexOf("portfolio_cancel_group") >= 0);
 	}
 }
