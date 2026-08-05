@@ -106,18 +106,18 @@ eligibility changes; this table is the navigator.
 |--------|-------------------------------|--------------------------------|-------------------------|
 | **Interp** | **N** | **N** | **N** |
 | **JS** | **B** (`np_*`) | **B** | **B** |
-| **Bytecode VM** | **B** (`VmNpEligibility`) | **H** create + **B** reduce (cliff 2; const 1-D ≤64) | **U** |
-| **WASM** | **N** (≤64) | **N** packed `(base,len)` | **H** |
+| **Bytecode VM** | **B** (`VmNpEligibility`) | **H** create + vec ufuncs (incl. abs/sqrt/clip/minmax) / reshape / matmul≤8 + **B** reduce (`len ≤ 64`; +min/max/prod/std/var/size/ndim) | axis·keepdims **U**; reshape capped **H** |
+| **WASM** | **N** (≤64; +min/max/prod/std/var/ufuncs) | **N** packed `(base,len)` | **H** |
 | **NMA** | Expand→interp (`nma-unsupported`) | — | — |
 
-### `muse.pd` (opaque frames + packed rank + VM Series lane)
+### `muse.pd` (opaque WASM frames + packed rank + Series lane)
 
 | Engine | Construct / select / groupby / … | `pd_rank1d` (≤64) | Series `pd_series`/`pd_shift`/`values` | `read_csv` / `read_parquet` |
 |--------|----------------------------------|-------------------|----------------------------------------|----------------------------|
 | **Interp** | **N** (Haxe) | **N** | **N** | **U** unless grant |
 | **JS** | **B** (`pd_*`) | **B** | **B** | grant / Studio (parquet: Node + hyparquet) |
-| **Bytecode VM** | **U** (frames/Index) | **H** OBJ `NdArrayF64` | **H** OBJ `Series`/`NdArrayF64` (`VmPdEligibility`) | **U** |
-| **WASM** | **U** (opaque fallback) | **N** ≤64 | **U** (opaque Series) | **U** |
+| **Bytecode VM** | **H** gated frames (`VmPdEligibility`) · **U** Index/asof/keys-agg | **H** OBJ `NdArrayF64` | **H** OBJ `Series`/`NdArrayF64` + frame shift | **U** |
+| **WASM** | **U** (opaque fallback) | **N** ≤64 | **N** packed + `$vec_shift` | **U** |
 | **NMA** | Don't force frames into kind-switch | — | — | — |
 
 ## CI
