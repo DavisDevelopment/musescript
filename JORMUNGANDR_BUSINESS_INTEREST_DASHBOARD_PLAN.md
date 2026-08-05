@@ -4,6 +4,12 @@
 
 **Status:** P0 shipped (interest drawer + pins). Soft, ambitious. Constitution: honest provenance; Brier/calibration ranks — **never P&L leaderboards**; exposure scores are situational, not money PnL.
 
+**Blueprints synthesis (2026-08-05):** Interest / Company signal sinks in MuseLab Blueprints
+(`mobile/src/lab/blueprints/blueprintInterestSinks.js`) — Event-lane graphs that pin / alert /
+open dossier / research without `long()`/`flat()`, with coverage-not-trading Truth. See
+`FORGE_OVERHAUL_PLAN.md` “Interest / Company signal sinks” and Blueprints README.
+Not a P1 alert-feed replacement — a Muse authoring path into the same book.
+
 **Name collision (important):** `GET/POST /interests` on the advisor already stores a **string topic list** in `user_profile.db` (LLM/topic prefs). This plan’s **Business Interests** are first-class geo/CRE/market entities under `/world/interests`. Do not overload the topic string list.
 
 ---

@@ -218,6 +218,7 @@ $files = @(
   "lab\SymbolPicker.jsx",
   "lab\uiMuseEvents.js",          # Lab/terminal UI MuseEvents host pumps (ui.click|selection|focus|command)
   "lab\watchlistMuseEvents.js",   # watchlist.add|remove|ping pumps (SymbolPicker)
+  "lab\interestMuseEvents.js",    # interest.pin|alert|dossier|research (Blueprints Interest sinks)
   "lab\orderMuseEvents.js",       # broker/order status pumps (TradeSheet / DeployBookSheet)
   "lab\canvas\graphArena.js",
   "lab\distillExplain.js",

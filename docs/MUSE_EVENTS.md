@@ -54,6 +54,7 @@ Wildcards: `order.*`, `*`.
 | `order.status` | order | host | no | status, prevStatus? |
 | `order.suggested` | order | host | no | summary, runId? (human-gated) |
 | `watchlist.add` / `.remove` / `.ping` | watchlist | host | no | symbol, … |
+| `interest.pin` / `.alert` / `.dossier` / `.research` | interest | host | no | symbol, intent, … (Company / Business Interests — not orders) |
 | `ui.click` / `.selection` / `.focus` / `.command` | ui | host | no | target / panel / command |
 | `meta.reload` | meta | host | no | sourceId? |
 | `meta.macro_expand` | meta | det | yes | macro, resultDigest? |
@@ -137,6 +138,7 @@ uses `MuseRuntime.on` / `pumpHostEvent`.
 | Swarm `order.suggested` via `pumpHostEvent` | **Live** (mobile `createLiveScheduler`) |
 | Broker fill/reject/status | **Live** (mobile `orderMuseEvents.js` ← TradeSheet + DeployBookSheet) |
 | Watchlist add/remove/ping | **Live** (mobile `watchlistMuseEvents.js` ← SymbolPicker + signalAlerts) |
+| Interest pin/alert/dossier/research | **Live** (mobile `interestMuseEvents.js` ← Blueprints Interest sinks) |
 | UI click/selection/focus/command | **Live** (mobile `uiMuseEvents.js` ← Lab/Studio/Charts; selection throttled) |
 | World shock/scrub/muse_* | **Live** (mobile `jormungandrMuseEvents.js` ← Desktop World) |
 
@@ -160,6 +162,19 @@ Selftest: `node src/lab/orderMuseEvents.selftest.js`
 | `fireSignalAlert` (cockpit signals) | `watchlist.ping` | kind, message |
 
 Selftest: `node src/lab/watchlistMuseEvents.selftest.js`
+
+### Interest / Company family (Blueprints synthesis)
+
+| Host path | Events | Payload |
+|-----------|--------|---------|
+| Blueprints Interest Run · pin_interest | `interest.pin` (+ Business Interests API when live) | symbol, creId?, intent, kind |
+| Blueprints Interest Run · watch_alert | `interest.alert` (+ watchlist.ping) | symbol, message, trigger |
+| Blueprints Interest Run · open_dossier | `interest.dossier` (+ `openCompany`) | symbol, panel, edgar? |
+| Blueprints Interest Run · research_intent | `interest.research` | symbol, intent=research, note? |
+
+Honesty: not trading orders; not OHLCV Prove. Coverage latch for Marketplace `blueprint_interest`.
+
+Selftest: `node src/lab/interestMuseEvents.selftest.js` · `node src/lab/blueprints/blueprintInterestSinks.selftest.js`
 
 ### UI family (Lab / terminal only — not World)
 

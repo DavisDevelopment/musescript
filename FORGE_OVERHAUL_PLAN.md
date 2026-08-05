@@ -538,6 +538,18 @@ Shipped as commercial Trust latch value (chosen over Phase 6 interaction polish)
 
 → See `mobile/src/lab/blueprints/README.md` capability matrix rows.
 
+### Product synthesis — Interest / Company signal sinks (not Phase 6)
+
+Chosen over further Proven-on-tape polish for research & exposure management: Blueprints
+**Interest** mode ships Event-lane triggers + sinks (`pin_interest`, `watch_alert`,
+`open_dossier`, `research_intent`) feeding Company + Business Interests **without**
+forcing `long()`/`flat()`. Trading Truth latch unchanged for strategy blueprints.
+Interest publish uses `artifactKind: blueprint_interest` + coverage/freshness/provenance
+receipt — never Robust|Fragile on Company/EDGAR timelines.
+
+→ `mobile/src/lab/blueprints/blueprintInterestSinks.js`, `interestMuseEvents.js`;
+companion: `JORMUNGANDR_BUSINESS_INTEREST_DASHBOARD_PLAN.md`.
+
 ### Phase 6 — Premium interaction polish (M–L)
 
 **DoD**
