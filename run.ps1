@@ -76,6 +76,17 @@ switch ($Target) {
   "04b" { Build-Js; node build/js/04b-order-flow-live.js }
   "test" { Build-Js; node build/js/tests.js }
   "test-py" { Build-Py; & $Py build/py/tests.py }
+  "engine-matrix" {
+    # Critical honesty suites (ndarray / host-evo / pd / VM / orderbook / portfolio / muse-io).
+    # See docs/ENGINE_MATRIX.md
+    node tools/engine_matrix.mjs @args
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  }
+  "prefer-vm-soak" {
+    # Optional preferVm regression (DetParity + vm-parity + Fitness preferVm path). Default ON.
+    & "$PSScriptRoot\tools\prefer_vm_soak.ps1" @args
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  }
   "graal" {
     # GraalVM/GraalWasm stress: export artifacts -> assemble wasm -> run Java harness
     Write-Host "Building graal-export..."

@@ -109,6 +109,80 @@ class DetParityDump {
 			buf.add("vm eq[" + vi + "]=" + fbits(vmRes.equity[vi]) + "\n");
 		}
 
+		// Cliff 4 — scalar np_mean(window) VM↔interp (no NdArray on unboxed stack).
+		buf.add("-- MuseVm np_mean(window) vs MuseInterp --\n");
+		var npSrc = "strategy S { onBar {\n"
+			+ "  when np_mean(window(close, 5)) > open: { long(1); }\n"
+			+ "  when np_mean(window(close, 5)) < open: { flat(); }\n"
+			+ "} }";
+		var npFeed = musescript.harness.BarFeed.synthetic(200, 11);
+		var npProg = new musescript.parse.MuseParser().parse(npSrc);
+		musescript.builtins.TradeBuiltins.resetCrossState();
+		var npInterp = new musescript.interp.MuseInterp(new musescript.harness.HarnessContext())
+			.runBacktest(npProg, npFeed);
+		npFeed.reset();
+		musescript.builtins.TradeBuiltins.resetCrossState();
+		var npVm = musescript.vm.MuseVm.runBacktest(
+			new musescript.harness.HarnessContext(),
+			new musescript.parse.MuseParser().parse(npSrc),
+			npFeed
+		);
+		buf.add("interp trades=" + npInterp.trades + " eq=" + fbits(npInterp.finalEquity) + "\n");
+		buf.add("vm trades=" + npVm.trades + " eq=" + fbits(npVm.finalEquity) + "\n");
+		var npMatch = npInterp.trades == npVm.trades
+			&& fbits(npInterp.finalEquity) == fbits(npVm.finalEquity);
+		buf.add("match=" + (npMatch ? "1" : "0") + "\n");
+
+		// Cliff 2 — OBJ-lane NdArrayF64 handle (zeros/asarray → mean/get_flat); nums lane stays Float.
+		buf.add("-- MuseVm np handle (zeros/asarray) vs MuseInterp --\n");
+		var hSrc = "strategy S { onBar {\n"
+			+ "  xs = np_asarray([1.0, 2.0, 3.0])\n"
+			+ "  zs = np_zeros(3)\n"
+			+ "  when np_get_flat(xs, 1) == 2.0 && np_mean(zs) == 0.0: { long(1); }\n"
+			+ "  when np_sum(xs) != 6.0: { flat(); }\n"
+			+ "} }";
+		var hFeed = musescript.harness.BarFeed.synthetic(200, 11);
+		var hProg = new musescript.parse.MuseParser().parse(hSrc);
+		musescript.builtins.TradeBuiltins.resetCrossState();
+		var hInterp = new musescript.interp.MuseInterp(new musescript.harness.HarnessContext())
+			.runBacktest(hProg, hFeed);
+		hFeed.reset();
+		musescript.builtins.TradeBuiltins.resetCrossState();
+		var hVm = musescript.vm.MuseVm.runBacktest(
+			new musescript.harness.HarnessContext(),
+			new musescript.parse.MuseParser().parse(hSrc),
+			hFeed
+		);
+		buf.add("interp trades=" + hInterp.trades + " eq=" + fbits(hInterp.finalEquity) + "\n");
+		buf.add("vm trades=" + hVm.trades + " eq=" + fbits(hVm.finalEquity) + "\n");
+		var hMatch = hInterp.trades == hVm.trades
+			&& fbits(hInterp.finalEquity) == fbits(hVm.finalEquity);
+		buf.add("match=" + (hMatch ? "1" : "0") + "\n");
+
+		// Cliff PD — packed pd_rank1d OBJ-lane NdArray → get_flat (nums lane stays Float).
+		buf.add("-- MuseVm pd_rank1d handle vs MuseInterp --\n");
+		var pdSrc = "strategy S { onBar {\n"
+			+ "  when np_get_flat(pd_rank1d([1.0, 2.0, 3.0], true), 1) > 0.5: { long(1); }\n"
+			+ "  when np_get_flat(pd_rank1d([1.0, 2.0, 3.0], true), 0) < 0.5: { flat(); }\n"
+			+ "} }";
+		var pdFeed = musescript.harness.BarFeed.synthetic(200, 11);
+		var pdProg = new musescript.parse.MuseParser().parse(pdSrc);
+		musescript.builtins.TradeBuiltins.resetCrossState();
+		var pdInterp = new musescript.interp.MuseInterp(new musescript.harness.HarnessContext())
+			.runBacktest(pdProg, pdFeed);
+		pdFeed.reset();
+		musescript.builtins.TradeBuiltins.resetCrossState();
+		var pdVm = musescript.vm.MuseVm.runBacktest(
+			new musescript.harness.HarnessContext(),
+			new musescript.parse.MuseParser().parse(pdSrc),
+			pdFeed
+		);
+		buf.add("interp trades=" + pdInterp.trades + " eq=" + fbits(pdInterp.finalEquity) + "\n");
+		buf.add("vm trades=" + pdVm.trades + " eq=" + fbits(pdVm.finalEquity) + "\n");
+		var pdMatch = pdInterp.trades == pdVm.trades
+			&& fbits(pdInterp.finalEquity) == fbits(pdVm.finalEquity);
+		buf.add("match=" + (pdMatch ? "1" : "0") + "\n");
+
 		return buf.toString();
 	}
 

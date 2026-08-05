@@ -96,3 +96,15 @@ vm trades=44 eq=40F869C5CB17EFCF
 match=1
 interp eq[100]=40F869F25E41C8B2
 vm eq[100]=40F869F25E41C8B2
+-- MuseVm np_mean(window) vs MuseInterp --
+interp trades=135 eq=40F86A9FA6BE837A
+vm trades=135 eq=40F86A9FA6BE837A
+match=1
+-- MuseVm np handle (zeros/asarray) vs MuseInterp --
+interp trades=200 eq=40F85B04F97D715C
+vm trades=200 eq=40F85B04F97D715C
+match=1
+-- MuseVm pd_rank1d handle vs MuseInterp --
+interp trades=400 eq=40F86A0000000000
+vm trades=400 eq=40F86A0000000000
+match=1

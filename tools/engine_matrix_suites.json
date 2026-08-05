@@ -1,0 +1,73 @@
+{
+  "description": "Critical Muse honesty suites — op×engine parity / eligibility gates. Fail closed.",
+  "suites": [
+    {
+      "name": "ndarray",
+      "hxml": "build-ndarray-tests.hxml",
+      "js": "build/js/tests-ndarray.js",
+      "covers": ["NdArray", "TestWasmNp (WASM NP native vs host_eval)"]
+    },
+    {
+      "name": "host-evo",
+      "hxml": "build-host-evo-followups.hxml",
+      "js": "build/js/tests-host-evo-followups.js",
+      "covers": [
+        "muse.* host",
+        "panel WASM parity",
+        "NP/PD evo palette",
+        "panel fitness",
+        "NMA fitness",
+        "hybrid WASM"
+      ]
+    },
+    {
+      "name": "pd",
+      "hxml": "build-pd-tests.hxml",
+      "js": "build/js/tests-pd.js",
+      "covers": ["muse.pd M0–M4", "MultiIndex lite", "WASM PD honesty via eligibility"]
+    },
+    {
+      "name": "vm-parity",
+      "hxml": "build-vm-parity.hxml",
+      "js": "build/js/tests-vm-parity.js",
+      "covers": ["bytecode VM interp↔VM byte-identity", "VmNpEligibility / VmPdEligibility"]
+    },
+    {
+      "name": "orderbook",
+      "hxml": "build-orderbook-tests.hxml",
+      "js": "build/js/tests-orderbook.js",
+      "covers": ["OrderBook groups / brackets / partial flat"]
+    },
+    {
+      "name": "portfolio",
+      "hxml": "build-portfolio-tests.hxml",
+      "js": "build/js/tests-portfolio.js",
+      "covers": ["portfolio panel backtest surface"]
+    },
+    {
+      "name": "muse-io",
+      "hxml": "build-muse-io-tests.hxml",
+      "js": "build/js/tests-muse-io.js",
+      "covers": ["muse.re / muse.fs / muse.http / ingest grants"]
+    }
+  ],
+  "alternate": {
+    "name": "muse-host",
+    "hxml": "build-muse-host-tests.hxml",
+    "js": "build/js/tests-muse-host.js",
+    "note": "Broader host suite (also re-runs NdArray + TestWasmNp + LangClass). Default matrix uses focused host-evo instead."
+  },
+  "optional": [
+    {
+      "name": "prefer-vm-soak",
+      "hxml": "build-prefer-vm-soak.hxml",
+      "js": "build/js/tests-prefer-vm-soak.js",
+      "covers": [
+        "Fitness.preferVm / evaluateVm / vmParityCheck corpus+evolved",
+        "DetParityDump MuseVm match=1 + golden",
+        "preferVm defaults ON"
+      ],
+      "note": "Regression soak with preferVm default ON. Not in default matrix — use --soak or --only prefer-vm-soak, or tools/prefer_vm_soak.*"
+    }
+  ]
+}

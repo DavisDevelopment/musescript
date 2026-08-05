@@ -6,6 +6,10 @@ on:
   push:
     branches: [main, master]
   pull_request:
+  workflow_dispatch:
+  schedule:
+    # Weekly preferVm soak (optional regression). Push/PR still use required jobs only.
+    - cron: "17 8 * * 1"
 
 jobs:
   hardening-tests:
@@ -54,6 +58,61 @@ jobs:
           PLANTED_GENS: "3"
           PLANTED_POP: "6"
           PLANTED_MAX_BARS: "900"
+
+  # Aggregated op×engine honesty suites (ndarray / host-evo / pd / VM / book / portfolio / io).
+  # See docs/ENGINE_MATRIX.md. Fail closed; prints suite names.
+  engine-matrix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Haxe
+        uses: krdlab/setup-haxe@v1
+        with:
+          haxe-version: 4.3.6
+
+      - name: Install haxelib deps
+        run: |
+          haxelib install utest --quiet
+          haxelib install hxnodejs --quiet
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Engine-matrix honesty gate
+        run: bash tools/engine_matrix.sh
+
+  # Optional preferVm regression soak — DetParity + vm-parity + Fitness.preferVm path.
+  # preferVm defaults ON. continue-on-error so soak flakiness/slow fails never block merge.
+  # Also runnable via workflow_dispatch / weekly schedule (see `on:`). See docs/ENGINE_MATRIX.md.
+  prefer-vm-soak:
+    # Manual / weekly only — not on every push/PR (required CI stays lean).
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Haxe
+        uses: krdlab/setup-haxe@v1
+        with:
+          haxe-version: 4.3.6
+
+      - name: Install haxelib deps
+        run: |
+          haxelib install utest --quiet
+          haxelib install hxnodejs --quiet
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: preferVm soak (regression; default ON)
+        run: bash tools/prefer_vm_soak.sh
+
   det-parity:
     runs-on: ubuntu-latest
     steps:
