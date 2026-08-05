@@ -1,7 +1,9 @@
 # Forge Overhaul Plan — Premium No-Code Trading Programming
 
-> **Status:** Phase 0 + Phase 1 vertical slice **shipped in code** (2026-08-04) —
-> MuseLab / Studio Blueprints scaffold. Distill Forge UI **not** rewritten.
+> **Status:** Phase 0 + Phase 1 vertical slice **shipped** (2026-08-04); Phase 2
+> (palette + Logic Lane materialization + richer `@on(bar)` + canvas UX) **landed in
+> code** (2026-08-04) — MuseLab / Studio Blueprints. Distill Forge UI **not** rewritten
+> (Distill-only + → Blueprints importer handoff).
 > **Home for Forge / Blueprints next-gen work.** Web vendoring / surface parity stays in
 > [`WEB_SURFACE_PARITY_PLAN.md`](./WEB_SURFACE_PARITY_PLAN.md); Forge *product*
 > overhaul + Blueprints IDE placement is tracked here.
@@ -386,7 +388,7 @@ DoD = definition of done for that phase.
   → `BlueprintsCanvas.jsx` + `BlueprintNode.jsx`
 - [x] Align Distill boolean as first-class **importer** into Logic Lane (Forge export
   via `forgeMuseProjection` / shared graph helpers), not forever-canonical Blueprints save.
-  → `logicLaneImport.js` (Phase 1 stub; rich Lane UX = Phase 2)
+  → `logicLaneImport.js` (Phase 1 stub; **Phase 2 materializes** typed Lane nodes)
 - [x] Document Prove latch policy: Truth Report **required** only for Marketplace
   publish / live deploy; Library / Swarm save remain unblocked by Truth.
   → `proveLatchRequired()` + editor Save / Prove copy
@@ -414,13 +416,25 @@ DoD = definition of done for that phase.
 
 ### Phase 2 — Palette from engine + templates shelf (M–L)
 
+**Status:** ✅ Landed in code (2026-08-04) — Logic Lane materialization + curated
+BuiltinSigs palette + richer `@on(bar)` + canvas UX. Full live `pluginKinds` /
+engine TemplateExpand compounds remain deferred polish under this phase’s spirit.
+
 **DoD**
 
-- Node palette generated from `BuiltinSigs` / `pluginKinds` JSON (filtered by
-  strategy vs widget capability).
-- Stmt/expr template macros appear as compound nodes; expand via engine semantics.
-- Form-op indicators path toward Muse templates; Distill/Forge indicator scoring
+- [x] Node palette generated from `BuiltinSigs`-shaped JSON (filtered strategy mode;
+  widget filter stub). → `blueprintPalette.js` (`STRATEGY_PALETTE_JSON`)
+- [x] Stmt/expr template macros appear as compound nodes; expand via graph recipes
+  (MA cross / RSI rising / thresh). Engine TemplateExpand deep-link = later.
+- [x] Form-op indicators path toward Muse templates; Distill/Forge indicator scoring
   can remain until Logic Lane parity closed.
+- [x] Full Distill → Logic Lane import materializes Cmp/Bin as typed Blueprints nodes
+  (not parked fragment stub); Distill AST kept in provenance; export-back available.
+  → `logicLaneImport.js` + Forge **→ Blueprints** stash handoff
+- [x] Richer editable `@on(bar)` subset: ema/rsi/atr, comparisons, and/or, rising/falling, unop
+- [x] Premium canvas UX: palette rail, Muse edges, selection inspector, undo; Emit + Run intact;
+  Truth preview non-blocking; Marketplace latch still publish-only copy
+- [x] Goldens `04_rsi_rising.ms` / `05_ema_atr.ms` + `blueprints.selftest.js` green
 
 **Deps:** Phase 1 · **Effort:** M–L
 
