@@ -11,6 +11,7 @@ import musescript.harness.HarnessContext;
  *   muse.data.close_of("AAPL")
  *   muse.portfolio.buy("AAPL", 1)
  *   muse.portfolio.long("AAPL", { type: "limit", px: 95, qty: 10 })
+ *   muse.portfolio.alloc_group_id() / muse.portfolio.cancel_group(gid, ?sym)
  *   muse.chart.plot(close, "c")
  *   muse.bags.equal(["AAPL", "MSFT"])
  *   muse.params.get("fast")
@@ -40,8 +41,9 @@ import musescript.harness.HarnessContext;
  * lower natively. Panel: literal-symbol `close_of` / `mom_of` / `sma_of` /
  * `ema_of` / `rsi_of` / `sym_available` / `fund_of` pack into `field@SYM`
  * feature slots; literal `buy`/`sell_all`/`target_weight`/`rebalance_equal([…])`
- * are HostABI imports. Bags, computed/graph bags, `symbols()`, scan/portfolio
- * queries stay `host_eval` or whole-module fallback
+ * and closed Expand `portfolio_apply(bag_from_scan|{bag_norm(bag_from_dict)})`
+ * (`apply_bag_scan` / `apply_bag_weights`) are HostABI. Open bags, computed/graph
+ * bags, `symbols()`, scan/portfolio queries stay `host_eval` or whole-module fallback
  * (`StrategyWasmEmitter.PANEL_HOST_ESCAPE`). muse.np: documented packed-f64
  * native subset + per-op host_eval escapes (`WasmNpEligibility` / docs/WASM_NP.md).
  */
@@ -143,6 +145,7 @@ class MuseHost {
 		"merge_asof" => "pd_merge_asof", "fillna" => "pd_fillna", "dropna" => "pd_dropna", "isna" => "pd_isna",
 		"concat" => "pd_concat", "concat_cols" => "pd_concat_cols",
 		"parse_csv" => "pd_parse_csv", "read_csv" => "pd_read_csv",
+		"read_parquet" => "pd_read_parquet",
 		"groupby_agg" => "pd_groupby_agg", "groupby_transform" => "pd_groupby_transform",
 		"groupby_rank" => "pd_groupby_rank", "groupby_mean" => "pd_groupby_mean",
 		"groupby_sum" => "pd_groupby_sum", "groupby_std" => "pd_groupby_std",
@@ -151,7 +154,14 @@ class MuseHost {
 		"rolling_mean" => "pd_rolling_mean", "rolling_sum" => "pd_rolling_sum",
 		"rolling_std" => "pd_rolling_std", "ewm_mean" => "pd_ewm_mean",
 		"groupby_keys_agg" => "pd_groupby_keys_agg",
-		"pivot" => "pd_pivot", "melt" => "pd_melt", "corr" => "pd_corr", "cov" => "pd_cov"
+		"pivot" => "pd_pivot", "melt" => "pd_melt", "corr" => "pd_corr", "cov" => "pd_cov",
+		"resample" => "pd_resample", "rank1d" => "pd_rank1d",
+		"multi_index" => "pd_multi_index", "reset_index" => "pd_reset_index",
+		"xs" => "pd_xs", "get_level_values" => "pd_get_level_values",
+		"get_level_values_str" => "pd_get_level_values_str",
+		"index_nlevels" => "pd_index_nlevels",
+		"factorize" => "pd_factorize", "index_codes" => "pd_index_codes",
+		"index_levels" => "pd_index_levels", "multi_index_codes" => "pd_multi_index_codes"
 	];
 
 	static final FLAT:Map<String, Map<String, String>> = [
@@ -203,6 +213,10 @@ class MuseHost {
 			"orders_cancel_all" => "portfolio_orders_cancel_all",
 			"portfolio_orders_pending" => "portfolio_orders_pending",
 			"portfolio_orders_cancel_all" => "portfolio_orders_cancel_all",
+			"alloc_group_id" => "portfolio_alloc_group_id",
+			"cancel_group" => "portfolio_cancel_group",
+			"portfolio_alloc_group_id" => "portfolio_alloc_group_id",
+			"portfolio_cancel_group" => "portfolio_cancel_group",
 			"pos" => "pos",
 			"entry_of" => "entry_of",
 			"weight_of" => "weight_of",
@@ -459,6 +473,16 @@ class MuseHost {
 		});
 		Reflect.setField(p, "portfolio_orders_cancel_all", function(?sym:String) {
 			return harness.portfolio.cancelAll(sym);
+		});
+		Reflect.setField(p, "alloc_group_id", function() return harness.portfolio.allocGroupId());
+		Reflect.setField(p, "cancel_group", function(gid:Dynamic, ?sym:String) {
+			var g = Std.isOfType(gid, Float) || Std.isOfType(gid, Int) ? Std.int(cast gid) : Std.parseInt(Std.string(gid));
+			return harness.portfolio.cancelGroup(g == null ? 0 : g, sym);
+		});
+		Reflect.setField(p, "portfolio_alloc_group_id", function() return harness.portfolio.allocGroupId());
+		Reflect.setField(p, "portfolio_cancel_group", function(gid:Dynamic, ?sym:String) {
+			var g = Std.isOfType(gid, Float) || Std.isOfType(gid, Int) ? Std.int(cast gid) : Std.parseInt(Std.string(gid));
+			return harness.portfolio.cancelGroup(g == null ? 0 : g, sym);
 		});
 		Reflect.setField(p, "pos", function(sym:String) return harness.portfolio.positionOf(sym));
 		Reflect.setField(p, "entry_of", function(sym:String) return harness.portfolio.entryOf(sym));

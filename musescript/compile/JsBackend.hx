@@ -738,6 +738,7 @@ class JsBackend {
 		Reflect.setField(f1, "pd_concat", function(a:Dynamic) return PdBuiltins.concat(a));
 		Reflect.setField(f1, "pd_parse_csv", function(a:Dynamic) return PdBuiltins.parseCsv(a));
 		Reflect.setField(f1, "pd_read_csv", function(a:Dynamic) return PdBuiltins.readCsv(harness.ioGrants, a));
+		Reflect.setField(f1, "pd_read_parquet", function(a:Dynamic) return PdBuiltins.readParquet(harness.ioGrants, a));
 		Reflect.setField(f1, "pd_dropna", function(a:Dynamic) return PdBuiltins.dropna(a));
 		Reflect.setField(f2, "pd_reindex", function(a:Dynamic, b:Dynamic) return PdBuiltins.reindex(a, b));
 		Reflect.setField(f2, "pd_align", function(a:Dynamic, b:Dynamic) return PdBuiltins.alignFrames(a, b));
@@ -788,6 +789,34 @@ class JsBackend {
 		Reflect.setField(f3, "pd_groupby_keys_agg", function(a:Dynamic, b:Dynamic, c:Dynamic) return PdBuiltins.groupbyKeysAgg(a, b, c));
 		Reflect.setField(f4, "pd_pivot", function(a:Dynamic, b:Dynamic, c:Dynamic, d:Dynamic) return PdBuiltins.pivotOf(a, b, c, d));
 		Reflect.setField(f4, "pd_melt", function(a:Dynamic, b:Dynamic, c:Dynamic, d:Dynamic) return PdBuiltins.meltOf(a, b, c, d));
+		Reflect.setField(f4, "pd_groupby_keys_agg", function(a:Dynamic, b:Dynamic, c:Dynamic, d:Dynamic) return PdBuiltins.groupbyKeysAgg(a, b, c, d));
+		// M4 resample / rank1d
+		Reflect.setField(f1, "pd_rank1d", function(a:Dynamic) return PdBuiltins.rank1dOf(a));
+		Reflect.setField(f2, "pd_resample", function(a:Dynamic, b:Dynamic) return PdBuiltins.resampleOf(a, b));
+		Reflect.setField(f2, "pd_rank1d", function(a:Dynamic, b:Dynamic) return PdBuiltins.rank1dOf(a, b));
+		Reflect.setField(f3, "pd_resample", function(a:Dynamic, b:Dynamic, c:Dynamic) return PdBuiltins.resampleOf(a, b, c));
+		Reflect.setField(f3, "pd_rank1d", function(a:Dynamic, b:Dynamic, c:Dynamic) return PdBuiltins.rank1dOf(a, b, c));
+		// MultiIndex lite
+		Reflect.setField(f1, "pd_reset_index", function(a:Dynamic) return PdBuiltins.resetIndexOf(a));
+		Reflect.setField(f1, "pd_get_level_values", function(a:Dynamic) return PdBuiltins.getLevelValuesOf(a));
+		Reflect.setField(f1, "pd_get_level_values_str", function(a:Dynamic) return PdBuiltins.getLevelValuesStrOf(a));
+		Reflect.setField(f1, "pd_index_nlevels", function(a:Dynamic) return PdBuiltins.indexNlevelsOf(a));
+		Reflect.setField(f1, "pd_factorize", function(a:Dynamic) return PdBuiltins.factorizeOf(a));
+		Reflect.setField(f1, "pd_index_codes", function(a:Dynamic) return PdBuiltins.indexCodesOf(a));
+		Reflect.setField(f1, "pd_index_levels", function(a:Dynamic) return PdBuiltins.indexLevelsOf(a));
+		Reflect.setField(f2, "pd_multi_index", function(a:Dynamic, b:Dynamic) return PdBuiltins.multiIndexOf(a, b));
+		Reflect.setField(f2, "pd_reset_index", function(a:Dynamic, b:Dynamic) return PdBuiltins.resetIndexOf(a, b));
+		Reflect.setField(f2, "pd_xs", function(a:Dynamic, b:Dynamic) return PdBuiltins.xsOf(a, b));
+		Reflect.setField(f2, "pd_get_level_values", function(a:Dynamic, b:Dynamic) return PdBuiltins.getLevelValuesOf(a, b));
+		Reflect.setField(f2, "pd_get_level_values_str", function(a:Dynamic, b:Dynamic) return PdBuiltins.getLevelValuesStrOf(a, b));
+		Reflect.setField(f2, "pd_factorize", function(a:Dynamic, b:Dynamic) return PdBuiltins.factorizeOf(a, b));
+		Reflect.setField(f2, "pd_index_levels", function(a:Dynamic, b:Dynamic) return PdBuiltins.indexLevelsOf(a, b));
+		Reflect.setField(f2, "pd_multi_index_codes", function(a:Dynamic, b:Dynamic) return PdBuiltins.multiIndexCodesOf(a, b));
+		Reflect.setField(f3, "pd_multi_index", function(a:Dynamic, b:Dynamic, c:Dynamic) return PdBuiltins.multiIndexOf(a, b, c));
+		Reflect.setField(f3, "pd_reset_index", function(a:Dynamic, b:Dynamic, c:Dynamic) return PdBuiltins.resetIndexOf(a, b, c));
+		Reflect.setField(f3, "pd_xs", function(a:Dynamic, b:Dynamic, c:Dynamic) return PdBuiltins.xsOf(a, b, c));
+		Reflect.setField(f3, "pd_factorize", function(a:Dynamic, b:Dynamic, c:Dynamic) return PdBuiltins.factorizeOf(a, b, c));
+		Reflect.setField(f3, "pd_multi_index_codes", function(a:Dynamic, b:Dynamic, c:Dynamic) return PdBuiltins.multiIndexCodesOf(a, b, c));
 		// pd_melt 5-arg (valueName) falls through FLAT_NAMES / dispatchBuiltin
 	}
 
@@ -1023,6 +1052,8 @@ class JsBackend {
 		if (StringTools.startsWith(name, "pd_")) {
 			if (name == "pd_read_csv")
 				return PdBuiltins.readCsv(harness.ioGrants, args.length > 0 ? args[0] : "");
+			if (name == "pd_read_parquet")
+				return PdBuiltins.readParquet(harness.ioGrants, args.length > 0 ? args[0] : "");
 			var pfn:Dynamic = PdBuiltins.FLAT_NAMES.get(name);
 			if (pfn != null) return Reflect.callMethod(null, pfn, args);
 		}
@@ -1436,6 +1467,10 @@ class JsBackend {
 				harness.portfolio.pendingCount(args.length > 0 ? args[0] : null);
 			case "portfolio_orders_cancel_all":
 				harness.portfolio.cancelAll(args.length > 0 ? args[0] : null);
+			case "portfolio_alloc_group_id":
+				harness.portfolio.allocGroupId();
+			case "portfolio_cancel_group":
+				harness.portfolio.cancelGroup(Std.int(args[0]), args.length > 1 ? args[1] : null);
 			case "pos": harness.portfolio.positionOf(args[0]);
 			case "entry_of": harness.portfolio.entryOf(args[0]);
 			case "weight_of": harness.portfolio.weightOf(args[0], harness.panelPrices);

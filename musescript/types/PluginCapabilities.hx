@@ -48,7 +48,7 @@ class PluginCapabilities {
 		// Future / stub IO flats — classified even before MuseHost install.
 		if (StringTools.startsWith(name, "fs_") || StringTools.startsWith(name, "db_"))
 			return CAP_IO_FS;
-		if (name == "pd_read_csv") return CAP_IO_FS;
+		if (name == "pd_read_csv" || name == "pd_read_parquet") return CAP_IO_FS;
 		if (StringTools.startsWith(name, "http_")) return CAP_IO_NET;
 		var c = classOf.get(name);
 		return c != null ? c : CAP_COMPUTE;
@@ -304,6 +304,7 @@ class PluginCapabilities {
 			"orders_cancel_all",
 			"portfolio_long", "portfolio_short", "portfolio_flat",
 			"portfolio_orders_pending", "portfolio_orders_cancel_all",
+			"portfolio_alloc_group_id", "portfolio_cancel_group",
 			"portfolio_apply", "portfolio_add", "portfolio_sub", "portfolio_mask",
 			"portfolio_bag", "portfolio_equity", "portfolio_cash", "portfolio_unrealized"
 		]);
@@ -317,7 +318,7 @@ class PluginCapabilities {
 		mark(CAP_IO_FS, [
 			"fs_read_text", "fs_write_text", "fs_append_text", "fs_exists",
 			"fs_is_dir", "fs_is_file", "fs_list", "fs_mkdir", "fs_read_bytes",
-			"pd_read_csv",
+			"pd_read_csv", "pd_read_parquet",
 			"db_open", "db_query", "db_exec", "db_close"
 		]);
 		mark(CAP_IO_NET, ["http_request", "http_get", "http_post"]);

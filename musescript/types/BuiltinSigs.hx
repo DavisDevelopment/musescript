@@ -225,6 +225,9 @@ class BuiltinSigs {
 		fun("portfolio_flat", [TString, TUnknown], TVoid, 1);
 		fun("portfolio_orders_pending", [TString], TScalar, 0);
 		fun("portfolio_orders_cancel_all", [TString], TScalar, 0);
+		// Cross-symbol OCO group allocator / cancel (PortfolioSim.allocGroupId / cancelGroup).
+		fun("portfolio_alloc_group_id", [], TScalar);
+		fun("portfolio_cancel_group", [TScalar, TString], TScalar, 1);
 		fun("pos", [TString], TScalar);
 		fun("entry_of", [TString], TScalar);
 		fun("weight_of", [TString], TScalar);
@@ -469,6 +472,7 @@ class BuiltinSigs {
 		fun("pd_concat_cols", [TDataFrame, TDataFrame, TString], TDataFrame, 2);
 		fun("pd_parse_csv", [TString], TDataFrame);
 		fun("pd_read_csv", [TString], TDataFrame);
+		fun("pd_read_parquet", [TString], TDataFrame);
 		// M2 — groupby / cross-section / windows (Interp N | JS B | WASM H/U)
 		fun("pd_groupby_agg", [TDataFrame, TString, TString], TDataFrame, 2);
 		fun("pd_groupby_transform", [TDataFrame, TString, TString], TDataFrame, 2);
@@ -486,11 +490,25 @@ class BuiltinSigs {
 		fun("pd_rolling_std", [TUnknown, TScalar, TScalar], TUnknown, 2);
 		fun("pd_ewm_mean", [TUnknown, TScalar], TUnknown);
 		// M3 reshape / multi-key / corr
-		fun("pd_groupby_keys_agg", [TDataFrame, TUnknown, TString], TDataFrame, 2);
+		fun("pd_groupby_keys_agg", [TDataFrame, TUnknown, TString, TBool], TDataFrame, 2);
 		fun("pd_pivot", [TDataFrame, TString, TString, TString], TDataFrame);
 		fun("pd_melt", [TDataFrame, TUnknown, TUnknown, TString, TString], TDataFrame, 1);
 		fun("pd_corr", [TDataFrame], TDataFrame);
 		fun("pd_cov", [TDataFrame, TScalar], TDataFrame, 1);
+		// M4 resample + packed 1-D rank (WASM N ≤64 via $vec_rank)
+		fun("pd_resample", [TDataFrame, TString, TString], TDataFrame, 2);
+		fun("pd_rank1d", [TNdArray, TBool, TBool], TNdArray, 1);
+		// MultiIndex lite (M4 leftover)
+		fun("pd_multi_index", [TUnknown, TUnknown, TUnknown], TIndex, 2);
+		fun("pd_reset_index", [TDataFrame, TBool, TString], TDataFrame, 1);
+		fun("pd_xs", [TDataFrame, TUnknown, TScalar], TDataFrame, 2);
+		fun("pd_get_level_values", [TDataFrame, TScalar], TUnknown, 1);
+		fun("pd_get_level_values_str", [TDataFrame, TScalar], TUnknown, 1);
+		fun("pd_index_nlevels", [TIndex], TScalar);
+		fun("pd_factorize", [TUnknown, TUnknown, TUnknown], TUnknown, 1);
+		fun("pd_index_codes", [TIndex], TUnknown);
+		fun("pd_index_levels", [TIndex, TScalar], TUnknown, 1);
+		fun("pd_multi_index_codes", [TUnknown, TUnknown, TUnknown], TIndex, 2);
 		fun("vector_zscore", [TVector], TVector);
 		// `zscore` is the vector builtin at runtime (same as vector_zscore). The old
 		// Feature-pipeline signature was a palette lie — keep feature transforms named
