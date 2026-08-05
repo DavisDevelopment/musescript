@@ -12,6 +12,7 @@ import musescript.dataframe.Index;
 import musescript.dataframe.Join;
 import musescript.dataframe.MergeAsof;
 import musescript.dataframe.Pd;
+import musescript.builtins.PdBuiltins;
 import musescript.dataframe.PdParquet;
 import musescript.ndarray.Np;
 
@@ -431,4 +432,27 @@ class TestPdStrSidecar extends Test {
 		Assert.equals(2, cross.nrows());
 		Assert.same(["a", "b"], cross.strValuesOf("note"));
 	}
+	public function testHostAssignStrTryGet() {
+		var df = PdBuiltins.fromColumns({t: [1., 2.], x: [10., 20.]});
+		df = PdBuiltins.assignStr(df, "sym", ["AAPL", "MSFT"]);
+		Assert.isTrue(PdBuiltins.hasStr(df, "sym"));
+		Assert.same(["AAPL", "MSFT"], PdBuiltins.getStr(df, "sym"));
+		Assert.same(["AAPL", "MSFT"], PdBuiltins.strValues(df, "sym"));
+		Assert.equals(0, PdBuiltins.getStr(df, "x").length);
+		Assert.isNull(PdBuiltins.tryGet(df, "sym"));
+		Assert.notNull(PdBuiltins.tryGet(df, "x"));
+		assertSeries([10., 20.], PdBuiltins.tryGet(df, "x").toArray(), "try_get x");
+		Assert.equals(0, PdBuiltins.getCol(df, "sym").length);
+	}
+
+	public function testHostSeriesNameOnly() {
+		var s = PdBuiltins.series([1.0, 2.0], "close");
+		Assert.equals("close", PdBuiltins.seriesName(s));
+		Assert.equals(2.0, PdBuiltins.seriesLength(s));
+		var s2 = PdBuiltins.series([1.0, 2.0], [10.0, 20.0], "px");
+		Assert.equals("px", PdBuiltins.seriesName(s2));
+		Assert.equals(2.0, PdBuiltins.seriesLength(s2));
+		Assert.equals(2, s2.values.size);
+	}
+
 }

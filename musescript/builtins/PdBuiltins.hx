@@ -63,6 +63,8 @@ class PdBuiltins {
 		"pd_iloc" => iloc, "pd_to_ndarray" => toNdArray,
 		"pd_series_values" => seriesValues, "pd_series_name" => seriesName,
 		"pd_series_length" => seriesLength, "pd_index_kind" => indexKind,
+		"pd_assign_str" => assignStr, "pd_get_str" => getStr, "pd_str_values" => strValues,
+		"pd_has_str" => hasStr, "pd_try_get" => tryGet,
 		"pd_index_range" => indexRange, "pd_index_floats" => indexFloats, "pd_index_strings" => indexStrings,
 		"pd_from_bars" => fromBars, "pd_from_bar_column" => fromBarColumn,
 		"pd_from_panel" => fromPanel,
@@ -96,6 +98,8 @@ class PdBuiltins {
 		"iloc" => iloc, "to_ndarray" => toNdArray,
 		"series_values" => seriesValues, "series_name" => seriesName,
 		"series_length" => seriesLength, "index_kind" => indexKind,
+		"assign_str" => assignStr, "get_str" => getStr, "str_values" => strValues,
+		"has_str" => hasStr, "try_get" => tryGet,
 		"index_range" => indexRange, "index_floats" => indexFloats, "index_strings" => indexStrings,
 		"from_bars" => fromBars, "from_bar_column" => fromBarColumn,
 		"from_panel" => fromPanel,
@@ -122,6 +126,11 @@ class PdBuiltins {
 
 	public static function series(data:Dynamic, ?index:Dynamic, ?name:Dynamic):Series {
 		var vals = coerce1d(data);
+		// 2-arg name-only: series(data, "close") — String middle is name, not Index.
+		if (name == null && Std.isOfType(index, String)) {
+			name = index;
+			index = null;
+		}
 		var idx = coerceIndex(index, vals.size);
 		var nm:Null<String> = name == null ? null : Std.string(name);
 		return Series.create(vals, idx, nm);
@@ -258,6 +267,42 @@ class PdBuiltins {
 	public static function seriesLength(s:Dynamic):Float {
 		var ser = asSeries(s);
 		return ser == null ? 0 : ser.length;
+	}
+
+	/** Assign / overwrite a Str sidecar column (labels coerced to strings). */
+	public static function assignStr(df:Dynamic, name:Dynamic, labels:Dynamic):DataFrame {
+		var f = asDf(df);
+		if (f == null) return DataFrame.empty();
+		var nm = name == null ? "" : Std.string(name);
+		return f.assignStr(nm, coerceStringList(labels));
+	}
+
+	/** Str sidecar labels, or `[]` when missing / F64. */
+	public static function getStr(df:Dynamic, name:Dynamic):Array<String> {
+		var f = asDf(df);
+		if (f == null) return [];
+		var s = f.getStr(name == null ? "" : Std.string(name));
+		return s != null ? s : [];
+	}
+
+	/** Alias of `getStr` (muse.pd.str_values). */
+	public static function strValues(df:Dynamic, name:Dynamic):Array<String>
+		return getStr(df, name);
+
+	/** True when `name` is a Str sidecar column. */
+	public static function hasStr(df:Dynamic, name:Dynamic):Bool {
+		var f = asDf(df);
+		return f != null && f.hasStrColumn(name == null ? "" : Std.string(name));
+	}
+
+	/**
+	 * F64 column as Series, or `null` when missing **or** Str sidecar.
+	 * Prefer over `pd_get` when callers must not treat Str as empty Series.
+	 */
+	public static function tryGet(df:Dynamic, name:Dynamic):Null<Series> {
+		var f = asDf(df);
+		if (f == null) return null;
+		return f.tryGet(name == null ? "" : Std.string(name));
 	}
 
 	public static function indexKind(idx:Dynamic):String {
@@ -700,9 +745,13 @@ class PdBuiltins {
 
 	static function asIndex(v:Dynamic):Null<AnyIndex> {
 		if (v == null) return null;
+		// Plain label arrays must not cast as Index handles (JS enum switch is silent).
+		if (Std.isOfType(v, Array)) return null;
+		if (Std.isOfType(v, NdArrayF64)) return null;
 		// Enum instances are objects; probe via Index helpers when already AnyIndex-shaped.
 		try {
-			var _ = Index.kindOf(cast v);
+			var k = Index.kindOf(cast v);
+			if (k != "f64" && k != "str" && k != "multi") return null;
 			return cast v;
 		} catch (_:Dynamic) {
 			return null;

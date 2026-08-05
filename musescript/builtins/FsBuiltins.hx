@@ -21,9 +21,7 @@ class FsBuiltins {
 		vars.set("fs_is_file", function(path:Dynamic) return isFile(g(), path));
 		vars.set("fs_list", function(path:Dynamic) return list(g(), path));
 		vars.set("fs_mkdir", function(path:Dynamic, ?recursive:Dynamic) return mkdir(g(), path, recursive));
-		vars.set("fs_read_bytes", function(path:Dynamic) {
-			return throwUnavailable("fs_read_bytes", "use M2+; prefer fs_read_text");
-		});
+		vars.set("fs_read_bytes", function(path:Dynamic) return readBytes(g(), path));
 	}
 
 	public static function build(?grantsOf:Void->Null<IoGrant>):Dynamic {
@@ -37,10 +35,13 @@ class FsBuiltins {
 		Reflect.setField(f, "is_file", function(path:Dynamic) return isFile(g(), path));
 		Reflect.setField(f, "list", function(path:Dynamic) return list(g(), path));
 		Reflect.setField(f, "mkdir", function(path:Dynamic, ?recursive:Dynamic) return mkdir(g(), path, recursive));
-		Reflect.setField(f, "read_bytes", function(path:Dynamic) {
-			return throwUnavailable("fs_read_bytes", "use M2+; prefer fs_read_text");
-		});
+		Reflect.setField(f, "read_bytes", function(path:Dynamic) return readBytes(g(), path));
 		return f;
+	}
+
+	/** M2+ stub — install/JsBackend parity; prefer {@link readText}. */
+	public static function readBytes(?grants:Null<IoGrant>, path:Dynamic):Dynamic {
+		return throwUnavailable("fs_read_bytes", "use M2+; prefer fs_read_text");
 	}
 
 	public static function readText(?grants:Null<IoGrant>, path:Dynamic):String {

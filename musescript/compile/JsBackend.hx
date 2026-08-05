@@ -717,6 +717,10 @@ class JsBackend {
 		Reflect.setField(f1, "pd_head", function(a:Dynamic) return PdBuiltins.headOf(a));
 		Reflect.setField(f1, "pd_tail", function(a:Dynamic) return PdBuiltins.tailOf(a));
 		Reflect.setField(f2, "pd_get", function(a:Dynamic, b:Dynamic) return PdBuiltins.getCol(a, b));
+		Reflect.setField(f2, "pd_get_str", function(a:Dynamic, b:Dynamic) return PdBuiltins.getStr(a, b));
+		Reflect.setField(f2, "pd_str_values", function(a:Dynamic, b:Dynamic) return PdBuiltins.strValues(a, b));
+		Reflect.setField(f2, "pd_has_str", function(a:Dynamic, b:Dynamic) return PdBuiltins.hasStr(a, b));
+		Reflect.setField(f2, "pd_try_get", function(a:Dynamic, b:Dynamic) return PdBuiltins.tryGet(a, b));
 		Reflect.setField(f2, "pd_select", function(a:Dynamic, b:Dynamic) return PdBuiltins.select(a, b));
 		Reflect.setField(f2, "pd_drop", function(a:Dynamic, b:Dynamic) return PdBuiltins.drop(a, b));
 		Reflect.setField(f2, "pd_iloc", function(a:Dynamic, b:Dynamic) return PdBuiltins.iloc(a, b));
@@ -729,6 +733,7 @@ class JsBackend {
 		Reflect.setField(f2, "pd_from_panel", function(a:Dynamic, b:Dynamic) return PdBuiltins.fromPanel(a, b));
 		Reflect.setField(f2, "pd_from_bar_column", function(a:Dynamic, b:Dynamic) return PdBuiltins.fromBarColumn(a, b));
 		Reflect.setField(f3, "pd_assign", function(a:Dynamic, b:Dynamic, c:Dynamic) return PdBuiltins.assign(a, b, c));
+		Reflect.setField(f3, "pd_assign_str", function(a:Dynamic, b:Dynamic, c:Dynamic) return PdBuiltins.assignStr(a, b, c));
 		Reflect.setField(f3, "pd_from_columns", function(a:Dynamic, b:Dynamic, c:Dynamic) return PdBuiltins.fromColumns(a, b, c));
 		Reflect.setField(f3, "pd_from_ndarray", function(a:Dynamic, b:Dynamic, c:Dynamic) return PdBuiltins.fromNdArray(a, b, c));
 		Reflect.setField(f3, "pd_series", function(a:Dynamic, b:Dynamic, c:Dynamic) return PdBuiltins.series(a, b, c));
@@ -1171,6 +1176,8 @@ class JsBackend {
 			case "fs_list": FsBuiltins.list(harness.ioGrants, args[0]);
 			case "fs_mkdir":
 				FsBuiltins.mkdir(harness.ioGrants, args[0], args.length > 1 ? args[1] : null);
+			case "fs_read_bytes":
+				FsBuiltins.readBytes(harness.ioGrants, args.length > 0 ? args[0] : null);
 			case "http_request": HttpBuiltins.request(harness.ioGrants, harness, args[0]);
 			case "http_get":
 				HttpBuiltins.get(harness.ioGrants, harness, args[0], args.length > 1 ? args[1] : null);

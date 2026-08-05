@@ -330,6 +330,8 @@ class BuiltinSigs {
 		fun("fs_is_file", [TString], TBool);
 		fun("fs_list", [TString], TStringArray);
 		fun("fs_mkdir", [TString, TBool], TBool, 1);
+		// M2+ stub (FsBuiltins throws IoDenied); keep sig/dispatch for install↔parity.
+		fun("fs_read_bytes", [TString], TUnknown);
 		fun("http_request", [TUnknown], TUnknown);
 		fun("http_get", [TString, TUnknown], TUnknown, 1);
 		fun("http_post", [TString, TUnknown, TUnknown], TUnknown, 1);
@@ -454,6 +456,11 @@ class BuiltinSigs {
 		fun("pd_series_values", [TPdSeries], TNdArray);
 		fun("pd_series_name", [TPdSeries], TString);
 		fun("pd_series_length", [TPdSeries], TScalar);
+		fun("pd_assign_str", [TDataFrame, TString, TUnknown], TDataFrame);
+		fun("pd_get_str", [TDataFrame, TString], TStringArray);
+		fun("pd_str_values", [TDataFrame, TString], TStringArray);
+		fun("pd_has_str", [TDataFrame, TString], TBool);
+		fun("pd_try_get", [TDataFrame, TString], TUnknown);
 		fun("pd_index_kind", [TIndex], TString);
 		fun("pd_index_range", [TScalar], TIndex);
 		fun("pd_index_floats", [TUnknown], TIndex);
