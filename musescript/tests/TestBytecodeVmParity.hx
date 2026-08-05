@@ -61,7 +61,10 @@ class TestBytecodeVmParity extends Test {
 		"strategy S { onBar {\n  zs = np_ones([4])\n  when np_mean(zs) == 1.0 && np_sum(zs) == 4.0: { long(1); }\n} }",
 		// Cliff PD: packed pd_rank1d → OBJ NdArrayF64 → np_get_flat / np_mean (nums stays Float)
 		"strategy S { onBar {\n  r = pd_rank1d([30.0, 10.0, 20.0])\n  when np_get_flat(r, 1) == 1.0: { long(1); }\n  when np_sum(r) != 6.0: { flat(); }\n} }",
-		"strategy S { onBar {\n  when np_get_flat(pd_rank1d([1.0, 2.0, 3.0], true), 1) > 0.5: { long(1); }\n  when np_get_flat(pd_rank1d([1.0, 2.0, 3.0], true), 0) < 0.5: { flat(); }\n} }"
+		"strategy S { onBar {\n  when np_get_flat(pd_rank1d([1.0, 2.0, 3.0], true), 1) > 0.5: { long(1); }\n  when np_get_flat(pd_rank1d([1.0, 2.0, 3.0], true), 0) < 0.5: { flat(); }\n} }",
+		// Cliff PD Series: pd_series / pd_shift → OBJ Series → pd_series_values → np_get_flat
+		"strategy S { onBar {\n  s = pd_series([1.0, 2.0, 3.0])\n  when np_get_flat(pd_series_values(s), 1) == 2.0: { long(1); }\n  when np_sum(pd_series_values(s)) != 6.0: { flat(); }\n} }",
+		"strategy S { onBar {\n  when np_get_flat(pd_series_values(pd_shift(pd_series(window(close, 4)), 1)), 3) > 0.0: { long(1); }\n  when np_get_flat(pd_series_values(pd_shift(pd_series([5.0, 6.0, 7.0]), 1)), 1) != 5.0: { flat(); }\n} }"
 	];
 
 	public function testInterpVsVmByteParity() {
@@ -98,7 +101,11 @@ class TestBytecodeVmParity extends Test {
 			"strategy S { onBar {\n  when pd_nrows(pd_from_columns({a: [1.0]})) > 0.0: { long(1); }\n} }",
 			"strategy S { onBar {\n  when pd_xs_rank(pd_from_columns({a: [1.0]}), true) != null: { long(1); }\n} }",
 			"strategy S { onBar {\n  when pd_rank1d([1.0], true, false) != null: { long(1); }\n} }",
-			"strategy S { onBar {\n  when np_get_flat(pd_rank1d([close, 1.0]), 0) > 0.0: { long(1); }\n} }"
+			"strategy S { onBar {\n  when np_get_flat(pd_rank1d([close, 1.0]), 0) > 0.0: { long(1); }\n} }",
+			"strategy S { onBar {\n  when pd_series([1.0], pd_index_range(1)) != null: { long(1); }\n} }",
+			"strategy S { onBar {\n  when pd_shift(pd_from_columns({a: [1.0, 2.0]}), 1) != null: { long(1); }\n} }",
+			"strategy S { onBar {\n  when pd_series_values(pd_from_columns({a: [1.0]})) != null: { long(1); }\n} }",
+			"strategy S { onBar {\n  when np_get_flat(pd_series_values(pd_shift(pd_series(window(close, 4)), close)), 0) > 0.0: { long(1); }\n} }"
 		];
 		for (src in cases) {
 			var threw = false;
@@ -124,13 +131,30 @@ class TestBytecodeVmParity extends Test {
 		Assert.isFalse(musescript.vm.VmNpEligibility.isScalarB("np_zeros"));
 		Assert.isTrue(musescript.vm.VmPdEligibility.isPdBuiltin("pd_xs_rank"));
 		Assert.isTrue(musescript.vm.VmPdEligibility.isHeapPd("pd_rank1d"));
+		Assert.isTrue(musescript.vm.VmPdEligibility.isHeapPd("pd_series"));
+		Assert.isTrue(musescript.vm.VmPdEligibility.isHeapPd("pd_shift"));
+		Assert.isTrue(musescript.vm.VmPdEligibility.isHeapPd("pd_series_values"));
+		Assert.isTrue(musescript.vm.VmPdEligibility.isHeapSeries("pd_series"));
+		Assert.isTrue(musescript.vm.VmPdEligibility.isHeapSeries("pd_shift"));
+		Assert.isFalse(musescript.vm.VmPdEligibility.isHeapSeries("pd_rank1d"));
 		Assert.isFalse(musescript.vm.VmPdEligibility.isDocumentedUnsupported("pd_rank1d"));
+		Assert.isFalse(musescript.vm.VmPdEligibility.isDocumentedUnsupported("pd_series"));
+		Assert.isFalse(musescript.vm.VmPdEligibility.isDocumentedUnsupported("pd_shift"));
+		Assert.isFalse(musescript.vm.VmPdEligibility.isDocumentedUnsupported("pd_series_values"));
 		Assert.isFalse(musescript.vm.VmPdEligibility.isScalarB("pd_nrows"));
 		Assert.isTrue(musescript.vm.VmPdEligibility.isDocumentedUnsupported("pd_from_columns"));
 		Assert.isTrue(musescript.vm.VmPdEligibility.isDocumentedUnsupported("pd_xs_rank"));
+		Assert.isTrue(musescript.vm.VmPdEligibility.isDocumentedUnsupported("pd_series_length"));
 		Assert.isTrue(musescript.vm.VmPdEligibility.arityOk("pd_rank1d", 1));
 		Assert.isTrue(musescript.vm.VmPdEligibility.arityOk("pd_rank1d", 2));
 		Assert.isFalse(musescript.vm.VmPdEligibility.arityOk("pd_rank1d", 3));
+		Assert.isTrue(musescript.vm.VmPdEligibility.arityOk("pd_series", 1));
+		Assert.isFalse(musescript.vm.VmPdEligibility.arityOk("pd_series", 2));
+		Assert.isTrue(musescript.vm.VmPdEligibility.arityOk("pd_shift", 1));
+		Assert.isTrue(musescript.vm.VmPdEligibility.arityOk("pd_shift", 2));
+		Assert.isFalse(musescript.vm.VmPdEligibility.arityOk("pd_shift", 3));
+		Assert.isTrue(musescript.vm.VmPdEligibility.arityOk("pd_series_values", 1));
+		Assert.isFalse(musescript.vm.VmPdEligibility.arityOk("pd_series_values", 2));
 	}
 
 	function assertParity(src:String, a:BacktestResult, b:BacktestResult) {

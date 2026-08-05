@@ -33,10 +33,11 @@ import musescript.vm.MuseBytecodeCompiler.VmUnsupported;
  * Expand→interp/WASM (`nma-unsupported` / `vm-unsupported`). `SProj` PSPoint inlines via
  * `ProjInline`; PSHost/PSNoise stay Expand. Closed `KNp` scalar mean/sum/dot of window is
  * columnar-NMA eligible (trailing window reduce over SPrice/SInd columns) and bytecode-VM
- * eligible (`VmNpEligibility`); Expand `KPd` stays Expand→interp (panel/Series U —
- * packed `pd_rank1d` alone is VM-eligible via `VmPdEligibility`). With `preferVm` (default ON;
- * CorpusEvoRun `--no-vm` to opt out), KNp-only genomes that miss NMA fall through to the VM
- * path before interp.
+ * eligible (`VmNpEligibility`); Expand `KPd("xs_rank")` stays Expand→interp (panel/
+ * frame U); Series-lane `KPd("shift")` + packed `pd_rank1d` ≤64 are VM-eligible via
+ * `VmPdEligibility`. With `preferVm` (default ON; CorpusEvoRun `--no-vm` to opt out),
+ * KNp-only (and Series-shift) genomes that miss NMA fall through to the VM path before
+ * interp.
  *
  * «εὑρήκαμεν, συγκάθομεν· Βάκχος ἡγεῖται.»
  */
@@ -432,11 +433,11 @@ class Fitness {
 			if (usesPanelFitness(g) || hasPanelOf(g))
 				return new FitnessResult(false, 0, 0, 0, "vm-unsupported",
 					"panelAction / SPanel -- bytecode VM has no portfolio panel path; Expand→interp/WASM");
-			// Cliff 4/2/PD: closed KNp + hand-written packed pd_rank1d ≤64 are VM-eligible.
-			// Expand KPd stays U: xs_rank needs panel HostABI; shift needs Series handles.
-			if (hasClosedPd(g))
+			// Cliff 4/2/PD: closed KNp + packed pd_rank1d + Series shift H are VM-eligible.
+			// Expand KPd("xs_rank") stays U (panel HostABI / frame); KPd("shift") may hit Series H.
+			if (Expand.hasKPdXsRank(g))
 				return new FitnessResult(false, 0, 0, 0, "vm-unsupported",
-					"KPd — Expand panel xs_rank / Series shift still U on VM (packed pd_rank1d alone is eligible; Expand→interp/JS)");
+					"KPd xs_rank — panel/frame still U on VM (Series shift + pd_rank1d ≤64 eligible; Expand→interp/JS)");
 			if (projectionProvider != null && ProjectionProvider.hostProjRefs(g).length > 0)
 				return new FitnessResult(false, 0, 0, 0, "vm-unsupported");
 			var key = Canonical.structuralKey(g);
@@ -633,7 +634,7 @@ class Fitness {
 		// trailing window mean/sum/dot over series columns (matches Expand `np_*`/`window`).
 		if (hasClosedPd(nmaGenome))
 			return new FitnessResult(false, -999, 0, 0, "nma-unsupported",
-				"genome uses closed KPd palette -- Expand→interp/JS (no columnar PD; panel/Series U on VM)");
+				"genome uses closed KPd palette -- Expand→interp/JS (no columnar PD; xs_rank panel U; Series shift may hit VM)");
 		// Cliff 3: closed SPanel → field@SYM (`PanelInline`) + packed PanelFeed columns.
 		// Closed PABuy/PARebalance/PATargetWeight/PABagScanTop/PABagRankWeights drive PortfolioSim
 		// from signal (+ bag score/rank) columns (backend `nma`). Open bag_rank_* stay Expand.

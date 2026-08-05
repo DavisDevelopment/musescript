@@ -247,8 +247,8 @@ class MuseBytecodeCompiler {
 	}
 
 	function emitBuiltinCall(name:String, args:Array<Expr>):Void {
-		// Cliff 4/2/PD — ND create + packed pd_rank1d are OBJ-lane handles (H);
-		// scalar mean/sum/dot/get_flat are B onto nums. Frame/Series/Index → U.
+		// Cliff 4/2/PD — ND create + packed pd_rank1d + Series H are OBJ-lane;
+		// scalar mean/sum/dot/get_flat are B onto nums. Frames / Index → U.
 		// No NdArray / AnyDataFrame / Dynamic on the nums lane.
 		if (VmPdEligibility.isHeapPd(name)) {
 			if (!VmPdEligibility.arityOk(name, args.length))
@@ -259,7 +259,7 @@ class MuseBytecodeCompiler {
 			return;
 		}
 		if (VmPdEligibility.isPdBuiltin(name))
-			throw new VmUnsupported('pd builtin "$name" (TDataFrame/TPdSeries/TIndex opaque — VM U)');
+			throw new VmUnsupported('pd builtin "$name" (TDataFrame/TIndex / opaque Series — VM U)');
 		if (VmNpEligibility.isHeapNd(name)) {
 			if (!VmNpEligibility.arityOk(name, args.length))
 				throw new VmUnsupported('heap ND "$name" arity ${args.length}');
@@ -287,13 +287,14 @@ class MuseBytecodeCompiler {
 	}
 
 	/**
-	 * Cliff-PD: packed `pd_rank1d` data operand (len ≤ MAX_WIN). Mirrors WASM
-	 * `lowerPdRank1d` eligibility — constvec / window / ND handle; frames **U**.
+	 * Cliff-PD: packed `pd_rank1d` + Series (`pd_series` / `pd_shift` /
+	 * `pd_series_values`) with len ≤ MAX_WIN. Constvec / window / ND·Series
+	 * handle; frames **U**.
 	 */
 	function assertHeapPdShapeOk(name:String, args:Array<Expr>):Void {
 		switch (name) {
 			case "pd_rank1d":
-				assertPdRank1dDataOk(args[0]);
+				assertPdPackedDataOk(args[0], "pd_rank1d");
 				if (args.length >= 2) {
 					switch (unwrapParent(args[1])) {
 						case EConst(CBool(_)) | EIdent("true") | EIdent("false"):
@@ -301,27 +302,43 @@ class MuseBytecodeCompiler {
 							throw new VmUnsupported('pd_rank1d pct needs const bool (VM U)');
 					}
 				}
+			case "pd_series":
+				assertPdPackedDataOk(args[0], "pd_series");
+			case "pd_shift":
+				assertSeriesHandleOk(args[0], "pd_shift");
+				if (args.length >= 2) {
+					switch (unwrapParent(args[1])) {
+						case EConst(CInt(k)):
+							if (!VmPdEligibility.fitsShiftPeriods(k))
+								throw new VmUnsupported('pd_shift periods $k > ${VmPdEligibility.MAX_WIN} (VM U)');
+						default:
+							throw new VmUnsupported('pd_shift periods needs const int (VM U)');
+					}
+				}
+			case "pd_series_values":
+				assertSeriesHandleOk(args[0], "pd_series_values");
 			default:
 				null;
 		}
 	}
 
-	function assertPdRank1dDataOk(data:Expr):Void {
+	/** Constvec / window / ND handle data for `pd_rank1d` / `pd_series` (≤ MAX_WIN). */
+	function assertPdPackedDataOk(data:Expr, op:String):Void {
 		switch (unwrapParent(data)) {
 			case EArrayDecl(vs):
 				if (!VmPdEligibility.fitsWin(vs.length))
-					throw new VmUnsupported('pd_rank1d len ${vs.length} > ${VmPdEligibility.MAX_WIN} (VM U)');
+					throw new VmUnsupported('$op len ${vs.length} > ${VmPdEligibility.MAX_WIN} (VM U)');
 				if (!isConstScalarArray(vs))
-					throw new VmUnsupported('pd_rank1d needs const 1-D data (VM U)');
+					throw new VmUnsupported('$op needs const 1-D data (VM U)');
 			case ECall(EIdent("window"), wargs):
 				if (wargs.length != 2)
-					throw new VmUnsupported('pd_rank1d(window) arity (VM U)');
+					throw new VmUnsupported('$op(window) arity (VM U)');
 				switch (unwrapParent(wargs[1])) {
 					case EConst(CInt(k)):
 						if (!VmPdEligibility.fitsWin(k))
-							throw new VmUnsupported('pd_rank1d(window) len $k > ${VmPdEligibility.MAX_WIN} (VM U)');
+							throw new VmUnsupported('$op(window) len $k > ${VmPdEligibility.MAX_WIN} (VM U)');
 					default:
-						throw new VmUnsupported('pd_rank1d(window) needs const len (VM U)');
+						throw new VmUnsupported('$op(window) needs const len (VM U)');
 				}
 			case EIdent(_):
 				// Existing OBJ-lane ND / Array handle — length checked when created.
@@ -329,15 +346,29 @@ class MuseBytecodeCompiler {
 			case ECall(EIdent(inner), _) if (
 				VmNpEligibility.isHeapNd(inner)
 				|| VmNpEligibility.isHeapProducer(inner)
-				|| VmPdEligibility.isHeapPd(inner)
+				|| inner == "pd_rank1d"
+				|| inner == "pd_series_values"
+				|| VmPdEligibility.isHeapSeries(inner)
 			):
 				null;
 			default:
-				throw new VmUnsupported('pd_rank1d operand not a constvec/window/handle (VM U)');
+				throw new VmUnsupported('$op operand not a constvec/window/handle (VM U)');
 		}
 	}
 
-	/** Emit PD heap args: const array → CONST pool; pct bool → CONST; else expr. */
+	/** Series OBJ handle: local, `pd_series`, or `pd_shift` (never frame). */
+	function assertSeriesHandleOk(data:Expr, op:String):Void {
+		switch (unwrapParent(data)) {
+			case EIdent(_):
+				null;
+			case ECall(EIdent(inner), _) if (VmPdEligibility.isHeapSeries(inner)):
+				null;
+			default:
+				throw new VmUnsupported('$op needs Series handle (pd_series/pd_shift) (VM U)');
+		}
+	}
+
+	/** Emit PD heap args: const array → CONST pool; pct/periods → CONST; else expr. */
 	function emitHeapPdArgs(name:String, args:Array<Expr>):Void {
 		switch (name) {
 			case "pd_rank1d":
@@ -354,6 +385,20 @@ class MuseBytecodeCompiler {
 							expr(args[1]);
 					}
 				}
+			case "pd_series":
+				emitHeapNdArg(args[0]);
+			case "pd_shift":
+				expr(args[0]);
+				if (args.length >= 2) {
+					switch (unwrapParent(args[1])) {
+						case EConst(CInt(k)):
+							emit(Op.CONST); emit(constIndex(k));
+						default:
+							expr(args[1]);
+					}
+				}
+			case "pd_series_values":
+				expr(args[0]);
 			default:
 				for (a in args) expr(a);
 		}

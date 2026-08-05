@@ -108,3 +108,7 @@ match=1
 interp trades=400 eq=40F86A0000000000
 vm trades=400 eq=40F86A0000000000
 match=1
+-- MuseVm pd_series/shift handle vs MuseInterp --
+interp trades=197 eq=40F85AAD78E61297
+vm trades=197 eq=40F85AAD78E61297
+match=1

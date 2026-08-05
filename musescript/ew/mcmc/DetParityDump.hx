@@ -183,6 +183,30 @@ class DetParityDump {
 			&& fbits(pdInterp.finalEquity) == fbits(pdVm.finalEquity);
 		buf.add("match=" + (pdMatch ? "1" : "0") + "\n");
 
+		// Cliff PD Series — pd_series / pd_shift OBJ Series → series_values → get_flat.
+		buf.add("-- MuseVm pd_series/shift handle vs MuseInterp --\n");
+		var serSrc = "strategy S { onBar {\n"
+			+ "  when np_get_flat(pd_series_values(pd_shift(pd_series(window(close, 4)), 1)), 3) > 0.0: { long(1); }\n"
+			+ "  when np_get_flat(pd_series_values(pd_shift(pd_series([5.0, 6.0, 7.0]), 1)), 1) != 5.0: { flat(); }\n"
+			+ "} }";
+		var serFeed = musescript.harness.BarFeed.synthetic(200, 11);
+		var serProg = new musescript.parse.MuseParser().parse(serSrc);
+		musescript.builtins.TradeBuiltins.resetCrossState();
+		var serInterp = new musescript.interp.MuseInterp(new musescript.harness.HarnessContext())
+			.runBacktest(serProg, serFeed);
+		serFeed.reset();
+		musescript.builtins.TradeBuiltins.resetCrossState();
+		var serVm = musescript.vm.MuseVm.runBacktest(
+			new musescript.harness.HarnessContext(),
+			new musescript.parse.MuseParser().parse(serSrc),
+			serFeed
+		);
+		buf.add("interp trades=" + serInterp.trades + " eq=" + fbits(serInterp.finalEquity) + "\n");
+		buf.add("vm trades=" + serVm.trades + " eq=" + fbits(serVm.finalEquity) + "\n");
+		var serMatch = serInterp.trades == serVm.trades
+			&& fbits(serInterp.finalEquity) == fbits(serVm.finalEquity);
+		buf.add("match=" + (serMatch ? "1" : "0") + "\n");
+
 		return buf.toString();
 	}
 

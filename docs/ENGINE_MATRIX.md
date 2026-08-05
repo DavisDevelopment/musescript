@@ -110,15 +110,15 @@ eligibility changes; this table is the navigator.
 | **WASM** | **N** (≤64) | **N** packed `(base,len)` | **H** |
 | **NMA** | Expand→interp (`nma-unsupported`) | — | — |
 
-### `muse.pd` (opaque frames + packed rank)
+### `muse.pd` (opaque frames + packed rank + VM Series lane)
 
-| Engine | Construct / select / groupby / … | `pd_rank1d` (≤64) | `read_csv` / `read_parquet` |
-|--------|----------------------------------|-------------------|----------------------------|
-| **Interp** | **N** (Haxe) | **N** | **U** unless grant |
-| **JS** | **B** (`pd_*`) | **B** | grant / Studio (parquet: Node + hyparquet) |
-| **Bytecode VM** | **U** | **H** OBJ `NdArrayF64` (`VmPdEligibility`) | **U** |
-| **WASM** | **U** (opaque fallback) | **N** ≤64 | **U** |
-| **NMA** | Don't force frames into kind-switch | — | — |
+| Engine | Construct / select / groupby / … | `pd_rank1d` (≤64) | Series `pd_series`/`pd_shift`/`values` | `read_csv` / `read_parquet` |
+|--------|----------------------------------|-------------------|----------------------------------------|----------------------------|
+| **Interp** | **N** (Haxe) | **N** | **N** | **U** unless grant |
+| **JS** | **B** (`pd_*`) | **B** | **B** | grant / Studio (parquet: Node + hyparquet) |
+| **Bytecode VM** | **U** (frames/Index) | **H** OBJ `NdArrayF64` | **H** OBJ `Series`/`NdArrayF64` (`VmPdEligibility`) | **U** |
+| **WASM** | **U** (opaque fallback) | **N** ≤64 | **U** (opaque Series) | **U** |
+| **NMA** | Don't force frames into kind-switch | — | — | — |
 
 ## CI
 

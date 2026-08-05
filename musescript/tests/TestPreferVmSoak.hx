@@ -32,6 +32,7 @@ class TestPreferVmSoak extends Test {
 		Assert.isTrue(dump.indexOf("-- MuseVm np_mean(window)") >= 0);
 		Assert.isTrue(dump.indexOf("-- MuseVm np handle") >= 0);
 		Assert.isTrue(dump.indexOf("-- MuseVm pd_rank1d handle") >= 0);
+		Assert.isTrue(dump.indexOf("-- MuseVm pd_series/shift handle") >= 0);
 		var matches = 0;
 		for (line in dump.split("\n")) {
 			if (StringTools.startsWith(StringTools.trim(line), "match=")) {
@@ -39,7 +40,7 @@ class TestPreferVmSoak extends Test {
 				matches++;
 			}
 		}
-		Assert.isTrue(matches >= 3, "expected >=3 match= lines (interp+np+handle VM tiers), got " + matches);
+		Assert.isTrue(matches >= 4, "expected >=4 match= lines (interp+np+handle+pd Series VM tiers), got " + matches);
 	}
 
 	/** Gen-0 corpus through Fitness.vmParityCheck — sacred-path twin of TestVmParityCorpus. */

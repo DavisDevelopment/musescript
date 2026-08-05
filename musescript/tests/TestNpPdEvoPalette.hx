@@ -382,6 +382,39 @@ class TestNpPdEvoPalette extends Test {
 		Assert.notEquals("nma", r.backend, "KPd must not claim columnar NMA");
 	}
 
+	/** Series-lane KPd("shift") is VM-eligible; xs_rank stays panel/frame U. */
+	public function testKPdShiftPreferVmParity() {
+		var gShift = genome(BCmp(">", KPd("shift", "close", 3, "", []), KConst(0.0)));
+		var bars = BarFeed.synthetic(60, 7).all();
+		var prevNma = Fitness.preferNma;
+		var prevVm = Fitness.preferVm;
+		Fitness.preferNma = false;
+		Fitness.preferVm = false;
+		var ref = Fitness.evaluate(gShift, bars, "js", false);
+		Assert.isTrue(ref.ok, "shift ref " + ref.error);
+		var direct = Fitness.evaluateVm(gShift, bars);
+		Assert.isTrue(direct.ok, "shift evaluateVm " + direct.backend + " " + direct.error);
+		Assert.equals("vm", direct.backend);
+		Fitness.preferVm = true;
+		var via = Fitness.evaluate(gShift, bars, "js", false);
+		Fitness.preferNma = prevNma;
+		Fitness.preferVm = prevVm;
+		Assert.equals("vm", via.backend, "KPd shift preferVm route");
+		Assert.equals(ref.trades, via.trades);
+		Assert.equals(
+			haxe.io.FPHelper.doubleToI64(ref.finalEquity),
+			haxe.io.FPHelper.doubleToI64(via.finalEquity),
+			"KPd shift VM finalEquity bits vs Expand→JS");
+
+		var gXs = genome(BCmp(">",
+			KPd("xs_rank", "mom", 5, "AAA", ["AAA", "BBB"]),
+			KConst(0.5)));
+		gXs.panelAction = PATargetWeight("AAA");
+		var blocked = Fitness.evaluateVm(gXs, bars);
+		Assert.isFalse(blocked.ok, "xs_rank must stay vm-unsupported");
+		Assert.equals("vm-unsupported", blocked.backend);
+	}
+
 	public function testExpandPdXsRankInterpSmoke() {
 		// Hand-expanded shapes: packed rank1d (≤64) and frame xs_rank (>64 path).
 		var src1d = '

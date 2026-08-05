@@ -249,7 +249,8 @@ bags (not `long`/`short`/`flat`). Attach a panel tape with `Fitness.configurePan
 portfolio equity/Sharpe (`runPanelBacktest`); classic genomes stay single-name.
 Columnar NMA (`preferNma`) hosts closed `SPanel` + `PABuy`/`PARebalance`/`PATargetWeight`
 /`PABagScanTop`/`PABagRankWeights` via `PanelInline`/`field@SYM` pack (equal bag or
-percentile xs_rank → `bag_norm` → `applyBag`); `KPd` / VM stay Expand→interp/WASM.
+percentile xs_rank → `bag_norm` → `applyBag`); `KPd("xs_rank")` / panel stay
+Expand→interp/WASM; gated Series `KPd("shift")` + packed `pd_rank1d` may hit bytecode VM.
 Open `bag_rank_*` / `symbols()` remain out of genome Expand and NMA.
 Still single-name-only without a universe: classic Expand skeleton.
 Open bags / `symbols()` / `scan_*` remain panel-escape (not genome-grown).

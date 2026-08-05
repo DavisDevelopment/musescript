@@ -47,10 +47,11 @@ and closed bag templates **`PABagScanTop`** / **`PABagRankWeights`** (columnar s
 equal bag or percentile xs_rank → `bag_norm` → `applyBag`) on packed `PanelFeed` columns
 (`preferNma` → backend `nma`). Closed **PD** `KPd` stays `nma-unsupported`. Open
 `bag_rank_*` / `symbols()` stay out of Expand and NMA. Bytecode VM also runs closed NP
-(`VmNpEligibility`) and packed `pd_rank1d` (`VmPdEligibility`); Expand `KPd` / panel stay
-`vm-unsupported`. WASM may claim native for the NP scalar subset and for
-size-capped Expand `pd_rank1d` (`WasmPdEligibility`); wide frame `pd_xs_rank`
-remains all-U (honest fallback).
+(`VmNpEligibility`), packed `pd_rank1d`, and Series-lane `pd_series`/`pd_shift`/
+`pd_series_values` (`VmPdEligibility`); Expand `KPd("xs_rank")` / panel stay
+`vm-unsupported` while gated `KPd("shift")` may hit `--vm`. WASM may claim native for
+the NP scalar subset and for size-capped Expand `pd_rank1d` (`WasmPdEligibility`);
+wide frame `pd_xs_rank` remains all-U (honest fallback).
 
 **Offline loaders / CLI:** `PanelLoader` (`json` bySym, long CSV + `symbol`,
 `--tapes SYM=path`, dir of CSVs). GeneRunner:
@@ -64,8 +65,9 @@ Pre-join DB panels with `tools/fund_panel_loader.py` (offline sqlite/duckdb → 
 
 **NMA / VM:** closed `SPanel` + `PABuy`/`PARebalance`/`PATargetWeight`/`PABagScanTop`/
 `PABagRankWeights` are nma-fast via `PanelInline` + panel packing (`preferNma`). Open
-panel genomes and `KPd` remain Expand→interp/WASM (`nma-unsupported` /
-`vm-unsupported`). Open `bag_rank_*` / `symbols()` stay out of Expand and NMA.
+panel genomes and `KPd("xs_rank")` remain Expand→interp/WASM (`nma-unsupported` /
+`vm-unsupported`); Series `KPd("shift")` may hit bytecode VM. Open `bag_rank_*` /
+`symbols()` stay out of Expand and NMA.
 
 Jenetics (`io.jenetics:jenetics:8.3.0`, Java 21) is the preferred host for
 Engine/selection when deploying on JVM; the Haxe `EvolutionEngine` is the

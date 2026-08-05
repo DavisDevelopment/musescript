@@ -136,9 +136,10 @@ short ND pipelines do not Expand→interp solely for create+reduce.
 
 
 
-**Deferred (both engines):** DataFrame / `TPdSeries` / Index handles — stay **H** (WASM) /
-**U** (VM). Packed `pd_rank1d` is claimed-native on WASM (**N**) and OBJ-lane **H** on
-the bytecode VM (`VmPdEligibility`); see `docs/WASM_PD.md`.
+**Deferred (WASM):** DataFrame / `TPdSeries` / Index handles — stay **H** / opaque **U**.
+Bytecode VM ships Series-lane **H** (`pd_series` / `pd_shift` / `pd_series_values`) plus
+packed `pd_rank1d` (**N** on WASM, OBJ **H** on VM); frames/Index stay VM **U**.
+See `docs/WASM_PD.md`.
 
 
 
