@@ -101,8 +101,12 @@ $trees = @(
   @{ root = "minigames"; exclude = @("minigames.selftest.js") },
   # Phase 6 — Forge visual strategy editor (item 28): ForgePage + ForgeCanvas +
   # graph/tree projections + indicatorStore. forgeLlm routes through the
-  # onDeviceLlm/llmClient seams (honest manual mode on web).
-  @{ root = "lab\forge"; exclude = @("*.selftest.*") }
+  # onDeviceLlm/llmClient seams (honest manual mode on web). Distill-only — do
+  # not grow into Blueprints (/app/forge stays Distill).
+  @{ root = "lab\forge"; exclude = @("*.selftest.*") },
+  # Muse Blueprints IDE (FORGE_OVERHAUL_PLAN Phase 0/1): MuseLab/Studio home —
+  # @xyflow/react canvas + BlueprintDocument IR. Not a Forge rewrite.
+  @{ root = "lab\blueprints"; exclude = @("*.selftest.*", "README.md") }
 )
 
 # ── Vendored file manifest (relative to mobile/src) ─────────────────────────

@@ -11,6 +11,10 @@
 > - **Decision 5** — on-device LLM analogue remains **deferred** (manual Autoresearch /
 >   assist mode; honest stubs).
 >
+> **Forge product overhaul** (next-gen no-code / Muse Blueprints) is tracked separately in
+> [`FORGE_OVERHAUL_PLAN.md`](./FORGE_OVERHAUL_PLAN.md) — this doc only covers web parity of the
+> shipped Forge v1 surface (#28).
+>
 > **Decision 6 (resolved):** dual Firestore + mederos-relay redundancy for social writes,
 > economy wallet, and cross-device paper broker — see `mederos-web/DURABLE_STORE.md`.
 > Relay `/durable/{health,mutate,query}` implemented in `kalshi-ai-advisor/relay/`.
