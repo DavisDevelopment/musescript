@@ -9,6 +9,7 @@ import musescript.dataframe.Pd;
 import musescript.dataframe.Resample;
 import musescript.builtins.MuseHost;
 import musescript.builtins.PdBuiltins;
+import musescript.compile.MuseCompiler;
 import musescript.compile.MuseHostLower;
 import musescript.compile.MusePrinter;
 import musescript.compile.StrategyWasmBackend;
@@ -18,6 +19,7 @@ import musescript.harness.HarnessContext;
 import musescript.interp.MuseInterp;
 import musescript.ndarray.Np;
 import musescript.parse.MuseParser;
+import musescript.builtins.TradeBuiltins;
 
 /**
  * muse.pd M4 — resample OHLCV + tiny WASM N `pd_rank1d`.
@@ -110,11 +112,23 @@ class TestPdM4 extends Test {
 	}
 
 	public function testWasmPdRank1dNative() {
-		Assert.equals(1, WasmPdEligibility.NATIVE_VEC.length);
+		Assert.equals(4, WasmPdEligibility.NATIVE_VEC.length);
 		Assert.isTrue(WasmPdEligibility.isClaimedNative("pd_rank1d"));
+		Assert.isTrue(WasmPdEligibility.isClaimedNative("pd_series"));
+		Assert.isTrue(WasmPdEligibility.isClaimedNative("pd_shift"));
+		Assert.isTrue(WasmPdEligibility.isClaimedNative("pd_series_values"));
+		Assert.isTrue(WasmPdEligibility.isClaimedNative("pd_series_length"));
+		Assert.isFalse(WasmPdEligibility.isDocumentedEscape("pd_series_length"));
+		Assert.isTrue(WasmPdEligibility.isDocumentedEscape("pd_series_name"));
 		Assert.isFalse(WasmPdEligibility.isClaimedNative("pd_xs_rank"));
 		Assert.isTrue(WasmPdEligibility.isDocumentedEscape("pd_resample"));
+		Assert.isFalse(WasmPdEligibility.isDocumentedEscape("pd_series"));
+		Assert.isFalse(WasmPdEligibility.isDocumentedEscape("pd_shift"));
 		Assert.equals(64, WasmPdEligibility.MAX_VEC_LEN);
+		Assert.isTrue(WasmPdEligibility.arityOk("pd_series", 1));
+		Assert.isFalse(WasmPdEligibility.arityOk("pd_series", 2));
+		Assert.isTrue(WasmPdEligibility.fitsShiftPeriods(1));
+		Assert.isFalse(WasmPdEligibility.fitsShiftPeriods(65));
 
 		var src = '
 			strategy PdRank1dNative {
@@ -131,6 +145,112 @@ class TestPdM4 extends Test {
 		// const-fold preferred: sum of ranks = 4+1.5+3+1.5 = 10
 		Assert.isTrue(wat.indexOf("f64.const 10") >= 0 || wat.indexOf("call $vec_rank") >= 0, wat);
 	}
+
+	public function testWasmPdSeriesLaneNative() {
+		var src = '
+			strategy PdSeriesNative {
+				onBar {
+					s = muse.pd.series([1.0, 2.0, 3.0])
+					when muse.np.get_flat(muse.pd.series_values(s), 1) == 2.0: long()
+					when muse.np.sum(muse.pd.series_values(s)) != 6.0: flat()
+				}
+			}
+		';
+		var wat = StrategyWasmBackend.emitWat(MuseHostLower.lower(new MuseParser().parse(src)));
+		Assert.notNull(wat, "Series lane must not force opaque fallback");
+		Assert.isTrue(wat.indexOf("call $host_eval") < 0, wat);
+	}
+
+	public function testWasmPdSeriesShiftNative() {
+		var src = '
+			strategy PdSeriesShift {
+				onBar {
+					when muse.np.get_flat(muse.pd.series_values(muse.pd.shift(muse.pd.series(window(close, 4)), 1)), 3) > 0.0: long()
+					when muse.np.get_flat(muse.pd.series_values(muse.pd.shift(muse.pd.series([5.0, 6.0, 7.0]), 1)), 1) != 5.0: flat()
+				}
+			}
+		';
+		var wat = StrategyWasmBackend.emitWat(MuseHostLower.lower(new MuseParser().parse(src)));
+		Assert.notNull(wat, "pd_shift Series chain must emit");
+		Assert.isTrue(wat.indexOf("call $host_eval") < 0, wat);
+		// window path needs runtime shift; const nest may fold
+		Assert.isTrue(
+			wat.indexOf("call $vec_shift") >= 0
+			|| wat.indexOf("call $window_to_scratch") >= 0
+			|| wat.indexOf("f64.const") >= 0,
+			wat
+		);
+	}
+
+	public function testWasmPdSeriesLengthNative() {
+		var src = '
+			strategy PdSeriesLen {
+				onBar {
+					when muse.pd.series_length(muse.pd.series([1.0, 2.0, 3.0])) == 3.0: long()
+				}
+			}
+		';
+		var wat = StrategyWasmBackend.emitWat(MuseHostLower.lower(new MuseParser().parse(src)));
+		Assert.notNull(wat, "pd_series_length must emit");
+		Assert.isTrue(wat.indexOf("call $host_eval") < 0, wat);
+		Assert.isTrue(wat.indexOf("f64.const 3") >= 0 || wat.indexOf("f64.convert_i32") >= 0, wat);
+	}
+
+	public function testWasmPdSeriesIndexCtorStillOpaque() {
+		var src = '
+			strategy PdSeriesIndexOpaque {
+				onBar {
+					when muse.pd.series([1.0], muse.pd.index_range(1)) != null: long()
+				}
+			}
+		';
+		var wat = StrategyWasmBackend.emitWat(MuseHostLower.lower(new MuseParser().parse(src)));
+		Assert.isNull(wat, "pd_series index/name arity stays opaque U");
+	}
+
+	public function testWasmPdFrameShiftStillOpaque() {
+		var src = '
+			strategy PdFrameShiftOpaque {
+				onBar {
+					when muse.pd.shift(muse.pd.from_columns({a: [1.0, 2.0]}), 1) != null: long()
+				}
+			}
+		';
+		var wat = StrategyWasmBackend.emitWat(MuseHostLower.lower(new MuseParser().parse(src)));
+		Assert.isNull(wat, "frame pd_shift stays opaque U");
+	}
+
+	#if (js || python)
+	public function testInterpWasmParitySeriesShift() {
+		if (!StrategyWasmBackend.hostReady()) {
+			Assert.isTrue(true);
+			return;
+		}
+		var source = '
+			strategy PdSeriesParity {
+				onBar {
+					when muse.np.get_flat(muse.pd.series_values(muse.pd.shift(muse.pd.series(window(close, 4)), 1)), 3) > 0.0: long()
+					when muse.np.get_flat(muse.pd.series_values(muse.pd.shift(muse.pd.series([5.0, 6.0, 7.0]), 1)), 1) != 5.0: flat()
+				}
+			}
+		';
+		var prog = MuseHostLower.lower(new MuseParser().parse(source));
+		var wat = StrategyWasmBackend.emitWat(prog);
+		Assert.notNull(wat);
+		Assert.isTrue(wat.indexOf("call $host_eval") < 0, wat);
+
+		var feed = BarFeed.synthetic(40, 11);
+		var wasmFn = MuseCompiler.compile(prog, { target: "wasm" });
+		var wasmResult = wasmFn({ feed: feed });
+		TradeBuiltins.resetCrossState();
+		var interpResult = new MuseInterp(new HarnessContext()).runBacktest(
+			MuseHostLower.lower(new MuseParser().parse(source)),
+			BarFeed.synthetic(40, 11)
+		);
+		Assert.equals(interpResult.trades, wasmResult.trades);
+		Assert.isTrue(Math.abs(interpResult.finalEquity - wasmResult.finalEquity) < 1e-6);
+	}
+	#end
 
 	public function testWasmPdRank1dRuntimeKernel() {
 		var src = '

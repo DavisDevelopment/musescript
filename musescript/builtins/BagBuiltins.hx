@@ -12,11 +12,13 @@ import musescript.harness.SymbolBag;
  *
  * Evo Expand closes a narrow subset only: fixed-universe score object literals →
  * `bag_from_scan` / `bag_from_dict`+`bag_norm` → `portfolio_apply`
- * (`PanelAction.PABagScanTop` / `PABagRankWeights`). WASM HostABI lowers those
- * closed forms (`apply_bag_scan` / `apply_bag_weights`). NMA hosts both columnarily
+ * (`PanelAction.PABagScanTop` / `PABagRankWeights`). WASM HostABI also gates
+ * honesty-safe literals: bottom scan, raw `bag_from_dict`, `bag_equal([...])`,
+ * `bag_pair(L,S[,scale])` → `apply_bag_*`. NMA hosts Expand templates columnarily
  * (`preferNma`): scan → equal bag; rank-weights → percentile xs_rank → `bag_norm`.
- * Open recipes (`bag_rank_mom`, `bag_computed`, `bag_graph`, `symbols()` loops) stay
- * authored surface — not genome Expand.
+ * Open recipes (`bag_rank_mom`, `bag_computed`, `bag_graph`, `symbols()` loops),
+ * assigned bag locals, and free-standing `bag_*`/`scan_*` stay authored surface /
+ * WASM U — not genome Expand.
  */
 class BagBuiltins {
 	/**

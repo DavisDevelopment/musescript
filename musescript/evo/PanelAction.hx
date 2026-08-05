@@ -13,8 +13,10 @@ package musescript.evo;
  * Rank→bag templates (`PABagScanTop` / `PABagRankWeights`) are **closed-palette** only:
  * fixed-universe score object literals + `bag_from_scan` / `bag_from_dict`+`bag_norm` →
  * `portfolio_apply`. No `symbols()` loops, no `bag_rank_mom` / `bag_computed` / graph recipes.
- * Closed forms HostABI on WASM (`apply_bag_scan` / `apply_bag_weights`); open bags stay
- * `PANEL_HOST_ESCAPE` → opaque whole-module / host_eval (honest). Interp/JS fitness OK.
+ * Closed Expand forms HostABI on WASM (`apply_bag_scan` / `apply_bag_weights`);
+ * additional gated literals (`apply_bag_raw` / `apply_bag_equal` / `apply_bag_pair` /
+ * bottom scan) also HostABI. Open bags / bag locals stay `PANEL_HOST_ESCAPE` →
+ * opaque whole-module / host_eval (honest). Interp/JS fitness OK.
  * NMA (`preferNma`): both bag templates are columnar-fast — `PABagScanTop` (equal bag) and
  * `PABagRankWeights` (percentile xs_rank → `bag_norm` → `applyBag`). Open `bag_rank_*` /
  * `symbols()` stay out of Expand and NMA.

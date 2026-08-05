@@ -41,10 +41,12 @@ import musescript.harness.HarnessContext;
  * lower natively. Panel: literal-symbol `close_of` / `mom_of` / `sma_of` /
  * `ema_of` / `rsi_of` / `sym_available` / `fund_of` pack into `field@SYM`
  * feature slots; literal `buy`/`sell_all`/`target_weight`/`rebalance_equal([…])`
- * and closed Expand `portfolio_apply(bag_from_scan|{bag_norm(bag_from_dict)})`
- * (`apply_bag_scan` / `apply_bag_weights`) are HostABI. Open bags, computed/graph
- * bags, `symbols()`, scan/portfolio queries stay `host_eval` or whole-module fallback
- * (`StrategyWasmEmitter.PANEL_HOST_ESCAPE`). muse.np: documented packed-f64
+ * and gated `portfolio_apply(bag_*)` HostABI (`apply_bag_scan` ±bottom /
+ * `apply_bag_weights` / `apply_bag_raw` / `apply_bag_equal` / `apply_bag_pair`).
+ * Bag locals, open recipes (`bag_rank_*` / computed / graph), `symbols()`,
+ * free-standing scan/portfolio queries, `portfolio_add|sub|mask` stay
+ * `host_eval` or whole-module fallback (`StrategyWasmEmitter.PANEL_HOST_ESCAPE`).
+ * muse.np: documented packed-f64
  * native subset + per-op host_eval escapes (`WasmNpEligibility` / docs/WASM_NP.md).
  */
 class MuseHost {
@@ -138,6 +140,8 @@ class MuseHost {
 		"iloc" => "pd_iloc", "to_ndarray" => "pd_to_ndarray",
 		"series_values" => "pd_series_values", "series_name" => "pd_series_name",
 		"series_length" => "pd_series_length", "index_kind" => "pd_index_kind",
+		"assign_str" => "pd_assign_str", "get_str" => "pd_get_str", "str_values" => "pd_str_values",
+		"has_str" => "pd_has_str", "try_get" => "pd_try_get",
 		"index_range" => "pd_index_range", "index_floats" => "pd_index_floats", "index_strings" => "pd_index_strings",
 		"from_bars" => "pd_from_bars", "from_bar_column" => "pd_from_bar_column",
 		"from_panel" => "pd_from_panel",

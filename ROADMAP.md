@@ -158,10 +158,11 @@ Richer order semantics compose as **rules on the sim side**, not new AST verbs
   `close_of`/`mom_of`/`sma_of`/`ema_of`/`rsi_of`/`sym_available`/`fund_of` on
   the feature tape (`field@SYM` from `PanelFeed`); HostABI
   `buy`/`sell_all`/`target_weight`/`rebalance_equal([...])` plus closed Expand
-  bags `portfolio_apply(bag_from_scan|{bag_norm(bag_from_dict)})` →
-  `apply_bag_scan`/`apply_bag_weights` (native scores, host `applyBag` — no
-  opaque whole-module bail). Open bags / scan / portfolio queries remain
-  host_eval / opaque U — see `PANEL_HOST_ESCAPE`, `TestPanelWasmParity`.
+  bags `portfolio_apply(bag_from_scan|{bag_norm(bag_from_dict)}|bag_from_dict|
+  bag_equal|bag_pair)` → `apply_bag_*` (native scores, host `applyBag` — no
+  opaque whole-module bail). Bag locals / open recipes / free-standing scan /
+  portfolio queries / `portfolio_add|sub|mask` remain host_eval / opaque U —
+  see `PANEL_HOST_ESCAPE`, `TestPanelWasmParity`, docs/WASM_PD.md.
   Panel evo genomes: `SPanel` +
   `Variation.configureForUniverse` → Expand `*_of`; `PanelAction`
   (`PABuy`/`PARebalance`/`PATargetWeight`/`PABagScanTop`/`PABagRankWeights`) →

@@ -235,12 +235,16 @@ region next to OHLCV. Live network/EDGAR fetch is intentionally out of strategy 
 `ema_of` / `rsi_of` / `sym_available` / `fund_of` / OHLCV `*_of`) lower natively onto dense
 feature slots keyed `field@SYM`, packed from a calendar-aligned `PanelFeed` (missing bars →
 NaN; PIT join stays host-side). Drive with `ctx.panel`. Literal `buy` / `sell_all` /
-`target_weight` / `rebalance_equal([...])` are HostABI imports. Closed Expand bags
-(`portfolio_apply(bag_from_scan({SYM: score…}, k))` /
-`portfolio_apply(bag_norm(bag_from_dict({…})))`) are HostABI `apply_bag_scan` /
-`apply_bag_weights` (native score reads + host `applyBag` — no opaque whole-module
-bail). **Escape list** (host_eval or whole-module fallback): open bags, computed bags,
-graph bags, `symbols()`, `scan_top`/`scan_bottom`, portfolio queries (`pos`/`holdings`/…). See
+`target_weight` / `rebalance_equal([...])` are HostABI imports. Gated bag applies
+(`portfolio_apply(bag_from_scan({SYM:…}, k[, name][, bottom]))` /
+`portfolio_apply(bag_norm(bag_from_dict({…})))` /
+`portfolio_apply(bag_from_dict({…}))` /
+`portfolio_apply(bag_equal([…]))` /
+`portfolio_apply(bag_pair(L,S[,scale]))`) are HostABI `apply_bag_*` (native score
+reads + host `applyBag` — no opaque whole-module bail). **Escape list**
+(host_eval or whole-module fallback): bag locals, open recipes, computed/graph
+bags, `symbols()`, free-standing `scan_top`/`scan_bottom`, portfolio queries
+(`pos`/`holdings`/…), `portfolio_add|sub|mask`. See
 `StrategyWasmEmitter.PANEL_HOST_ESCAPE`. Panel evo genomes: `SPanel` leaves under
 `Variation.configureForUniverse` → Expand `*_of("SYM",…)`; constrained `PanelAction`
 templates → HostABI `buy`/`sell_all`/`rebalance_equal([...])`/`target_weight` / closed
@@ -253,7 +257,7 @@ percentile xs_rank → `bag_norm` → `applyBag`); `KPd("xs_rank")` / panel stay
 Expand→interp/WASM; gated Series `KPd("shift")` + packed `pd_rank1d` may hit bytecode VM.
 Open `bag_rank_*` / `symbols()` remain out of genome Expand and NMA.
 Still single-name-only without a universe: classic Expand skeleton.
-Open bags / `symbols()` / `scan_*` remain panel-escape (not genome-grown).
+Bag locals / open recipes / free-standing `scan_*` remain panel-escape (not genome-grown).
 
 ## `musescript.evo` — typed genetic-programming engine
 

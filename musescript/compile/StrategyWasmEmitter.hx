@@ -10,6 +10,7 @@ import musescript.ast.ConstructOnce;
 import musescript.types.BuiltinSigs;
 import musescript.builtins.MlBuiltins;
 import musescript.builtins.StatsBuiltins;
+import musescript.dataframe.FrameWindow;
 import musescript.dataframe.GroupBy;
 import musescript.ew.mcmc.DetMath;
 import musescript.evo.Palette;
@@ -35,19 +36,26 @@ import musescript.ndarray.Np;
  * feature slots keyed `field@SYM` (same as `PortfolioBuiltins.seriesKey`) —
  * calendar-aligned panel columns packed by the host from `PanelFeed`.
  * Literal `buy`/`sell_all`/`target_weight`/`rebalance_equal([...])` are HostABI
- * imports. Closed Expand bags — `portfolio_apply(bag_from_scan({SYM: score…}, k))`
- * and `portfolio_apply(bag_norm(bag_from_dict({SYM: w…})))` with fixed literal
- * universes — lower as HostABI `apply_bag_scan` / `apply_bag_weights` (native
- * score reads + host `applyBag`; no opaque whole-module bail). Open bags /
- * computed bags / graph bags / `symbols()` / scan / portfolio queries stay
- * `host_eval` or whole-module fallback.
+ * imports. Closed / gated bag applies (fixed literal universes ≤64) HostABI:
+ *   `portfolio_apply(bag_from_scan({SYM:…}, k[, name][, bottom]))` → `apply_bag_scan`
+ *   `portfolio_apply(bag_norm(bag_from_dict({SYM:…})))` → `apply_bag_weights`
+ *   `portfolio_apply(bag_from_dict({SYM:…}))` → `apply_bag_raw` (no bag_norm)
+ *   `portfolio_apply(bag_equal([…]))` → `apply_bag_equal`
+ *   `portfolio_apply(bag_pair(L,S[,scale]))` → `apply_bag_pair`
+ * Native score/`*_of` reads + host `applyBag` — no opaque whole-module bail when
+ * the gated shape matches. **Deferred U** (honest refuse): assigned bag locals,
+ * `bag_rank_*` / `bag_computed` / `bag_graph` / `symbols()`, free-standing
+ * `bag_*`/`scan_*`, `portfolio_add`/`sub`/`mask`, nested bag algebra, >64
+ * universes — see `PANEL_HOST_ESCAPE` / docs/WASM_PD.md.
  *
  * muse.np / flat `np_*` (after MuseHostLower): documented packed-f64 subset is
  * native on VEC_SCRATCH (`WasmNpEligibility`); everything else is per-statement
  * `host_eval` (H), not whole-module fallback — see docs/WASM_NP.md.
  *
- * muse.pd tiny N: `pd_rank1d` ≤64 → `$vec_rank` / `$vec_rank_pct`
- * (`WasmPdEligibility`). Frame-returning `pd_*` stay opaque whole-module U.
+ * muse.pd tiny N: `pd_rank1d` ≤64 → `$vec_rank` / `$vec_rank_pct`; Series lane
+ * `pd_series` / `pd_shift` / `pd_series_values` / `pd_series_length` (≤64, const periods, arity-1 ctor)
+ * → packed `(base,len)` + `$vec_shift` (`WasmPdEligibility`). Frame-returning
+ * `pd_*` and Series index/name / frame `pd_shift` stay opaque whole-module U.
  */
 class StrategyWasmEmitter {
 	var locals:Map<String, String> = new Map();
@@ -61,7 +69,8 @@ class StrategyWasmEmitter {
 	var nextCrossSlot:Int = 0;
 	var nextRiseSlot:Int = 0;
 	var scratchCursor:Int = 0;
-	var vectorLocals:Map<String, {baseLocal:String, lenLocal:String, maxLen:Null<Int>}> = new Map();
+	/** Packed scratch locals. `isSeries` marks Series-lane producers (`pd_series` / `pd_shift`) for `pd_shift` / `pd_series_values` gates (ND locals stay false). */
+	var vectorLocals:Map<String, {baseLocal:String, lenLocal:String, maxLen:Null<Int>, isSeries:Bool}> = new Map();
 	var usedIndicators:Map<String, Bool> = new Map();
 	/**
 	 * Hybrid compilation (F1): statements the native emitter can't lower are
@@ -930,9 +939,9 @@ class StrategyWasmEmitter {
 	 *  strategy must fall back to interp/js. Checks RETURN type only: a builtin consuming an opaque
 	 *  literal but returning a scalar (graph_degree) still escape-compiles, so it's not flagged.
 	 *
-	 * Carve-out: closed Expand `portfolio_apply(bag_from_scan|{bag_norm(bag_from_dict)})`
-	 * HostABI patterns never materialize `TBag` on the WASM side (scores spill to scratch;
-	 * host `applyBag`), so nested `bag_*` there do **not** force whole-module fallback. */
+	 * Carve-out: gated HostABI `portfolio_apply(bag_*)` (`matchClosedBagApplyArg`) never
+	 * materialize `TBag` on the WASM side (scores/weights spill or packed literals; host
+	 * `applyBag`), so nested `bag_*` in those forms do **not** force whole-module fallback. */
 	function programProducesOpaqueBuiltin(stmts:Array<Stmt>):Bool {
 		for (s in stmts) if (stmtProducesOpaqueLeak(s)) return true;
 		return false;
@@ -980,10 +989,23 @@ class StrategyWasmEmitter {
 				var m = StrategyWasmEmitter.matchClosedBagApplyArg(args[0]);
 				for (f in m.fields) if (exprProducesOpaqueLeak(f.e)) return true;
 				false;
+			case ECall(EIdent(name), args) if (
+				WasmPdEligibility.isNativeSeries(name)
+				|| name == "pd_series_values"
+				|| name == "pd_series_length"
+			):
+				// Eligible Series lane lowers to packed scratch — not whole-module opaque.
+				// Ineligible arity / nested frame forms still force U below via TPdSeries / TDataFrame.
+				if (!WasmPdEligibility.arityOk(name, args.length)) {
+					var sigBad = musescript.types.BuiltinSigs.get(name);
+					return sigBad != null && isOpaqueObjectType(sigBad.ret);
+				}
+				for (a in args) if (exprProducesOpaqueLeak(a)) return true;
+				false;
 			case ECall(callee, args):
 				switch (callee) {
-					case EIdent(name):
-						var sig = musescript.types.BuiltinSigs.get(name);
+					case EIdent(nm):
+						var sig = musescript.types.BuiltinSigs.get(nm);
 						if (sig != null && isOpaqueObjectType(sig.ret)) return true;
 					default:
 				}
@@ -1051,8 +1073,9 @@ class StrategyWasmEmitter {
 	}
 
 	/** The object-carrying MuseTypes the WASM on-bar backend can neither lower nor round-trip through
-	 *  an escape region. Deliberately EXCLUDES vector/matrix (which the emitter handles) and
-	 *  scalar-ish feature/metric/string types. */
+	 *  an escape region. Deliberately EXCLUDES vector/matrix (which the emitter handles), eligible
+	 *  packed Series (`TPdSeries` only when the call is not native Series-lane — see
+	 *  `exprProducesOpaqueLeak`), and scalar-ish feature/metric/string types. */
 	static function isOpaqueObjectType(t:musescript.types.MuseType):Bool {
 		return switch (t) {
 			case TProbCloud | TGraph | TGraphPath | TGraphRanks | TModel | TTree
@@ -1618,13 +1641,37 @@ class StrategyWasmEmitter {
 			case "np_sum":
 				assertNpAxis0Ok(args);
 				emitNpSum(args);
+			case "np_min":
+				assertNpAxis0Ok(args);
+				emitNpReduce(args, "vec_min", function(xs) return Np.min(Np.asarray(xs)));
+			case "np_max":
+				assertNpAxis0Ok(args);
+				emitNpReduce(args, "vec_max", function(xs) return Np.max(Np.asarray(xs)));
+			case "np_prod":
+				assertNpAxis0Ok(args);
+				emitNpReduce(args, "vec_prod", function(xs) return Np.prod(Np.asarray(xs)));
+			case "np_std":
+				assertNpStdVarOk(args);
+				emitNpStdVar(args, true);
+			case "np_var":
+				assertNpStdVarOk(args);
+				emitNpStdVar(args, false);
+			case "np_size":
+				emitNpSize(args);
+			case "np_ndim":
+				emitNpNdim(args);
 			case "np_get_flat":
 				emitNpGetFlat(args);
-			// Vector-producing muse.np — assign/nest via lowerVecOperand only.
+			case "pd_series_length":
+				emitPdSeriesLength(args);
+			// Vector-producing muse.np / pd Series lane — assign/nest via lowerVecOperand only.
 			case "np_asarray" | "np_array" | "np_zeros" | "np_ones" | "np_full"
 			   | "np_add" | "np_subtract" | "np_multiply" | "np_divide"
-			   | "np_cumsum" | "np_diff" | "np_exp" | "np_log" | "np_matmul"
-			   | "pd_rank1d":
+			   | "np_minimum" | "np_maximum"
+			   | "np_cumsum" | "np_diff" | "np_exp" | "np_log"
+			   | "np_negative" | "np_abs" | "np_sqrt" | "np_square" | "np_sign" | "np_clip"
+			   | "np_matmul"
+			   | "pd_rank1d" | "pd_series" | "pd_shift" | "pd_series_values":
 				throw new EmitUnsupported();
 			// Dynamic graph objects/results have no Strategy-WASM ABI yet. Refuse
 			// emission explicitly so MuseCompiler selects its documented host fallback.
@@ -1656,9 +1703,9 @@ class StrategyWasmEmitter {
 	 * WASM panel escape list: these stay host_eval / whole-module fallback when used
 	 * as free-standing producers. Native/hybrid subset: literal-symbol OHLCV `*_of` /
 	 * `mom_of` / `sma_of` / `ema_of` / `rsi_of` / `sym_available` / `fund_of`, plus HostABI
-	 * `buy` / `sell_all` / `target_weight` / literal-array `rebalance_equal`, plus closed
-	 * `portfolio_apply(bag_from_scan|{bag_norm(bag_from_dict)})` → `apply_bag_scan` /
-	 * `apply_bag_weights` (nested bag_* in that form are NOT whole-module bail).
+	 * `buy` / `sell_all` / `target_weight` / literal-array `rebalance_equal`, plus gated
+	 * `portfolio_apply(bag_*)` HostABI (`apply_bag_*` — nested bag_* in matching forms are
+	 * NOT whole-module bail). Free-standing bag/scan producers stay escape.
 	 */
 	public static final PANEL_HOST_ESCAPE:Array<String> = [
 		"symbols", "bag_new", "bag_set", "bag_get", "bag_has", "bag_delete", "bag_name",
@@ -1675,14 +1722,15 @@ class StrategyWasmEmitter {
 		"portfolio_orders_pending", "portfolio_orders_cancel_all",
 		"portfolio_alloc_group_id", "portfolio_cancel_group"
 		// buy / sell_all / target_weight / rebalance_equal(literal[]): HostABI
-		// closed portfolio_apply(bag_from_scan|bag_norm(bag_from_dict)): HostABI apply_bag_*
+		// gated portfolio_apply(bag_*): apply_bag_scan|weights|raw|equal|pair
+		// DEFER U: bag locals / open recipes / portfolio_add|sub|mask / free-standing bag_*
 		// ema_of / rsi_of: native panel series slots (removed from escape)
 	];
 
 	/** muse.np ops documented as WASM host_eval / U — alias of `WasmNpEligibility.HOST_ESCAPE`. */
 	public static final NP_HOST_ESCAPE:Array<String> = WasmNpEligibility.HOST_ESCAPE;
 
-	/** muse.pd ops — all H/U / opaque fallback; alias of `WasmPdEligibility.HOST_ESCAPE`. */
+	/** muse.pd ops documented as WASM H/U / opaque fallback — alias of `WasmPdEligibility.HOST_ESCAPE` (Series lane NATIVE_VEC excluded). */
 	public static final PD_HOST_ESCAPE:Array<String> = WasmPdEligibility.HOST_ESCAPE;
 
 	/** Object / string order args (specs, tags, qty/frac flats) — HostABI is scalar qty only. */
@@ -1740,16 +1788,28 @@ class StrategyWasmEmitter {
 	public static inline var REBALANCE_SYM_SEP = "\x1f";
 
 	/**
-	 * Closed Expand bag apply: literal-key object scores + `bag_from_scan` / `bag_norm(bag_from_dict)`.
-	 * Used by HostABI emit and by the opaque-bail carve-out.
+	 * Gated HostABI bag apply matcher (Expand templates + honesty-safe literals).
+	 * kind: scan | norm | raw | equal | pair. Used by emit + opaque-bail carve-out.
+	 * Returns null → EmitUnsupported / whole-module U (do not invent an execution model).
 	 */
-	static function matchClosedBagApplyArg(e:Expr):Null<{kind:String, fields:Array<{sym:String, e:Expr}>, topK:Int}> {
+	static function matchClosedBagApplyArg(e:Expr):Null<{
+		kind:String,
+		fields:Array<{sym:String, e:Expr}>,
+		topK:Int,
+		bottom:Bool,
+		equalSyms:Array<String>,
+		pairLong:String,
+		pairShort:String,
+		pairScale:Float
+	}> {
 		return switch (unwrapParent(e)) {
 			case ECall(EIdent("bag_from_scan"), args) if (args.length >= 2):
+				var bottom = false;
 				if (args.length >= 4) {
 					switch (unwrapParent(args[3])) {
-						case EConst(CBool(true)): return null; // bottom scan stays opaque
-						default:
+						case EConst(CBool(true)): bottom = true;
+						case EConst(CBool(false)): bottom = false;
+						default: return null; // non-const bottom → refuse
 					}
 				}
 				var fields = literalScoreObjectFields(args[0]);
@@ -1757,15 +1817,51 @@ class StrategyWasmEmitter {
 				var k = tryConstInt(args[1]);
 				if (k == null || k < 1) return null;
 				if (!WasmNpEligibility.fitsVecLen(fields.length)) return null;
-				{ kind: "scan", fields: fields, topK: k };
+				{
+					kind: "scan", fields: fields, topK: k, bottom: bottom,
+					equalSyms: [], pairLong: "", pairShort: "", pairScale: 1.0
+				};
 			case ECall(EIdent("bag_norm"), nargs) if (nargs.length >= 1):
 				switch (unwrapParent(nargs[0])) {
 					case ECall(EIdent("bag_from_dict"), dargs) if (dargs.length >= 1):
 						var fieldsN = literalScoreObjectFields(dargs[0]);
 						if (fieldsN == null) return null;
 						if (!WasmNpEligibility.fitsVecLen(fieldsN.length)) return null;
-						{ kind: "norm", fields: fieldsN, topK: 0 };
-					default: null;
+						{
+							kind: "norm", fields: fieldsN, topK: 0, bottom: false,
+							equalSyms: [], pairLong: "", pairShort: "", pairScale: 1.0
+						};
+					default: null; // bag_norm of open/local bag → DEFER U
+				};
+			case ECall(EIdent("bag_from_dict"), dargs) if (dargs.length >= 1):
+				var fieldsR = literalScoreObjectFields(dargs[0]);
+				if (fieldsR == null) return null;
+				if (!WasmNpEligibility.fitsVecLen(fieldsR.length)) return null;
+				{
+					kind: "raw", fields: fieldsR, topK: 0, bottom: false,
+					equalSyms: [], pairLong: "", pairShort: "", pairScale: 1.0
+				};
+			case ECall(EIdent("bag_equal"), eargs) if (eargs.length >= 1):
+				var symsEq = literalSymStringList(eargs[0]);
+				if (symsEq == null || symsEq.length == 0) return null;
+				if (!WasmNpEligibility.fitsVecLen(symsEq.length)) return null;
+				{
+					kind: "equal", fields: [], topK: 0, bottom: false,
+					equalSyms: symsEq, pairLong: "", pairShort: "", pairScale: 1.0
+				};
+			case ECall(EIdent("bag_pair"), pargs) if (pargs.length >= 2):
+				var longS = tryConstString(pargs[0]);
+				var shortS = tryConstString(pargs[1]);
+				if (longS == null || shortS == null || longS == "" || shortS == "") return null;
+				var scale = 1.0;
+				if (pargs.length >= 3) {
+					var sc = tryConstFloat(pargs[2]);
+					if (sc == null) return null; // dynamic scale → DEFER U
+					scale = sc;
+				}
+				{
+					kind: "pair", fields: [], topK: 0, bottom: false,
+					equalSyms: [], pairLong: longS, pairShort: shortS, pairScale: scale
 				};
 			default: null;
 		};
@@ -1793,6 +1889,29 @@ class StrategyWasmEmitter {
 		};
 	}
 
+	/** Literal `["AAA","BBB"]` for gated `bag_equal` apply (dynamic lists → U). */
+	static function literalSymStringList(e:Expr):Null<Array<String>> {
+		return switch (unwrapParent(e)) {
+			case EArrayDecl(values):
+				if (values.length == 0) return null;
+				var out:Array<String> = [];
+				for (v in values) {
+					var s = tryConstString(v);
+					if (s == null || s == "") return null;
+					out.push(s);
+				}
+				out;
+			default: null;
+		};
+	}
+
+	static function tryConstString(e:Expr):Null<String> {
+		return switch (unwrapParent(e)) {
+			case EConst(CString(s)): s;
+			default: null;
+		};
+	}
+
 	static function tryConstInt(e:Expr):Null<Int> {
 		return switch (unwrapParent(e)) {
 			case EConst(CInt(i)): i;
@@ -1804,26 +1923,60 @@ class StrategyWasmEmitter {
 		};
 	}
 
+	static function tryConstFloat(e:Expr):Null<Float> {
+		return switch (unwrapParent(e)) {
+			case EConst(CInt(i)): i * 1.0;
+			case EConst(CFloat(f)): f;
+			case EUnop("-", true, inner):
+				var v = tryConstFloat(inner);
+				v == null ? null : -v;
+			default: null;
+		};
+	}
+
 	/**
-	 * HostABI closed bag apply: spill native score/weight f64s into VEC_SCRATCH, pass
-	 * packed symbol list + ptr/len to host `applyBag` (scan → equal bag of top-k;
-	 * norm → bag_norm then replace apply).
+	 * HostABI gated bag apply: spill scores/weights or pack literal syms → host applyBag.
+	 * scan (±bottom) / norm / raw / equal / pair. Unknown match → EmitUnsupported.
 	 */
 	function emitClosedBagApply(args:Array<Expr>):String {
 		if (args.length < 1) throw new EmitUnsupported();
 		var m = matchClosedBagApplyArg(args[0]);
-		if (m == null || m.fields.length == 0) throw new EmitUnsupported();
+		if (m == null) throw new EmitUnsupported();
+		switch (m.kind) {
+			case "equal":
+				if (m.equalSyms.length == 0) throw new EmitUnsupported();
+				needImport("apply_bag_equal", "(param i32)");
+				return "i32.const " + strId(m.equalSyms.join(REBALANCE_SYM_SEP))
+					+ "\n    call $apply_bag_equal\n    f64.const 0";
+			case "pair":
+				needImport("apply_bag_pair", "(param i32 i32 f64)");
+				return "i32.const " + strId(m.pairLong)
+					+ "\n    i32.const " + strId(m.pairShort)
+					+ "\n    f64.const " + m.pairScale
+					+ "\n    call $apply_bag_pair\n    f64.const 0";
+			default:
+		}
+		if (m.fields.length == 0) throw new EmitUnsupported();
 		var spill = spillArrayDecl([for (f in m.fields) f.e]);
 		var pack = [for (f in m.fields) f.sym].join(REBALANCE_SYM_SEP);
 		var sid = strId(pack);
 		if (m.kind == "scan") {
-			needImport("apply_bag_scan", "(param i32 i32 i32 i32)");
+			needImport("apply_bag_scan", "(param i32 i32 i32 i32 i32)");
 			return spill.prelude
 				+ "\n    i32.const " + sid
 				+ "\n    i32.const " + m.topK
 				+ "\n    " + spill.baseExpr
 				+ "\n    " + spill.lenExpr
+				+ "\n    i32.const " + (m.bottom ? 1 : 0)
 				+ "\n    call $apply_bag_scan\n    f64.const 0";
+		}
+		if (m.kind == "raw") {
+			needImport("apply_bag_raw", "(param i32 i32 i32)");
+			return spill.prelude
+				+ "\n    i32.const " + sid
+				+ "\n    " + spill.baseExpr
+				+ "\n    " + spill.lenExpr
+				+ "\n    call $apply_bag_raw\n    f64.const 0";
 		}
 		needImport("apply_bag_weights", "(param i32 i32 i32)");
 		return spill.prelude
@@ -1971,12 +2124,12 @@ class StrategyWasmEmitter {
 		vectorLocals.remove(name);
 	}
 
-	function bindVectorLocal(name:String, vec:{prelude:String, baseExpr:String, lenExpr:String, maxLen:Null<Int>}):String {
+	function bindVectorLocal(name:String, vec:{prelude:String, baseExpr:String, lenExpr:String, maxLen:Null<Int>}, isSeries:Bool = false):String {
 		var baseLocal = name + "__base";
 		var lenLocal = name + "__len";
 		ensureLocal(baseLocal, "i32");
 		ensureLocal(lenLocal, "i32");
-		vectorLocals.set(name, {baseLocal: baseLocal, lenLocal: lenLocal, maxLen: vec.maxLen});
+		vectorLocals.set(name, {baseLocal: baseLocal, lenLocal: lenLocal, maxLen: vec.maxLen, isSeries: isSeries});
 		var parts:Array<String> = [];
 		if (vec.prelude.length > 0) parts.push(vec.prelude);
 		parts.push(vec.baseExpr + "\n    local.set $" + baseLocal);
@@ -1986,7 +2139,7 @@ class StrategyWasmEmitter {
 
 	function tryAssignVector(name:String, e:Expr):Null<String> {
 		try {
-			return bindVectorLocal(name, lowerVecOperand(e));
+			return bindVectorLocal(name, lowerVecOperand(e), isSeriesProducerExpr(e));
 		} catch (_:EmitUnsupported) {
 			return null;
 		}
@@ -2011,6 +2164,11 @@ class StrategyWasmEmitter {
 			case "ml_softmax": "vec_softmax";
 			case "np_exp": "vec_exp";
 			case "np_log": "vec_log";
+			case "np_negative": "vec_neg";
+			case "np_abs": "vec_abs";
+			case "np_sqrt": "vec_sqrt";
+			case "np_square": "vec_square";
+			case "np_sign": "vec_sign";
 			default: null;
 		};
 	}
@@ -2024,6 +2182,11 @@ class StrategyWasmEmitter {
 			case "ml_softmax": MlBuiltins.softmax(xs);
 			case "np_exp": [for (x in xs) DetMath.exp(x)];
 			case "np_log": [for (x in xs) DetMath.log(x)];
+			case "np_negative": Np.negative(Np.asarray(xs)).toArray();
+			case "np_abs": Np.abs(Np.asarray(xs)).toArray();
+			case "np_sqrt": Np.sqrt(Np.asarray(xs)).toArray();
+			case "np_square": Np.square(Np.asarray(xs)).toArray();
+			case "np_sign": Np.sign(Np.asarray(xs)).toArray();
 			default: null;
 		};
 	}
@@ -2087,10 +2250,18 @@ class StrategyWasmEmitter {
 				if (name == "stat_zscore" || name == "sci_cumsum" || name == "sci_diff"
 					|| name == "sci_normalize" || name == "ml_softmax"
 					|| name == "np_cumsum" || name == "np_diff"
-					|| name == "np_exp" || name == "np_log"):
+					|| name == "np_exp" || name == "np_log"
+					|| name == "np_negative" || name == "np_abs" || name == "np_sqrt"
+					|| name == "np_square" || name == "np_sign"):
 				lowerVecTransform(name, args);
 			case ECall(EIdent(name), args) if (name == "pd_rank1d"):
 				lowerPdRank1d(args);
+			case ECall(EIdent(name), args) if (name == "pd_series"):
+				lowerPdSeries(args);
+			case ECall(EIdent(name), args) if (name == "pd_shift"):
+				lowerPdShift(args);
+			case ECall(EIdent(name), args) if (name == "pd_series_values"):
+				lowerPdSeriesValues(args);
 			case ECall(EIdent(name), args) if (WasmNpEligibility.isNativeVec(name)):
 				lowerNpVecOp(name, args);
 			default:
@@ -2133,6 +2304,118 @@ class StrategyWasmEmitter {
 		parts.push(vec.baseExpr);
 		parts.push(vec.lenExpr);
 		parts.push("call $vec_sum");
+		return parts.join("\n    ");
+	}
+
+	/** Shared 1-D reduce emit: window spill / const-fold / packed vec → `$helper`. */
+	function emitNpReduce(args:Array<Expr>, helper:String, fold:Array<Float>->Float):String {
+		if (args.length < 1) throw new EmitUnsupported();
+		assertNpVecOperandCap(args[0]);
+		var window = asWindowArg(args[0]);
+		if (window != null) {
+			var spill = spillWindow(window);
+			var parts:Array<String> = [];
+			if (spill.prelude.length > 0) parts.push(spill.prelude);
+			parts.push(spill.baseExpr);
+			parts.push(spill.lenExpr);
+			parts.push("call $" + helper);
+			return parts.join("\n    ");
+		}
+		var consts = tryConstVector(args[0]);
+		if (consts != null) {
+			if (!WasmNpEligibility.fitsVecLen(consts.length)) throw new EmitUnsupported();
+			return "f64.const " + watFloat(fold(consts));
+		}
+		var vec = lowerVecOperand(args[0]);
+		var parts2:Array<String> = [];
+		if (vec.prelude.length > 0) parts2.push(vec.prelude);
+		parts2.push(vec.baseExpr);
+		parts2.push(vec.lenExpr);
+		parts2.push("call $" + helper);
+		return parts2.join("\n    ");
+	}
+
+	/**
+	 * `np_std` / `np_var`: axis gate like sum/mean, plus optional literal ddof ∈ {0,1}
+	 * as 4th arg (default 0). keepdims=true / non-literal ddof → H.
+	 */
+	function assertNpStdVarOk(args:Array<Expr>):Void {
+		if (args.length < 1) throw new EmitUnsupported();
+		if (args.length == 1) return;
+		if (args.length > 4) throw new EmitUnsupported();
+		var ax = try {
+			constIntKey(args[1]);
+		} catch (_:EmitUnsupported) {
+			throw new EmitUnsupported();
+		};
+		if (ax != 0 && ax != -1) throw new EmitUnsupported();
+		if (args.length >= 3) {
+			var kd = tryConstBool(args[2]);
+			if (kd == null || kd == true) throw new EmitUnsupported();
+		}
+		if (args.length >= 4) {
+			var ddof = try {
+				constIntKey(args[3]);
+			} catch (_:EmitUnsupported) {
+				throw new EmitUnsupported();
+			};
+			if (ddof != 0 && ddof != 1) throw new EmitUnsupported();
+		}
+	}
+
+	function npLiteralDdof(args:Array<Expr>):Int {
+		if (args.length < 4) return 0;
+		return constIntKey(args[3]);
+	}
+
+	function emitNpStdVar(args:Array<Expr>, isStd:Bool):String {
+		assertNpVecOperandCap(args[0]);
+		var ddof = npLiteralDdof(args);
+		var sample = ddof; // WAT sample=1 → / (n-1); matches Np ddof
+		var winHelper = isStd ? "stat_window_stdev" : "stat_window_var";
+		var vecHelper = isStd ? "vec_stdev" : "vec_var";
+		return emitStatWindowOrLiteral(args, winHelper, vecHelper, sample, function(xs) {
+			if (!WasmNpEligibility.fitsVecLen(xs.length)) throw new EmitUnsupported();
+			return isStd ? Np.std(Np.asarray(xs), ddof) : Np.variance(Np.asarray(xs), ddof);
+		});
+	}
+
+	/** Packed 1-D `np_size` → length as f64. Multi-dim / unbound → H. */
+	function emitNpSize(args:Array<Expr>):String {
+		if (args.length != 1) throw new EmitUnsupported();
+		assertNpVecOperandCap(args[0]);
+		var consts = tryConstVector(args[0]);
+		if (consts != null) {
+			if (!WasmNpEligibility.fitsVecLen(consts.length)) throw new EmitUnsupported();
+			return "f64.const " + watFloat(consts.length);
+		}
+		var vec = lowerVecOperand(args[0]);
+		if (vec.maxLen == null) throw new EmitUnsupported();
+		if (!WasmNpEligibility.fitsVecLen(vec.maxLen)) throw new EmitUnsupported();
+		var parts:Array<String> = [];
+		if (vec.prelude.length > 0) parts.push(vec.prelude);
+		parts.push(vec.lenExpr);
+		parts.push("f64.convert_i32_s");
+		return parts.join("\n    ");
+	}
+
+	/** Packed scratch operands are always 1-D → `np_ndim` = 1. */
+	function emitNpNdim(args:Array<Expr>):String {
+		if (args.length != 1) throw new EmitUnsupported();
+		assertNpVecOperandCap(args[0]);
+		// Force operand to be a packable 1-D vec (else EmitUnsupported → H).
+		var consts = tryConstVector(args[0]);
+		if (consts != null) {
+			if (!WasmNpEligibility.fitsVecLen(consts.length)) throw new EmitUnsupported();
+			return "f64.const 1";
+		}
+		var vec = lowerVecOperand(args[0]);
+		if (vec.maxLen == null || !WasmNpEligibility.fitsVecLen(vec.maxLen))
+			throw new EmitUnsupported();
+		// Consume prelude so nested creates still run (side effect / scratch bind).
+		var parts:Array<String> = [];
+		if (vec.prelude.length > 0) parts.push(vec.prelude);
+		parts.push("f64.const 1");
 		return parts.join("\n    ");
 	}
 
@@ -2242,6 +2525,137 @@ class StrategyWasmEmitter {
 		};
 	}
 
+	/** True when expr is a Series-lane producer (local tagged Series, or pd_series / pd_shift nest). */
+	function isSeriesProducerExpr(e:Expr):Bool {
+		return switch (e) {
+			case EParent(inner): isSeriesProducerExpr(inner);
+			case EIdent(n) if (vectorLocals.exists(n)):
+				vectorLocals.get(n).isSeries;
+			case ECall(EIdent(name), _) if (WasmPdEligibility.isNativeSeries(name)):
+				true;
+			default: false;
+		};
+	}
+
+	/** Series handle gate: Series local or `pd_series` / `pd_shift` nest (never bare ND / frame). */
+	function assertSeriesHandleOk(e:Expr):Void {
+		if (!isSeriesProducerExpr(e)) throw new EmitUnsupported();
+	}
+
+	/**
+	 * Series lane **N**: `pd_series(constvec|window|ND-local)` arity 1 only.
+	 * Index/name extras → EmitUnsupported (opaque U at module level via arity gate).
+	 */
+	function lowerPdSeries(args:Array<Expr>):{prelude:String, baseExpr:String, lenExpr:String, maxLen:Null<Int>} {
+		if (!WasmPdEligibility.arityOk("pd_series", args.length)) throw new EmitUnsupported();
+		assertPdSeriesDataCap(args[0]);
+		var out = lowerVecOperand(args[0]);
+		if (out.maxLen != null && !WasmPdEligibility.fitsVecLen(out.maxLen))
+			throw new EmitUnsupported();
+		return out;
+	}
+
+	/**
+	 * Series lag **N**: `pd_shift(series [, const periods])` — default periods=1.
+	 * Frame operand / non-const periods / `|p|>64` → EmitUnsupported (H) or opaque U.
+	 */
+	function lowerPdShift(args:Array<Expr>):{prelude:String, baseExpr:String, lenExpr:String, maxLen:Null<Int>} {
+		if (!WasmPdEligibility.arityOk("pd_shift", args.length)) throw new EmitUnsupported();
+		assertSeriesHandleOk(args[0]);
+		var periods = 1;
+		if (args.length >= 2) {
+			try {
+				periods = constIntKey(args[1]);
+			} catch (_:EmitUnsupported) {
+				throw new EmitUnsupported();
+			}
+			if (!WasmPdEligibility.fitsShiftPeriods(periods)) throw new EmitUnsupported();
+		}
+		var consts = tryConstSeriesValues(args[0]);
+		if (consts != null) {
+			if (!WasmPdEligibility.fitsVecLen(consts.length)) throw new EmitUnsupported();
+			var folded = FrameWindow.shift1d(Np.asarray(consts), periods).toArray();
+			return spillConstFloats(folded);
+		}
+		var src = lowerVecOperand(args[0]);
+		if (src.maxLen == null) throw new EmitUnsupported();
+		if (!WasmPdEligibility.fitsVecLen(src.maxLen)) throw new EmitUnsupported();
+		if (src.maxLen <= 0)
+			return {prelude: src.prelude, baseExpr: "i32.const 0", lenExpr: "i32.const 0", maxLen: 0};
+		var dst = allocScratch(src.maxLen);
+		var lenLocal = "_vlen_" + (nextTmp++);
+		ensureLocal(lenLocal, "i32");
+		var parts:Array<String> = [];
+		if (src.prelude.length > 0) parts.push(src.prelude);
+		parts.push(src.baseExpr);
+		parts.push(src.lenExpr);
+		parts.push("i32.const " + periods);
+		parts.push("i32.const " + dst);
+		parts.push("call $vec_shift");
+		parts.push("local.set $" + lenLocal);
+		return {
+			prelude: parts.join("\n    "),
+			baseExpr: "i32.const " + dst,
+			lenExpr: "local.get $" + lenLocal,
+			maxLen: src.maxLen
+		};
+	}
+
+	/** `pd_series_length(series)` → f64 from packed len (name stays U / no string ABI). */
+	function emitPdSeriesLength(args:Array<Expr>):String {
+		if (!WasmPdEligibility.arityOk("pd_series_length", args.length)) throw new EmitUnsupported();
+		assertSeriesHandleOk(args[0]);
+		var consts = tryConstSeriesValues(args[0]);
+		if (consts != null) return "f64.const " + watFloat(consts.length * 1.0);
+		var vec = lowerVecOperand(args[0]);
+		var parts:Array<String> = [];
+		if (vec.prelude.length > 0) parts.push(vec.prelude);
+		parts.push(vec.lenExpr);
+		parts.push("f64.convert_i32_s");
+		return parts.join("\n    ");
+	}
+
+	/** `pd_series_values(series)` → packed buffer (identity) for NP follow-ons. */
+	function lowerPdSeriesValues(args:Array<Expr>):{prelude:String, baseExpr:String, lenExpr:String, maxLen:Null<Int>} {
+		if (!WasmPdEligibility.arityOk("pd_series_values", args.length)) throw new EmitUnsupported();
+		assertSeriesHandleOk(args[0]);
+		return lowerVecOperand(args[0]);
+	}
+
+	/** Cap gate for Series / rank data: constvec / window / lowerable vec nest ≤64. */
+	function assertPdSeriesDataCap(e:Expr):Void {
+		var window = asWindowArg(e);
+		if (window != null && window.lenConst != null && !WasmPdEligibility.fitsVecLen(window.lenConst))
+			throw new EmitUnsupported();
+		var consts = tryConstVector(e);
+		if (consts != null && !WasmPdEligibility.fitsVecLen(consts.length))
+			throw new EmitUnsupported();
+	}
+
+	/** Const-fold Series values through `pd_series` / `pd_shift` nests for shift fold. */
+	function tryConstSeriesValues(e:Expr):Null<Array<Float>> {
+		return switch (e) {
+			case EParent(inner): tryConstSeriesValues(inner);
+			case ECall(EIdent("pd_series"), args) if (args.length == 1):
+				tryConstVector(args[0]);
+			case ECall(EIdent("pd_shift"), args) if (args.length >= 1 && args.length <= 2):
+				var base = tryConstSeriesValues(args[0]);
+				if (base == null) return null;
+				var p = 1;
+				if (args.length >= 2) {
+					try {
+						p = constIntKey(args[1]);
+					} catch (_:EmitUnsupported) {
+						return null;
+					}
+					if (!WasmPdEligibility.fitsShiftPeriods(p)) return null;
+				}
+				FrameWindow.shift1d(Np.asarray(base), p).toArray();
+			default:
+				null;
+		};
+	}
+
 	/** Fail closed when a claimed-native np_* operand exceeds the documented cap. */
 	function assertNpVecOperandCap(e:Expr):Void {
 		var window = asWindowArg(e);
@@ -2266,8 +2680,11 @@ class StrategyWasmEmitter {
 			case "np_full":
 				if (args.length < 2) throw new EmitUnsupported();
 				lowerNpFilled(constNumber(args[1]), [args[0]]);
-			case "np_add" | "np_subtract" | "np_multiply" | "np_divide":
+			case "np_add" | "np_subtract" | "np_multiply" | "np_divide"
+			   | "np_minimum" | "np_maximum":
 				lowerNpBinop(name, args);
+			case "np_clip":
+				lowerNpClip(args);
 			case "np_matmul":
 				lowerNpMatmul(args);
 			default:
@@ -2299,6 +2716,8 @@ class StrategyWasmEmitter {
 			case "np_subtract": "vec_sub";
 			case "np_multiply": "vec_mul";
 			case "np_divide": "vec_div";
+			case "np_minimum": "vec_minimum";
+			case "np_maximum": "vec_maximum";
 			default: throw new EmitUnsupported();
 		};
 	}
@@ -2312,6 +2731,8 @@ class StrategyWasmEmitter {
 				case "np_subtract": xs[i] - ys[i];
 				case "np_multiply": xs[i] * ys[i];
 				case "np_divide": xs[i] / ys[i];
+				case "np_minimum": xs[i] < ys[i] ? xs[i] : ys[i];
+				case "np_maximum": xs[i] > ys[i] ? xs[i] : ys[i];
 				default: throw new EmitUnsupported();
 			});
 		}
@@ -2349,6 +2770,41 @@ class StrategyWasmEmitter {
 			baseExpr: "i32.const " + dst,
 			lenExpr: "local.get $" + lenLocal,
 			maxLen: left.maxLen
+		};
+	}
+
+	/** `np_clip(xs, lo, hi)` with literal lo/hi bounds — same-length 1-D only. */
+	function lowerNpClip(args:Array<Expr>):{prelude:String, baseExpr:String, lenExpr:String, maxLen:Null<Int>} {
+		if (args.length != 3) throw new EmitUnsupported();
+		var lo = constNumber(args[1]);
+		var hi = constNumber(args[2]);
+		var consts = tryConstVector(args[0]);
+		if (consts != null) {
+			if (!WasmNpEligibility.fitsVecLen(consts.length)) throw new EmitUnsupported();
+			return spillConstFloats(Np.clip(Np.asarray(consts), lo, hi).toArray());
+		}
+		var src = lowerVecOperand(args[0]);
+		if (src.maxLen == null) throw new EmitUnsupported();
+		if (!WasmNpEligibility.fitsVecLen(src.maxLen)) throw new EmitUnsupported();
+		if (src.maxLen <= 0)
+			return {prelude: src.prelude, baseExpr: "i32.const 0", lenExpr: "i32.const 0", maxLen: 0};
+		var dst = allocScratch(src.maxLen);
+		var lenLocal = "_vlen_" + (nextTmp++);
+		ensureLocal(lenLocal, "i32");
+		var parts:Array<String> = [];
+		if (src.prelude.length > 0) parts.push(src.prelude);
+		parts.push(src.baseExpr);
+		parts.push(src.lenExpr);
+		parts.push("f64.const " + watFloat(lo));
+		parts.push("f64.const " + watFloat(hi));
+		parts.push("i32.const " + dst);
+		parts.push("call $vec_clip");
+		parts.push("local.set $" + lenLocal);
+		return {
+			prelude: parts.join("\n    "),
+			baseExpr: "i32.const " + dst,
+			lenExpr: "local.get $" + lenLocal,
+			maxLen: src.maxLen
 		};
 	}
 

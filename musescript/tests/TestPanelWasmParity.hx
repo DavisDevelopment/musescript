@@ -17,8 +17,9 @@ import musescript.parse.MuseParser;
  * Panel linear-memory parity gate: literal-symbol panel reads lower natively
  * (no host_eval for close_of/mom_of/sma_of/ema_of/rsi_of/sym_available), pack from PanelFeed,
  * and match interp trades / equity / sharpe on synthetic universes. Literal
- * rebalance_equal / target_weight / closed Expand bag `portfolio_apply` are HostABI;
- * open bags/scan still escape / whole-module-fallback honestly.
+ * rebalance_equal / target_weight / gated bag `portfolio_apply` (scan±bottom /
+ * norm / raw / equal / pair) are HostABI; bag locals / open recipes / free-standing
+ * scan still escape / whole-module-fallback honestly.
  */
 class TestPanelWasmParity extends Test {
 	/** Dual-name momentum flip — portfolio apply may HostABI; reads must be native. */
@@ -70,6 +71,17 @@ class TestPanelWasmParity extends Test {
 		}
 	';
 
+	/** Gated bottom scan — 4th arg `true` (name slot present). */
+	static final PANEL_BAG_SCAN_BOTTOM_SRC = '
+		strategy panel_bag_scan_bottom {
+			onBar {
+				when (sym_available("AAA") && sym_available("BBB")): {
+					portfolio_apply(bag_from_scan({AAA: mom_of("AAA", 5), BBB: mom_of("BBB", 5)}, 1, "scan", true))
+				}
+			}
+		}
+	';
+
 	static final PANEL_BAG_NORM_SRC = '
 		strategy panel_bag_norm {
 			onBar {
@@ -78,6 +90,40 @@ class TestPanelWasmParity extends Test {
 						AAA: mom_of("AAA", 4),
 						BBB: mom_of("BBB", 4)
 					})))
+				}
+			}
+		}
+	';
+
+	/** Raw dict apply (no bag_norm) — HostABI apply_bag_raw. */
+	static final PANEL_BAG_RAW_SRC = '
+		strategy panel_bag_raw {
+			onBar {
+				when (sym_available("AAA") && sym_available("BBB")): {
+					portfolio_apply(bag_from_dict({
+						AAA: 0.7,
+						BBB: 0.3
+					}))
+				}
+			}
+		}
+	';
+
+	static final PANEL_BAG_EQUAL_SRC = '
+		strategy panel_bag_equal {
+			onBar {
+				when (sym_available("AAA") && sym_available("BBB")): {
+					portfolio_apply(bag_equal(["AAA", "BBB"]))
+				}
+			}
+		}
+	';
+
+	static final PANEL_BAG_PAIR_SRC = '
+		strategy panel_bag_pair {
+			onBar {
+				when (sym_available("AAA") && sym_available("BBB")): {
+					portfolio_apply(bag_pair("AAA", "BBB", 1.0))
 				}
 			}
 		}
@@ -183,8 +229,9 @@ class TestPanelWasmParity extends Test {
 		var interpR = runInterp(src, panel);
 		Assert.isTrue(interpR.trades >= 0);
 		#if (js || python)
+		if (!StrategyWasmBackend.hostReady()) return;
 		var wasmR = runWasm(src, panel);
-		if (wasmR == null) return;
+		Assert.notNull(wasmR, "WASM host ready but compile/run returned null — fail closed");
 		Assert.equals(interpR.trades, wasmR.trades);
 		Assert.floatEquals(interpR.finalEquity, wasmR.finalEquity);
 		Assert.floatEquals(interpR.sharpe, wasmR.sharpe);
@@ -251,6 +298,44 @@ class TestPanelWasmParity extends Test {
 		Assert.equals(0, emitted.escapeRegions.length);
 	}
 
+	public function testEmitBagScanBottomHostAbi() {
+		var prog = MuseHostLower.lower(new MuseParser().parse(PANEL_BAG_SCAN_BOTTOM_SRC));
+		var emitted = StrategyWasmBackend.emitOnBar(prog);
+		Assert.notNull(emitted, "bottom bag_from_scan must emit");
+		Assert.isTrue(emitted.wat.indexOf("call $apply_bag_scan") >= 0, emitted.wat);
+		Assert.isTrue(emitted.wat.indexOf("i32.const 1\n    call $apply_bag_scan") >= 0
+			|| emitted.wat.indexOf("i32.const 1") >= 0, emitted.wat);
+		Assert.isTrue(emitted.wat.indexOf("call $host_eval") < 0, emitted.wat);
+		Assert.equals(0, emitted.escapeRegions.length);
+	}
+
+	public function testEmitBagRawDictHostAbi() {
+		var prog = MuseHostLower.lower(new MuseParser().parse(PANEL_BAG_RAW_SRC));
+		var emitted = StrategyWasmBackend.emitOnBar(prog);
+		Assert.notNull(emitted, "bag_from_dict apply must emit");
+		Assert.isTrue(emitted.wat.indexOf("call $apply_bag_raw") >= 0, emitted.wat);
+		Assert.isTrue(emitted.wat.indexOf("call $host_eval") < 0, emitted.wat);
+		Assert.equals(0, emitted.escapeRegions.length);
+	}
+
+	public function testEmitBagEqualHostAbi() {
+		var prog = MuseHostLower.lower(new MuseParser().parse(PANEL_BAG_EQUAL_SRC));
+		var emitted = StrategyWasmBackend.emitOnBar(prog);
+		Assert.notNull(emitted, "bag_equal apply must emit");
+		Assert.isTrue(emitted.wat.indexOf("call $apply_bag_equal") >= 0, emitted.wat);
+		Assert.isTrue(emitted.wat.indexOf("call $host_eval") < 0, emitted.wat);
+		Assert.equals(0, emitted.escapeRegions.length);
+	}
+
+	public function testEmitBagPairHostAbi() {
+		var prog = MuseHostLower.lower(new MuseParser().parse(PANEL_BAG_PAIR_SRC));
+		var emitted = StrategyWasmBackend.emitOnBar(prog);
+		Assert.notNull(emitted, "bag_pair apply must emit");
+		Assert.isTrue(emitted.wat.indexOf("call $apply_bag_pair") >= 0, emitted.wat);
+		Assert.isTrue(emitted.wat.indexOf("call $host_eval") < 0, emitted.wat);
+		Assert.equals(0, emitted.escapeRegions.length);
+	}
+
 	public function testDenseUniverseParity() {
 		assertParity(PANEL_SCAN_SRC, densePanel(80, 11));
 	}
@@ -269,6 +354,22 @@ class TestPanelWasmParity extends Test {
 
 	public function testClosedBagNormParity() {
 		assertParity(PANEL_BAG_NORM_SRC, densePanel(80, 31));
+	}
+
+	public function testBagScanBottomParity() {
+		assertParity(PANEL_BAG_SCAN_BOTTOM_SRC, densePanel(80, 37));
+	}
+
+	public function testBagRawDictParity() {
+		assertParity(PANEL_BAG_RAW_SRC, densePanel(80, 41));
+	}
+
+	public function testBagEqualParity() {
+		assertParity(PANEL_BAG_EQUAL_SRC, densePanel(80, 43));
+	}
+
+	public function testBagPairParity() {
+		assertParity(PANEL_BAG_PAIR_SRC, densePanel(80, 47));
 	}
 
 	public function testSparseSymAvailableParity() {
@@ -359,6 +460,33 @@ class TestPanelWasmParity extends Test {
 		// Opaque bag return assigned across statements → whole-module null.
 		Assert.isNull(emitted);
 		Assert.isTrue(StrategyWasmEmitter.PANEL_HOST_ESCAPE.indexOf("bag_equal") >= 0);
+	}
+
+	/** Free-standing bag producer (not inside portfolio_apply) stays whole-module U. */
+	public function testFreeStandingBagFromScanStillU() {
+		var src = '
+			strategy free_bag {
+				onBar {
+					var b = bag_from_scan({AAA: mom_of("AAA", 5), BBB: mom_of("BBB", 5)}, 1);
+					portfolio_apply(b);
+				}
+			}
+		';
+		var emitted = StrategyWasmBackend.emitOnBar(MuseHostLower.lower(new MuseParser().parse(src)));
+		Assert.isNull(emitted, "assigned bag local must stay whole-module U");
+	}
+
+	/** Nested bag algebra not HostABI — refuse honestly. */
+	public function testNestedBagAlgebraStillU() {
+		var src = '
+			strategy nest_bag {
+				onBar {
+					portfolio_apply(bag_scale(bag_from_dict({AAA: 1.0, BBB: 1.0}), 0.5));
+				}
+			}
+		';
+		var emitted = StrategyWasmBackend.emitOnBar(MuseHostLower.lower(new MuseParser().parse(src)));
+		Assert.isNull(emitted, "bag_scale(bag_from_dict) must stay U");
 	}
 
 	public function testEscapeListDocumented() {

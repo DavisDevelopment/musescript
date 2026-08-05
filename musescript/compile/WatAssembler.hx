@@ -12,7 +12,8 @@ import haxe.io.BytesBuffer;
  * const initializers, funcs with named params/results/locals, folded AND flat
  * instruction forms, if/then/else (with optional result type), named
  * block/loop labels, br/br_if, call, return, unreachable, memory.size/grow,
- * plain (offset-less) loads/stores, and the i32/f64 ALU ops the emitters use.
+ * plain (offset-less) loads/stores, the i32/f64 ALU ops the emitters use, and the
+ * i64 reinterpret/bit ops DetMath.exp/log (`$$det_pow2i` / `$$det_log`) need.
  *
  * NOT a general-purpose assembler: unknown constructs throw with a clear
  * message instead of guessing — the parity gate (wasm tier vs js tier) is
@@ -142,6 +143,7 @@ private typedef FuncDecl = {
 
 private class ModuleEncoder {
 	static inline var I32 = 0x7F;
+	static inline var I64 = 0x7E;
 	static inline var F64 = 0x7C;
 
 	var mod:Array<Dynamic>;
@@ -315,6 +317,7 @@ private class ModuleEncoder {
 	static function valType(s:String):Int {
 		return switch (s) {
 			case "i32": I32;
+			case "i64": I64;
 			case "f64": F64;
 			case t: throw 'WatAssembler: unsupported value type $t';
 		};
@@ -455,6 +458,19 @@ private class ModuleEncoder {
 	public static function sleb(b:BytesBuffer, v:Int):Void {
 		while (true) {
 			var byte = v & 0x7F;
+			v >>= 7;
+			if ((v == 0 && (byte & 0x40) == 0) || (v == -1 && (byte & 0x40) != 0)) {
+				b.addByte(byte);
+				break;
+			}
+			b.addByte(byte | 0x80);
+		}
+	}
+
+	/** Signed LEB128 for i64.const (DetMath bit reinterpret needs values past i32). */
+	public static function sleb64(b:BytesBuffer, v:haxe.Int64):Void {
+		while (true) {
+			var byte = haxe.Int64.toInt(v & 0x7F);
 			v >>= 7;
 			if ((v == 0 && (byte & 0x40) == 0) || (v == -1 && (byte & 0x40) != 0)) {
 				b.addByte(byte);
@@ -712,6 +728,7 @@ private class FuncBodyEncoder {
 			case "memory.size": b.addByte(0x3F); b.addByte(0x00);
 			case "memory.grow": b.addByte(0x40); b.addByte(0x00);
 			case "i32.const": b.addByte(0x41); ModuleEncoder.sleb(b, parseI32(imms[0]));
+			case "i64.const": b.addByte(0x42); ModuleEncoder.sleb64(b, parseI64(imms[0]));
 			case "f64.const": b.addByte(0x44); ModuleEncoder.f64(b, parseF64(imms[0]));
 			case "i32.eqz": b.addByte(0x45);
 			case "i32.eq": b.addByte(0x46);
@@ -756,7 +773,18 @@ private class FuncBodyEncoder {
 			case "f64.max": b.addByte(0xA5);
 			case "i32.trunc_f64_s": b.addByte(0xAA);
 			case "f64.convert_i32_s": b.addByte(0xB7);
-			case "i32.wrap_i64": throw "WatAssembler: i64 not supported";
+			// i64 subset for DetMath.exp/log bit reinterpret (StrategyWasmRuntimeWat)
+			case "i64.and": b.addByte(0x83);
+			case "i64.or": b.addByte(0x84);
+			case "i64.xor": b.addByte(0x85);
+			case "i64.shl": b.addByte(0x86);
+			case "i64.shr_s": b.addByte(0x87);
+			case "i64.shr_u": b.addByte(0x88);
+			case "i32.wrap_i64": b.addByte(0xA7);
+			case "i64.extend_i32_s": b.addByte(0xAC);
+			case "i64.extend_i32_u": b.addByte(0xAD);
+			case "i64.reinterpret_f64": b.addByte(0xBD);
+			case "f64.reinterpret_i64": b.addByte(0xBF);
 			default:
 				throw 'WatAssembler: unsupported instruction $op';
 		}
@@ -766,6 +794,23 @@ private class FuncBodyEncoder {
 		var v = Std.parseInt(s);
 		if (v == null) throw 'WatAssembler: bad i32 literal $s';
 		return v;
+	}
+
+	static function parseI64(s:String):haxe.Int64 {
+		var neg = false;
+		var t = s;
+		if (StringTools.startsWith(t, "-")) {
+			neg = true;
+			t = t.substr(1);
+		}
+		if (t.length == 0) throw 'WatAssembler: bad i64 literal $s';
+		var v = haxe.Int64.ofInt(0);
+		for (i in 0...t.length) {
+			var d = t.charCodeAt(i) - "0".code;
+			if (d < 0 || d > 9) throw 'WatAssembler: bad i64 literal $s';
+			v = v * 10 + d;
+		}
+		return neg ? -v : v;
 	}
 
 	static function parseF64(s:String):Float {

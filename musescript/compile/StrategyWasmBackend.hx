@@ -30,11 +30,12 @@ import musescript.interp.MuseInterp;
  * `sym_available` / `fund_of` pack as dense `field@SYM` feature slots from
  * `PanelFeed` (calendar-aligned; missing bars → NaN). Drive via `ctx.panel` +
  * `runPanelBacktest`. HostABI portfolio apply: literal `buy` / `sell_all` /
- * `target_weight` / `rebalance_equal([...])`, plus closed Expand bags
- * (`portfolio_apply(bag_from_scan({…},k))` / `bag_norm(bag_from_dict({…}))` →
- * `apply_bag_scan` / `apply_bag_weights`). Escape list (host_eval /
- * opaque whole-module fallback): open bags, computed bags, graph bags, `symbols()`,
- * scan / portfolio queries, and pending-book verbs (`portfolio_long` /
+ * `target_weight` / `rebalance_equal([...])`, plus gated bag applies
+ * (`apply_bag_scan` [±bottom] / `apply_bag_weights` / `apply_bag_raw` /
+ * `apply_bag_equal` / `apply_bag_pair`). Escape list (host_eval /
+ * opaque whole-module fallback): bag locals, open recipes (`bag_rank_*` /
+ * `bag_computed` / `bag_graph`), `symbols()`, free-standing scan / portfolio
+ * queries, `portfolio_add|sub|mask`, and pending-book verbs (`portfolio_long` /
  * `portfolio_short` / `portfolio_flat` / pending cancel — object specs,
  * brackets, and cross-symbol OCO stay host_eval; HostABI is qty-only) —
  * see `StrategyWasmEmitter.PANEL_HOST_ESCAPE`.
@@ -231,8 +232,8 @@ class StrategyWasmBackend {
 				var bi = bar() != null ? bar().index : -1;
 				harness.portfolio.rebalanceEqual(list, harness.panelPrices, bi);
 			},
-			/** Closed bag scan: packed syms + f64 scores in linear memory → equal bag of top-k → applyBag. */
-			apply_bag_scan: function(sid:Int, topK:Int, base:Int, n:Int) {
+			/** Gated bag scan: packed syms + f64 scores → equal bag of top/bottom-k → applyBag. */
+			apply_bag_scan: function(sid:Int, topK:Int, base:Int, n:Int, bottom:Int) {
 				var packed = str(sid);
 				var syms:Array<String> = packed.length == 0
 					? []
@@ -245,11 +246,12 @@ class StrategyWasmBackend {
 					if (s == null || s == "") continue;
 					scores.set(s, frameGet(base + i * 8));
 				}
-				var bag = musescript.builtins.BagBuiltins.bagFromScan(scores, topK);
+				var bag = musescript.builtins.BagBuiltins.bagFromScan(
+					scores, topK, null, bottom != 0);
 				var bi = bar() != null ? bar().index : -1;
 				harness.portfolio.applyBag(bag.weights, harness.panelPrices, bi, true);
 			},
-			/** Closed bag weights: packed syms + f64s → bag_norm → applyBag (replace). */
+			/** Gated bag weights: packed syms + f64s → bag_norm → applyBag (replace). */
 			apply_bag_weights: function(sid:Int, base:Int, n:Int) {
 				var packed = str(sid);
 				var syms:Array<String> = packed.length == 0
@@ -265,6 +267,40 @@ class StrategyWasmBackend {
 				}
 				var raw = musescript.builtins.BagBuiltins.bagFromDict(weights);
 				var bag = musescript.builtins.BagBuiltins.bagNorm(raw);
+				var bi = bar() != null ? bar().index : -1;
+				harness.portfolio.applyBag(bag.weights, harness.panelPrices, bi, true);
+			},
+			/** Gated raw dict weights: packed syms + f64s → applyBag without bag_norm. */
+			apply_bag_raw: function(sid:Int, base:Int, n:Int) {
+				var packed = str(sid);
+				var syms:Array<String> = packed.length == 0
+					? []
+					: packed.split(StrategyWasmEmitter.REBALANCE_SYM_SEP);
+				var count = n < 0 ? 0 : n;
+				if (count > syms.length) count = syms.length;
+				var weights = new Map<String, Dynamic>();
+				for (i in 0...count) {
+					var s = syms[i];
+					if (s == null || s == "") continue;
+					weights.set(s, frameGet(base + i * 8));
+				}
+				var bag = musescript.builtins.BagBuiltins.bagFromDict(weights);
+				var bi = bar() != null ? bar().index : -1;
+				harness.portfolio.applyBag(bag.weights, harness.panelPrices, bi, true);
+			},
+			/** Gated equal-weight literal list → bag_equal → applyBag. */
+			apply_bag_equal: function(sid:Int) {
+				var packed = str(sid);
+				var list:Array<String> = packed.length == 0
+					? []
+					: packed.split(StrategyWasmEmitter.REBALANCE_SYM_SEP);
+				var bag = musescript.builtins.BagBuiltins.bagEqual(list);
+				var bi = bar() != null ? bar().index : -1;
+				harness.portfolio.applyBag(bag.weights, harness.panelPrices, bi, true);
+			},
+			/** Gated dollar-neutral pair → bag_pair → applyBag (no bag_norm). */
+			apply_bag_pair: function(sidLong:Int, sidShort:Int, scale:Float) {
+				var bag = musescript.builtins.BagBuiltins.bagPair(str(sidLong), str(sidShort), scale);
 				var bi = bar() != null ? bar().index : -1;
 				harness.portfolio.applyBag(bag.weights, harness.panelPrices, bi, true);
 			},

@@ -10,7 +10,7 @@ import musescript.io.IoGrant;
 /**
  * Haxe `pd.*` facade — trading-critical dataframe feel, zero Dynamic on typed API.
  *
- * Engine eligibility: Interp N | JS B (`pd_*`) | WASM H/U | VM U (`VmPdEligibility`)
+ * Engine eligibility: Interp N | JS B (`pd_*`) | WASM H/U | VM H/U (`VmPdEligibility`)
  * Columns are NdArray F64; compose via `NdBridge` / `PdBridge`.
  * IO (`read_csv` / `read_parquet`) is grant-gated — null grants throw IoDenied.
  */
