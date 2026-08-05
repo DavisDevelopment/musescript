@@ -8,9 +8,9 @@ import musescript.ndarray.Np;
  * Column storage shares NdArray buffers; mutate-through when views alias.
  *
  * **F64-only by design (no Series-of-strings):** DataFrame string sidecars are
- * not Series. `df.get(strCol)` returns an empty Series; use `df.strValuesOf(name)`,
- * MultiIndex `getLevelValuesStr`, or `pd.get_level_values_str` for labels.
- * A future string Series would need a new typed handle — not Dynamic cells.
+ * not Series. Prefer `df.tryGet(name)` (null when Str/missing) or `df.getStr` /
+ * `strValuesOf` for labels; `df.get(strCol)` still returns an empty Series for
+ * older call sites. MultiIndex: `getLevelValuesStr` / `pd.get_level_values_str`.
  */
 class Series {
 	public var name:Null<String>;

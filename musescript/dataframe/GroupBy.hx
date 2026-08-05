@@ -462,6 +462,11 @@ class GroupBy {
 	 * Cross-section rank: each row ranked across columns (wide panel DNA).
 	 * Returns same shape; NaN cells stay NaN and are excluded from that row's ranks.
 	 */
+	/**
+	 * Cross-section ranks across **F64** columns per row. Str sidecars pass
+	 * through unchanged (not ranked — lexicographic panel rank is not a trading
+	 * path; use factorize / groupby for categorical codes).
+	 */
 	public static function xsRankFrame(df:DataFrame, ?pct:Bool = false, ?ascending:Bool = true):DataFrame {
 		if (df == null || df.emptyFrame()) return DataFrame.empty();
 		var names = df.f64Columns();
@@ -497,6 +502,12 @@ class GroupBy {
 		}
 		var map = new Map<String, NdArrayF64>();
 		for (c in 0...m) map.set(names[c], outs[c]);
-		return DataFrame.fromColumns(map, Index.copyOf(df.index), names);
+		var sMap = new Map<String, Array<String>>();
+		var sOrder = df.strColumns();
+		for (nm in sOrder) {
+			var src = df.strValuesOf(nm);
+			sMap.set(nm, src != null ? src : []);
+		}
+		return DataFrame.fromColumns(map, Index.copyOf(df.index), names, sMap, sOrder);
 	}
 }

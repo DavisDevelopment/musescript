@@ -174,7 +174,7 @@ Flat aliases: `pd_merge_asof`, `pd_groupby_mean`, … for Expand simplicity **on
 |---|---|
 | **Must** | Index+Series+DataFrame F64 columnar; construct from panel/bars/NdArray; reindex/align; merge/join; **merge_asof backward**; groupby agg/transform/rank; shift/diff/pct_change; rolling/ewm subset; fillna/dropna; concat; to/from NdArray; deep `muse.pd` on interp/JS |
 | **Should** | pivot/melt; multi-key groupby; loc; resample OHLCV; corr/cov; categorical codes; PanelFeed zero-copy column views; tiny WASM N for rank/zscore 1-D; JVM `@:multiType` Index codes |
-| **Later** | sparse; Series-of-strings (Series stays F64-only — use DataFrame Str sidecar + `strValuesOf`); Arrow writer; Method chaining sugar; SQL-like query; datetime Index tz; styler; plot helpers; Parquet Node helper string columns |
+| **Later** | sparse; Series-of-strings typed handle (Series stays F64-only — use DataFrame Str sidecar + `tryGet`/`getStr`/`strValuesOf`); Arrow writer; Method chaining sugar; SQL-like query; datetime Index tz; styler; plot helpers |
 | **Never (Muse product / fitness)** | `dtype=object` / Dynamic cells; open `apply(λ)`; `eval`/`query` string exec; silent Python pandas in fitness; pickle protocol; full Excel/HTML IO; CUDA; “100% pandas parity” as a gate; **open groupby/merge graphs in Expand**; live http/db inside on_bar |
 
 ---

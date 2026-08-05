@@ -13,9 +13,9 @@ import musescript.ndarray.NdArrayF64;
  * JVM / non-Node: clear {@link IoDenied} — use Node ingest or preconvert to CSV.
  * Fitness / null grants → {@link IoDenied} (same as {@link PdCsv}).
  *
- * `fromObjects`: numeric / bool → F64; non-numeric strings → Str sidecar
- * (empty/NA tokens → `""`). `fromColumnar` / Node helper path stays F64-only
- * (string parquet columns still coerce to NaN — use CSV or post-`assignStr`).
+ * `fromObjects` / `fromColumnar` / Node helper: numeric / bool → F64;
+ * non-numeric strings → Str sidecar (empty/NA tokens → `""`). Same cell policy
+ * as CSV — no NaN coercion of string columns.
  */
 class PdParquet {
 	public static function readParquet(?grants:Null<IoGrant>, path:String):DataFrame {
@@ -123,36 +123,98 @@ class PdParquet {
 		return Std.string(v);
 	}
 
-	/** Columnar payload from Node bridge: `{ order: string[], columns: { name: number[] } }`. */
+	/**
+	 * Columnar payload from Node bridge:
+	 * `{ order: string[], columns: { name: (number|string|bool|null)[] } }`.
+	 * Optional `strColumns` / `strOrder` maps skip classification for those names.
+	 */
 	public static function fromColumnar(payload:Dynamic):DataFrame {
 		if (payload == null) return DataFrame.empty();
 		var orderDyn:Dynamic = Reflect.field(payload, "order");
 		var colsDyn:Dynamic = Reflect.field(payload, "columns");
-		if (colsDyn == null) return DataFrame.empty();
+		var explicitStr:Dynamic = Reflect.field(payload, "strColumns");
+		if (colsDyn == null && explicitStr == null) return DataFrame.empty();
 		var order:Array<String> = [];
 		if (Std.isOfType(orderDyn, Array)) {
 			var arr:Array<Dynamic> = cast orderDyn;
 			for (x in arr) order.push(Std.string(x));
 		} else {
-			for (k in Reflect.fields(colsDyn)) order.push(k);
+			if (colsDyn != null) for (k in Reflect.fields(colsDyn)) order.push(k);
+			if (explicitStr != null) for (k in Reflect.fields(explicitStr)) {
+				var known = false;
+				for (n in order) if (n == k) { known = true; break; }
+				if (!known) order.push(k);
+			}
 		}
 		if (order.length == 0) return DataFrame.empty();
-		var n = 0;
-		var first = Reflect.field(colsDyn, order[0]);
-		if (Std.isOfType(first, Array)) n = (cast first : Array<Dynamic>).length;
-		var map = new Map<String, NdArrayF64>();
-		for (name in order) {
-			var raw:Dynamic = Reflect.field(colsDyn, name);
-			var col = NdArrayF64.empty([n]);
-			if (Std.isOfType(raw, Array)) {
-				var arr:Array<Dynamic> = cast raw;
-				for (i in 0...n) col.setFlat(i, cellToFloat(i < arr.length ? arr[i] : null));
+
+		var explicitStrNames = new Map<String, Bool>();
+		if (explicitStr != null) {
+			var strOrderDyn:Dynamic = Reflect.field(payload, "strOrder");
+			if (Std.isOfType(strOrderDyn, Array)) {
+				var so:Array<Dynamic> = cast strOrderDyn;
+				for (x in so) explicitStrNames.set(Std.string(x), true);
 			} else {
-				for (i in 0...n) col.setFlat(i, Math.NaN);
+				for (k in Reflect.fields(explicitStr)) explicitStrNames.set(k, true);
 			}
-			map.set(name, col);
 		}
-		return DataFrame.fromColumns(map, Index.range(n), order);
+
+		var n = 0;
+		for (name in order) {
+			var raw:Dynamic = colsDyn != null ? Reflect.field(colsDyn, name) : null;
+			if (raw == null && explicitStr != null) raw = Reflect.field(explicitStr, name);
+			if (Std.isOfType(raw, Array)) {
+				var len = (cast raw : Array<Dynamic>).length;
+				if (len > n) n = len;
+			}
+		}
+
+		var isStr:Array<Bool> = [for (_ in 0...order.length) false];
+		for (c in 0...order.length) {
+			var name = order[c];
+			if (explicitStrNames.exists(name)) {
+				isStr[c] = true;
+				continue;
+			}
+			var raw:Dynamic = colsDyn != null ? Reflect.field(colsDyn, name) : null;
+			if (!Std.isOfType(raw, Array)) continue;
+			var arr:Array<Dynamic> = cast raw;
+			for (i in 0...arr.length) {
+				if (cellLooksStr(arr[i])) {
+					isStr[c] = true;
+					break;
+				}
+			}
+		}
+
+		var map = new Map<String, NdArrayF64>();
+		var fOrder:Array<String> = [];
+		var sMap = new Map<String, Array<String>>();
+		var sOrder:Array<String> = [];
+		for (c in 0...order.length) {
+			var name = order[c];
+			var raw:Dynamic = null;
+			if (isStr[c] && explicitStr != null) {
+				var exRaw:Dynamic = Reflect.field(explicitStr, name);
+				if (exRaw != null || (explicitStrNames.exists(name) && colsDyn == null))
+					raw = exRaw;
+			}
+			if (raw == null && colsDyn != null)
+				raw = Reflect.field(colsDyn, name);
+			var arr:Array<Dynamic> = Std.isOfType(raw, Array) ? cast raw : [];
+			if (isStr[c]) {
+				var labels:Array<String> = [];
+				for (i in 0...n) labels.push(cellToStr(i < arr.length ? arr[i] : null));
+				sOrder.push(name);
+				sMap.set(name, labels);
+			} else {
+				var col = NdArrayF64.empty([n]);
+				for (i in 0...n) col.setFlat(i, cellToFloat(i < arr.length ? arr[i] : null));
+				fOrder.push(name);
+				map.set(name, col);
+			}
+		}
+		return DataFrame.fromColumns(map, Index.range(n), fOrder, sMap, sOrder);
 	}
 
 	static function cellToFloat(v:Dynamic):Float {

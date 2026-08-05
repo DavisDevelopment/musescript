@@ -225,13 +225,28 @@ class DataFrame {
 
 	/**
 	 * Column as Series sharing NdArray buffer + Index.
-	 * Missing or Str sidecar → empty Series (Series is F64-only; use `strValuesOf`).
+	 * Missing or Str sidecar → empty Series (length 0). Prefer `tryGet` /
+	 * `getStr` / `hasStrColumn` when callers must distinguish Str from absent.
 	 */
 	public function get(name:String):Series {
 		var i = colIndex(name);
 		if (i < 0) return Series.empty(name);
 		return Series.create(_cols[i], _index, name);
 	}
+
+	/**
+	 * F64 column as Series, or null when missing **or** Str sidecar.
+	 * (Series stays F64-only — no Series-of-strings.)
+	 */
+	public function tryGet(name:String):Null<Series> {
+		var i = colIndex(name);
+		if (i < 0) return null;
+		return Series.create(_cols[i], _index, name);
+	}
+
+	/** Str sidecar labels (copy), or null when missing / F64. Alias of `strValuesOf`. */
+	public inline function getStr(name:String):Null<Array<String>>
+		return strValuesOf(name);
 
 	/** Raw F64 column NdArray (shared). Str columns → null. */
 	public function valuesOf(name:String):Null<NdArrayF64> {

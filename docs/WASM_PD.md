@@ -46,13 +46,13 @@ other engines unless `IoGrant` is attached (ingest tier).
 CI/local aggregator: [ENGINE_MATRIX.md](ENGINE_MATRIX.md)
 (`bash tools/engine_matrix.sh` / `.\tools\engine_matrix.ps1`).
 
-| Engine | Construct / select | merge_asof / join | groupby / pivot / corr | rolling / xs_rank / resample | `pd_rank1d` | read_csv / read_parquet |
-|--------|--------------------|-------------------|------------------------|------------------------------|-------------|-------------------------|
-| **Interp** | **N** (Haxe) | **N** | **N** | **N** | **N** | **U** unless grant |
-| **JS** | **B** (`pd_*`) | **B** | **B** | **B** | **B** | grant / Studio (parquet: Node + hyparquet) |
-| **Bytecode VM** | **U** | **U** | **U** | **U** | **H** ≤64 → OBJ `NdArrayF64` (`VmPdEligibility`) | **U** |
-| **WASM** | **U** (opaque fallback) | **U** | **U** | **U** | **N** ≤64 | **U** |
-| **NMA** | Don't force frames into kind-switch | — | — | — | — | — |
+| Engine | Construct / select | merge_asof / join | groupby / pivot / corr | rolling / xs_rank / resample | `pd_rank1d` | Series `pd_series`/`pd_shift`/`pd_series_values` | read_csv / read_parquet |
+|--------|--------------------|-------------------|------------------------|------------------------------|-------------|------------------|-------------------------|
+| **Interp** | **N** (Haxe) | **N** | **N** | **N** | **N** | **N** | **U** unless grant |
+| **JS** | **B** (`pd_*`) | **B** | **B** | **B** | **B** | **B** | grant / Studio (parquet: Node + hyparquet) |
+| **Bytecode VM** | **U** (frames) | **U** | **U** | **U** | **H** ≤64 → OBJ `NdArrayF64` | **H** ≤64 → OBJ `Series`/`NdArrayF64` (`VmPdEligibility`) | **U** |
+| **WASM** | **U** (opaque fallback) | **U** | **U** | **U** | **N** ≤64 | **U** (opaque Series) | **U** |
+| **NMA** | Don't force frames into kind-switch | — | — | — | — | — | — |
 
 ## Evo palette `PD_*`
 
@@ -90,10 +90,10 @@ engine.configureForPd(null)       # or ["xs_rank"] / ["shift"] / both
 
 NMA columnarizes closed bag templates (`PABagScanTop` / `PABagRankWeights` →
 score columns → equal bag or percentile xs_rank → `bag_norm` → `applyBag`);
-`KPd` / VM stay Expand→interp/JS for panel `xs_rank` and Series `shift` (or WASM
-HostABI for closed bags). Packed `pd_rank1d` alone is VM **H** (OBJ-lane
-`NdArrayF64`, `len ≤ 64`) — same logical handle as WASM **N**; Expand `KPd` genomes
-still refuse `evaluateVm` because they need panel / Series. `Fitness.preferVm` defaults ON
+`KPd("xs_rank")` / panel stay Expand→interp/JS (or WASM HostABI for closed bags).
+Bytecode VM Series lane: packed `pd_rank1d` + gated Expand `pd_shift` chain are
+**H** (`VmPdEligibility`, `len ≤ 64`) — `Fitness.evaluateVm` accepts `KPd("shift")`
+and refuses `KPd("xs_rank")` / panel. `Fitness.preferVm` defaults ON
 (Expand→interp fallback on U).
 
 ## Panel closed bags — native vs HostABI matrix
@@ -110,26 +110,31 @@ Tests: `TestPanelWasmParity` emit gates (`apply_bag_*`, no `host_eval`) + interp
 
 ## Follow-ups
 
-- Bytecode VM: packed `pd_rank1d` OBJ-lane handle **shipped** (`VmPdEligibility`);
-  deferred Series/DataFrame/Index handles (`pd_series` / `pd_shift` / frame ops)
+- Bytecode VM: packed `pd_rank1d` + Series lane (`pd_series` / `pd_shift` /
+  `pd_series_values`) OBJ-lane handles **shipped** (`VmPdEligibility`); deferred
+  DataFrame/Index (`pd_from_columns`, groupby, merge, one-row `pd_xs_rank`,
+  frame `pd_shift`) and Series ctor index/name / length/name scalars
 - MultiIndex shipped: F64 and/or Str levels, N≥1 (`fromLevels` / groupby `as_index`
   takes all by-cols); `xs` / `xsStr` / `get_level_values(_str)` / `reset_index`.
 - **String sidecar propagation (shipped):** `assignStr` / select / drop / slice /
   iloc / reset_index / xs; **concat** (axis 0/1); **join**; **merge_asof**; **melt**
-  (Str idVars **and** Str-only valueVars → Str `variable`/`value`); **pivot**
-  (Str `index`/`columns`, F64 `values`); **align/reindex**; window mapCols;
-  fillna (F64); dropna / isna (F64 NaN **and** Str `""` → missing; isna emits
-  F64 0/1 masks for both); **corr/cov** skip Str; **resample** last-nonempty Str;
-  CSV parse / Parquet `fromObjects` → Str sidecars for non-numeric columns.
-  `Series` stays **F64-only** (no Series-of-strings) — Str cols → empty Series;
-  use `strValuesOf` / `get_level_values_str`.
+  (Str idVars; Str-only valueVars → Str `variable`/`value`; **mixed F64+Str
+  valueVars** → Str `variable`, F64 `value` (NaN on Str rows), Str `value_str`);
+  **pivot** (Str `index`/`columns`, F64 `values`); **align/reindex**; window
+  mapCols; **xs_rank** (F64 ranks; Str sidecars pass through); fillna (F64);
+  dropna / isna (F64 NaN **and** Str `""` → missing; isna emits F64 0/1 masks
+  for both); **corr/cov** skip Str; **resample** last-nonempty Str; CSV parse /
+  Parquet `fromObjects` **and** Node/`fromColumnar` → Str sidecars for
+  non-numeric columns (same cell policy as CSV).
+  `Series` stays **F64-only** (no Series-of-strings) — use `tryGet` (null on
+  Str/missing), `getStr` / `strValuesOf`, or `get_level_values_str`. Legacy
+  `get(strCol)` still returns an empty Series.
 - **codes / factorize (shipped):** `Factorize` F64/Str → codes+uniques; MultiIndex
   `.codes` / `.uniqueLevels` / `fromCodes` (codes-primary until densify); groupby
   partitions via int codes; flats `pd_factorize` / `pd_index_codes` /
   `pd_index_levels` / `pd_multi_index_codes`.
-- **Still open / deferred:** Parquet Node/`fromColumnar` string columns (still
-  NaN coerce — CSV or `assignStr`); melt mixed F64+Str valueVars (returns empty);
-  Series-of-strings; xs_rank Str.
+- **Still open / deferred:** Series-of-strings typed handle (not planned — stay
+  on Str sidecar + `tryGet`/`getStr`); Arrow writer; open Dynamic melt `value`.
 - Parquet ingest **shipped** (grant + optional `hyparquet` peer on Node; JVM → clear deny / CSV preconvert)
 - Columnar NMA for PD-bearing `KPd` genomes (still Expand→interp / host_eval today)
 - Deeper checker enforcement of `TDataFrame` ≠ `TSeries`

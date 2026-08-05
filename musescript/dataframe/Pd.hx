@@ -139,8 +139,8 @@ class Pd {
 		return s.rank(pct, ascending);
 
 	/**
-	 * Cross-section ranks: wide frame → rank across columns per row.
-	 * Trading path: factor wide panel → xs_rank → bag / target_weight helpers.
+	 * Cross-section ranks: wide F64 columns → rank across columns per row.
+	 * Str sidecars pass through. Trading path: factor panel → xs_rank → bags.
 	 */
 	public static inline function xsRank(df:DataFrame, ?pct:Bool = false, ?ascending:Bool = true):DataFrame
 		return GroupBy.xsRankFrame(df, pct, ascending);

@@ -46,6 +46,29 @@ class TestPdParquet extends Test {
 		Assert.isTrue(Math.isNaN(df.get("a").getFlat(1)));
 	}
 
+	public function testFromColumnarStringColumns() {
+		var df = PdParquet.fromColumnar({
+			order: ["time", "sym", "fact"],
+			columns: {
+				time: [1.0, 2.0],
+				sym: ["AAPL", "MSFT"],
+				fact: [10.0, 20.0]
+			}
+		});
+		Assert.equals(2, df.nrows());
+		Assert.isTrue(df.hasStrColumn("sym"));
+		Assert.isFalse(df.hasStrColumn("fact"));
+		Assert.same(["AAPL", "MSFT"], df.strValuesOf("sym"));
+		Assert.equals(10.0, df.get("fact").getFlat(0));
+		// Numeric-looking strings stay F64 (CSV / fromObjects policy).
+		var numish = PdParquet.fromColumnar({
+			order: ["x"],
+			columns: { x: ["1.5", "2.0"] }
+		});
+		Assert.isFalse(numish.hasStrColumn("x"));
+		Assert.equals(1.5, numish.get("x").getFlat(0));
+	}
+
 	public function testGrantDeniedAndCaps() {
 		var denied = false;
 		try {

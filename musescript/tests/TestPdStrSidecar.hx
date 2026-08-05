@@ -53,6 +53,12 @@ class TestPdStrSidecar extends Test {
 		var df = withSym([1., 2.], [10., 20.], ["AAPL", "MSFT"]);
 		var s = df.get("sym");
 		Assert.equals(0, s.length);
+		Assert.isNull(df.tryGet("sym"));
+		Assert.isNull(df.tryGet("missing"));
+		Assert.notNull(df.tryGet("x"));
+		assertSeries([10., 20.], df.tryGet("x").toArray(), "tryGet x");
+		Assert.same(["AAPL", "MSFT"], df.getStr("sym"));
+		Assert.isNull(df.getStr("x"));
 		Assert.same(["AAPL", "MSFT"], df.strValuesOf("sym"));
 		assertSeries([10., 20.], df.get("x").toArray(), "f64 series");
 	}
@@ -215,10 +221,52 @@ class TestPdStrSidecar extends Test {
 		assertSeries([0., 1., 0., 1.], m.get("t").toArray(), "t");
 	}
 
-	public function testMeltMixedValueVarsEmpty() {
+	public function testMeltMixedValueVars() {
 		var df = withSym([0., 1.], [10., 20.], ["A", "B"]).assignStr("tag", ["u", "v"]);
-		var empty = FrameReshape.melt(df, ["t"], ["x", "tag"], "variable", "value");
-		Assert.isTrue(empty.emptyFrame());
+		var m = FrameReshape.melt(df, ["t"], ["x", "tag"], "variable", "value");
+		Assert.equals(4, m.nrows());
+		Assert.isTrue(m.hasStrColumn("variable"));
+		Assert.isTrue(m.hasColumn("value"));
+		Assert.isTrue(m.hasStrColumn("value_str"));
+		Assert.same(["x", "x", "tag", "tag"], m.strValuesOf("variable"));
+		assertSeries([10., 20., Math.NaN, Math.NaN], m.get("value").toArray(), "value");
+		Assert.same(["", "", "u", "v"], m.strValuesOf("value_str"));
+		assertSeries([0., 1., 0., 1.], m.get("t").toArray(), "t");
+	}
+
+	public function testXsRankPreservesStr() {
+		var df = DataFrame.fromColumns([
+			"AAA" => Np.asarray([3., 1.]),
+			"BBB" => Np.asarray([1., 4.])
+		], null, ["AAA", "BBB"]).assignStr("note", ["r0", "r1"]);
+		var r = Pd.xsRank(df);
+		Assert.same(["r0", "r1"], r.strValuesOf("note"));
+		assertSeries([2., 1.], r.get("AAA").toArray(), "AAA rank");
+		assertSeries([1., 2.], r.get("BBB").toArray(), "BBB rank");
+	}
+
+	public function testParquetFromColumnarStringColumn() {
+		var df = PdParquet.fromColumnar({
+			order: ["t", "sym", "x"],
+			columns: {
+				t: [1.0, 2.0],
+				sym: ["AAPL", "MSFT"],
+				x: [10.0, 20.0]
+			}
+		});
+		Assert.isTrue(df.hasStrColumn("sym"));
+		Assert.same(["AAPL", "MSFT"], df.strValuesOf("sym"));
+		assertSeries([1., 2.], df.get("t").toArray(), "t");
+		assertSeries([10., 20.], df.get("x").toArray(), "x");
+		// Explicit strColumns map (Node helper optional shape).
+		var df2 = PdParquet.fromColumnar({
+			order: ["t", "sym"],
+			columns: { t: [1.0, 2.0] },
+			strOrder: ["sym"],
+			strColumns: { sym: ["A", "B"] }
+		});
+		Assert.same(["A", "B"], df2.strValuesOf("sym"));
+		assertSeries([1., 2.], df2.get("t").toArray(), "t2");
 	}
 
 	public function testPivotStrKeys() {

@@ -13,7 +13,9 @@ import musescript.ndarray.NdArrayF64;
  * Melt: id vars (F64 and/or Str) copied per value block.
  * - F64 valueVars → (`varName`, `valueName`) as F64 (var codes / values).
  * - Str valueVars → (`varName`, `valueName`) as Str sidecar (column names / labels).
- * Mixed F64+Str in one `valueVars` list → empty (no Dynamic cells).
+ * - Mixed F64+Str valueVars → Str `varName` (column names), F64 `valueName`
+ *   (NaN on Str rows), Str `<valueName>_str` (empty on F64 rows).
+ *   No Dynamic cells.
  * Defaults: varName=`"variable"`, valueName=`"value"`.
  */
 class FrameReshape {
@@ -99,7 +101,7 @@ class FrameReshape {
 	/**
 	 * Wide → long. Null/empty `valueVars` → every non-id **F64** column.
 	 * Explicit Str-only `valueVars` → Str `varName`/`valueName` sidecars.
-	 * Mixed F64+Str valueVars → empty.
+	 * Mixed F64+Str → Str `varName`, F64 `valueName`, Str `<valueName>_str`.
 	 */
 	public static function melt(
 		df:DataFrame,
@@ -127,7 +129,6 @@ class FrameReshape {
 		} else {
 			for (n in df.f64Columns()) if (!idSet.exists(n)) valsF64.push(n);
 		}
-		if (valsF64.length > 0 && valsStr.length > 0) return DataFrame.empty();
 		if (valsF64.length == 0 && valsStr.length == 0) return DataFrame.empty();
 
 		var idCols:Array<{name:String, src:NdArrayF64}> = [];
@@ -143,6 +144,8 @@ class FrameReshape {
 		}
 
 		var nrows = df.nrows();
+		if (valsF64.length > 0 && valsStr.length > 0)
+			return meltMixed(df, idCols, idStrCols, valsF64, valsStr, vn, valn, nrows);
 		if (valsStr.length > 0)
 			return meltStr(df, idCols, idStrCols, valsStr, vn, valn, nrows);
 		return meltF64(df, idCols, idStrCols, valsF64, vn, valn, nrows);
@@ -247,6 +250,78 @@ class FrameReshape {
 		sMap.set(vn, varOut);
 		sOrder.push(valn);
 		sMap.set(valn, valOut);
+		return DataFrame.fromColumns(map, Index.range(outLen), order, sMap, sOrder);
+	}
+
+	/**
+	 * Mixed F64+Str valueVars without Dynamic cells: Str variable names,
+	 * F64 `valueName` (NaN on Str blocks), Str `<valueName>_str` ("" on F64 blocks).
+	 * Block order: F64 valueVars first (input order), then Str valueVars.
+	 */
+	static function meltMixed(
+		df:DataFrame,
+		idCols:Array<{name:String, src:NdArrayF64}>,
+		idStrCols:Array<{name:String, src:Array<String>}>,
+		valsF64:Array<String>,
+		valsStr:Array<String>,
+		vn:String,
+		valn:String,
+		nrows:Int
+	):DataFrame {
+		var vals:Array<{name:String, isStr:Bool}> = [];
+		for (n in valsF64) vals.push({name: n, isStr: false});
+		for (n in valsStr) vals.push({name: n, isStr: true});
+		var outLen = nrows * vals.length;
+		var idOuts:Array<NdArrayF64> = [for (_ in idCols) NdArrayF64.empty([outLen])];
+		var idStrOuts:Array<Array<String>> = [for (_ in idStrCols) [for (_ in 0...outLen) ""]];
+		var varOut:Array<String> = [for (_ in 0...outLen) ""];
+		var valOut = NdArrayF64.empty([outLen]);
+		var valStrOut:Array<String> = [for (_ in 0...outLen) ""];
+		var valnStr = valn + "_str";
+
+		var o = 0;
+		for (vi in 0...vals.length) {
+			var name = vals[vi].name;
+			var isStr = vals[vi].isStr;
+			var fsrc = isStr ? null : df.valuesOf(name);
+			var ssrc = isStr ? df.strValuesOf(name) : null;
+			for (r in 0...nrows) {
+				for (ii in 0...idCols.length)
+					idOuts[ii].setFlat(o, idCols[ii].src.getFlat(r));
+				for (ii in 0...idStrCols.length) {
+					var labels = idStrCols[ii].src;
+					idStrOuts[ii][o] = (r < labels.length) ? labels[r] : "";
+				}
+				varOut[o] = name;
+				if (isStr) {
+					valOut.setFlat(o, Math.NaN);
+					valStrOut[o] = ssrc != null && r < ssrc.length && ssrc[r] != null ? ssrc[r] : "";
+				} else {
+					valOut.setFlat(o, fsrc != null ? fsrc.getFlat(r) : Math.NaN);
+					valStrOut[o] = "";
+				}
+				o++;
+			}
+		}
+
+		var map = new Map<String, NdArrayF64>();
+		var order:Array<String> = [];
+		for (ii in 0...idCols.length) {
+			order.push(idCols[ii].name);
+			map.set(idCols[ii].name, idOuts[ii]);
+		}
+		order.push(valn);
+		map.set(valn, valOut);
+		var sMap = new Map<String, Array<String>>();
+		var sOrder:Array<String> = [];
+		for (ii in 0...idStrCols.length) {
+			sOrder.push(idStrCols[ii].name);
+			sMap.set(idStrCols[ii].name, idStrOuts[ii]);
+		}
+		sOrder.push(vn);
+		sMap.set(vn, varOut);
+		sOrder.push(valnStr);
+		sMap.set(valnStr, valStrOut);
 		return DataFrame.fromColumns(map, Index.range(outLen), order, sMap, sOrder);
 	}
 

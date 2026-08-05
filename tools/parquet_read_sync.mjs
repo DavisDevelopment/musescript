@@ -3,8 +3,11 @@
  * Invoked via child_process.spawnSync from PdParquet — avoids Worker+Atomics races.
  *
  * Usage: node tools/parquet_read_sync.mjs <abs-path-to.parquet>
- * stdout: { ok: true, order: string[], columns: { [name]: (number|null)[] } }
+ * stdout: { ok: true, order: string[], columns: { [name]: (number|string|boolean|null)[] } }
  *      or { ok: false, error: string }
+ *
+ * Non-numeric strings are preserved for PdParquet.fromColumnar Str sidecars
+ * (same policy as fromObjects / CSV). Bool → 0/1; non-finite numbers → null.
  */
 import fs from "fs";
 
@@ -45,12 +48,21 @@ try {
 	for (const row of rows) {
 		for (const name of order) {
 			let v = row == null ? null : row[name];
-			if (typeof v === "bigint") v = Number(v);
-			else if (typeof v === "boolean") v = v ? 1 : 0;
-			else if (v == null || (typeof v === "number" && !Number.isFinite(v))) v = null;
-			else if (typeof v !== "number") {
-				const f = parseFloat(String(v));
-				v = Number.isFinite(f) ? f : null;
+			if (typeof v === "bigint") {
+				const n = Number(v);
+				v = Number.isFinite(n) ? n : null;
+			} else if (typeof v === "boolean") {
+				v = v ? 1 : 0;
+			} else if (v == null) {
+				v = null;
+			} else if (typeof v === "number") {
+				v = Number.isFinite(v) ? v : null;
+			} else if (typeof v === "string") {
+				// Keep as string — fromColumnar classifies Str vs F64 (numeric-looking → F64).
+			} else if (typeof v === "object" && v !== null && typeof v.toISOString === "function") {
+				v = v.toISOString();
+			} else {
+				v = String(v);
 			}
 			columns[name].push(v);
 		}
