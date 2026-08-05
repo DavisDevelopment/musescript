@@ -9,69 +9,129 @@ Source of truth: `musescript/compile/WasmPdEligibility.hx` (+ opaque tagging in
 
 ## Caps
 
-None claimed. A future 1-D native `pd_xs_rank` / `pd_shift` would mirror
-`WasmNpEligibility.MAX_VEC_LEN` (64); **not shipped in M3**.
+| Cap | Value | Meaning |
+|-----|------:|---------|
+| `MAX_VEC_LEN` | 64 | Max 1-D length for claimed-native `pd_rank1d` |
+
+Over cap → **H** (`host_eval`), fail closed. Same scratch budget class as
+`WasmNpEligibility.MAX_VEC_LEN`.
 
 ## Native subset (**N**)
 
 | Op | Shape | Notes |
 |----|-------|-------|
-| *(none)* | — | M3 ships **zero** claimed-native `pd_*` |
+| `pd_rank1d` | 1-D ≤64 | Average-tie ascending rank → `$vec_rank`; literal `pct=true` → `$vec_rank_pct`. Const-fold via Haxe `GroupBy.rank1d`. Non-literal pct / descending / len>64 → **H** |
 
-Do not invent silent native frame kernels. Rank/zscore on packed f64 scratch is
-a follow-up only after emitter + DetMath + Expand tests exist.
+Do not invent silent native **frame** kernels. `pd_xs_rank` / `pd_resample` /
+groupby / merge return opaque `TDataFrame` → still whole-module **U**. Authors
+who already have packed score vectors should prefer `pd_rank1d` on WASM.
 
 ## Escape / unsupported (**H** / **U**)
 
 | Tag | Meaning for `pd_*` |
 |-----|--------------------|
-| **H** | Would be per-statement `host_eval` if DataFrame round-trip through escape regions worked — it does **not** today |
-| **U** | Practical WASM stance: any strategy calling a builtin that **returns** `TDataFrame`, `TPdSeries`, or `TIndex` forces **whole-module fallback** (interp/JS), same honesty class as `TProbCloud` / `TBag` |
+| **H** | Per-statement `host_eval` for non-native forms of claimed ops, or future opaque round-trip |
+| **U** | Practical WASM stance for builtins that **return** `TDataFrame`, `TPdSeries`, or `TIndex`: **whole-module fallback** (interp/JS), same honesty class as `TProbCloud` / `TBag` |
 
-Documented catalog (representative of all `pd_*`): see
+Documented catalog (representative of all frame `pd_*`): see
 `WasmPdEligibility.HOST_ESCAPE` — construct/select, merge_asof/join, groupby,
-pivot/melt, corr/cov, rolling/ewm, grant CSV, etc. Unlisted `pd_*` is also
-escape / unsupported.
+pivot/melt, corr/cov, rolling/ewm, **resample**, grant CSV, `pd_xs_rank`, etc.
+Unlisted `pd_*` is also escape / unsupported unless in `NATIVE_*`.
 
-`pd_read_csv` remains **U** on WASM fitness and **U** on other engines unless
-`IoGrant` is attached (ingest tier).
+`pd_read_csv` / `pd_read_parquet` remain **U** on WASM fitness and **U** on
+other engines unless `IoGrant` is attached (ingest tier).
 
-## Engine matrix (M3)
+## Engine matrix (M4+)
 
-| Engine | Construct / select | merge_asof / join | groupby / pivot / corr | rolling / xs_rank | read_csv |
-|--------|--------------------|-------------------|------------------------|-------------------|----------|
-| **Interp** | **N** (Haxe) | **N** | **N** | **N** | **U** unless grant |
-| **JS** | **B** (`pd_*`) | **B** | **B** | **B** | grant / Studio |
-| **Bytecode VM** | **U** | **U** | **U** | **U** | **U** |
-| **WASM** | **U** (opaque fallback) | **U** | **U** | **U** | **U** |
-| **NMA** | Don't force frames into kind-switch | — | — | — | — |
+CI/local aggregator: [ENGINE_MATRIX.md](ENGINE_MATRIX.md)
+(`bash tools/engine_matrix.sh` / `.\tools\engine_matrix.ps1`).
+
+| Engine | Construct / select | merge_asof / join | groupby / pivot / corr | rolling / xs_rank / resample | `pd_rank1d` | read_csv / read_parquet |
+|--------|--------------------|-------------------|------------------------|------------------------------|-------------|-------------------------|
+| **Interp** | **N** (Haxe) | **N** | **N** | **N** | **N** | **U** unless grant |
+| **JS** | **B** (`pd_*`) | **B** | **B** | **B** | **B** | grant / Studio (parquet: Node + hyparquet) |
+| **Bytecode VM** | **U** | **U** | **U** | **U** | **H** ≤64 → OBJ `NdArrayF64` (`VmPdEligibility`) | **U** |
+| **WASM** | **U** (opaque fallback) | **U** | **U** | **U** | **N** ≤64 | **U** |
+| **NMA** | Don't force frames into kind-switch | — | — | — | — | — |
 
 ## Evo palette `PD_*`
 
 **Shipped (gated, default off):** `KPd("xs_rank", …)` via
 `Variation.configureForPd` **and** `configureForUniverse` (or
-`configureForPanel`, which sets the universe). Expand emits a literal one-row
-`pd_from_columns` + **percentile** `pd_xs_rank(..., true)` cell extract — no
-open groupby/merge/HTTP — and coerces onto `PanelAction` / `target_weight` so
-selection scores via `Fitness.configurePanel` → `runPanelBacktest`.
+`configureForPanel`, which sets the universe). Expand dual path:
+
+| Universe width | Expand shape | WASM |
+|----------------|--------------|------|
+| `≤ MAX_VEC_LEN` (64) | `np_get_flat(pd_rank1d([score…], true), i)` | **N** (`$vec_rank_pct` + `np_get_flat`) when scores lower |
+| `> 64` | one-row `pd_from_columns` + percentile `pd_xs_rank` cell extract | **U** (opaque frame) |
+
+No open groupby/merge/HTTP. Coerces onto `PanelAction` / `target_weight` **or**
+closed rank→bag templates (`PABagScanTop` /
+`PABagRankWeights` → `portfolio_apply(bag_from_scan|bag_norm(bag_from_dict))`)
+so selection scores via `Fitness.configurePanel` → `runPanelBacktest`. Closed bags
+on WASM are HostABI hybrid: native score/`*_of` reads + `apply_bag_scan` /
+`apply_bag_weights` (host `applyBag`) — **not** opaque whole-module fallback and
+**not** per-statement `host_eval` when the Expand shape matches. Open
+`bag_rank_mom` / `bag_computed` / `symbols()` / assigned bag locals remain **U**
+(`PANEL_HOST_ESCAPE`).
+
+Also gated: `KPd("shift", field, periods, …)` — size-capped Series lag
+(`pd_shift(pd_series(window(field, w)), p)` → scalar). No universe required;
+stays on the single-name fitness path (`hasKPd` true, `usesPanelFitness` false
+unless a `PanelAction` is present). Frame `pd_shift` remains escape/U.
 
 Enable trio:
 
 ```text
 engine.configureForPanel(panel)
-engine.configureForPd(null)       # or ["xs_rank"]
+engine.configureForPd(null)       # or ["xs_rank"] / ["shift"] / both
 # universe comes from panel; or configureForUniverse([...]) without panel growth-only
 ```
 
-NMA/VM/WASM stay unsupported / all-U → Expand→interp/JS. Columnar NMA for PD
-frames remains deferred.
+NMA columnarizes closed bag templates (`PABagScanTop` / `PABagRankWeights` →
+score columns → equal bag or percentile xs_rank → `bag_norm` → `applyBag`);
+`KPd` / VM stay Expand→interp/JS for panel `xs_rank` and Series `shift` (or WASM
+HostABI for closed bags). Packed `pd_rank1d` alone is VM **H** (OBJ-lane
+`NdArrayF64`, `len ≤ 64`) — same logical handle as WASM **N**; Expand `KPd` genomes
+still refuse `evaluateVm` because they need panel / Series. `Fitness.preferVm` defaults ON
+(Expand→interp fallback on U).
 
-`PD_SHIFT` remains deferred (use `KLookback` / series lookback instead).
+## Panel closed bags — native vs HostABI matrix
+
+| Surface | Scores / `*_of` | Apply | Whole-module bail? |
+|---------|-----------------|-------|--------------------|
+| `buy` / `sell_all` / `target_weight` / `rebalance_equal([…])` | **N** | HostABI | No |
+| `portfolio_apply(bag_from_scan({SYM:…}, k))` ≤64 | **N** (spill) | HostABI `apply_bag_scan` | No |
+| `portfolio_apply(bag_norm(bag_from_dict({…})))` ≤64 | **N** (spill) | HostABI `apply_bag_weights` | No |
+| `var b = bag_*…` / `bag_equal` / open `bag_rank_*` / `symbols()` | — | — | **U** (opaque) |
+| Free-standing `bag_from_scan` / `bag_norm` (not inside HostABI apply) | — | — | **U** |
+
+Tests: `TestPanelWasmParity` emit gates (`apply_bag_*`, no `host_eval`) + interp↔WASM parity.
 
 ## Follow-ups
 
-- Optional tiny **N**: 1-D `pd_xs_rank` / `pd_shift` ≤64 scratch + goldens
-- Columnar NMA / bag Expand for PD-bearing genomes (still Expand→interp today)
+- Bytecode VM: packed `pd_rank1d` OBJ-lane handle **shipped** (`VmPdEligibility`);
+  deferred Series/DataFrame/Index handles (`pd_series` / `pd_shift` / frame ops)
+- MultiIndex shipped: F64 and/or Str levels, N≥1 (`fromLevels` / groupby `as_index`
+  takes all by-cols); `xs` / `xsStr` / `get_level_values(_str)` / `reset_index`.
+- **String sidecar propagation (shipped):** `assignStr` / select / drop / slice /
+  iloc / reset_index / xs; **concat** (axis 0/1); **join**; **merge_asof**; **melt**
+  (Str idVars **and** Str-only valueVars → Str `variable`/`value`); **pivot**
+  (Str `index`/`columns`, F64 `values`); **align/reindex**; window mapCols;
+  fillna (F64); dropna / isna (F64 NaN **and** Str `""` → missing; isna emits
+  F64 0/1 masks for both); **corr/cov** skip Str; **resample** last-nonempty Str;
+  CSV parse / Parquet `fromObjects` → Str sidecars for non-numeric columns.
+  `Series` stays **F64-only** (no Series-of-strings) — Str cols → empty Series;
+  use `strValuesOf` / `get_level_values_str`.
+- **codes / factorize (shipped):** `Factorize` F64/Str → codes+uniques; MultiIndex
+  `.codes` / `.uniqueLevels` / `fromCodes` (codes-primary until densify); groupby
+  partitions via int codes; flats `pd_factorize` / `pd_index_codes` /
+  `pd_index_levels` / `pd_multi_index_codes`.
+- **Still open / deferred:** Parquet Node/`fromColumnar` string columns (still
+  NaN coerce — CSV or `assignStr`); melt mixed F64+Str valueVars (returns empty);
+  Series-of-strings; xs_rank Str.
+- Parquet ingest **shipped** (grant + optional `hyparquet` peer on Node; JVM → clear deny / CSV preconvert)
+- Columnar NMA for PD-bearing `KPd` genomes (still Expand→interp / host_eval today)
 - Deeper checker enforcement of `TDataFrame` ≠ `TSeries`
 - Engine-matrix CI jobs beyond Node pd gate
-- MultiIndex for multi-key agg index (M4+)
+- HostABI `bottom` scan / packed bag locals across statements (still U)

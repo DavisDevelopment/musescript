@@ -7,7 +7,8 @@ import musescript.ndarray.NdArrayF64;
  *
  * Pearson corr; sample cov with `ddof=1` (pandas default). Pairwise complete
  * observations per column pair (skip rows where either cell is NaN).
- * Result is square DataFrame: columns = column names, Index = IndexStr names.
+ * Str sidecar columns are skipped. Result is square DataFrame over F64 names
+ * only (Index = IndexStr of those names).
  */
 class FrameCorr {
 	public static function corr(df:DataFrame):DataFrame
@@ -18,7 +19,8 @@ class FrameCorr {
 
 	static function pairwise(df:DataFrame, asCorr:Bool, ddof:Int):DataFrame {
 		if (df == null || df.emptyFrame()) return DataFrame.empty();
-		var names = df.columns();
+		// Str sidecars are non-numeric — omit (do not invent Dynamic corr cells).
+		var names = df.f64Columns();
 		var m = names.length;
 		if (m == 0) return DataFrame.empty();
 		var cols:Array<NdArrayF64> = [];

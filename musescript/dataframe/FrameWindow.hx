@@ -71,13 +71,19 @@ class FrameWindow {
 
 	static function mapCols(df:DataFrame, f:NdArrayF64->NdArrayF64):DataFrame {
 		if (df == null) return DataFrame.empty();
-		var order = df.columns();
+		var order = df.f64Columns();
 		var map = new Map<String, NdArrayF64>();
 		for (n in order) {
 			var src = df.valuesOf(n);
 			map.set(n, f(src != null ? src : NdArrayF64.empty([df.nrows()])));
 		}
-		return DataFrame.fromColumns(map, Index.copyOf(df.index), order);
+		var sMap = new Map<String, Array<String>>();
+		var sOrder = df.strColumns();
+		for (n in sOrder) {
+			var src = df.strValuesOf(n);
+			sMap.set(n, src != null ? src : []);
+		}
+		return DataFrame.fromColumns(map, Index.copyOf(df.index), order, sMap, sOrder);
 	}
 
 	public static function shift1d(src:NdArrayF64, periods:Int):NdArrayF64 {

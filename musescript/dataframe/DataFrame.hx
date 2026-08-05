@@ -4,21 +4,32 @@ import musescript.ndarray.NdArrayF64;
 
 /**
  * Columnar DataFrame — shared Index + ordered F64 NdArray columns.
- * No row-object / Dynamic cell API. Column select returns Series sharing buffer.
+ * Optional string sidecar columns (MultiIndex Str reset / string groupby keys /
+ * CSV non-numeric / assignStr). No row-object / Dynamic cell API.
  */
 class DataFrame {
 	var _index:AnyIndex;
 	var _names:Array<String>;
 	var _cols:Array<NdArrayF64>;
+	var _strNames:Array<String>;
+	var _strCols:Array<Array<String>>;
 
-	function new(index:AnyIndex, names:Array<String>, cols:Array<NdArrayF64>) {
+	function new(
+		index:AnyIndex,
+		names:Array<String>,
+		cols:Array<NdArrayF64>,
+		?strNames:Array<String>,
+		?strCols:Array<Array<String>>
+	) {
 		_index = index;
 		_names = names != null ? names : [];
 		_cols = cols != null ? cols : [];
+		_strNames = strNames != null ? strNames : [];
+		_strCols = strCols != null ? strCols : [];
 	}
 
 	public static function empty():DataFrame
-		return new DataFrame(Index.range(0), [], []);
+		return new DataFrame(Index.range(0), [], [], [], []);
 
 	/**
 	 * Build from ordered column name → 1-D NdArray map (names follow `columnOrder`
@@ -27,9 +38,15 @@ class DataFrame {
 	public static function fromColumns(
 		columns:Map<String, NdArrayF64>,
 		?index:AnyIndex,
-		?columnOrder:Array<String>
+		?columnOrder:Array<String>,
+		?strColumns:Map<String, Array<String>>,
+		?strOrder:Array<String>
 	):DataFrame {
-		if (columns == null) return empty();
+		if (columns == null) columns = new Map();
+		if (strColumns == null && columns.keys().hasNext() == false) return empty();
+		// Allow str-only frames (MultiIndex Str reset with no F64 value cols).
+		if (!columns.keys().hasNext() && (strColumns == null || !strColumns.keys().hasNext()))
+			return empty();
 		var names:Array<String> = [];
 		if (columnOrder != null && columnOrder.length > 0) {
 			for (n in columnOrder) if (columns.exists(n)) names.push(n);
@@ -44,7 +61,23 @@ class DataFrame {
 			cols.push(c);
 			if (c.size > nrows) nrows = c.size;
 		}
-		// Align shorter columns with NaN.
+		var sNames:Array<String> = [];
+		var sCols:Array<Array<String>> = [];
+		if (strColumns != null) {
+			if (strOrder != null && strOrder.length > 0) {
+				for (n in strOrder) if (strColumns.exists(n)) sNames.push(n);
+			} else {
+				for (k in strColumns.keys()) sNames.push(k);
+				sNames.sort(Reflect.compare);
+			}
+			for (n in sNames) {
+				var src = strColumns.get(n);
+				var labels:Array<String> = src != null ? src.copy() : [];
+				if (labels.length > nrows) nrows = labels.length;
+				sCols.push(labels);
+			}
+		}
+		// Align shorter F64 columns with NaN.
 		for (i in 0...cols.length) {
 			if (cols[i].size == nrows) continue;
 			var aligned = NdArrayF64.empty([nrows]);
@@ -53,12 +86,15 @@ class DataFrame {
 			for (j in n...nrows) aligned.setFlat(j, Math.NaN);
 			cols[i] = aligned;
 		}
+		for (i in 0...sCols.length) {
+			while (sCols[i].length < nrows) sCols[i].push("");
+			if (sCols[i].length > nrows) sCols[i] = sCols[i].slice(0, nrows);
+		}
 		var idx = index != null ? index : Index.range(nrows);
 		var nIdx = Index.lengthOf(idx);
 		if (nIdx != nrows) {
 			if (nIdx == 0) idx = Index.range(nrows);
 			else {
-				// Re-align columns to index length.
 				var target = nIdx;
 				for (i in 0...cols.length) {
 					var aligned = NdArrayF64.empty([target]);
@@ -67,9 +103,13 @@ class DataFrame {
 					for (j in n...target) aligned.setFlat(j, Math.NaN);
 					cols[i] = aligned;
 				}
+				for (i in 0...sCols.length) {
+					while (sCols[i].length < target) sCols[i].push("");
+					if (sCols[i].length > target) sCols[i] = sCols[i].slice(0, target);
+				}
 			}
 		}
-		return new DataFrame(idx, names, cols);
+		return new DataFrame(idx, names, cols, sNames, sCols);
 	}
 
 	/**
@@ -135,11 +175,19 @@ class DataFrame {
 	public var index(get, never):AnyIndex;
 	inline function get_index():AnyIndex return _index;
 
-	public function columns():Array<String> return _names.copy();
+	public function columns():Array<String> {
+		var out = _names.copy();
+		for (n in _strNames) out.push(n);
+		return out;
+	}
+
+	public function f64Columns():Array<String> return _names.copy();
+
+	public function strColumns():Array<String> return _strNames.copy();
 
 	public function nrows():Int return Index.lengthOf(_index);
 
-	public function ncols():Int return _names.length;
+	public function ncols():Int return _names.length + _strNames.length;
 
 	/** `[nrows, ncols]` */
 	public function shape():Array<Int> return [nrows(), ncols()];
@@ -148,7 +196,21 @@ class DataFrame {
 
 	public function hasColumn(name:String):Bool {
 		for (n in _names) if (n == name) return true;
+		for (n in _strNames) if (n == name) return true;
 		return false;
+	}
+
+	/** True when `name` is a string sidecar column (not F64). */
+	public function hasStrColumn(name:String):Bool {
+		for (n in _strNames) if (n == name) return true;
+		return false;
+	}
+
+	/** Raw string sidecar labels (copy). Null when missing. */
+	public function strValuesOf(name:String):Null<Array<String>> {
+		for (i in 0..._strNames.length)
+			if (_strNames[i] == name) return _strCols[i].copy();
+		return null;
 	}
 
 	function colIndex(name:String):Int {
@@ -156,14 +218,22 @@ class DataFrame {
 		return -1;
 	}
 
-	/** Column as Series sharing NdArray buffer + Index. Missing → empty Series. */
+	function strColIndex(name:String):Int {
+		for (i in 0..._strNames.length) if (_strNames[i] == name) return i;
+		return -1;
+	}
+
+	/**
+	 * Column as Series sharing NdArray buffer + Index.
+	 * Missing or Str sidecar → empty Series (Series is F64-only; use `strValuesOf`).
+	 */
 	public function get(name:String):Series {
 		var i = colIndex(name);
 		if (i < 0) return Series.empty(name);
 		return Series.create(_cols[i], _index, name);
 	}
 
-	/** Raw column NdArray (shared). */
+	/** Raw F64 column NdArray (shared). Str columns → null. */
 	public function valuesOf(name:String):Null<NdArrayF64> {
 		var i = colIndex(name);
 		return i < 0 ? null : _cols[i];
@@ -173,24 +243,54 @@ class DataFrame {
 		if (names == null || names.length == 0) return empty();
 		var map = new Map<String, NdArrayF64>();
 		var order:Array<String> = [];
+		var sMap = new Map<String, Array<String>>();
+		var sOrder:Array<String> = [];
 		for (n in names) {
 			var i = colIndex(n);
-			if (i < 0) continue;
-			order.push(n);
-			map.set(n, _cols[i]);
+			if (i >= 0) {
+				order.push(n);
+				map.set(n, _cols[i]);
+				continue;
+			}
+			var si = strColIndex(n);
+			if (si >= 0) {
+				sOrder.push(n);
+				sMap.set(n, _strCols[si]);
+			}
 		}
-		return fromColumns(map, _index, order);
+		return fromColumns(map, _index, order, sMap, sOrder);
 	}
 
-	/** New frame with column assigned (owned copy of values). */
+	/** New frame with F64 column assigned (owned copy of values). */
 	public function assign(name:String, values:NdArrayF64):DataFrame {
-		var map = new Map<String, NdArrayF64>();
+		var map = f64ColumnMap();
 		var order = _names.copy();
-		for (i in 0..._names.length) map.set(_names[i], _cols[i]);
 		var v = normalize1d(values).copy();
 		if (!map.exists(name)) order.push(name);
 		map.set(name, v);
-		return fromColumns(map, _index, order);
+		var sMap = strColumnMap();
+		var sOrder = _strNames.copy();
+		if (sMap.exists(name)) {
+			sMap.remove(name);
+			sOrder = [for (n in sOrder) if (n != name) n];
+		}
+		return fromColumns(map, _index, order, sMap, sOrder);
+	}
+
+	/** Assign / upsert a string sidecar column. */
+	public function assignStr(name:String, labels:Array<String>):DataFrame {
+		var map = f64ColumnMap();
+		var order = _names.copy();
+		var sMap = strColumnMap();
+		var sOrder = _strNames.copy();
+		var copied = labels != null ? labels.copy() : [];
+		if (!sMap.exists(name)) sOrder.push(name);
+		sMap.set(name, copied);
+		if (map.exists(name)) {
+			map.remove(name);
+			order = [for (n in order) if (n != name) n];
+		}
+		return fromColumns(map, _index, order, sMap, sOrder);
 	}
 
 	public function drop(names:Array<String>):DataFrame {
@@ -204,12 +304,20 @@ class DataFrame {
 			order.push(_names[i]);
 			map.set(_names[i], _cols[i]);
 		}
-		return fromColumns(map, _index, order);
+		var sMap = new Map<String, Array<String>>();
+		var sOrder:Array<String> = [];
+		for (i in 0..._strNames.length) {
+			if (dropSet.exists(_strNames[i])) continue;
+			sOrder.push(_strNames[i]);
+			sMap.set(_strNames[i], _strCols[i]);
+		}
+		return fromColumns(map, _index, order, sMap, sOrder);
 	}
 
 	public function copy():DataFrame {
 		var cols:Array<NdArrayF64> = [for (c in _cols) c.copy()];
-		return new DataFrame(Index.copyOf(_index), _names.copy(), cols);
+		var sCols:Array<Array<String>> = [for (c in _strCols) c.copy()];
+		return new DataFrame(Index.copyOf(_index), _names.copy(), cols, _strNames.copy(), sCols);
 	}
 
 	public function head(n:Int = 5):DataFrame {
@@ -234,7 +342,9 @@ class DataFrame {
 			var v = c.slice1d(s, e, 1);
 			cols.push(v != null ? v : NdArrayF64.empty([0]));
 		}
-		return new DataFrame(Index.sliceOf(_index, s, e), _names.copy(), cols);
+		var sCols:Array<Array<String>> = [];
+		for (c in _strCols) sCols.push(c.slice(s, e));
+		return new DataFrame(Index.sliceOf(_index, s, e), _names.copy(), cols, _strNames.copy(), sCols);
 	}
 
 	/** Integer-location row take (M0 iloc). */
@@ -250,13 +360,22 @@ class DataFrame {
 			}
 			cols.push(out);
 		}
-		return new DataFrame(Index.takeOf(_index, indices), _names.copy(), cols);
+		var sCols:Array<Array<String>> = [];
+		for (c in _strCols) {
+			var out:Array<String> = [];
+			for (i in 0...indices.length) {
+				var ix = indices[i];
+				out.push((ix >= 0 && ix < n) ? c[ix] : "");
+			}
+			sCols.push(out);
+		}
+		return new DataFrame(Index.takeOf(_index, indices), _names.copy(), cols, _strNames.copy(), sCols);
 	}
 
-	/** Stack columns into owned `n × m` matrix (row-major). */
+	/** Stack F64 columns into owned `n × m` matrix (row-major). Str cols excluded. */
 	public function toNdArray():NdArrayF64 {
 		var n = nrows();
-		var m = ncols();
+		var m = _names.length;
 		if (n == 0 || m == 0) return NdArrayF64.empty([0, 0]);
 		var out = NdArrayF64.empty([n, m]);
 		for (c in 0...m)
@@ -268,7 +387,20 @@ class DataFrame {
 	public function dtypes():Map<String, String> {
 		var m = new Map<String, String>();
 		for (n in _names) m.set(n, "f64");
+		for (n in _strNames) m.set(n, "str");
 		return m;
+	}
+
+	function f64ColumnMap():Map<String, NdArrayF64> {
+		var map = new Map<String, NdArrayF64>();
+		for (i in 0..._names.length) map.set(_names[i], _cols[i]);
+		return map;
+	}
+
+	function strColumnMap():Map<String, Array<String>> {
+		var map = new Map<String, Array<String>>();
+		for (i in 0..._strNames.length) map.set(_strNames[i], _strCols[i]);
+		return map;
 	}
 
 	/** Single-key groupby (F64 column). */
@@ -319,6 +451,138 @@ class DataFrame {
 
 	public function cov(?ddof:Int = 1):DataFrame
 		return FrameCorr.cov(this, ddof);
+
+	/** Resample / down-sample — see {@link Resample.agg}. */
+	public function resample(rule:String, ?how:String = "ohlcv"):DataFrame
+		return Resample.agg(this, rule, how);
+
+	/**
+	 * Promote Index labels to columns; replace Index with `range(n)`.
+	 * MultiIndex → named level columns (F64 → NdArray; Str → sidecar);
+	 * F64 Index → `"index"` (or `name`); Str Index → sidecar column.
+	 * `drop=true` discards labels.
+	 */
+	public function resetIndex(?drop:Bool = false, ?name:String = "index"):DataFrame {
+		var n = nrows();
+		var map = f64ColumnMap();
+		for (k in map.keys()) map.set(k, map.get(k).copy());
+		var order = _names.copy();
+		var sMap = strColumnMap();
+		for (k in sMap.keys()) sMap.set(k, sMap.get(k).copy());
+		var sOrder = _strNames.copy();
+		if (!drop) {
+			switch (_index) {
+				case Multi(mi):
+					var nm = mi.names();
+					var insertAt = 0;
+					for (lv in 0...mi.nlevels) {
+						var baseName = lv < nm.length ? nm[lv] : ("level_" + lv);
+						if (mi.levelKind(lv) == "str") {
+							var colName = uniqueStrColName(baseName, map, sMap);
+							var labels = mi.levelValuesStr(lv);
+							while (labels.length < n) labels.push("");
+							if (labels.length > n) labels = labels.slice(0, n);
+							sMap.set(colName, labels);
+							sOrder.insert(insertAt, colName);
+						} else {
+							var colName = uniqueColName(baseName, map, sMap);
+							var vals = NdArrayF64.empty([n]);
+							var arr = mi.levelValues(lv);
+							for (r in 0...n) vals.setFlat(r, r < arr.length ? arr[r] : Math.NaN);
+							map.set(colName, vals);
+							order.insert(insertAt, colName);
+						}
+						insertAt++;
+					}
+				case F64(idx):
+					var colName = uniqueColName(name != null ? name : "index", map, sMap);
+					var vals = NdArrayF64.empty([n]);
+					for (r in 0...n) vals.setFlat(r, idx.get(r));
+					map.set(colName, vals);
+					order.insert(0, colName);
+				case Str(idx):
+					var colName = uniqueStrColName(name != null ? name : "index", map, sMap);
+					var labels = idx.labels();
+					while (labels.length < n) labels.push("");
+					if (labels.length > n) labels = labels.slice(0, n);
+					sMap.set(colName, labels);
+					sOrder.insert(0, colName);
+			}
+		}
+		return fromColumns(map, Index.range(n), order, sMap, sOrder);
+	}
+
+	/**
+	 * Cross-section on MultiIndex: keep rows where F64 `level` equals `key`.
+	 * Remaining levels become Index (F64 / Str / Multi). Non-Multi → empty.
+	 */
+	public function xs(key:Float, ?level:Int = 0):DataFrame {
+		var mi = Index.asMulti(_index);
+		if (mi == null) return empty();
+		var pos = mi.xsPositions(key, level);
+		return xsPositions(mi, pos, level);
+	}
+
+	/** Cross-section where Str `level` equals `key`. */
+	public function xsStr(key:String, ?level:Int = 0):DataFrame {
+		var mi = Index.asMulti(_index);
+		if (mi == null) return empty();
+		var pos = mi.xsPositionsStr(key, level);
+		return xsPositions(mi, pos, level);
+	}
+
+	function xsPositions(mi:MultiIndex, pos:Array<Int>, level:Int):DataFrame {
+		if (pos.length == 0) return empty();
+		var taken = iloc(pos);
+		var remaining = mi.take(pos).withoutLevel(level);
+		var map = taken.f64ColumnMap();
+		var order = taken.f64Columns();
+		var sMap = taken.strColumnMap();
+		var sOrder = taken.strColumns();
+		return fromColumns(map, remaining.toAnyIndex(), order, sMap, sOrder);
+	}
+
+	/** Level values as F64 array; Str levels → []; non-Multi level 0 → F64 Index labels. */
+	public function getLevelValues(level:Int = 0):Array<Float> {
+		return switch (_index) {
+			case Multi(mi): mi.levelValues(level);
+			case F64(i): level == 0 ? i.toArray() : [];
+			case Str(_): [];
+		};
+	}
+
+	/** Level values as strings; F64 levels → stringified; non-Multi Str Index when level=0. */
+	public function getLevelValuesStr(level:Int = 0):Array<String> {
+		return switch (_index) {
+			case Multi(mi):
+				if (mi.levelKind(level) == "str") return mi.levelValuesStr(level);
+				var f = mi.levelValues(level);
+				return [for (v in f) Math.isNaN(v) ? "" : Std.string(v)];
+			case Str(i): level == 0 ? i.labels() : [];
+			case F64(i):
+				if (level != 0) return [];
+				[for (v in i.toArray()) Math.isNaN(v) ? "" : Std.string(v)];
+		};
+	}
+
+	static function uniqueColName(
+		base:String,
+		map:Map<String, NdArrayF64>,
+		?strMap:Map<String, Array<String>>
+	):String {
+		var b = base != null && base != "" ? base : "index";
+		if (!map.exists(b) && (strMap == null || !strMap.exists(b))) return b;
+		var i = 0;
+		while (map.exists(b + "_" + i) || (strMap != null && strMap.exists(b + "_" + i))) i++;
+		return b + "_" + i;
+	}
+
+	static function uniqueStrColName(
+		base:String,
+		map:Map<String, NdArrayF64>,
+		strMap:Map<String, Array<String>>
+	):String
+		return uniqueColName(base, map, strMap);
 
 	static function normalize1d(data:NdArrayF64):NdArrayF64 {
 		if (data == null) return NdArrayF64.empty([0]);

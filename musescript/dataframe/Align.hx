@@ -43,6 +43,23 @@ class Align {
 		return out;
 	}
 
+	/** Tuple-key map for MultiIndex (first match wins). */
+	public static function mapMulti(source:MultiIndex, target:MultiIndex):Array<Int> {
+		var nT = target != null ? target.length : 0;
+		var out:Array<Int> = [for (_ in 0...nT) -1];
+		if (source == null || target == null) return out;
+		var first = new Map<String, Int>();
+		for (i in 0...source.length) {
+			var k = source.rowTag(i);
+			if (!first.exists(k)) first.set(k, i);
+		}
+		for (j in 0...nT) {
+			var k = target.rowTag(j);
+			if (first.exists(k)) out[j] = first.get(k);
+		}
+		return out;
+	}
+
 	/** Reindex frame rows to `newIndex` (label join); missing → NaN. */
 	public static function reindex(df:DataFrame, newIndex:AnyIndex):DataFrame {
 		if (df == null) return DataFrame.empty();
@@ -50,6 +67,7 @@ class Align {
 		var mapper = switch [df.index, newIndex] {
 			case [F64(s), F64(t)]: mapF64(s, t);
 			case [Str(s), Str(t)]: mapStr(s, t);
+			case [Multi(s), Multi(t)]: mapMulti(s, t);
 			default: [for (_ in 0...Index.lengthOf(newIndex)) -1];
 		};
 		return takeRows(df, mapper, newIndex);
@@ -84,7 +102,7 @@ class Align {
 		var n = positions != null ? positions.length : 0;
 		var idx = index != null ? index : Index.range(n);
 		var map = new Map<String, NdArrayF64>();
-		var order = df.columns();
+		var order = df.f64Columns();
 		var nrows = df.nrows();
 		for (name in order) {
 			var src = df.valuesOf(name);
@@ -95,7 +113,18 @@ class Align {
 			}
 			map.set(name, col);
 		}
-		return DataFrame.fromColumns(map, idx, order);
+		var sMap = new Map<String, Array<String>>();
+		var sOrder = df.strColumns();
+		for (name in sOrder) {
+			var src = df.strValuesOf(name);
+			var labels:Array<String> = [];
+			for (i in 0...n) {
+				var p = positions[i];
+				labels.push((p >= 0 && p < nrows && src != null && p < src.length) ? src[p] : "");
+			}
+			sMap.set(name, labels);
+		}
+		return DataFrame.fromColumns(map, idx, order, sMap, sOrder);
 	}
 
 	static function keyF64(v:Float):String {

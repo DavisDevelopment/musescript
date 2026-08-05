@@ -4,6 +4,8 @@ import musescript.dataframe.AnyIndex;
 import musescript.dataframe.Align;
 import musescript.dataframe.Concat;
 import musescript.dataframe.DataFrame;
+import musescript.dataframe.Factorize;
+import musescript.dataframe.FactorizeResult;
 import musescript.dataframe.FrameCorr;
 import musescript.dataframe.FrameNa;
 import musescript.dataframe.FrameReshape;
@@ -11,10 +13,15 @@ import musescript.dataframe.FrameWindow;
 import musescript.dataframe.GroupBy;
 import musescript.dataframe.Index;
 import musescript.dataframe.IndexF64;
+import musescript.dataframe.IndexStr;
 import musescript.dataframe.Join;
 import musescript.dataframe.MergeAsof;
+import musescript.dataframe.MultiIndex;
+import musescript.dataframe.MultiLevel;
 import musescript.dataframe.Pd;
 import musescript.dataframe.PdCsv;
+import musescript.dataframe.PdParquet;
+import musescript.dataframe.Resample;
 import musescript.dataframe.Series;
 import musescript.dataframe.bridge.PdBridge;
 import musescript.harness.Bar;
@@ -25,7 +32,7 @@ import musescript.ndarray.Np;
 /**
  * Muse install surface for `muse.pd` / `muse.dataframe` / flat `pd_*`.
  *
- * Engine eligibility: Interp N | JS B | WASM H/U | VM U
+ * Engine eligibility: Interp N | JS B | WASM H/U | VM U (no scalar-safe pd without frames)
  * Dynamic only at this coercion boundary — typed callers use `Pd` / `DataFrame`.
  * Do not confuse with streaming Muse `TSeries`.
  */
@@ -34,6 +41,7 @@ class PdBuiltins {
 		var g = grantsOf == null ? function() return null : grantsOf;
 		for (k in FLAT_NAMES.keys()) vars.set(k, FLAT_NAMES.get(k));
 		vars.set("pd_read_csv", function(path:Dynamic) return readCsv(g(), path));
+		vars.set("pd_read_parquet", function(path:Dynamic) return readParquet(g(), path));
 	}
 
 	public static function build(?grantsOf:Void->Null<musescript.io.IoGrant>):Dynamic {
@@ -42,6 +50,7 @@ class PdBuiltins {
 		for (k in METHOD_NAMES.keys())
 			Reflect.setField(pd, k, METHOD_NAMES.get(k));
 		Reflect.setField(pd, "read_csv", function(path:Dynamic) return readCsv(g(), path));
+		Reflect.setField(pd, "read_parquet", function(path:Dynamic) return readParquet(g(), path));
 		return pd;
 	}
 
@@ -68,7 +77,14 @@ class PdBuiltins {
 		"pd_rolling_mean" => rollingMeanOf, "pd_rolling_sum" => rollingSumOf,
 		"pd_rolling_std" => rollingStdOf, "pd_ewm_mean" => ewmMeanOf,
 		"pd_groupby_keys_agg" => groupbyKeysAgg,
-		"pd_pivot" => pivotOf, "pd_melt" => meltOf, "pd_corr" => corrOf, "pd_cov" => covOf
+		"pd_pivot" => pivotOf, "pd_melt" => meltOf, "pd_corr" => corrOf, "pd_cov" => covOf,
+		"pd_resample" => resampleOf, "pd_rank1d" => rank1dOf,
+		"pd_multi_index" => multiIndexOf, "pd_reset_index" => resetIndexOf,
+		"pd_xs" => xsOf, "pd_get_level_values" => getLevelValuesOf,
+		"pd_get_level_values_str" => getLevelValuesStrOf,
+		"pd_index_nlevels" => indexNlevelsOf,
+		"pd_factorize" => factorizeOf, "pd_index_codes" => indexCodesOf,
+		"pd_index_levels" => indexLevelsOf, "pd_multi_index_codes" => multiIndexCodesOf
 	];
 
 	static final METHOD_NAMES:Map<String, Dynamic> = [
@@ -94,7 +110,14 @@ class PdBuiltins {
 		"rolling_mean" => rollingMeanOf, "rolling_sum" => rollingSumOf,
 		"rolling_std" => rollingStdOf, "ewm_mean" => ewmMeanOf,
 		"groupby_keys_agg" => groupbyKeysAgg,
-		"pivot" => pivotOf, "melt" => meltOf, "corr" => corrOf, "cov" => covOf
+		"pivot" => pivotOf, "melt" => meltOf, "corr" => corrOf, "cov" => covOf,
+		"resample" => resampleOf, "rank1d" => rank1dOf,
+		"multi_index" => multiIndexOf, "reset_index" => resetIndexOf,
+		"xs" => xsOf, "get_level_values" => getLevelValuesOf,
+		"get_level_values_str" => getLevelValuesStrOf,
+		"index_nlevels" => indexNlevelsOf,
+		"factorize" => factorizeOf, "index_codes" => indexCodesOf,
+		"index_levels" => indexLevelsOf, "multi_index_codes" => multiIndexCodesOf
 	];
 
 	public static function series(data:Dynamic, ?index:Dynamic, ?name:Dynamic):Series {
@@ -333,6 +356,9 @@ class PdBuiltins {
 	public static function readCsv(?grants:Null<musescript.io.IoGrant>, path:Dynamic):DataFrame
 		return PdCsv.readCsv(grants, path == null ? "" : Std.string(path));
 
+	public static function readParquet(?grants:Null<musescript.io.IoGrant>, path:Dynamic):DataFrame
+		return PdParquet.readParquet(grants, path == null ? "" : Std.string(path));
+
 	// --- M2: groupby / rank / windows ---
 
 	public static function groupbyAgg(df:Dynamic, by:Dynamic, ?fn:Dynamic):DataFrame {
@@ -450,10 +476,11 @@ class PdBuiltins {
 
 	// --- M3: multi-key / reshape / corr ---
 
-	public static function groupbyKeysAgg(df:Dynamic, by:Dynamic, ?fn:Dynamic):DataFrame {
+	public static function groupbyKeysAgg(df:Dynamic, by:Dynamic, ?fn:Dynamic, ?asIndex:Dynamic):DataFrame {
 		var f = asDf(df);
 		if (f == null) return DataFrame.empty();
-		return GroupBy.createKeys(f, coerceStringList(by)).agg(fn == null ? "mean" : Std.string(fn));
+		var ai = asIndex == true;
+		return GroupBy.createKeys(f, coerceStringList(by)).agg(fn == null ? "mean" : Std.string(fn), ai);
 	}
 
 	public static function pivotOf(df:Dynamic, index:Dynamic, columns:Dynamic, values:Dynamic):DataFrame {
@@ -486,6 +513,181 @@ class PdBuiltins {
 		if (f == null) return DataFrame.empty();
 		var d = ddof == null ? 1 : Std.int(toFloat(ddof));
 		return FrameCorr.cov(f, d);
+	}
+
+	// --- M4: resample + rank1d ---
+
+	public static function resampleOf(df:Dynamic, rule:Dynamic, ?how:Dynamic):DataFrame {
+		var f = asDf(df);
+		if (f == null) return DataFrame.empty();
+		var r = rule == null ? "1" : Std.string(rule);
+		var h = how == null ? "ohlcv" : Std.string(how);
+		return Resample.agg(f, r, h);
+	}
+
+	/** Packed 1-D average-tie rank → NdArray (WASM N ≤64). */
+	public static function rank1dOf(data:Dynamic, ?pct:Dynamic, ?ascending:Dynamic):NdArrayF64 {
+		var a = coerce1d(data);
+		var p = pct == true;
+		var asc = ascending == null ? true : ascending != false;
+		return GroupBy.rank1d(a, p, asc);
+	}
+
+	// --- MultiIndex (F64 / Str / N-level) ---
+
+	public static function multiIndexOf(level0:Dynamic, level1:Dynamic, ?names:Dynamic):AnyIndex {
+		var nms = coerceStringList(names);
+		var nameOpt = nms.length > 0 ? nms : null;
+		if (looksLikeStringList(level0) || looksLikeStringList(level1)) {
+			var l0:MultiLevel = looksLikeStringList(level0)
+				? MultiLevel.Str(IndexStr.fromArray(coerceStringList(level0)))
+				: MultiLevel.F64(IndexF64.fromArray(coerceFloatList(level0)));
+			var l1:MultiLevel = looksLikeStringList(level1)
+				? MultiLevel.Str(IndexStr.fromArray(coerceStringList(level1)))
+				: MultiLevel.F64(IndexF64.fromArray(coerceFloatList(level1)));
+			return Index.multiFromLevels([l0, l1], nameOpt);
+		}
+		return Index.multiFromArrays(coerceFloatList(level0), coerceFloatList(level1), nameOpt);
+	}
+
+	public static function resetIndexOf(df:Dynamic, ?drop:Dynamic, ?name:Dynamic):DataFrame {
+		var f = asDf(df);
+		if (f == null) return DataFrame.empty();
+		var d = drop == true;
+		var nm = name == null ? "index" : Std.string(name);
+		return f.resetIndex(d, nm);
+	}
+
+	public static function xsOf(df:Dynamic, key:Dynamic, ?level:Dynamic):DataFrame {
+		var f = asDf(df);
+		if (f == null) return DataFrame.empty();
+		var lv = level == null ? 0 : Std.int(toFloat(level));
+		if (Std.isOfType(key, String)) return f.xsStr(Std.string(key), lv);
+		return f.xs(toFloat(key), lv);
+	}
+
+	public static function getLevelValuesOf(df:Dynamic, ?level:Dynamic):Dynamic {
+		var f = asDf(df);
+		if (f == null) return [];
+		var lv = level == null ? 0 : Std.int(toFloat(level));
+		var mi = Index.asMulti(f.index);
+		if (mi != null && mi.levelKind(lv) == "str") return f.getLevelValuesStr(lv);
+		if (Index.kindOf(f.index) == "str" && lv == 0) return f.getLevelValuesStr(0);
+		return f.getLevelValues(lv);
+	}
+
+	public static function getLevelValuesStrOf(df:Dynamic, ?level:Dynamic):Array<String> {
+		var f = asDf(df);
+		if (f == null) return [];
+		var lv = level == null ? 0 : Std.int(toFloat(level));
+		return f.getLevelValuesStr(lv);
+	}
+
+	public static function indexNlevelsOf(idx:Dynamic):Float {
+		var i = coerceIndex(idx, 0);
+		return Index.nlevelsOf(i);
+	}
+
+	/**
+	 * Factorize values or a (df, col) pair.
+	 * Returns `{codes: Float[], uniques: Float[]|String[], kind: "f64"|"str"}`.
+	 */
+	public static function factorizeOf(values:Dynamic, ?dropNaOrCol:Dynamic, ?dropNa:Dynamic):Dynamic {
+		var fr:FactorizeResult;
+		// (df, col, ?dropNa)
+		if (Std.isOfType(values, DataFrame) && dropNaOrCol != null && !Std.isOfType(dropNaOrCol, Bool)) {
+			var f = asDf(values);
+			var col = Std.string(dropNaOrCol);
+			var dn = dropNa == null ? true : dropNa != false;
+			fr = Pd.factorizeCol(f, col, dn);
+		} else {
+			var dn = dropNaOrCol == null ? true : dropNaOrCol != false;
+			if (looksLikeStringList(values))
+				fr = Factorize.str(coerceStringList(values), dn);
+			else if (Std.isOfType(values, Series))
+				fr = Factorize.f64Nd((cast values : Series).values, dn);
+			else
+				fr = Factorize.f64(coerceFloatList(values), dn);
+		}
+		return factorizeBag(fr);
+	}
+
+	/** MultiIndex `.codes` as nested Float arrays (Muse-friendly). */
+	public static function indexCodesOf(idx:Dynamic):Array<Array<Float>> {
+		var mi = Index.asMulti(coerceIndex(idx, 0));
+		if (mi == null) return [];
+		return [for (c in mi.codes()) [for (x in c) x * 1.0]];
+	}
+
+	/**
+	 * Unique values for one MultiIndex level (or all when level omitted → list of lists).
+	 * Returns Float[] for F64 levels, String[] for Str.
+	 */
+	public static function indexLevelsOf(idx:Dynamic, ?level:Dynamic):Dynamic {
+		var mi = Index.asMulti(coerceIndex(idx, 0));
+		if (mi == null) return [];
+		var uniques = mi.uniqueLevels();
+		if (level == null) {
+			var all:Array<Dynamic> = [];
+			for (u in uniques) all.push(uniqueLevelBag(u));
+			return all;
+		}
+		var lv = Std.int(toFloat(level));
+		if (lv < 0 || lv >= uniques.length) return [];
+		return uniqueLevelBag(uniques[lv]);
+	}
+
+	/** Construct MultiIndex from uniques + codes. `uniques` = array of arrays (Float or Str). */
+	public static function multiIndexCodesOf(uniques:Dynamic, codes:Dynamic, ?names:Dynamic):AnyIndex {
+		var nms = coerceStringList(names);
+		var nameOpt = nms.length > 0 ? nms : null;
+		var ulv = coerceUniqueLevels(uniques);
+		var cc = coerceCodesMatrix(codes);
+		return Index.multiFromCodes(ulv, cc, nameOpt);
+	}
+
+	static function factorizeBag(fr:FactorizeResult):Dynamic {
+		var uniques:Dynamic = fr.kind() == "str"
+			? (fr.uniquesAsStrings() : Dynamic)
+			: (fr.uniquesAsFloats() : Dynamic);
+		return {
+			codes: fr.codesAsFloats(),
+			uniques: uniques,
+			kind: fr.kind()
+		};
+	}
+
+	static function uniqueLevelBag(u:MultiLevel):Dynamic {
+		return switch (u) {
+			case F64(i): i.toArray();
+			case Str(i): i.labels();
+		};
+	}
+
+	static function coerceUniqueLevels(v:Dynamic):Array<MultiLevel> {
+		var out:Array<MultiLevel> = [];
+		if (v == null || !Std.isOfType(v, Array)) return out;
+		var arr:Array<Dynamic> = cast v;
+		for (item in arr) {
+			if (looksLikeStringList(item))
+				out.push(MultiLevel.Str(IndexStr.fromArray(coerceStringList(item))));
+			else
+				out.push(MultiLevel.F64(IndexF64.fromArray(coerceFloatList(item))));
+		}
+		return out;
+	}
+
+	static function coerceCodesMatrix(v:Dynamic):Array<Array<Int>> {
+		var out:Array<Array<Int>> = [];
+		if (v == null || !Std.isOfType(v, Array)) return out;
+		var arr:Array<Dynamic> = cast v;
+		for (row in arr) {
+			if (Std.isOfType(row, Array))
+				out.push([for (x in (cast row : Array<Dynamic>)) Std.int(toFloat(x))]);
+			else
+				out.push([Std.int(toFloat(row))]);
+		}
+		return out;
 	}
 
 	// --- coercion ---
@@ -540,6 +742,7 @@ class PdBuiltins {
 		if (v == null) return Index.range(fallbackLen);
 		var existing = asIndex(v);
 		if (existing != null) return existing;
+		if (Std.isOfType(v, MultiIndex)) return AnyIndex.Multi(cast v);
 		if (Std.isOfType(v, IndexF64)) return AnyIndex.F64(cast v);
 		if (Std.isOfType(v, NdArrayF64)) return Index.fromNdArray(cast v);
 		if (Std.isOfType(v, Array)) {
@@ -582,6 +785,13 @@ class PdBuiltins {
 		if (data == null || Std.isOfType(data, Array) || Std.isOfType(data, NdArrayF64)) return false;
 		if (Std.isOfType(data, haxe.ds.StringMap)) return true;
 		return Reflect.isObject(data);
+	}
+
+	static function looksLikeStringList(v:Dynamic):Bool {
+		if (v == null || !Std.isOfType(v, Array)) return false;
+		var arr:Array<Dynamic> = cast v;
+		if (arr.length == 0) return false;
+		return Std.isOfType(arr[0], String);
 	}
 
 	static function coerceStringList(v:Dynamic):Array<String> {

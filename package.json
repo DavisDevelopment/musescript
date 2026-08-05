@@ -10,5 +10,8 @@
   "devDependencies": {
     "esbuild": "^0.25.0",
     "javascript-obfuscator": "^4.1.1"
+  },
+  "optionalDependencies": {
+    "hyparquet": "^1.27.1"
   }
 }

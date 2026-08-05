@@ -10,9 +10,9 @@ import musescript.io.IoGrant;
 /**
  * Haxe `pd.*` facade — trading-critical dataframe feel, zero Dynamic on typed API.
  *
- * Engine eligibility: Interp N | JS B (`pd_*`) | WASM H/U | VM U
+ * Engine eligibility: Interp N | JS B (`pd_*`) | WASM H/U | VM U (`VmPdEligibility`)
  * Columns are NdArray F64; compose via `NdBridge` / `PdBridge`.
- * IO (`read_csv`) is grant-gated — null grants throw IoDenied.
+ * IO (`read_csv` / `read_parquet`) is grant-gated — null grants throw IoDenied.
  */
 class Pd {
 	public static inline function series(data:NdArrayF64, ?index:AnyIndex, ?name:String):Series
@@ -116,6 +116,10 @@ class Pd {
 	public static inline function parseCsv(text:String):DataFrame
 		return PdCsv.parse(text);
 
+	/** Grant-gated Parquet ingest (Node + optional hyparquet). Null grants → IoDenied. */
+	public static inline function readParquet(?grants:Null<IoGrant>, path:String):DataFrame
+		return PdParquet.readParquet(grants, path);
+
 	// --- M2: groupby / rank / windows ---
 
 	public static inline function groupby(df:DataFrame, by:String):GroupBy
@@ -182,8 +186,96 @@ class Pd {
 	public static inline function groupbyKeys(df:DataFrame, by:Array<String>):GroupBy
 		return GroupBy.createKeys(df, by);
 
-	public static inline function groupbyKeysAgg(df:DataFrame, by:Array<String>, ?fn:String = "mean"):DataFrame
-		return GroupBy.createKeys(df, by).agg(fn);
+	/**
+	 * Multi-key agg. Default `asIndex=false` keeps M3 column shape; `true` → MultiIndex
+	 * on the row Index (all by-cols as levels; F64 and/or Str).
+	 */
+	public static inline function groupbyKeysAgg(
+		df:DataFrame,
+		by:Array<String>,
+		?fn:String = "mean",
+		?asIndex:Bool = false
+	):DataFrame
+		return GroupBy.createKeys(df, by).agg(fn, asIndex);
+
+	public static inline function multiIndex(
+		level0:Array<Float>,
+		level1:Array<Float>,
+		?names:Array<String>
+	):AnyIndex
+		return Index.multiFromArrays(level0, level1, names);
+
+	public static inline function multiIndexStr(
+		level0:Array<String>,
+		level1:Array<String>,
+		?names:Array<String>
+	):AnyIndex
+		return Index.multiFromArraysStr(level0, level1, names);
+
+	public static inline function multiIndexLevels(
+		levels:Array<MultiLevel>,
+		?names:Array<String>
+	):AnyIndex
+		return Index.multiFromLevels(levels, names);
+
+	public static inline function resetIndex(df:DataFrame, ?drop:Bool = false, ?name:String = "index"):DataFrame
+		return df.resetIndex(drop, name);
+
+	public static inline function xs(df:DataFrame, key:Float, ?level:Int = 0):DataFrame
+		return df.xs(key, level);
+
+	public static inline function xsStr(df:DataFrame, key:String, ?level:Int = 0):DataFrame
+		return df.xsStr(key, level);
+
+	public static inline function getLevelValues(df:DataFrame, ?level:Int = 0):Array<Float>
+		return df.getLevelValues(level);
+
+	public static inline function getLevelValuesStr(df:DataFrame, ?level:Int = 0):Array<String>
+		return df.getLevelValuesStr(level);
+
+	public static inline function indexNlevels(idx:AnyIndex):Int
+		return Index.nlevelsOf(idx);
+
+	/** Factorize F64 values → codes + uniques (`dropNa` → −1 for NaN). */
+	public static inline function factorizeF64(values:Array<Float>, ?dropNa:Bool = true):FactorizeResult
+		return Factorize.f64(values, dropNa);
+
+	/** Factorize Str values → codes + uniques. */
+	public static inline function factorizeStr(values:Array<String>, ?dropNa:Bool = true):FactorizeResult
+		return Factorize.str(values, dropNa);
+
+	/** Factorize a DataFrame column (Str sidecar or F64). */
+	public static function factorizeCol(df:DataFrame, col:String, ?dropNa:Bool = true):FactorizeResult {
+		if (df == null || col == null || col == "")
+			return Factorize.f64([], dropNa);
+		if (df.hasStrColumn(col)) {
+			var s = df.strValuesOf(col);
+			return Factorize.str(s != null ? s : [], dropNa);
+		}
+		var c = df.valuesOf(col);
+		return Factorize.f64Nd(c, dropNa);
+	}
+
+	/** MultiIndex codes (one Int array per level). */
+	public static function indexCodes(idx:AnyIndex):Array<Array<Int>> {
+		var mi = Index.asMulti(idx);
+		if (mi == null) return [];
+		return mi.codes();
+	}
+
+	/** MultiIndex unique levels (pandas `.levels`). */
+	public static function indexLevels(idx:AnyIndex):Array<MultiLevel> {
+		var mi = Index.asMulti(idx);
+		if (mi == null) return [];
+		return mi.uniqueLevels();
+	}
+
+	public static inline function multiIndexFromCodes(
+		uniques:Array<MultiLevel>,
+		codes:Array<Array<Int>>,
+		?names:Array<String>
+	):AnyIndex
+		return Index.fromMulti(MultiIndex.fromCodes(uniques, codes, names));
 
 	public static inline function pivot(df:DataFrame, index:String, columns:String, values:String):DataFrame
 		return FrameReshape.pivot(df, index, columns, values);
@@ -202,4 +294,21 @@ class Pd {
 
 	public static inline function cov(df:DataFrame, ?ddof:Int = 1):DataFrame
 		return FrameCorr.cov(df, ddof);
+
+	// --- M4: resample + 1-D rank (WASM-native path for packed vec) ---
+
+	/**
+	 * Resample / down-sample. Rules: `"5"`/`"5B"` bar count; `"1h"`/`"5m"`/`"1000ms"` on F64 time index.
+	 * Default `how="ohlcv"` (open first, high max, low min, close last, volume sum).
+	 */
+	public static inline function resample(df:DataFrame, rule:String, ?how:String = "ohlcv"):DataFrame
+		return Resample.agg(df, rule, how);
+
+	/**
+	 * Average-tie 1-D rank on a packed numeric vector (not a DataFrame).
+	 * WASM **N** for len ≤ 64 via `$vec_rank` / `$vec_rank_pct` — see docs/WASM_PD.md.
+	 * Prefer this over `pd_xs_rank` when scores already live in scratch / NdArray.
+	 */
+	public static function rank1d(data:NdArrayF64, ?pct:Bool = false, ?ascending:Bool = true):NdArrayF64
+		return GroupBy.rank1d(data, pct, ascending);
 }

@@ -8,6 +8,7 @@
 |---|---|---|---|
 | `muse.str` / `muse.path` / `muse.re` | yes (pure) | yes (compute) | yes |
 | `muse.fs` | **no** (`opts.grants` null → `IoDenied`) | **always deny** `io_fs` | yes with `FsGrant` roots |
+| `muse.pd.read_csv` / `read_parquet` | **no** | deny (`io_fs`) | yes with `FsGrant` + (parquet: Node optional `hyparquet`) |
 | `muse.http` | **no** live; replay fixtures only if NetGrant | **always deny** `io_net` | replay / record / strict |
 | `muse.db` | no (M3) | deny `io_fs` | planned |
 
@@ -118,8 +119,8 @@ Default / fitness: omit `grants` → any `fs_*` / `http_*` throws `IoDenied`.
 First-class **Studio / CLI** tier that closes the IO loop for fitness:
 
 ```
-muse.http (replay|record)  →  muse.fs.write_text / pd_read_csv
-        →  PIT CSV under FsGrant root
+muse.http (replay|record)  →  muse.fs.write_text / pd_read_csv / pd_read_parquet
+        →  PIT CSV/Parquet under FsGrant root
         →  offline MuseRuntime.run / runPanel / GeneRunner --tape  (grants null)
 ```
 
@@ -150,7 +151,19 @@ on TruthReport / evo fitness — those keep `ioGrants = null`.
 
 Example: `examples/ingest/http_to_csv.ms` → `examples/ingest/smoke_strategy.ms`.
 
+### Parquet (`pd_read_parquet` / `muse.pd.read_parquet`)
+
+Grant shape identical to CSV (`FsGrant` roots). Fitness / null grants → `IoDenied`.
+
+| Host | Behavior |
+|---|---|
+| **Node** | Optional peer [`hyparquet`](https://www.npmjs.com/package/hyparquet) (pure JS, 0 deps). Decode via `tools/parquet_read_sync.mjs` + `spawnSync`. Missing peer → clear `IoDenied`. Snappy/uncompressed (default hyparquet); gzip/zstd need optional `hyparquet-compressors` (not pulled). |
+| **JVM / other** | `IoDenied` — preconvert to CSV (`pd_read_csv`) or run Node ingest |
+
+Checked-in fixture: `testdata/pd_sample.parquet` (2 rows × `time`,`fact`).
+
 **Not a plugin kind.** Plugins still deny `io_fs` / `io_net` at audit time.
+
 ## M3 next
 
 SQLite `muse.db` behind grants; write hardening.

@@ -139,12 +139,14 @@ class TestPdM3 extends Test {
 	}
 
 	public function testWasmPdEligibilityHonesty() {
+		// M4 claims pd_rank1d as tiny N; frames remain escape / opaque U.
 		Assert.equals(0, WasmPdEligibility.NATIVE_SCALAR.length);
-		Assert.equals(0, WasmPdEligibility.NATIVE_VEC.length);
+		Assert.isTrue(WasmPdEligibility.NATIVE_VEC.indexOf("pd_rank1d") >= 0);
 		Assert.isTrue(WasmPdEligibility.isDocumentedEscape("pd_pivot"));
 		Assert.isTrue(WasmPdEligibility.isDocumentedEscape("pd_xs_rank"));
 		Assert.isTrue(WasmPdEligibility.isDocumentedEscape("pd_corr"));
 		Assert.isFalse(WasmPdEligibility.isClaimedNative("pd_xs_rank"));
+		Assert.isTrue(WasmPdEligibility.isClaimedNative("pd_rank1d"));
 		Assert.isTrue(StrategyWasmEmitter.PD_HOST_ESCAPE.indexOf("pd_melt") >= 0);
 	}
 

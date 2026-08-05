@@ -5,6 +5,7 @@ import musescript.ndarray.NdArrayF64;
 /**
  * Equality join on F64 key columns (M1).
  * Duplicate keys: takes **last** right match (pandas-ish). `validate=true` forbids dups.
+ * String sidecar columns ride along (missing match → "").
  */
 class Join {
 	/**
@@ -34,19 +35,21 @@ class Join {
 
 		var rLast = lastIndexMap(rKey);
 		var lLast = lastIndexMap(lKey);
-		var lNames = left.columns();
-		var rExtra:Array<String> = [for (n in right.columns()) if (n != on) n];
+		var lF64 = left.f64Columns();
+		var lStr = left.strColumns();
+		var rExtraF64:Array<String> = [for (n in right.f64Columns()) if (n != on) n];
+		var rExtraStr:Array<String> = [for (n in right.strColumns()) if (n != on) n];
 
 		return switch (mode) {
 			case "inner":
-				emit(left, right, on, lKey, rLast, lNames, rExtra, suf, true, false);
+				emit(left, right, on, lKey, rLast, lF64, lStr, rExtraF64, rExtraStr, suf, true);
 			case "right":
-				emitRight(left, right, on, rKey, lLast, lNames, rExtra, suf);
+				emitRight(left, right, on, rKey, lLast, lF64, lStr, rExtraF64, rExtraStr, suf);
 			case "outer":
-				var leftPart = emit(left, right, on, lKey, rLast, lNames, rExtra, suf, false, false);
-				appendUnmatchedRight(leftPart, left, right, on, lKey, rKey, rLast, lNames, rExtra, suf);
+				var leftPart = emit(left, right, on, lKey, rLast, lF64, lStr, rExtraF64, rExtraStr, suf, false);
+				appendUnmatchedRight(leftPart, left, right, on, lKey, rKey, rLast, lF64, lStr, rExtraF64, rExtraStr, suf);
 			default:
-				emit(left, right, on, lKey, rLast, lNames, rExtra, suf, false, false);
+				emit(left, right, on, lKey, rLast, lF64, lStr, rExtraF64, rExtraStr, suf, false);
 		};
 	}
 
@@ -56,11 +59,12 @@ class Join {
 		on:String,
 		lKey:NdArrayF64,
 		rLast:Map<String, Int>,
-		lNames:Array<String>,
-		rExtra:Array<String>,
+		lF64:Array<String>,
+		lStr:Array<String>,
+		rExtraF64:Array<String>,
+		rExtraStr:Array<String>,
 		suf:String,
-		innerOnly:Bool,
-		_:Bool
+		innerOnly:Bool
 	):DataFrame {
 		var pairs:Array<{li:Int, ri:Int}> = [];
 		for (i in 0...left.nrows()) {
@@ -69,7 +73,7 @@ class Join {
 			if (innerOnly && ri < 0) continue;
 			pairs.push({li: i, ri: ri});
 		}
-		return materialize(left, right, on, pairs, lNames, rExtra, suf, left.index, true);
+		return materialize(left, right, on, pairs, lF64, lStr, rExtraF64, rExtraStr, suf, left.index, true);
 	}
 
 	static function emitRight(
@@ -78,8 +82,10 @@ class Join {
 		on:String,
 		rKey:NdArrayF64,
 		lLast:Map<String, Int>,
-		lNames:Array<String>,
-		rExtra:Array<String>,
+		lF64:Array<String>,
+		lStr:Array<String>,
+		rExtraF64:Array<String>,
+		rExtraStr:Array<String>,
 		suf:String
 	):DataFrame {
 		var pairs:Array<{li:Int, ri:Int}> = [];
@@ -88,7 +94,7 @@ class Join {
 			var li = lLast.exists(k) ? lLast.get(k) : -1;
 			pairs.push({li: li, ri: i});
 		}
-		return materialize(left, right, on, pairs, lNames, rExtra, suf, right.index, false);
+		return materialize(left, right, on, pairs, lF64, lStr, rExtraF64, rExtraStr, suf, right.index, false);
 	}
 
 	static function appendUnmatchedRight(
@@ -99,8 +105,10 @@ class Join {
 		lKey:NdArrayF64,
 		rKey:NdArrayF64,
 		rLast:Map<String, Int>,
-		lNames:Array<String>,
-		rExtra:Array<String>,
+		lF64:Array<String>,
+		lStr:Array<String>,
+		rExtraF64:Array<String>,
+		rExtraStr:Array<String>,
 		suf:String
 	):DataFrame {
 		var seenL = new Map<String, Bool>();
@@ -112,7 +120,7 @@ class Join {
 				pairs.push({li: -1, ri: i});
 		}
 		if (pairs.length == 0) return leftPart;
-		var extra = materialize(left, right, on, pairs, lNames, rExtra, suf, Index.range(pairs.length), false);
+		var extra = materialize(left, right, on, pairs, lF64, lStr, rExtraF64, rExtraStr, suf, Index.range(pairs.length), false);
 		return Concat.axis0([leftPart, extra]);
 	}
 
@@ -121,8 +129,10 @@ class Join {
 		right:DataFrame,
 		on:String,
 		pairs:Array<{li:Int, ri:Int}>,
-		lNames:Array<String>,
-		rExtra:Array<String>,
+		lF64:Array<String>,
+		lStr:Array<String>,
+		rExtraF64:Array<String>,
+		rExtraStr:Array<String>,
 		suf:String,
 		baseIndex:AnyIndex,
 		useLeftIndex:Bool
@@ -130,36 +140,55 @@ class Join {
 		var n = pairs.length;
 		var order:Array<String> = [];
 		var cols:Array<NdArrayF64> = [];
+		var sOrder:Array<String> = [];
+		var sCols:Array<Array<String>> = [];
 
-		function pushCol(name:String):NdArrayF64 {
+		function pushF64(name:String):NdArrayF64 {
 			var c = NdArrayF64.empty([n]);
 			order.push(name);
 			cols.push(c);
 			return c;
 		}
-
-		var lOut:Array<NdArrayF64> = [];
-		for (nm in lNames) {
-			var outNm = (nm != on && right.hasColumn(nm)) ? nm + (useLeftIndex ? "" : suf) : nm;
-			// Left names keep original; conflicting right extras get suffix.
-			if (nm != on && right.hasColumn(nm) && !useLeftIndex) outNm = nm + suf;
-			lOut.push(pushCol(nm)); // keep left names as-is
+		function pushStr(name:String):Array<String> {
+			var c:Array<String> = [for (_ in 0...n) ""];
+			sOrder.push(name);
+			sCols.push(c);
+			return c;
 		}
-		var rOut:Array<NdArrayF64> = [];
-		for (nm in rExtra) {
+
+		var lOutF:Array<NdArrayF64> = [];
+		for (nm in lF64) lOutF.push(pushF64(nm));
+		var lOutS:Array<Array<String>> = [];
+		for (nm in lStr) lOutS.push(pushStr(nm));
+
+		var rOutF:Array<NdArrayF64> = [];
+		for (nm in rExtraF64) {
 			var outNm = left.hasColumn(nm) ? nm + suf : nm;
-			rOut.push(pushCol(outNm));
+			rOutF.push(pushF64(outNm));
+		}
+		var rOutS:Array<Array<String>> = [];
+		for (nm in rExtraStr) {
+			var outNm = left.hasColumn(nm) ? nm + suf : nm;
+			rOutS.push(pushStr(outNm));
 		}
 
 		for (row in 0...n) {
 			var p = pairs[row];
-			for (c in 0...lNames.length) {
-				var src = left.valuesOf(lNames[c]);
-				lOut[c].setFlat(row, (p.li >= 0 && src != null) ? src.getFlat(p.li) : Math.NaN);
+			for (c in 0...lF64.length) {
+				var src = left.valuesOf(lF64[c]);
+				lOutF[c].setFlat(row, (p.li >= 0 && src != null) ? src.getFlat(p.li) : Math.NaN);
 			}
-			for (c in 0...rExtra.length) {
-				var src = right.valuesOf(rExtra[c]);
-				rOut[c].setFlat(row, (p.ri >= 0 && src != null) ? src.getFlat(p.ri) : Math.NaN);
+			for (c in 0...lStr.length) {
+				var src = left.strValuesOf(lStr[c]);
+				lOutS[c][row] = (p.li >= 0 && src != null && p.li < src.length) ? src[p.li] : "";
+			}
+			for (c in 0...rExtraF64.length) {
+				var src = right.valuesOf(rExtraF64[c]);
+				rOutF[c].setFlat(row, (p.ri >= 0 && src != null) ? src.getFlat(p.ri) : Math.NaN);
+			}
+			for (c in 0...rExtraStr.length) {
+				var src = right.strValuesOf(rExtraStr[c]);
+				rOutS[c][row] = (p.ri >= 0 && src != null && p.ri < src.length) ? src[p.ri] : "";
 			}
 		}
 
@@ -170,12 +199,15 @@ class Join {
 		} else {
 			Index.range(n);
 		};
-		// Fix index for left-join with all rows
 		if (useLeftIndex) {
 			var positions:Array<Int> = [for (p in pairs) p.li];
 			idx = Index.takeOf(left.index, positions);
 		}
-		return DataFrame.fromColumnLists(order, cols, idx);
+		var map = new Map<String, NdArrayF64>();
+		for (i in 0...order.length) map.set(order[i], cols[i]);
+		var sMap = new Map<String, Array<String>>();
+		for (i in 0...sOrder.length) sMap.set(sOrder[i], sCols[i]);
+		return DataFrame.fromColumns(map, idx, order, sMap, sOrder);
 	}
 
 	static function lastIndexMap(key:NdArrayF64):Map<String, Int> {

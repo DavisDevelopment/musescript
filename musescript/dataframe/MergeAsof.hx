@@ -177,37 +177,47 @@ class MergeAsof {
 		rightForLeft:Array<Int>
 	):DataFrame {
 		var n = left.nrows();
-		var order:Array<String> = left.columns().copy();
+		var order:Array<String> = left.f64Columns().copy();
 		var cols:Array<NdArrayF64> = [];
 		for (nm in order) {
 			var src = left.valuesOf(nm);
 			cols.push(src != null ? src.copy() : NdArrayF64.empty([n]));
 		}
-		for (nm in right.columns()) {
-			if (nm == on) continue;
-			if (left.hasColumn(nm) && nm != on) {
-				// skip exact name collision — use suffix
-				var outNm = nm + "_r";
-				order.push(outNm);
-				var src = right.valuesOf(nm);
-				var col = NdArrayF64.empty([n]);
-				for (i in 0...n) {
-					var rj = rightForLeft[i];
-					col.setFlat(i, (rj >= 0 && src != null) ? src.getFlat(rj) : Math.NaN);
-				}
-				cols.push(col);
-			} else {
-				order.push(nm);
-				var src = right.valuesOf(nm);
-				var col = NdArrayF64.empty([n]);
-				for (i in 0...n) {
-					var rj = rightForLeft[i];
-					col.setFlat(i, (rj >= 0 && src != null) ? src.getFlat(rj) : Math.NaN);
-				}
-				cols.push(col);
-			}
+		var sOrder:Array<String> = left.strColumns().copy();
+		var sCols:Array<Array<String>> = [];
+		for (nm in sOrder) {
+			var src = left.strValuesOf(nm);
+			sCols.push(src != null ? src.copy() : [for (_ in 0...n) ""]);
 		}
-		return DataFrame.fromColumnLists(order, cols, Index.copyOf(left.index));
+		for (nm in right.f64Columns()) {
+			if (nm == on) continue;
+			var outNm = left.hasColumn(nm) ? nm + "_r" : nm;
+			order.push(outNm);
+			var src = right.valuesOf(nm);
+			var col = NdArrayF64.empty([n]);
+			for (i in 0...n) {
+				var rj = rightForLeft[i];
+				col.setFlat(i, (rj >= 0 && src != null) ? src.getFlat(rj) : Math.NaN);
+			}
+			cols.push(col);
+		}
+		for (nm in right.strColumns()) {
+			if (nm == on) continue;
+			var outNm = left.hasColumn(nm) ? nm + "_r" : nm;
+			sOrder.push(outNm);
+			var src = right.strValuesOf(nm);
+			var labels:Array<String> = [];
+			for (i in 0...n) {
+				var rj = rightForLeft[i];
+				labels.push((rj >= 0 && src != null && rj < src.length) ? src[rj] : "");
+			}
+			sCols.push(labels);
+		}
+		var map = new Map<String, NdArrayF64>();
+		for (i in 0...order.length) map.set(order[i], cols[i]);
+		var sMap = new Map<String, Array<String>>();
+		for (i in 0...sOrder.length) sMap.set(sOrder[i], sCols[i]);
+		return DataFrame.fromColumns(map, Index.copyOf(left.index), order, sMap, sOrder);
 	}
 
 	static function withinTol(leftT:Float, rightT:Float, tol:Null<Float>):Bool {

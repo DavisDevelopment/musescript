@@ -1,6 +1,6 @@
 # MuseScript pandas-like stack (`muse.pd`) — Engineering Plan
 
-**Status:** M0 + M1 + M2 + M3 landed (Haxe core + muse.pd spine; no fitness pandas).  
+**Status:** M0 + M1 + M2 + M3 + M4 comfort + MultiIndex (F64/Str, N-level) landed (Haxe core + muse.pd spine; no fitness pandas).  
 **Workspace:** `muse-script` (Haxe 5.0.0-preview.1).  
 **Sister plan:** `scratch/_prior_ndarray_plan.md` (NdArray / `muse.np` M0–M2+ — **landed skeleton**).  
 **Governing doctrine:** `JIT_AUTHORING_GUIDE.md`, RingBuffer / GrowableVec / FloatSeries, `SPEC_BYTECODE_VM.md` (DetMath), `Palette.hx` evo boundary, `MuseHost.hx` + HostABI escape discipline, `IoGrant` / `PLUGIN_KINDS.md`, `docs/WASM_NP.md`, `docs/WASM_PD.md`.
@@ -57,7 +57,7 @@ There is **no** Index / Series / DataFrame type, no `muse.pd`, no join/groupby/a
 
 ```
 Index          — ordered labels (Int / Float time / String); codes → positions
-MultiIndex     — M4+ only (symbol × field, or time × symbol); defer until single Index solid
+MultiIndex     — F64 and/or Str levels (N≥1); construct / groupby as_index / xs / reset_index
 Series         — (name?, Index, values: AnyNdArray preferably F64 1-D)
 DataFrame      — (Index row, ordered column names, columns: Map/Array of Series sharing Index)
 BlockManager   — internal: columnar list of NdArray + shared Index (not row objects)
@@ -174,7 +174,7 @@ Flat aliases: `pd_merge_asof`, `pd_groupby_mean`, … for Expand simplicity **on
 |---|---|
 | **Must** | Index+Series+DataFrame F64 columnar; construct from panel/bars/NdArray; reindex/align; merge/join; **merge_asof backward**; groupby agg/transform/rank; shift/diff/pct_change; rolling/ewm subset; fillna/dropna; concat; to/from NdArray; deep `muse.pd` on interp/JS |
 | **Should** | pivot/melt; multi-key groupby; loc; resample OHLCV; corr/cov; categorical codes; PanelFeed zero-copy column views; tiny WASM N for rank/zscore 1-D; JVM `@:multiType` Index codes |
-| **Later** | MultiIndex; sparse; string columns; Arrow / parquet reader (ingest tier); Method chaining sugar; SQL-like query; datetime Index tz; styler; plot helpers |
+| **Later** | sparse; Series-of-strings (Series stays F64-only — use DataFrame Str sidecar + `strValuesOf`); Arrow writer; Method chaining sugar; SQL-like query; datetime Index tz; styler; plot helpers; Parquet Node helper string columns |
 | **Never (Muse product / fitness)** | `dtype=object` / Dynamic cells; open `apply(λ)`; `eval`/`query` string exec; silent Python pandas in fitness; pickle protocol; full Excel/HTML IO; CUDA; “100% pandas parity” as a gate; **open groupby/merge graphs in Expand**; live http/db inside on_bar |
 
 ---
@@ -232,17 +232,17 @@ Flat aliases: `pd_merge_asof`, `pd_groupby_mean`, … for Expand simplicity **on
 
 **Do not overload Muse `TSeries`.** Streaming bar series stays `TSeries`; tabular series gets `TPdSeries` (name bikeshed: `TFrameSeries` if clearer).
 
-### F.2 Engine eligibility matrix (initial)
+### F.2 Engine eligibility matrix (M4)
 
-| Engine | Construct / select / ufunc-via-np | merge_asof / join | groupby rank/agg | resample | read_csv |
-|---|---|---|---|---|---|
-| **Interp** | **N** (Haxe) | **N** | **N** | **N** subset | **U** unless grant |
-| **JS** | **B** | **B** | **B** | **B** | grant / Studio |
-| **Bytecode VM** | **U** or scalar-returning **B** only | **U** | **U** | **U** | **U** |
-| **WASM** | **H** (host_eval) or **U** | **H/U** | **H/U** (maybe later N: 1-D rank ≤64) | **U** | **U** |
-| **NMA** | Don’t force frames into kind-switch | — | — | — | — |
+| Engine | Construct / select / ufunc-via-np | merge_asof / join | groupby rank/agg | resample | `pd_rank1d` | read_csv |
+|---|---|---|---|---|---|---|
+| **Interp** | **N** (Haxe) | **N** | **N** | **N** | **N** | **U** unless grant |
+| **JS** | **B** | **B** | **B** | **B** | **B** | grant / Studio |
+| **Bytecode VM** | **U** or scalar-returning **B** only | **U** | **U** | **U** | **U** | **U** |
+| **WASM** | **H** (host_eval) or **U** | **H/U** | **H/U** | **U** | **N** ≤64 | **U** |
+| **NMA** | Don't force frames into kind-switch | — | — | — | — | — |
 
-Publish `docs/WASM_PD.md` twin of `WASM_NP.md` — **fail closed**, no surprise host_eval in claimed-native lists.
+Publish `docs/WASM_PD.md` twin of `WASM_NP.md` — **fail closed**, no surprise host_eval in claimed-native lists. Tiny N today: `pd_rank1d` only.
 
 ### F.3 VM / opacity
 
@@ -336,17 +336,24 @@ pd.merge_asof(left, right, on="time", by="symbol"?, direction="backward",
 
 ### M3 — Deep muse.pd + honesty docs + opaque hygiene ✅
 
-**Delivered:** `FrameReshape` pivot/melt; multi-key `GroupBy.createKeys` (agg `as_index=False` shape; MultiIndex M4+); `FrameCorr` pearson corr + sample cov; sealed `AnyDataFrame` / `AnyPdSeries` + `AnyPdValues`; `WasmPdEligibility` (native subset empty) + `docs/WASM_PD.md`; `TDataFrame`/`TPdSeries`/`TIndex` marked opaque in WASM emitter (whole-module fallback); Muse flats `pd_pivot`/`pd_melt`/`pd_corr`/`pd_cov`/`pd_groupby_keys_agg`.  
+**Delivered:** `FrameReshape` pivot/melt; multi-key `GroupBy.createKeys` (agg `as_index=False` shape; MultiIndex via `as_index=true` post-M4 lite); `FrameCorr` pearson corr + sample cov; sealed `AnyDataFrame` / `AnyPdSeries` + `AnyPdValues`; `WasmPdEligibility` (native subset empty) + `docs/WASM_PD.md`; `TDataFrame`/`TPdSeries`/`TIndex` marked opaque in WASM emitter (whole-module fallback); Muse flats `pd_pivot`/`pd_melt`/`pd_corr`/`pd_cov`/`pd_groupby_keys_agg`.
 **PD_* evo palette:** **gated closed set** — `KPd` / `configureForPd` + universe
-emits one-row `pd_xs_rank` only (no open groupby/merge). Default off.
-`PD_SHIFT` still deferred (use lookback). See `Palette.PD_OPS` / `TestNpPdEvoPalette`.
+emits one-row `pd_xs_rank` / size-safe `pd_shift` only (no open groupby/merge). Default off.
+See `Palette.PD_OPS` / `TestNpPdEvoPalette`.
 **Tests:** `TestPdM3` (reshape, multi-key, corr, Any*, eligibility, opaque fallback, interp pivot smoke).
 **Accept:** Published eligibility table; authored strategies rich on interp/JS; genomes stay closed (no open pd Expand).
 
-### M4 — Time resample + parquet ingest + optional accel
+### M4 — Time resample + parquet ingest + optional accel ✅ (comfort slice)
 
-**Deliver:** resample OHLCV; parquet ingest option (pro/con locked); Python `#if` dual-track polished; optional JVM join accel behind parity.  
-**Accept:** Must-tier green on Haxe+Muse interp/JS; WASM/VM matrix published; never-tier still never.
+**Delivered (this slice):**
+- **`Resample`** — bar-count (`"5"`/`"5B"`) + duration (`"1s"|"1m"|"1h"|"1d"|"Nms"`) rules; default OHLCV-aware agg (`open` first / `high` max / `low` min / `close` last / `volume` sum); uniform mean/sum/min/max/first/last; bin label = last index in bucket; Muse `pd_resample` / `muse.pd.resample`.
+- **Tiny WASM N:** `pd_rank1d` → `$vec_rank` / `$vec_rank_pct` on packed f64 ≤64 (`WasmPdEligibility`); frame `pd_*` (incl. resample / xs_rank) remain opaque **U**.
+- **Tests:** `TestPdM4`; `docs/WASM_PD.md` engine matrix updated.
+- **Parquet (ingest follow-on):** `pd_read_parquet` / `muse.pd.read_parquet` under `FsGrant` — Node optional peer `hyparquet` (pure JS, 0 transitive deps); fitness `io=null` → `IoDenied`; JVM clear deny; fixture `testdata/pd_sample.parquet` + `TestPdParquet`.
+
+**Still deferred after M4 comfort:** Python `#if muse_pd_pandas` polish; JVM join accel; engine-matrix CI beyond Node. MultiIndex F64/Str N-level landed. Expand→`pd_rank1d` (≤64) dual path shipped.
+
+**Accept:** Must-tier resample green on Haxe+Muse interp/JS; WASM matrix published with honest tiny N; never-tier still never.
 
 ---
 
@@ -453,7 +460,7 @@ emits one-row `pd_xs_rank` only (no open groupby/merge). Default off.
 - **No live EDGAR/http/db inside on_bar** (Palette / IoGrant / PluginKinds already say this).
 - **No pretending full pandas in M0–M1.**
 - **No megamorphic row-object kernels** on JVM/V8 — columnar NdArray loops only.
-- **No MultiIndex / sparse / ExtensionArray before asof+groupby are boringly correct.**
+- **No MultiIndex codes/factorize / sparse / ExtensionArray before asof+groupby stay boringly correct** (F64/Str MultiIndex is OK).
 - **No conflating Muse streaming `TSeries` with `pd.Series`.**
 
 ---
@@ -462,11 +469,11 @@ emits one-row `pd_xs_rank` only (no open groupby/merge). Default off.
 
 ```
 musescript/dataframe/          # Haxe core
-  Index.hx / IndexF64.hx / IndexStr.hx
+  Index.hx / IndexF64.hx / IndexStr.hx / MultiIndex.hx
   Series.hx
   DataFrame.hx
   Align.hx / Join.hx / MergeAsof.hx
-  GroupBy.hx / Resample.hx / Rolling.hx
+  GroupBy.hx / Resample.hx / Rolling.hx (FrameWindow)
   Pd.hx                        # facade
   PdAccel.hx                   # pure default + #if stubs
   bridge/PdBridge.hx           # PanelFeed, Bar, NdBridge, bags
@@ -474,6 +481,7 @@ musescript/dataframe/          # Haxe core
 musescript/builtins/PdBuiltins.hx
 musescript/types/ — TDataFrame, TPdSeries, TIndex; BuiltinSigs; PluginCapabilities rows
 musescript/compile/ — MuseHost ns, JsBackend, WasmPdEligibility (+ docs/WASM_PD.md)
+  StrategyWasmRuntimeWat — $vec_rank / $vec_rank_pct (pd_rank1d N)
 tools/pandas_golden/ — gen_fixtures.py + fixtures/
 musescript/tests/TestPd*.hx / TestPdMuseParity.hx / TestPdPit.hx
 ```
@@ -487,10 +495,22 @@ M0  Index+Series+DataFrame(F64 cols=NdArray) + muse.pd spine + Panel/Bar bridges
 M1  align/join/merge_asof + grant-gated CSV + pandas goldens + PIT tests
 M2  groupby/rank/transform + rolling + xs→portfolio path          ✅
 M3  deep muse.pd + type tags + WASM_PD honesty + sealed Any*      ✅ (PD_* xs_rank gated)
-M4  resample/parquet/opt-in accel + published engine coverage matrix
+M4  resample OHLCV + tiny WASM pd_rank1d N + eligibility matrix   ✅ comfort
+    MultiIndex (F64/Str levels, N≥1 + groupby as_index / xs / reset_index)   ✅
+    parquet read grant-gated (Node hyparquet optional; not fitness) ✅
+    (pandas #if / JVM join accel still deferred)
 ```
 
-**Still deferred after M3:** MultiIndex; `PD_SHIFT` genome node; tiny WASM N for 1-D rank; engine-matrix CI beyond Node; parquet; deeper checker; resample OHLCV; killing Dynamic score bags in examples (opportunistic). Open groupby/merge in Expand stays **never**.
+**Still deferred after M4 comfort:** engine-matrix CI beyond Node; deeper checker; killing Dynamic score bags in examples (opportunistic). Open groupby/merge in Expand stays **never**. MultiIndex codes/factorize **shipped**. Expand→`pd_rank1d` (≤64) dual path shipped.
+
+### Parquet ingest — pro/con (shipped: option B, Node-only optional peer)
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| A. Pure Haxe parquet decoder | Hermetic | Large / incomplete | Reject |
+| B. `hyparquet` optional peer (Node ingest) | Real files; 0 transitive deps; ~220KB; no fitness packaging | Async→sync bridge; JVM unsupported | **Ship** |
+| C. Offline Python/CLI → CSV/panel | Matches IoGrant tier; CSV already M1 | Extra convert step | Still valid fallback |
+| D. apache-arrow / parquet-wasm | Full codec surface | Heavy / WASM fitness risk | Reject for fitness; not needed |
 
 ---
 

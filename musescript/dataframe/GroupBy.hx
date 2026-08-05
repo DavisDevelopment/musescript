@@ -3,33 +3,35 @@ package musescript.dataframe;
 import musescript.ndarray.NdArrayF64;
 
 /**
- * Groupby (M2 single-key / M3 multi-key) — agg / transform / rank over F64 keys.
+ * Groupby (M2 single-key / M3 multi-key) — agg / transform / rank over F64 and Str keys.
  *
- * NaN keys form their own group. Duplicate labels OK.
+ * NaN / empty-string keys form their own group. Duplicate labels OK.
  * Rank uses average ties (pandas default); NaN stays NaN (not ranked).
  *
- * Multi-key: composite tag from all `by` columns. Agg uses `as_index=False`
- * shape (key columns restored) + range Index — MultiIndex is M4+.
- * Single-key agg keeps F64 key Index (M2 behavior).
+ * Multi-key agg default `as_index=false` (M3): key columns restored + range Index.
+ * `as_index=true` → MultiIndex on the row Index (all by-cols as levels, F64 and/or Str).
  */
 class GroupBy {
 	var _df:DataFrame;
 	var _byCols:Array<String>;
-	/** First key column values in group order (single-key Index); unused for multi. */
+	var _byKinds:Array<String>; // "f64" | "str" per by-col
+	/** First key column values in group order (single-key F64 Index); unused for multi / Str. */
 	var _keys:Array<Float>;
-	/** Per group, one Float per by-col (multi-key agg restore). */
-	var _keyRows:Array<Array<Float>>;
+	/** Per group, one KeyCell per by-col. */
+	var _keyRows:Array<Array<KeyCell>>;
 	var _members:Array<Array<Int>>;
 
 	function new(
 		df:DataFrame,
 		byCols:Array<String>,
+		byKinds:Array<String>,
 		keys:Array<Float>,
-		keyRows:Array<Array<Float>>,
+		keyRows:Array<Array<KeyCell>>,
 		members:Array<Array<Int>>
 	) {
 		_df = df;
 		_byCols = byCols != null ? byCols : [];
+		_byKinds = byKinds != null ? byKinds : [];
 		_keys = keys != null ? keys : [];
 		_keyRows = keyRows != null ? keyRows : [];
 		_members = members != null ? members : [];
@@ -40,51 +42,86 @@ class GroupBy {
 		return createKeys(df, [by]);
 	}
 
-	/** Multi-key groupby over ordered F64 columns. */
+	/**
+	 * Multi-key groupby over ordered F64 and/or Str columns.
+	 * Partitions via Factorize codes (dropNa=false so NaN stays groupable) —
+	 * int code tags avoid building string keys per row.
+	 */
 	public static function createKeys(df:DataFrame, by:Array<String>):GroupBy {
 		if (df == null || by == null || by.length == 0) return empty(df, by);
-		var cols:Array<NdArrayF64> = [];
 		var names:Array<String> = [];
+		var kinds:Array<String> = [];
 		for (b in by) {
 			if (b == null || b == "") continue;
-			var c = df.valuesOf(b);
-			if (c == null) continue;
-			names.push(b);
-			cols.push(c);
+			if (df.hasStrColumn(b)) {
+				names.push(b);
+				kinds.push("str");
+			} else if (df.valuesOf(b) != null) {
+				names.push(b);
+				kinds.push("f64");
+			}
 		}
 		if (names.length == 0) return empty(df, by);
 		var n = df.nrows();
+		var nk = names.length;
+		// dropNa=false: NaN / empty-string remain groupable uniques (compat).
+		var colCodes:Array<Array<Int>> = [];
+		var colUniques:Array<FactorUniques> = [];
+		for (c in 0...nk) {
+			var fr:FactorizeResult;
+			if (kinds[c] == "str") {
+				var raw = df.strValuesOf(names[c]);
+				var labels:Array<String> = [];
+				for (r in 0...n) labels.push(raw != null && r < raw.length && raw[r] != null ? raw[r] : "");
+				fr = Factorize.str(labels, false);
+			} else {
+				var col = df.valuesOf(names[c]);
+				var vals:Array<Float> = [];
+				for (r in 0...n) vals.push(col != null ? col.getFlat(r) : Math.NaN);
+				fr = Factorize.f64(vals, false);
+			}
+			colCodes.push(fr.codes);
+			colUniques.push(fr.uniques);
+		}
 		var keyOrder:Array<Float> = [];
-		var keyRows:Array<Array<Float>> = [];
+		var keyRows:Array<Array<KeyCell>> = [];
 		var members:Array<Array<Int>> = [];
 		var first = new Map<String, Int>();
-		var nk = cols.length;
 		for (r in 0...n) {
 			var tagParts:Array<String> = [];
-			var rowKeys:Array<Float> = [];
-			for (c in 0...nk) {
-				var k = cols[c].getFlat(r);
-				rowKeys.push(k);
-				tagParts.push(keyTag(k));
-			}
+			for (c in 0...nk) tagParts.push(Std.string(colCodes[c][r]));
 			var tag = tagParts.join("\x1f");
 			var gi = first.get(tag);
 			if (gi == null) {
 				gi = keyRows.length;
 				first.set(tag, gi);
-				keyOrder.push(rowKeys[0]);
+				var rowKeys:Array<KeyCell> = [];
+				for (c in 0...nk) {
+					var code = colCodes[c][r];
+					rowKeys.push(switch (colUniques[c]) {
+						case F64(u): KeyCell.F64(code >= 0 && code < u.length ? u.get(code) : Math.NaN);
+						case Str(u):
+							var s = code >= 0 && code < u.length ? u.get(code) : "";
+							KeyCell.Str(s != null ? s : "");
+					});
+				}
+				switch (rowKeys[0]) {
+					case F64(v): keyOrder.push(v);
+					case Str(_): keyOrder.push(Math.NaN);
+				}
 				keyRows.push(rowKeys);
 				members.push([]);
 			}
 			members[gi].push(r);
 		}
-		return new GroupBy(df, names, keyOrder, keyRows, members);
+		return new GroupBy(df, names, kinds, keyOrder, keyRows, members);
 	}
 
 	static function empty(df:DataFrame, by:Null<Array<String>>):GroupBy
 		return new GroupBy(
 			df != null ? df : DataFrame.empty(),
 			by != null ? by : [],
+			[],
 			[],
 			[],
 			[]
@@ -98,24 +135,26 @@ class GroupBy {
 
 	public function byCols():Array<String> return _byCols.copy();
 
-	/** Aggregate all non-`by` columns with one reducer (`mean` default). */
-	public function agg(?fn:String = "mean"):DataFrame {
+	/**
+	 * Aggregate all non-`by` F64 columns with one reducer (`mean` default).
+	 * `asIndex`: null = auto (single-key true / multi-key false for M3 compat).
+	 * Multi + true → MultiIndex (all by-cols as levels).
+	 */
+	public function agg(?fn:String = "mean", ?asIndex:Null<Bool> = null):DataFrame {
 		var op = normalizeOp(fn);
 		var names = valueCols();
 		var g = _members.length;
 		if (g == 0) return DataFrame.empty();
 		var multi = _byCols.length > 1;
+		var useAsIndex = asIndex != null ? asIndex : !multi;
 		var map = new Map<String, NdArrayF64>();
 		var order:Array<String> = [];
-		if (multi) {
-			for (bi in 0..._byCols.length) {
-				var out = NdArrayF64.empty([g]);
-				for (gi in 0...g) out.setFlat(gi, _keyRows[gi][bi]);
-				map.set(_byCols[bi], out);
-				order.push(_byCols[bi]);
-			}
+		var sMap = new Map<String, Array<String>>();
+		var sOrder:Array<String> = [];
+		if (!useAsIndex) {
+			emitKeyColumns(g, map, order, sMap, sOrder);
 		}
-		if (names.length == 0 && !multi) return DataFrame.empty();
+		if (names.length == 0 && order.length == 0 && sOrder.length == 0) return DataFrame.empty();
 		for (name in names) {
 			var src = _df.valuesOf(name);
 			var out = NdArrayF64.empty([g]);
@@ -123,31 +162,29 @@ class GroupBy {
 			map.set(name, out);
 			order.push(name);
 		}
-		if (order.length == 0) return DataFrame.empty();
-		var idx = multi ? Index.range(g) : Index.fromFloats(_keys.copy());
-		return DataFrame.fromColumns(map, idx, order);
+		if (order.length == 0 && sOrder.length == 0) return DataFrame.empty();
+		var idx = buildAggIndex(g, useAsIndex, multi);
+		return DataFrame.fromColumns(map, idx, order, sMap, sOrder);
 	}
 
-	public function mean():DataFrame return agg("mean");
-	public function sum():DataFrame return agg("sum");
-	public function min():DataFrame return agg("min");
-	public function max():DataFrame return agg("max");
-	public function count():DataFrame return agg("count");
-	public function std(?ddof:Int = 1):DataFrame {
+	public function mean(?asIndex:Null<Bool> = null):DataFrame return agg("mean", asIndex);
+	public function sum(?asIndex:Null<Bool> = null):DataFrame return agg("sum", asIndex);
+	public function min(?asIndex:Null<Bool> = null):DataFrame return agg("min", asIndex);
+	public function max(?asIndex:Null<Bool> = null):DataFrame return agg("max", asIndex);
+	public function count(?asIndex:Null<Bool> = null):DataFrame return agg("count", asIndex);
+	public function std(?ddof:Int = 1, ?asIndex:Null<Bool> = null):DataFrame {
 		var g = _members.length;
 		if (g == 0) return DataFrame.empty();
 		var d = ddof < 0 ? 0 : ddof;
 		var multi = _byCols.length > 1;
+		var useAsIndex = asIndex != null ? asIndex : !multi;
 		var names = valueCols();
 		var map = new Map<String, NdArrayF64>();
 		var order:Array<String> = [];
-		if (multi) {
-			for (bi in 0..._byCols.length) {
-				var out = NdArrayF64.empty([g]);
-				for (gi in 0...g) out.setFlat(gi, _keyRows[gi][bi]);
-				map.set(_byCols[bi], out);
-				order.push(_byCols[bi]);
-			}
+		var sMap = new Map<String, Array<String>>();
+		var sOrder:Array<String> = [];
+		if (!useAsIndex) {
+			emitKeyColumns(g, map, order, sMap, sOrder);
 		}
 		for (name in names) {
 			var src = _df.valuesOf(name);
@@ -156,9 +193,65 @@ class GroupBy {
 			map.set(name, out);
 			order.push(name);
 		}
-		if (order.length == 0) return DataFrame.empty();
-		var idx = multi ? Index.range(g) : Index.fromFloats(_keys.copy());
-		return DataFrame.fromColumns(map, idx, order);
+		if (order.length == 0 && sOrder.length == 0) return DataFrame.empty();
+		var idx = buildAggIndex(g, useAsIndex, multi);
+		return DataFrame.fromColumns(map, idx, order, sMap, sOrder);
+	}
+
+	function emitKeyColumns(
+		g:Int,
+		map:Map<String, NdArrayF64>,
+		order:Array<String>,
+		sMap:Map<String, Array<String>>,
+		sOrder:Array<String>
+	):Void {
+		for (bi in 0..._byCols.length) {
+			if (_byKinds[bi] == "str") {
+				var labels:Array<String> = [];
+				for (gi in 0...g) {
+					switch (_keyRows[gi][bi]) {
+						case Str(s): labels.push(s != null ? s : "");
+						case F64(v): labels.push(Math.isNaN(v) ? "" : Std.string(v));
+					}
+				}
+				sMap.set(_byCols[bi], labels);
+				sOrder.push(_byCols[bi]);
+			} else {
+				var out = NdArrayF64.empty([g]);
+				for (gi in 0...g) {
+					switch (_keyRows[gi][bi]) {
+						case F64(v): out.setFlat(gi, v);
+						case Str(_): out.setFlat(gi, Math.NaN);
+					}
+				}
+				map.set(_byCols[bi], out);
+				order.push(_byCols[bi]);
+			}
+		}
+	}
+
+	function buildAggIndex(g:Int, useAsIndex:Bool, multi:Bool):AnyIndex {
+		if (!useAsIndex) return Index.range(g);
+		if (multi) {
+			return Index.fromMulti(MultiIndex.fromKeyCells(_keyRows, _byCols.copy()));
+		}
+		// Single key
+		if (hasStrBy()) {
+			var labels:Array<String> = [];
+			for (gi in 0...g) {
+				switch (_keyRows[gi][0]) {
+					case Str(s): labels.push(s != null ? s : "");
+					case F64(v): labels.push(Math.isNaN(v) ? "" : Std.string(v));
+				}
+			}
+			return Index.fromStrings(labels);
+		}
+		return Index.fromFloats(_keys.copy());
+	}
+
+	function hasStrBy():Bool {
+		for (k in _byKinds) if (k == "str") return true;
+		return false;
 	}
 
 	/**
@@ -169,7 +262,7 @@ class GroupBy {
 	public function transform(?fn:String = "mean"):DataFrame {
 		var op = normalizeOp(fn);
 		var n = _df.nrows();
-		var order = _df.columns();
+		var order = _df.f64Columns();
 		var bySet = bySetMap();
 		var map = new Map<String, NdArrayF64>();
 		for (name in order) {
@@ -200,7 +293,14 @@ class GroupBy {
 			}
 			map.set(name, out);
 		}
-		return DataFrame.fromColumns(map, Index.copyOf(_df.index), order);
+		var sMap = new Map<String, Array<String>>();
+		var sOrder:Array<String> = [];
+		for (n in _df.strColumns()) {
+			var src = _df.strValuesOf(n);
+			sMap.set(n, src != null ? src : []);
+			sOrder.push(n);
+		}
+		return DataFrame.fromColumns(map, Index.copyOf(_df.index), order, sMap, sOrder);
 	}
 
 	/**
@@ -209,7 +309,7 @@ class GroupBy {
 	 */
 	public function rank(?pct:Bool = false, ?ascending:Bool = true):DataFrame {
 		var n = _df.nrows();
-		var order = _df.columns();
+		var order = _df.f64Columns();
 		var bySet = bySetMap();
 		var map = new Map<String, NdArrayF64>();
 		for (name in order) {
@@ -225,7 +325,14 @@ class GroupBy {
 				rankInto(src, _members[gi], out, pct, ascending);
 			map.set(name, out);
 		}
-		return DataFrame.fromColumns(map, Index.copyOf(_df.index), order);
+		var sMap = new Map<String, Array<String>>();
+		var sOrder:Array<String> = [];
+		for (nm in _df.strColumns()) {
+			var src = _df.strValuesOf(nm);
+			sMap.set(nm, src != null ? src : []);
+			sOrder.push(nm);
+		}
+		return DataFrame.fromColumns(map, Index.copyOf(_df.index), order, sMap, sOrder);
 	}
 
 	function bySetMap():Map<String, Bool> {
@@ -237,7 +344,7 @@ class GroupBy {
 	function valueCols():Array<String> {
 		var bySet = bySetMap();
 		var out:Array<String> = [];
-		for (n in _df.columns()) if (!bySet.exists(n)) out.push(n);
+		for (n in _df.f64Columns()) if (!bySet.exists(n)) out.push(n);
 		return out;
 	}
 
@@ -334,7 +441,6 @@ class GroupBy {
 		while (i < m) {
 			var j = i + 1;
 			while (j < m && vals[j].v == vals[i].v) j++;
-			// ranks are 1-based positions i+1 .. j (inclusive end j)
 			var avgRank = (i + 1 + j) / 2.0;
 			var score = pct ? (avgRank / m) : avgRank;
 			for (k in i...j) out.setFlat(vals[k].r, score);
@@ -358,7 +464,7 @@ class GroupBy {
 	 */
 	public static function xsRankFrame(df:DataFrame, ?pct:Bool = false, ?ascending:Bool = true):DataFrame {
 		if (df == null || df.emptyFrame()) return DataFrame.empty();
-		var names = df.columns();
+		var names = df.f64Columns();
 		var n = df.nrows();
 		var m = names.length;
 		var outs:Array<NdArrayF64> = [for (_ in 0...m) NdArrayF64.empty([n])];

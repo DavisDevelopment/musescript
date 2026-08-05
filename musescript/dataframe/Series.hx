@@ -6,6 +6,11 @@ import musescript.ndarray.Np;
 /**
  * Tabular 1-D series — Index + F64 NdArray values (not Muse streaming `TSeries`).
  * Column storage shares NdArray buffers; mutate-through when views alias.
+ *
+ * **F64-only by design (no Series-of-strings):** DataFrame string sidecars are
+ * not Series. `df.get(strCol)` returns an empty Series; use `df.strValuesOf(name)`,
+ * MultiIndex `getLevelValuesStr`, or `pd.get_level_values_str` for labels.
+ * A future string Series would need a new typed handle — not Dynamic cells.
  */
 class Series {
 	public var name:Null<String>;

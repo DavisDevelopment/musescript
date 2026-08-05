@@ -8,8 +8,10 @@ import musescript.ndarray.NdArrayF64;
 /**
  * Grant-gated CSV → DataFrame (M1 ingest tier).
  *
- * Parses numeric columns as F64 (non-numeric / empty → NaN). Header required.
- * Fitness / null grants → {@link IoDenied}.
+ * Columns that are entirely numeric (empty / NA tokens allowed) → F64.
+ * Any column with a non-numeric non-empty cell → Str sidecar (labels as-is;
+ * empty / NA tokens → `""`). Header required. Fitness / null grants →
+ * {@link IoDenied}.
  */
 class PdCsv {
 	public static function readCsv(?grants:Null<IoGrant>, path:String):DataFrame {
@@ -33,32 +35,101 @@ class PdCsv {
 		var header = parseRow(lines[0]);
 		if (header.length == 0) return DataFrame.empty();
 		var nCols = header.length;
-		var rows:Array<Array<Float>> = [];
+		var rawRows:Array<Array<String>> = [];
 		for (li in 1...lines.length) {
 			var line = lines[li];
 			if (StringTools.trim(line).length == 0) continue;
 			var cells = parseRow(line);
-			var row:Array<Float> = [];
-			for (c in 0...nCols) {
-				var raw = c < cells.length ? cells[c] : "";
-				row.push(parseCell(raw));
-			}
-			rows.push(row);
+			var row:Array<String> = [];
+			for (c in 0...nCols) row.push(c < cells.length ? cells[c] : "");
+			rawRows.push(row);
 		}
-		var n = rows.length;
-		var map = new Map<String, NdArrayF64>();
+		var n = rawRows.length;
+		var isStr:Array<Bool> = [for (_ in 0...nCols) false];
 		for (c in 0...nCols) {
-			var col = NdArrayF64.empty([n]);
-			for (r in 0...n) col.setFlat(r, rows[r][c]);
-			map.set(header[c], col);
+			for (r in 0...n) {
+				if (!cellLooksNumeric(rawRows[r][c])) {
+					isStr[c] = true;
+					break;
+				}
+			}
 		}
-		return DataFrame.fromColumns(map, Index.range(n), header);
+		var map = new Map<String, NdArrayF64>();
+		var order:Array<String> = [];
+		var sMap = new Map<String, Array<String>>();
+		var sOrder:Array<String> = [];
+		for (c in 0...nCols) {
+			var name = header[c];
+			if (isStr[c]) {
+				var labels:Array<String> = [];
+				for (r in 0...n) labels.push(strCell(rawRows[r][c]));
+				sOrder.push(name);
+				sMap.set(name, labels);
+			} else {
+				var col = NdArrayF64.empty([n]);
+				for (r in 0...n) col.setFlat(r, parseCell(rawRows[r][c]));
+				order.push(name);
+				map.set(name, col);
+			}
+		}
+		return DataFrame.fromColumns(map, Index.range(n), order, sMap, sOrder);
+	}
+
+	/** Empty / NA / parseable float → numeric-looking; else → Str. */
+	public static function cellLooksNumeric(raw:String):Bool {
+		var s = StringTools.trim(raw != null ? raw : "");
+		if (s.length == 0 || isNaToken(s)) return true;
+		var f = Std.parseFloat(s);
+		if (Math.isNaN(f)) return false;
+		return floatStringLooksComplete(s);
+	}
+
+	/** Shared with Parquet fromObjects — reject partial `parseFloat` prefixes. */
+	public static function floatStringLooksComplete(s:String):Bool {
+		var t = StringTools.trim(s);
+		if (t.length == 0) return false;
+		var i = 0;
+		if (t.charCodeAt(0) == 43 || t.charCodeAt(0) == 45) i = 1;
+		if (i >= t.length) return false;
+		var sawDigit = false;
+		var sawDot = false;
+		while (i < t.length) {
+			var c = t.charCodeAt(i);
+			if (c >= 48 && c <= 57) {
+				sawDigit = true;
+				i++;
+			} else if (c == 46 && !sawDot) {
+				sawDot = true;
+				i++;
+			} else if ((c == 101 || c == 69) && sawDigit) {
+				i++;
+				if (i < t.length && (t.charCodeAt(i) == 43 || t.charCodeAt(i) == 45)) i++;
+				var expDigit = false;
+				while (i < t.length && t.charCodeAt(i) >= 48 && t.charCodeAt(i) <= 57) {
+					expDigit = true;
+					i++;
+				}
+				return expDigit && i == t.length;
+			} else {
+				return false;
+			}
+		}
+		return sawDigit;
+	}
+
+	static function strCell(raw:String):String {
+		var s = StringTools.trim(raw != null ? raw : "");
+		if (s.length == 0 || isNaToken(s)) return "";
+		return s;
+	}
+
+	static function isNaToken(s:String):Bool {
+		return s == "nan" || s == "NaN" || s == "NA" || s == "null" || s == "None";
 	}
 
 	static function parseCell(raw:String):Float {
-		var s = StringTools.trim(raw);
-		if (s.length == 0 || s == "nan" || s == "NaN" || s == "NA" || s == "null")
-			return Math.NaN;
+		var s = StringTools.trim(raw != null ? raw : "");
+		if (s.length == 0 || isNaToken(s)) return Math.NaN;
 		var f = Std.parseFloat(s);
 		return Math.isNaN(f) ? Math.NaN : f;
 	}
