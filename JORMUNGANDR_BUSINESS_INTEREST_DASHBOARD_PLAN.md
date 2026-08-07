@@ -2,7 +2,7 @@
 
 *Product + architecture plan. Written 2026-08-05. Home: muse-script (this plan). Body: `kalshi-ai-advisor/python/worldfeed` + Desktop `mobile/src/world/`. Cross-links: `JORMUNGANDR_GEOSPATIAL_CRE_PLAN.md`, `JORMUNGANDR_MUSESCRIPT_INTEGRATION_PLAN.md`, `JORMUNGANDR_MIROFISH_INSPIRATION.md`, `kalshi-ai-advisor/python/WORLD_DATA_PLATFORM.md` §11.*
 
-**Status:** P0 shipped (interest drawer + pins). Soft, ambitious. Constitution: honest provenance; Brier/calibration ranks — **never P&L leaderboards**; exposure scores are situational, not money PnL.
+**Status:** P1 shipped (alert feed + matcher). Soft, ambitious. Constitution: honest provenance; Brier/calibration ranks — **never P&L leaderboards**; exposure scores are situational, not money PnL.
 
 **Blueprints synthesis (2026-08-05):** Interest / Company signal sinks in MuseLab Blueprints
 (`mobile/src/lab/blueprints/blueprintInterestSinks.js`) — Event-lane graphs that pin / alert /
@@ -280,15 +280,15 @@ P0–P1: **in-app alert rail only**. Push/email/desktop toast deferred to lock.
 **Depends:** CRE P0 fixtures + legend (see Geospatial CRE plan) — triad markets already locked.
 
 **Effort:** S–M (mostly chrome + thin store).
-### P1 — Alert feed
+### P1 — Alert feed ✅
 
-| Deliverable | DoD |
-| --- | --- |
-| Matcher: event proximity + region intersect | Alert row when quake/outbreak/etc. hits pinned metro |
-| Matcher: CRE status/price delta | Alert when fixture/listing row churns for pinned cre_id |
-| `GET /world/interests/alerts` | Cursor/`since`; ack endpoint |
-| Desktop alert rail in Split | Click → focus interest + open event/CRE dossier |
-| MuseEvents (optional) | `world.interest_alert` catalog reserve (host, non-det) — document only if not wired |
+| Deliverable | DoD | Status |
+| --- | --- | --- |
+| Matcher: event proximity + region intersect | Alert row when quake/outbreak/etc. hits pinned metro | ✅ `interest_matcher.run_match_pass` |
+| Matcher: CRE status/price delta | Alert when fixture/listing row churns for pinned cre_id | ✅ snapshots + `cre_*_change` |
+| `GET /world/interests/alerts` | Cursor/`since`; ack endpoint | ✅ + `POST …/match` |
+| Desktop alert rail in Split | Click → focus interest + open event/CRE dossier | ✅ `WorldAlertRail` |
+| MuseEvents (optional) | `world.interest_alert` catalog reserve (host, non-det) — document only if not wired | ✅ reserved in `jormungandrMuseEvents.js` (not pumped) |
 
 **Effort:** M.
 
