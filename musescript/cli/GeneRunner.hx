@@ -122,6 +122,9 @@ class GeneRunner {
 		var minTrades = intArg("--min-trades", 1);
 
 		var batchPath = argVal("--batch", "");
+		// Multi-tape warm jobs: NDJSON manifest (`--jobs path` or `--jobs -` for stdin).
+		// Spec: CURSOR_BATCH_RUNNER_SPEC.md / musescript.cli.BatchRunner.
+		var jobsPath = argVal("--jobs", "");
 		var panelMode = panelPath != "" || tapesArg != "";
 		var ingestMode = argFlag("--ingest");
 		var httpMode = argVal("--http", "");
@@ -211,6 +214,30 @@ class GeneRunner {
 			} catch (ex:Dynamic) {
 				emit({ ok: false, reason: Std.string(ex) });
 			}
+			return;
+		}
+
+		// Warm multi-tape jobs (flagship corpus / score_probe / matrix). Prefer BatchRunner /
+		// batch-runner.js; gene-runner --jobs - is the same protocol for one-binary deploys.
+		if (jobsPath != "") {
+			if (panelMode) {
+				emit({ ok: false, error: "GeneRunner: --jobs does not support --panel/--tapes yet" });
+				Sys.exit(1);
+				return;
+			}
+			var jobsText = jobsPath == "-" ? readStdin() : readFile(jobsPath);
+			var fatal = runJobsManifest(jobsText, {
+				target: target,
+				strict: strict,
+				defaultExecution: executionMode,
+				defaultCostBps: costBps,
+				defaultSeed: seed,
+				startCapital: startCapital,
+				equityFloor: equityFloor,
+				useVm: useVm,
+				synthN: synthN
+			});
+			if (fatal) Sys.exit(1);
 			return;
 		}
 
@@ -510,6 +537,174 @@ class GeneRunner {
 			Reflect.setField(out, "logs", harness.logs);
 		}
 		return out;
+	}
+
+	/**
+	 * Warm multi-tape jobs protocol (CURSOR_BATCH_RUNNER_SPEC Phase 1).
+	 *
+	 * NDJSON lines, each:
+	 *   {"id","source","tape","execution"?,"costBps"?,"seed"?,"symbol"?,"target"?}
+	 * Streams one result line per job as it finishes. Caches compiled strategies by
+	 * source hash and parsed tapes by path (+ optional symbol filter).
+	 *
+	 * @return true if a fatal (non-per-job) error occurred
+	 */
+	public static function runJobsManifest(text:String, opts:{
+		?target:String, ?strict:Bool, ?defaultExecution:String, ?defaultCostBps:Float,
+		?defaultSeed:Int, ?startCapital:Float, ?equityFloor:Float, ?useVm:Bool, ?synthN:Int
+	}):Bool {
+		var target = opts.target != null ? opts.target : "js";
+		var strict = opts.strict == true;
+		var defaultExecution = opts.defaultExecution != null ? opts.defaultExecution : "next-open";
+		var defaultCostBps = opts.defaultCostBps != null ? opts.defaultCostBps : 0.0;
+		var defaultSeed = opts.defaultSeed != null ? opts.defaultSeed : 42;
+		var startCapital = opts.startCapital != null ? opts.startCapital : 100000.0;
+		var equityFloor = opts.equityFloor != null ? opts.equityFloor : 0.0;
+		var useVm = opts.useVm == true;
+		var synthN = opts.synthN != null ? opts.synthN : 400;
+
+		var tapeBars = new Map<String, Array<Bar>>();
+		var tapeMetas = new Map<String, {symbol:String, assetClass:String}>();
+		var geneCache = new Map<String, {prog:musescript.ast.MuseProgram, ex:musescript.compile.CompileEx, target:String}>();
+
+		var lines = text.split("\r\n").join("\n").split("\r").join("\n").split("\n");
+		var sawAny = false;
+		for (ln in lines) {
+			var t = StringTools.trim(ln);
+			if (t == "") continue;
+			sawAny = true;
+			var id = "";
+			try {
+				var obj:Dynamic = haxe.Json.parse(t);
+				id = obj.id != null ? Std.string(obj.id) : "";
+				var source = obj.source != null ? Std.string(obj.source) : "";
+				if (source == "" && obj.sourcePath != null) {
+					source = readFile(Std.string(obj.sourcePath));
+				}
+				if (StringTools.trim(source) == "")
+					throw "job missing source / sourcePath";
+				var tape = obj.tape != null ? Std.string(obj.tape) : "";
+				if (tape == "")
+					throw "job missing tape";
+				var sym = obj.symbol != null ? Std.string(obj.symbol) : "";
+				var exec = obj.execution != null ? Std.string(obj.execution) : defaultExecution;
+				if (exec != "same-close" && exec != "next-open")
+					throw 'unknown execution mode: $exec';
+				var jobCost = defaultCostBps;
+				if (obj.costBps != null) {
+					var c:Float = Std.parseFloat(Std.string(obj.costBps));
+					if (!Math.isNaN(c)) jobCost = c;
+				}
+				var jobSeed = defaultSeed;
+				if (obj.seed != null) {
+					var s = Std.parseInt(Std.string(obj.seed));
+					if (s != null) jobSeed = s;
+				}
+				var jobTarget = obj.target != null ? Std.string(obj.target) : target;
+
+				var tapeKey = tape + "\x1e" + sym;
+				var bars = tapeBars.get(tapeKey);
+				if (bars == null) {
+					bars = loadBars(tape, sym, synthN, jobSeed, "", 0);
+					tapeBars.set(tapeKey, bars);
+					tapeMetas.set(tapeKey, tapeMeta(tape, sym));
+				}
+				var meta = tapeMetas.get(tapeKey);
+
+				var res:Dynamic;
+				if (useVm) {
+					// VM / unusual targets: fall through to full runOne (no gene cache).
+					res = runOne(source, bars, jobTarget, false, strict, "", exec, false, jobCost, startCapital, equityFloor, true, meta.symbol, meta.assetClass);
+				} else {
+					res = runOneCached(source, bars, jobTarget, strict, exec, jobCost, startCapital, equityFloor, meta.symbol, meta.assetClass, geneCache);
+				}
+				Reflect.setField(res, "id", id);
+				emit(res);
+			} catch (e:Dynamic) {
+				emit({ ok: false, id: id, error: Std.string(e) });
+			}
+		}
+		if (!sawAny) {
+			emit({ ok: false, error: "GeneRunner --jobs: empty manifest" });
+			return true;
+		}
+		return false;
+	}
+
+	/** Compile-once path used by --jobs / BatchRunner (JsBackend resets rising/falling per invoke). */
+	static function runOneCached(
+		source:String, bars:Array<Bar>, target:String, strict:Bool, executionMode:String,
+		costBps:Float, startCapital:Float, equityFloor:Float, symbol:String, assetClass:String,
+		cache:Map<String, {prog:musescript.ast.MuseProgram, ex:musescript.compile.CompileEx, target:String}>
+	):Dynamic {
+		var key = sourceHash(source) + "|" + target + "|" + (strict ? "1" : "0");
+		var prepared = cache.get(key);
+		if (prepared == null) {
+			var prog = new MuseParser().parse(source, "<gene>");
+			prog = musescript.compile.ClassStrategyLower.expand(prog);
+			prog = musescript.compile.MuseHostLower.lower(prog);
+			prog = musescript.compile.TemplateExpand.expand(prog);
+			prog = musescript.compile.ModuleExpand.expand(prog);
+			var ex = MuseCompiler.compileEx(prog, { target: target, strict: strict });
+			prepared = { prog: prog, ex: ex, target: target };
+			cache.set(key, prepared);
+		}
+
+		var harness = new HarnessContext();
+		MuseRuntime.applyIoGrants(harness, { fitness: true });
+		harness.symbol = symbol;
+		harness.assetClass = assetClass;
+		harness.orders.executionMode = executionMode;
+		if (startCapital != 100000) harness.orders.reset(startCapital);
+		if (equityFloor > 0) harness.orders.equityFloor = equityFloor;
+		if (costBps != 0) harness.orders.book.slippageBps = costBps;
+		var feed = new BarFeed(bars);
+		harness.feed = feed;
+		TradeBuiltins.resetCrossState();
+
+		var t0 = haxe.Timer.stamp();
+		var result:Dynamic = prepared.ex.fn(harness);
+		var runMs = (haxe.Timer.stamp() - t0) * 1000.0;
+		var backendName = prepared.ex.backend;
+		var out:Dynamic = {
+			ok: true,
+			backend: backendName,
+			execution: executionMode,
+			emitted: prepared.ex.emitted,
+			runMs: Math.fround(runMs * 1000) / 1000,
+			barsPerSec: runMs > 0 ? Math.fround(bars.length / (runMs / 1000.0)) : null,
+			bars: bars.length,
+			trades: intField(result, "trades"),
+			sharpe: finField(result, "sharpe"),
+			maxDrawdown: finField(result, "maxDrawdown"),
+			winRate: finField(result, "winRate"),
+			finalEquity: finField(result, "finalEquity"),
+			bankrupt: harness.orders.bankrupt,
+			cached: true
+		};
+		if (backendName != prepared.target)
+			Reflect.setField(out, "fallback", true);
+		if (harness.orders.tagFires.keys().hasNext()) {
+			var tagObj:Dynamic = {};
+			for (k in harness.orders.tagFires.keys()) Reflect.setField(tagObj, k, harness.orders.tagFires.get(k));
+			Reflect.setField(out, "exitTags", tagObj);
+		}
+		return out;
+	}
+
+	static function sourceHash(s:String):String {
+		#if js
+		return js.Syntax.code("require('crypto').createHash('sha256').update({0}, 'utf8').digest('hex')", s);
+		#else
+		// Fallback: length + a cheap rolling hash (non-JS hosts are rare for GeneRunner).
+		var h = s.length * 2654435761;
+		var i = 0;
+		while (i < s.length) {
+			h = ((h << 5) + h) + s.charCodeAt(i);
+			i += (i < 64 ? 1 : 17);
+		}
+		return StringTools.hex(h, 8) + "_" + s.length;
+		#end
 	}
 
 	static function loadBars(tapePath:String, symbol:String, synthN:Int, seed:Int,

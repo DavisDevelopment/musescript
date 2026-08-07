@@ -25,7 +25,7 @@ import sys
 import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 ROOT = Path(__file__).resolve().parents[3]
 FLAGSHIP = Path(__file__).resolve().parents[1]
@@ -35,8 +35,37 @@ CONFIGS = FLAGSHIP / "configs"
 TAPES = FLAGSHIP / "tapes"
 RESULTS = FLAGSHIP / "results"
 RUNNER = ROOT / "build" / "js" / "gene-runner.js"
+BATCH_RUNNER = ROOT / "build" / "js" / "batch-runner.js"
 SOURCE_TAPE = ROOT / "data" / "real" / "tape.csv"
 DEFAULT_STRATEGY = STRATEGIES / "flagship_v7g.ms"
+
+
+def _viz(kind: str, *args: Any, **kwargs: Any) -> None:
+    """Best-effort observer publish; never abort scoring.
+
+    Lazy-imports viz_core to avoid a circular import with this module.
+    """
+    try:
+        from viz_core import (  # noqa: WPS433 — intentional lazy import
+            publish_cell,
+            publish_job_done,
+            publish_job_start,
+            publish_run,
+        )
+    except Exception:
+        return
+    fn = {
+        "start": publish_job_start,
+        "cell": publish_cell,
+        "run": publish_run,
+        "done": publish_job_done,
+    }.get(kind)
+    if fn is None:
+        return
+    try:
+        fn(*args, **kwargs)
+    except Exception:
+        pass
 
 
 @dataclass
@@ -91,6 +120,155 @@ def ensure_runner() -> None:
         subprocess.run(["haxe", "build-cli.hxml"], cwd=str(ROOT), check=True)
     if not RUNNER.exists():
         raise SystemExit(f"gene-runner still missing after build: {RUNNER}")
+
+
+def ensure_batch_runner() -> Path:
+    """Resolve warm batch entry point; build via build-batch.hxml if missing.
+
+    Falls back to `gene-runner.js --jobs -` (same protocol) when batch-runner.js
+    is absent but gene-runner is present.
+    """
+    ensure_runner()
+    if BATCH_RUNNER.exists():
+        return BATCH_RUNNER
+    print(
+        f"missing {BATCH_RUNNER.relative_to(ROOT)} — building via haxe build-batch.hxml …",
+        file=sys.stderr,
+    )
+    try:
+        subprocess.run(["haxe", "build-batch.hxml"], cwd=str(ROOT), check=True)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+    if BATCH_RUNNER.exists():
+        return BATCH_RUNNER
+    return RUNNER
+
+
+def _metrics_from_data(data: dict[str, Any]) -> Metrics:
+    if not data.get("ok"):
+        err = data.get("error") or data.get("reason") or data
+        return Metrics(ok=False, error=str(err)[:400])
+    bars = int(data.get("bars") or 0)
+    trades = int(data.get("trades") or 0)
+    return Metrics(
+        ok=True,
+        bars=bars,
+        trades=trades,
+        sharpe=float(data.get("sharpe") or 0),
+        max_drawdown=float(data.get("maxDrawdown") or 0),
+        win_rate=float(data.get("winRate") or 0),
+        final_equity=float(data.get("finalEquity") or 0),
+        trades_per_bar=(trades / bars) if bars > 0 else 0.0,
+    )
+
+
+def run_gene_batch(
+    jobs: list[dict[str, Any]],
+    *,
+    on_result: Callable[[str, Metrics, dict[str, Any]], None] | None = None,
+    timeout: int | None = None,
+    default_execution: str = "next-open",
+    default_cost_bps: float = 10.0,
+    seed: int = 42,
+) -> dict[str, Metrics]:
+    """Run many backtests in one warm Node process (CURSOR_BATCH_RUNNER_SPEC).
+
+    Each job dict needs at least ``id``, ``source``, ``tape``; optional
+    ``execution``, ``costBps``, ``seed``, ``symbol``. Returns ``{job_id: Metrics}``.
+
+    ``on_result(job_id, Metrics, raw_dict)`` is invoked as each NDJSON result
+    arrives (for viz publish / progressive CLI output).
+    """
+    if not jobs:
+        return {}
+    # Single-job: keep interactive path ceremony-free (still warm-batch OK, but
+    # score_probe on one cell shouldn't force a special mental model).
+    runner = ensure_batch_runner()
+    use_jobs_flag = runner.resolve() == RUNNER.resolve()
+    cmd = ["node", str(runner)]
+    if use_jobs_flag:
+        cmd.extend(["--jobs", "-"])
+    cmd.extend(
+        [
+            "--target",
+            "js",
+            "--execution",
+            default_execution,
+            "--cost-bps",
+            str(default_cost_bps),
+            "--seed",
+            str(seed),
+        ]
+    )
+    manifest_lines: list[str] = []
+    for j in jobs:
+        job = dict(j)
+        job.setdefault("execution", default_execution)
+        job.setdefault("costBps", default_cost_bps)
+        job.setdefault("seed", seed)
+        if "tape" in job and not isinstance(job["tape"], str):
+            job["tape"] = str(job["tape"])
+        manifest_lines.append(json.dumps(job, ensure_ascii=False))
+    stdin_text = "\n".join(manifest_lines) + "\n"
+    # Generous default: ~30s/job floor plus compile amortization headroom.
+    if timeout is None:
+        timeout = max(180, 30 * len(jobs))
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(ROOT),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except OSError as e:
+        raise SystemExit(f"failed to spawn batch runner: {e}") from e
+
+    assert proc.stdin is not None and proc.stdout is not None
+    try:
+        proc.stdin.write(stdin_text)
+        proc.stdin.close()
+    except BrokenPipeError:
+        pass
+
+    out: dict[str, Metrics] = {}
+    try:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+            except json.JSONDecodeError:
+                data = {"ok": False, "id": "", "error": line[:400]}
+            jid = str(data.get("id") or "")
+            m = _metrics_from_data(data)
+            if jid:
+                out[jid] = m
+            if on_result is not None:
+                on_result(jid, m, data)
+        stderr = (proc.stderr.read() if proc.stderr else "") or ""
+        code = proc.wait(timeout=30)
+    except Exception:
+        proc.kill()
+        raise
+    if code != 0 and len(out) < len(jobs):
+        # Fatal non-per-job failure; surface stderr.
+        err = stderr.strip()[:400] or f"batch-runner exit {code}"
+        for j in jobs:
+            jid = str(j.get("id") or "")
+            if jid and jid not in out:
+                out[jid] = Metrics(ok=False, error=err)
+    # Fill any missing ids (crash mid-stream).
+    for j in jobs:
+        jid = str(j.get("id") or "")
+        if jid and jid not in out:
+            out[jid] = Metrics(ok=False, error="missing batch result")
+    return out
 
 
 def run_gene_raw(
@@ -188,23 +366,9 @@ def run_gene(
         check_only=check_only,
         timeout=timeout,
     )
-    if not data.get("ok"):
-        err = data.get("error") or data.get("reason") or data
-        return Metrics(ok=False, error=str(err)[:400])
     if check_only:
-        return Metrics(ok=True)
-    bars = int(data.get("bars") or 0)
-    trades = int(data.get("trades") or 0)
-    return Metrics(
-        ok=True,
-        bars=bars,
-        trades=trades,
-        sharpe=float(data.get("sharpe") or 0),
-        max_drawdown=float(data.get("maxDrawdown") or 0),
-        win_rate=float(data.get("winRate") or 0),
-        final_equity=float(data.get("finalEquity") or 0),
-        trades_per_bar=(trades / bars) if bars > 0 else 0.0,
-    )
+        return Metrics(ok=True) if data.get("ok") else _metrics_from_data(data)
+    return _metrics_from_data(data)
 
 
 def buy_hold_source() -> str:
@@ -338,8 +502,35 @@ def eval_batch(
     execution = honesty["execution"]
     cost_bps = float(honesty["cost_bps"])
 
+    jobs: list[dict[str, Any]] = []
+    plan: list[tuple[str, Path | None]] = []
     for sym in symbols:
         tape = tape_for(window, sym)
+        plan.append((sym, tape))
+        if tape is None:
+            continue
+        jobs.append(
+            {
+                "id": f"{sym}:strat",
+                "source": source,
+                "tape": str(tape),
+                "execution": execution,
+                "costBps": cost_bps,
+            }
+        )
+        jobs.append(
+            {
+                "id": f"{sym}:bh",
+                "source": bh,
+                "tape": str(tape),
+                "execution": execution,
+                "costBps": cost_bps,
+            }
+        )
+
+    batch_out = run_gene_batch(jobs, default_execution=execution, default_cost_bps=cost_bps) if jobs else {}
+
+    for sym, tape in plan:
         if tape is None:
             cells.append(
                 CellResult(
@@ -354,8 +545,8 @@ def eval_batch(
                 )
             )
             continue
-        m = run_gene(source, tape, execution=execution, cost_bps=cost_bps)
-        bh_m = run_gene(bh, tape, execution=execution, cost_bps=cost_bps)
+        m = batch_out.get(f"{sym}:strat", Metrics(ok=False, error="missing batch result"))
+        bh_m = batch_out.get(f"{sym}:bh", Metrics(ok=False, error="missing batch result"))
         bh_sharpe = bh_m.sharpe if bh_m.ok else None
         d_sharpe = (m.sharpe - bh_sharpe) if m.ok and bh_sharpe is not None else None
         freq_ok = frequency_match(m, freq) if freq_name != "any" else m.ok
@@ -630,72 +821,148 @@ def cmd_matrix(args: argparse.Namespace) -> int:
             else [f.strip() for f in args.frequencies.split(",")]
         )
 
-    matrix: list[dict[str, Any]] = []
-    perfect = 0
-    total = 0
-
-    for b in batch_names:
-        for w in window_names:
-            for h in honesty_names:
-                for f in freq_names:
-                    total += 1
-                    cells = eval_batch(
-                        source,
-                        batch_name=b,
-                        symbols=batches[b]["symbols"],
-                        window=w,
-                        honesty_name=h,
-                        honesty=honesty_cfg[h],
-                        freq_name=f,
-                        freq=frequencies[f],
-                        frequencies=frequencies,
-                    )
-                    summary = summarize(cells)
-                    title = f"{b} x {w} x {h} x freq={f}"
-                    print_summary(title, summary)
-                    row = {
-                        "batch": b,
-                        "window": w,
-                        "honesty": h,
-                        "frequency": f,
-                        "summary": summary,
-                    }
-                    matrix.append(row)
-                    if summary["n_pass"] == summary["n_symbols"] and summary["n_symbols"] > 0:
-                        perfect += 1
-
-    RESULTS.mkdir(parents=True, exist_ok=True)
-    out_path = RESULTS / f"matrix_{strategy.stem}.json"
-    payload = {
-        "strategy": rel(strategy),
-        "perfect_cells": perfect,
-        "total_cells": total,
-        "coverage": perfect / total if total else 0.0,
-        "matrix": matrix,
-    }
-    out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-
-    # Leaderboard-style markdown
-    md_lines = [
-        f"# Flagship matrix — `{strategy.name}`",
-        "",
-        f"Perfect cells: **{perfect}/{total}** ({payload['coverage']:.0%})",
-        "",
-        "| Batch | Window | Honesty | Freq | Pass | Score | Mean Sharpe | dBH | MDD |",
-        "|---|---|---|---|---|---|---|---|---|",
+    jobs = [
+        (b, w, h, f)
+        for b in batch_names
+        for w in window_names
+        for h in honesty_names
+        for f in freq_names
     ]
-    for row in sorted(matrix, key=lambda r: -r["summary"]["score"]):
-        s = row["summary"]
-        md_lines.append(
-            f"| {row['batch']} | {row['window']} | {row['honesty']} | {row['frequency']} | "
-            f"{s['n_pass']}/{s['n_symbols']} | {s['score']:.3f} | {s['mean_sharpe']:.3f} | "
-            f"{s['mean_d_sharpe']:.3f} | {s['mean_mdd']:.3f} |"
+    matrix: list[dict[str, Any]] = []
+    viz_rows: list[dict[str, Any]] = []
+    perfect = 0
+    total = len(jobs)
+
+    _viz(
+        "start",
+        "matrix",
+        strategy.name,
+        total=total,
+        agent="eval_matrix",
+        source="cli",
+        trigger="cli",
+    )
+    try:
+        for i, (b, w, h, f) in enumerate(jobs, 1):
+            cells = eval_batch(
+                source,
+                batch_name=b,
+                symbols=batches[b]["symbols"],
+                window=w,
+                honesty_name=h,
+                honesty=honesty_cfg[h],
+                freq_name=f,
+                freq=frequencies[f],
+                frequencies=frequencies,
+            )
+            summary = summarize(cells)
+            title = f"{b} x {w} x {h} x freq={f}"
+            print_summary(title, summary)
+            row = {
+                "batch": b,
+                "window": w,
+                "honesty": h,
+                "frequency": f,
+                "summary": summary,
+            }
+            matrix.append(row)
+            is_perfect = summary["n_pass"] == summary["n_symbols"] and summary["n_symbols"] > 0
+            if is_perfect:
+                perfect += 1
+            viz_row = {
+                "batch": b,
+                "window": w,
+                "honesty": h,
+                "frequency": f,
+                "n_pass": summary["n_pass"],
+                "n_total": summary["n_symbols"],
+                "perfect": is_perfect,
+                "mean_d_sharpe": round(summary["mean_d_sharpe"], 4),
+                "by_symbol": summary["by_symbol"],
+                "symbol": f"{b}×{f}",
+                "pass": is_perfect,
+                "d_sharpe": round(summary["mean_d_sharpe"], 4),
+            }
+            viz_rows.append(viz_row)
+            remaining = [
+                f"{bb}×{ww.replace('wf_', '').replace('eval_3m', 'eval')}×{ff}"
+                for bb, ww, _hh, ff in jobs[i:]
+            ]
+            _viz(
+                "cell",
+                "matrix",
+                strategy.name,
+                viz_row,
+                done=i,
+                total=total,
+                n_pass=perfect,
+                mean_d_sharpe=viz_row["mean_d_sharpe"],
+                remaining=remaining[:12],
+                remaining_n=len(remaining),
+                current={"symbol": f"{b}×{f}", "window": w},
+                source="cli",
+            )
+
+        RESULTS.mkdir(parents=True, exist_ok=True)
+        out_path = RESULTS / f"matrix_{strategy.stem}.json"
+        payload = {
+            "strategy": rel(strategy),
+            "perfect_cells": perfect,
+            "total_cells": total,
+            "coverage": perfect / total if total else 0.0,
+            "matrix": matrix,
+        }
+        out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+        # Leaderboard-style markdown
+        md_lines = [
+            f"# Flagship matrix — `{strategy.name}`",
+            "",
+            f"Perfect cells: **{perfect}/{total}** ({payload['coverage']:.0%})",
+            "",
+            "| Batch | Window | Honesty | Freq | Pass | Score | Mean Sharpe | dBH | MDD |",
+            "|---|---|---|---|---|---|---|---|---|",
+        ]
+        for row in sorted(matrix, key=lambda r: -r["summary"]["score"]):
+            s = row["summary"]
+            md_lines.append(
+                f"| {row['batch']} | {row['window']} | {row['honesty']} | {row['frequency']} | "
+                f"{s['n_pass']}/{s['n_symbols']} | {s['score']:.3f} | {s['mean_sharpe']:.3f} | "
+                f"{s['mean_d_sharpe']:.3f} | {s['mean_mdd']:.3f} |"
+            )
+        md_path = RESULTS / f"matrix_{strategy.stem}.md"
+        md_path.write_text("\n".join(md_lines) + "\n", encoding="utf-8")
+        print(f"\n=== MATRIX DONE  perfect={perfect}/{total} ===")
+        print(f"wrote {rel(out_path)}")
+        print(f"wrote {rel(md_path)}")
+
+        mean_dbh = 0.0
+        dvals = [r["mean_d_sharpe"] for r in viz_rows if r.get("mean_d_sharpe") is not None]
+        if dvals:
+            mean_dbh = round(sum(dvals) / len(dvals), 4)
+        _viz(
+            "run",
+            "matrix",
+            strategy.name,
+            {
+                "suite": "matrix",
+                "strategy": strategy.name,
+                "path": rel(strategy),
+                "n_pass": perfect,
+                "n_total": total,
+                "pct": round(100.0 * perfect / total, 1) if total else 0.0,
+                "perfect_cells": perfect,
+                "total_cells": total,
+                "matrix": viz_rows,
+                "mean_d_sharpe": mean_dbh,
+            },
+            source="cli",
+            agent="eval_matrix",
         )
-    md_path = RESULTS / f"matrix_{strategy.stem}.md"
-    md_path.write_text("\n".join(md_lines) + "\n", encoding="utf-8")
-    print(f"\n=== MATRIX DONE  perfect={perfect}/{total} ===")
-    print(f"wrote {rel(out_path)}")
-    print(f"wrote {rel(md_path)}")
+        _viz("done", source="cli")
+    except Exception as e:
+        _viz("done", error=str(e), source="cli")
+        raise
     return 0 if perfect == total and total > 0 else 2
 
 

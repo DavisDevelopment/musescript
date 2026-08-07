@@ -1,0 +1,9 @@
+# Warm batch-eval runner (CURSOR_BATCH_RUNNER_SPEC Phase 1).
+# Produces build/js/batch-runner.js — NDJSON jobs on stdin, streamed NDJSON results.
+# Requires the same classpath as build-cli.hxml (GeneRunner helpers are shared).
+extraParams.hxml
+-main musescript.cli.BatchRunner
+-lib hxnodejs
+-D node
+-D js_es=6
+-js build/js/batch-runner.js

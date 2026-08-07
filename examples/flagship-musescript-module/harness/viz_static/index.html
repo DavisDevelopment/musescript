@@ -1,0 +1,1025 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Flagship Observe · Desk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+<script>
+  window.__chartReady = false;
+  window.__chartLoadErr = false;
+</script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"
+  onload="window.__chartReady=true"
+  onerror="window.__chartLoadErr=true"></script>
+<style>
+  :root {
+    --bg: #07090c; --bg2: #0e1218; --bg3: #151b24; --bg4: #1c2430;
+    --line: #2a3444; --line2: #3a4658; --text: #e6ebf2; --muted: #8794a8;
+    --cyan: #3dd6c6; --teal: #1a9b8e; --green: #3ecf8e; --red: #ef6b6b;
+    --amber: #e8b84a; --copper: #c9854a;
+    --glow-ok: rgba(62,207,142,.22); --glow-bad: rgba(239,107,107,.18); --glow-run: rgba(232,184,74,.2);
+    --mono: "IBM Plex Mono","Cascadia Mono","Consolas",ui-monospace,monospace;
+    --sans: "IBM Plex Sans","Segoe UI",system-ui,sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: var(--sans); }
+  body {
+    display: grid; grid-template-rows: auto auto auto auto 1fr; min-height: 100vh;
+    background:
+      radial-gradient(1200px 500px at 10% -10%, rgba(61,214,198,.07), transparent 55%),
+      radial-gradient(900px 400px at 90% 0%, rgba(201,133,74,.06), transparent 50%),
+      linear-gradient(180deg, #0a0d12 0%, var(--bg) 40%);
+  }
+  header {
+    display: flex; align-items: center; gap: .85rem; flex-wrap: wrap;
+    padding: .7rem 1.1rem; border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, rgba(20,26,34,.95), rgba(10,13,18,.85));
+  }
+  header h1 { font-size: .95rem; font-weight: 600; letter-spacing: .06em; margin: 0; text-transform: uppercase; }
+  .brand { font-family: var(--mono); font-size: .78rem; color: var(--cyan); letter-spacing: .12em; font-weight: 600; }
+  .champ { color: var(--muted); font-size: .75rem; font-family: var(--mono); }
+  .pill {
+    font-family: var(--mono); font-size: .68rem; padding: .22rem .55rem;
+    border-radius: 3px; border: 1px solid var(--line); color: var(--muted); background: var(--bg3);
+  }
+  .pill.run { color: var(--amber); border-color: #7a5a18; background: rgba(232,184,74,.08); box-shadow: 0 0 0 1px var(--glow-run); }
+  .pill.ok { color: var(--green); border-color: #1f6b48; }
+  .pill.bad { color: var(--red); border-color: #7a2e2e; }
+  .pill.lock { color: var(--copper); border-color: #7a4a22; }
+  .pill.obs { color: var(--cyan); border-color: #1f6b63; }
+  .header-right { margin-left: auto; display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; }
+
+  .progress { height: 4px; background: var(--bg3); }
+  .progress > div {
+    height: 100%; width: 0; background: linear-gradient(90deg, var(--teal), var(--cyan));
+    transition: width .2s ease; box-shadow: 0 0 8px rgba(61,214,198,.45);
+  }
+  .progress.err > div { background: var(--red); }
+
+  .toolbar {
+    display: flex; flex-wrap: wrap; gap: .45rem; align-items: center;
+    padding: .55rem 1.1rem; border-bottom: 1px solid var(--line); background: rgba(14,18,24,.92);
+  }
+  select, button {
+    font: inherit; font-size: .78rem; border-radius: 3px; border: 1px solid var(--line);
+    background: var(--bg3); color: var(--text); padding: .38rem .7rem; cursor: pointer;
+  }
+  select { min-width: 12rem; font-family: var(--mono); }
+  button:hover:not(:disabled) { border-color: var(--line2); background: var(--bg4); }
+  button.primary { background: linear-gradient(180deg, #1a4f4a, #123834); border-color: #1f6b63; color: #d7f7f2; }
+  button.danger { border-color: #7a2e2e; color: #f5c2c2; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  .mode-banner {
+    font-family: var(--mono); font-size: .68rem; color: var(--muted);
+    padding: .35rem 1.1rem; border-bottom: 1px solid var(--line); background: rgba(61,214,198,.04);
+  }
+  .mode-banner b { color: var(--cyan); font-weight: 600; }
+  .mode-banner .path { color: var(--amber); }
+
+  .cockpit {
+    display: none; grid-template-columns: repeat(6, minmax(0,1fr)); gap: .55rem;
+    padding: .65rem 1.1rem; border-bottom: 1px solid var(--line);
+    background: linear-gradient(90deg, rgba(232,184,74,.06), rgba(61,214,198,.04), transparent 70%);
+  }
+  .cockpit.on { display: grid; }
+  @media (max-width: 1100px) { .cockpit { grid-template-columns: 1fr 1fr 1fr; } }
+  .ck { background: var(--bg3); border: 1px solid var(--line); border-radius: 4px; padding: .45rem .55rem; min-height: 3.2rem; }
+  .ck .k { font-size: .62rem; color: var(--muted); text-transform: uppercase; letter-spacing: .07em; }
+  .ck .v { font-family: var(--mono); font-size: .88rem; margin-top: .15rem; word-break: break-word; }
+  .ck .v.hi { color: var(--cyan); } .ck .v.ok { color: var(--green); } .ck .v.bad { color: var(--red); }
+  .ck .sub { font-family: var(--mono); font-size: .65rem; color: var(--muted); margin-top: .2rem; }
+  .ck.span2 { grid-column: span 2; }
+  .queue { display: flex; flex-wrap: wrap; gap: .25rem; margin-top: .25rem; max-height: 2.4rem; overflow: hidden; }
+  .queue span {
+    font-family: var(--mono); font-size: .58rem; padding: .1rem .3rem;
+    border: 1px solid var(--line); border-radius: 2px; color: var(--muted); background: var(--bg2);
+  }
+
+  main { display: grid; grid-template-columns: 300px minmax(0,1fr) 340px; gap: 0; min-height: 0; }
+  @media (max-width: 1200px) { main { grid-template-columns: 1fr; } .panel { max-height: 40vh; } }
+  .panel { border-right: 1px solid var(--line); overflow: auto; min-height: 0; background: rgba(8,10,14,.55); }
+  .panel:last-child { border-right: none; border-left: 1px solid var(--line); }
+  .panel h2 {
+    margin: 0; padding: .5rem .85rem; font-size: .66rem; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--line);
+    background: var(--bg2); position: sticky; top: 0; z-index: 2;
+  }
+  .promote {
+    margin: .7rem; padding: .75rem; border: 1px solid var(--line); border-radius: 4px;
+    background: linear-gradient(160deg, var(--bg3), var(--bg2));
+  }
+  .promote.cleared { border-color: #1f6b48; box-shadow: inset 0 0 0 1px #174f37, 0 0 18px var(--glow-ok); }
+  .promote.fail { border-color: #5c2a2a; }
+  .promote.live { border-color: #7a5a18; box-shadow: 0 0 14px var(--glow-run); }
+  .promote .label { font-family: var(--mono); font-size: .82rem; font-weight: 600; margin-bottom: .5rem; }
+  .promote.cleared .label { color: var(--green); }
+  .promote.fail .label { color: var(--red); }
+  .promote.live .label { color: var(--amber); }
+  .bar-row {
+    display: grid; grid-template-columns: 4.2rem 1fr 3.4rem; gap: .35rem; align-items: center;
+    margin: .32rem 0; font-size: .72rem; font-family: var(--mono);
+  }
+  .bar-track { height: 10px; background: #0a0e13; border-radius: 2px; overflow: hidden; border: 1px solid var(--line); position: relative; }
+  .bar-fill { height: 100%; background: var(--cyan); transition: width .25s ease; }
+  .bar-fill.ok { background: linear-gradient(90deg, #1f6b48, var(--green)); }
+  .bar-fill.bad { background: linear-gradient(90deg, #6b2a2a, var(--red)); }
+  .bar-fill.live { background: linear-gradient(90deg, #7a5a18, var(--amber)); }
+  .bar-thresh { position: absolute; top: -2px; bottom: -2px; width: 2px; background: rgba(230,235,242,.55); z-index: 1; }
+  .metrics { display: grid; grid-template-columns: 1fr 1fr; gap: .45rem; margin: .7rem; }
+  .metric { background: var(--bg3); border: 1px solid var(--line); border-radius: 4px; padding: .5rem .55rem; }
+  .metric .k { font-size: .6rem; color: var(--muted); text-transform: uppercase; letter-spacing: .07em; }
+  .metric .v { font-family: var(--mono); font-size: 1rem; margin-top: .12rem; }
+
+  .soft-chart { margin: .5rem .7rem 0; height: 96px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg2); }
+  .soft-list { margin: .4rem .75rem .75rem; font-family: var(--mono); font-size: .7rem; }
+  .soft-list .row { display: grid; grid-template-columns: 1.1rem 1fr auto; gap: .35rem; padding: .28rem 0; border-bottom: 1px solid var(--line); }
+  .soft-list .ok { color: var(--green); } .soft-list .bad { color: var(--red); }
+
+  .center { padding: .7rem; overflow: auto; min-height: 0; }
+  .suite-tabs { display: flex; gap: .3rem; margin-bottom: .55rem; flex-wrap: wrap; }
+  .suite-tabs button.active { border-color: var(--cyan); color: var(--cyan); background: rgba(61,214,198,.08); }
+  .hint { color: var(--muted); font-size: .7rem; margin: .2rem 0 .65rem; }
+
+  .charts { display: grid; grid-template-columns: 1.2fr 1fr; gap: .55rem; margin-bottom: .7rem; }
+  @media (max-width: 900px) { .charts { grid-template-columns: 1fr; } }
+  .chart-card { border: 1px solid var(--line); border-radius: 4px; background: var(--bg2); overflow: hidden; }
+  .chart-card h3 {
+    margin: 0; padding: .35rem .55rem; font-size: .62rem; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--line); font-weight: 500;
+  }
+  .chart-card canvas { display: block; width: 100%; height: 150px; }
+  .chart-card.equity canvas { height: 120px; }
+  .equity-bar {
+    display: flex; gap: .4rem; align-items: center; flex-wrap: wrap;
+    padding: .35rem .55rem; border-bottom: 1px solid var(--line); font-family: var(--mono); font-size: .65rem; color: var(--muted);
+  }
+
+  .grid-wrap { overflow: auto; border: 1px solid var(--line); border-radius: 4px; }
+  table.cells { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: .7rem; }
+  table.cells th, table.cells td { border-bottom: 1px solid var(--line); padding: .28rem .4rem; text-align: center; }
+  table.cells th { background: var(--bg2); color: var(--muted); font-weight: 500; position: sticky; top: 0; z-index: 1; }
+  table.cells td.sym { text-align: left; color: var(--muted); }
+  table.cells td.P { color: var(--green); background: rgba(62,207,142,.07); }
+  table.cells td.f { color: var(--red); background: rgba(239,107,107,.08); }
+  table.cells td.soft { box-shadow: inset 0 0 0 1px rgba(232,184,74,.7); }
+  table.cells td.pend { color: var(--muted); }
+  table.cells td.curr { outline: 1px solid var(--amber); outline-offset: -1px; }
+  table.cells td.sel { outline: 1px solid var(--cyan); outline-offset: -1px; cursor: pointer; }
+  table.cells td.clickable { cursor: pointer; }
+  table.cells .dbh { opacity: .72; font-size: .62rem; }
+
+  .compare .heads { display: grid; grid-template-columns: 1fr 1fr; gap: .55rem; margin-bottom: .55rem; }
+  .compare .head { border: 1px solid var(--line); border-radius: 4px; padding: .55rem; background: var(--bg3); font-family: var(--mono); font-size: .72rem; }
+  .compare .head .name { color: var(--cyan); font-size: .8rem; margin-bottom: .3rem; }
+  .compare table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: .7rem; }
+  .compare th, .compare td { border: 1px solid var(--line); padding: .3rem .4rem; text-align: center; }
+  .compare th { background: var(--bg2); color: var(--muted); }
+  .compare td.up { color: var(--green); } .compare td.dn { color: var(--red); }
+  .diff-list { margin-top: .55rem; font-family: var(--mono); font-size: .68rem; }
+  .diff-list .drow { display: grid; grid-template-columns: 7rem 4rem 4rem 1fr; gap: .35rem; padding: .22rem 0; border-bottom: 1px solid var(--line); }
+
+  .log { font-family: var(--mono); font-size: .66rem; padding: .5rem .7rem; white-space: pre-wrap; color: var(--muted); line-height: 1.35; }
+  .log .hi { color: var(--cyan); } .log .ok { color: var(--green); } .log .bad { color: var(--red); } .log .cell { color: var(--text); }
+  .log-meta { padding: .35rem .7rem; font-size: .62rem; color: var(--muted); border-bottom: 1px solid var(--line); }
+
+  details.advanced {
+    margin: .55rem .7rem .9rem; border: 1px dashed #5c2a2a; border-radius: 4px; padding: .45rem .55rem;
+    background: rgba(239,107,107,.04);
+  }
+  details.advanced summary {
+    cursor: pointer; font-family: var(--mono); font-size: .68rem; color: var(--red);
+    text-transform: uppercase; letter-spacing: .06em;
+  }
+  details.advanced .warn { font-size: .68rem; color: var(--muted); margin: .45rem 0; line-height: 1.4; }
+  details.advanced .btns { display: flex; flex-wrap: wrap; gap: .35rem; }
+</style>
+</head>
+<body>
+<header>
+  <span class="brand">MUSE · DESK</span>
+  <h1>Flagship Observe</h1>
+  <span class="champ" id="champLabel">DEFAULT …</span>
+  <div class="header-right">
+    <span class="pill obs" id="modePill">observe</span>
+    <span class="pill" id="lockPill">unlocked</span>
+    <span class="pill" id="statusPill">idle</span>
+  </div>
+</header>
+<div class="progress" id="progWrap"><div id="progBar"></div></div>
+<div class="mode-banner">
+  Observer for agent-driven grinds · watching <span class="path" id="statePath">results/viz_state.json</span>
+  · agents call <b>viz_core.publish_*</b> or <b>POST /api/publish</b>
+  · in-app suite launch is Advanced (CPU)
+</div>
+<div class="toolbar">
+  <select id="genomeSelect" title="Primary genome"></select>
+  <select id="compareSelect" title="Compare genome"><option value="">compare…</option></select>
+  <button id="btnScan" title="Lift matrix_*.json from results/">Rescan artifacts</button>
+  <button id="btnEquity" title="Load equity for selected / focused cell">Load equity</button>
+  <button class="danger" id="btnStop" disabled>Stop UI job</button>
+  <span class="pill" id="focusPill" style="margin-left:.25rem">focus —</span>
+</div>
+<section class="cockpit" id="cockpit">
+  <div class="ck"><div class="k">Cell</div><div class="v hi" id="ckCell">—</div><div class="sub" id="ckIdx">0 / 0</div></div>
+  <div class="ck"><div class="k">Pass tally</div><div class="v" id="ckPass">—</div><div class="sub" id="ckMean">mean dBH —</div></div>
+  <div class="ck span2"><div class="k">Last result</div><div class="v" id="ckLast">—</div><div class="sub" id="ckLastSub"></div></div>
+  <div class="ck"><div class="k">Timing</div><div class="v" id="ckTime">—</div><div class="sub" id="ckEta">ETA —</div></div>
+  <div class="ck"><div class="k">Queue</div><div class="v" id="ckRemN">—</div><div class="queue" id="ckQueue"></div></div>
+</section>
+<main>
+  <section class="panel">
+    <h2>Promote bar</h2>
+    <div class="promote fail" id="promoteBox">
+      <div class="label" id="promoteLabel">—</div>
+      <div id="promoteBars"></div>
+    </div>
+    <div class="metrics" id="metricCards"></div>
+    <h2>Soft walls · 2019 / 2024</h2>
+    <canvas class="soft-chart" id="softChart" height="96"></canvas>
+    <div class="soft-list" id="softWalls"><div class="hint">Waiting for bulls artifact…</div></div>
+    <details class="advanced" id="advPanel">
+      <summary>⚠ Advanced — launch suites in-app (burns CPU)</summary>
+      <p class="warn">Prefer agent / CLI scoring that publishes to viz_state.json.
+        In-app runs are single-flight only (max 1 worker). Stop cooperatively cancels between cells.</p>
+      <div class="btns">
+        <button class="primary" id="btnDual">Dual</button>
+        <button class="primary" id="btnBulls">Bulls</button>
+        <button class="primary" id="btnCorpus">Corpus</button>
+        <button class="primary" id="btnMatrix">Matrix --quick</button>
+        <button class="primary" id="btnAll">Full score</button>
+        <button id="btnCompare">Score both</button>
+      </div>
+    </details>
+  </section>
+  <section class="center">
+    <div class="suite-tabs">
+      <button data-tab="dual" class="active">Dual</button>
+      <button data-tab="bulls">Bulls</button>
+      <button data-tab="corpus">Corpus</button>
+      <button data-tab="matrix">Matrix</button>
+      <button data-tab="compare">Compare</button>
+      <button data-tab="charts">Charts</button>
+    </div>
+    <p class="hint" id="tabHint"></p>
+    <div class="chart-card equity" id="equityCard" style="margin-bottom:.7rem">
+      <h3>Equity / return · selected cell</h3>
+      <div class="equity-bar" id="equityMeta">Click a cell, then <b>Load equity</b> (opt-in · one cell · --instrument)</div>
+      <canvas id="chartEquity" height="120"></canvas>
+    </div>
+    <div class="charts" id="chartsStrip">
+      <div class="chart-card">
+        <h3>dBH per cell · P / f</h3>
+        <canvas id="chartDbh" height="150"></canvas>
+      </div>
+      <div class="chart-card">
+        <h3>Running pass + mean dBH</h3>
+        <canvas id="chartRun" height="150"></canvas>
+      </div>
+    </div>
+    <div id="gridHost"></div>
+    <div class="compare" id="compareHost" style="display:none"></div>
+  </section>
+  <section class="panel">
+    <h2>Live log</h2>
+    <div class="log-meta" id="logMeta">agent + artifact events</div>
+    <div class="log" id="log"></div>
+  </section>
+</main>
+<script>
+const SYMS_L10 = ["SPY","QQQ","IWM","AAPL","MSFT","NVDA","AMD","AMZN","GOOGL","META"];
+const SYMS_AV = [...SYMS_L10, "JPM","XOM","TSLA","BAC","WMT"];
+const SOFT = ["QQQ","AMD","GOOGL","NVDA"];
+const LOG_MAX = 200;
+const DESK = {
+  color: { green: "#3ecf8e", red: "#ef6b6b", cyan: "#3dd6c6", amber: "#e8b84a", muted: "#8794a8", teal: "#1a9b8e", copper: "#c9854a", grid: "#2a3444" }
+};
+let state = { genomes: [], default: null, runs: {}, job: null, log: [], equity: null, focus: null, bounds: null };
+let tab = "dual";
+let es = null;
+let logBuf = [];
+let selected = null; // {suite, symbol, window}
+let chartJs = { dbh: null, run: null, soft: null, equity: null, compare: null };
+
+function $(id){ return document.getElementById(id); }
+function fmt(n, d=2){ return n == null || Number.isNaN(n) ? "—" : Number(n).toFixed(d); }
+function fmtSign(n, d=2){
+  if (n == null || Number.isNaN(n)) return "—";
+  const v = Number(n);
+  return (v>=0?"+":"") + v.toFixed(d);
+}
+function stemOf(path){
+  const base = (path||"").split("/").pop() || "";
+  return base.replace(/\.ms$/, "") || "unknown";
+}
+function currentStem(){ return stemOf($("genomeSelect").value); }
+function compareStem(){ const v = $("compareSelect").value; return v ? stemOf(v) : null; }
+function winShort(w){ return String(w||"").replace("wf_","").replace("eval_3m","eval"); }
+function useChartJs(){ return !!(window.__chartReady && window.Chart && !window.__chartLoadErr); }
+
+function logLine(msg, cls="") {
+  const t = new Date().toLocaleTimeString();
+  logBuf.unshift({ t, msg, cls });
+  if (logBuf.length > LOG_MAX) logBuf.length = LOG_MAX;
+  $("log").innerHTML = logBuf.map(x => `<div class="${x.cls}">[${x.t}] ${x.msg}</div>`).join("");
+  $("logMeta").textContent = `${logBuf.length} lines · observe feed`;
+}
+
+function setStatus(text, running, err) {
+  const p = $("statusPill");
+  p.textContent = text;
+  p.className = "pill" + (err ? " bad" : running ? " run" : "");
+  $("btnStop").disabled = !running;
+  ["btnDual","btnBulls","btnCorpus","btnMatrix","btnAll","btnCompare"].forEach(id => {
+    const el = $(id); if (el) el.disabled = !!running;
+  });
+  $("progWrap").className = "progress" + (err ? " err" : "");
+}
+
+function fillSelects(genomes, defName) {
+  const a = $("genomeSelect"), b = $("compareSelect");
+  const keepA = a.value, keepB = b.value;
+  a.innerHTML = "";
+  b.innerHTML = `<option value="">compare…</option>`;
+  (genomes||[]).forEach(g => {
+    const opt = document.createElement("option");
+    opt.value = g.path;
+    opt.textContent = g.name + (g.is_default ? " ★ DEFAULT" : "");
+    a.appendChild(opt);
+    b.appendChild(opt.cloneNode(true));
+  });
+  if (keepA && [...a.options].some(o => o.value === keepA)) a.value = keepA;
+  else {
+    const def = (genomes||[]).find(g => g.is_default) || (genomes||[])[0];
+    if (def) a.value = def.path;
+  }
+  if (keepB && [...b.options].some(o => o.value === keepB)) b.value = keepB;
+  $("champLabel").textContent = `DEFAULT ${defName || "?"}`;
+}
+
+function barRow(label, value, max, ok, thrPct, live) {
+  const pct = Math.max(0, Math.min(100, (Number(value) / max) * 100));
+  const cls = live ? "live" : (ok ? "ok" : "bad");
+  const thr = thrPct != null ? `<div class="bar-thresh" style="left:${thrPct}%"></div>` : "";
+  return `<div class="bar-row"><span>${label}</span><div class="bar-track">${thr}<div class="bar-fill ${cls}" style="width:${pct}%"></div></div><span>${value}</span></div>`;
+}
+
+function renderLock() {
+  const job = state.job || {};
+  const lock = $("lockPill");
+  if (job.locked || job.running) {
+    lock.className = "pill lock";
+    lock.textContent = job.lock_reason || (job.running ? `locked · ${job.source||"run"}` : "locked");
+  } else {
+    lock.className = "pill";
+    lock.textContent = "unlocked";
+  }
+  $("modePill").textContent = `observe · ${(state.source||"disk")}`;
+  if (state.state_path) $("statePath").textContent = state.state_path;
+  const f = selected || state.focus;
+  $("focusPill").textContent = f && f.symbol
+    ? `focus ${f.symbol}@${winShort(f.window||"")}`
+    : "focus —";
+}
+
+function renderCockpit() {
+  const job = state.job || {};
+  const on = !!job.running;
+  $("cockpit").classList.toggle("on", on);
+  renderLock();
+  if (!on) {
+    if (job.error) setStatus("error", false, true);
+    else setStatus("idle · observing", false, false);
+    $("progBar").style.width = "0%";
+    return;
+  }
+  const cur = job.current || {};
+  const last = job.last_cell || {};
+  const done = job.done || 0;
+  const total = job.total || 0;
+  $("ckCell").textContent = cur.symbol ? `${cur.symbol} × ${winShort(cur.window)}` : "starting…";
+  $("ckIdx").textContent = `${done} / ${total} · ${job.suite||""}` + (job.source ? ` · ${job.source}` : "") + (job.agent ? ` · ${job.agent}` : "");
+  $("ckPass").textContent = `${job.n_pass||0} P`;
+  $("ckPass").className = "v " + ((job.n_pass||0) > 0 ? "ok" : "");
+  $("ckMean").textContent = `mean dBH ${fmtSign(job.mean_d_sharpe)}`;
+  if (last && (last.symbol || last.batch)) {
+    const mark = last.pass || last.perfect ? "P" : "f";
+    const sym = last.symbol || `${last.batch}×${last.frequency||""}`;
+    $("ckLast").textContent = `${mark} ${sym}@${winShort(last.window)}`;
+    $("ckLast").className = "v " + ((last.pass || last.perfect) ? "ok" : "bad");
+    $("ckLastSub").textContent =
+      `sh ${fmt(last.sharpe)} · dBH ${fmtSign(last.d_sharpe ?? last.mean_d_sharpe)} · tr ${last.trades ?? "—"} · mdd ${fmt(last.mdd, 3)}`;
+  } else {
+    $("ckLast").textContent = "waiting first cell…";
+    $("ckLast").className = "v";
+    $("ckLastSub").textContent = "";
+  }
+  $("ckTime").textContent = `${fmt(job.elapsed_s, 1)}s`;
+  $("ckEta").textContent = job.eta_s != null ? `ETA ${fmt(job.eta_s, 1)}s · ${fmt(job.pct, 0)}%` : "ETA —";
+  $("ckRemN").textContent = `${job.remaining_n ?? (job.remaining||[]).length} left`;
+  $("ckQueue").innerHTML = (job.remaining || []).slice(0, 10).map(x => `<span>${x}</span>`).join("")
+    + ((job.remaining_n||0) > 10 ? `<span>+${(job.remaining_n||0)-10}</span>` : "");
+  $("progBar").style.width = (total ? (100 * done / total) : 0) + "%";
+  setStatus(`${job.source||"run"} ${job.suite||""} ${done}/${total}`, true, !!job.error);
+}
+
+function renderPromote() {
+  const primary = currentStem();
+  const runs = (state.runs && state.runs[primary]) || {};
+  const promo = runs.promote || null;
+  const box = $("promoteBox");
+  const thr = (promo && promo.thresholds) || { dual_min:18, bulls_min:11, corpus_pct_min:55, dbh_floor:1.34, dbh_ref:1.58 };
+  const job = state.job || {};
+  const liveDual = job.running && job.suite === "dual" && stemOf(job.strategy||"") === primary;
+  const dual = runs.dual, bulls = runs.bulls, corpus = runs.corpus, matrix = runs.matrix;
+  let dualVal = dual ? dual.n_pass : 0;
+  let dbhVal = dual ? Number(dual.mean_d_sharpe||0).toFixed(2) : "0.00";
+  let dualOk = promo ? !!promo.dual_ok : false;
+  let dbhOk = promo ? !!promo.dbh_ok : false;
+  if (liveDual) {
+    dualVal = job.n_pass || dualVal;
+    dbhVal = Number(job.mean_d_sharpe||0).toFixed(2);
+    dualOk = dualVal >= thr.dual_min;
+    dbhOk = Number(dbhVal) >= thr.dbh_floor;
+    box.className = "promote live";
+    $("promoteLabel").textContent = `LIVE dual ${dualVal}/20 · mean dBH ${fmtSign(job.mean_d_sharpe)}`;
+  } else if (!promo) {
+    box.className = "promote fail";
+    $("promoteLabel").textContent = "No score yet — waiting for agent publish";
+  } else {
+    box.className = "promote " + (promo.cleared ? "cleared" : "fail");
+    $("promoteLabel").textContent = promo.label;
+  }
+  $("promoteBars").innerHTML =
+    barRow("dual", dualVal, 20, dualOk, (thr.dual_min/20)*100, liveDual) +
+    barRow("bulls", bulls ? bulls.n_pass : 0, 20, promo ? !!promo.bulls_ok : false, (thr.bulls_min/20)*100, false) +
+    barRow("corp%", corpus ? corpus.pct : 0, 100, promo ? !!promo.corpus_ok : false, thr.corpus_pct_min, false) +
+    barRow("dBH", dbhVal, thr.dbh_ref || 1.58, dbhOk, ((thr.dbh_floor)/(thr.dbh_ref||1.58))*100, liveDual);
+  $("metricCards").innerHTML = [
+    ["Dual", dual ? `${dual.n_pass}/${dual.n_total}` : "—"],
+    ["dBH", dual ? fmtSign(dual.mean_d_sharpe) : "—"],
+    ["Bulls", bulls ? `${bulls.n_pass}/${bulls.n_total}` : "—"],
+    ["Corpus", corpus ? `${corpus.n_pass}/${corpus.n_total}` : "—"],
+    ["Matrix", matrix ? `${matrix.perfect_cells||matrix.n_pass}/${matrix.total_cells||matrix.n_total}` : "—"],
+    ["Source", state.source || "—"],
+  ].map(([k,v]) => `<div class="metric"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
+  renderSoftWalls(bulls);
+}
+
+/* ---- charts: Chart.js preferred, canvas fallback ---- */
+function destroyChart(key) {
+  if (chartJs[key]) { try { chartJs[key].destroy(); } catch(e){} chartJs[key] = null; }
+}
+
+function deskTooltip() {
+  return {
+    backgroundColor: "rgba(14,18,24,.94)",
+    titleFont: { family: DESK.color && "IBM Plex Mono", size: 11 },
+    bodyFont: { family: "IBM Plex Mono", size: 11 },
+    borderColor: DESK.color.grid, borderWidth: 1, padding: 8
+  };
+}
+
+function cellsForChart() {
+  const job = state.job || {};
+  const primary = currentStem();
+  const runs = state.runs[primary] || {};
+  let cells = [];
+  if (job.running && job.suite && job.suite !== "matrix") {
+    const partial = runs[job.suite];
+    if (partial && partial.cells) cells = partial.cells;
+  } else if (tab === "bulls" && runs.bulls) cells = runs.bulls.cells || [];
+  else if (tab === "corpus" && runs.corpus) cells = runs.corpus.cells || [];
+  else if (runs.dual) cells = runs.dual.cells || [];
+  return cells;
+}
+
+function drawDbhBars() {
+  const cells = cellsForChart();
+  const labels = cells.map(c => `${c.symbol}@${winShort(c.window)}`);
+  const vals = cells.map(c => c.d_sharpe == null ? 0 : c.d_sharpe);
+  const colors = cells.map(c => c.pass ? DESK.color.green : DESK.color.red);
+  if (useChartJs()) {
+    destroyChart("dbh");
+    const ctx = $("chartDbh").getContext("2d");
+    chartJs.dbh = new Chart(ctx, {
+      type: "bar",
+      data: { labels, datasets: [{ label: "dBH", data: vals, backgroundColor: colors, borderWidth: 0 }] },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            ...deskTooltip(),
+            callbacks: {
+              title: (items) => {
+                const i = items[0].dataIndex; const c = cells[i];
+                return c ? `${c.symbol} · ${winShort(c.window)} · ${c.pass?"PASS":"fail"}` : "";
+              },
+              label: (item) => {
+                const c = cells[item.dataIndex];
+                return `dBH ${fmtSign(c?.d_sharpe)} · sh ${fmt(c?.sharpe)} · tr ${c?.trades??"—"} · mdd ${fmt(c?.mdd,3)}`;
+              }
+            }
+          }
+        },
+        scales: {
+          x: { ticks: { color: DESK.color.muted, maxRotation: 90, font: { size: 8, family: "IBM Plex Mono" } }, grid: { color: "transparent" } },
+          y: { ticks: { color: DESK.color.muted, font: { size: 9, family: "IBM Plex Mono" } }, grid: { color: DESK.color.grid }, title: { display: true, text: "dBH", color: DESK.color.muted } }
+        }
+      }
+    });
+    return;
+  }
+  // canvas fallback
+  const c = $("chartDbh");
+  const dpr = window.devicePixelRatio || 1;
+  const rect = c.getBoundingClientRect();
+  const w = Math.max(10, Math.floor(rect.width)), h = 150;
+  c.width = w * dpr; c.height = h * dpr;
+  const ctx = c.getContext("2d"); ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,w,h);
+  ctx.fillStyle = DESK.color.muted; ctx.font = "11px IBM Plex Mono";
+  if (!cells.length) { ctx.fillText("awaiting published cells", 20, h/2); return; }
+  const pad = { l: 30, r: 8, t: 12, b: 28 };
+  const mx = Math.max(0.5, ...vals.map(Math.abs));
+  const bw = (w - pad.l - pad.r) / cells.length;
+  const zero = h - pad.b - ((0 - (-mx)) / (2 * mx)) * (h - pad.t - pad.b);
+  cells.forEach((cell, i) => {
+    const v = cell.d_sharpe == null ? 0 : cell.d_sharpe;
+    const y = h - pad.b - ((v - (-mx)) / (2 * mx)) * (h - pad.t - pad.b);
+    ctx.fillStyle = cell.pass ? DESK.color.green : DESK.color.red;
+    ctx.fillRect(pad.l + i * bw + bw * 0.12, Math.min(zero, y), Math.max(1, bw * 0.76), Math.max(2, Math.abs(zero - y)));
+  });
+}
+
+function drawRunSeries() {
+  const hist = (state.job && state.job.history) || [];
+  let series = hist;
+  if (!series.length) {
+    const cells = cellsForChart();
+    let nPass = 0, dSum = 0, dN = 0;
+    series = cells.map((cell, i) => {
+      if (cell.pass) { nPass++; if (cell.d_sharpe != null) { dSum += cell.d_sharpe; dN++; } }
+      return { done: i + 1, n_pass: nPass, mean_d_sharpe: dN ? dSum / dN : 0 };
+    });
+  }
+  if (useChartJs()) {
+    destroyChart("run");
+    const ctx = $("chartRun").getContext("2d");
+    chartJs.run = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: series.map(s => s.done),
+        datasets: [
+          { label: "pass", data: series.map(s => s.n_pass), borderColor: DESK.color.green, backgroundColor: "transparent", tension: 0.15, yAxisID: "y" },
+          { label: "mean dBH", data: series.map(s => s.mean_d_sharpe), borderColor: DESK.color.cyan, backgroundColor: "transparent", tension: 0.15, yAxisID: "y1" }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        plugins: { legend: { labels: { color: DESK.color.muted, font: { size: 10, family: "IBM Plex Mono" } } }, tooltip: deskTooltip() },
+        scales: {
+          x: { ticks: { color: DESK.color.muted, font: { size: 9, family: "IBM Plex Mono" } }, grid: { color: "transparent" } },
+          y: { position: "left", ticks: { color: DESK.color.green, font: { size: 9 } }, grid: { color: DESK.color.grid } },
+          y1: { position: "right", ticks: { color: DESK.color.cyan, font: { size: 9 } }, grid: { drawOnChartArea: false } }
+        }
+      }
+    });
+    return;
+  }
+  const c = $("chartRun");
+  const dpr = window.devicePixelRatio || 1;
+  const rect = c.getBoundingClientRect();
+  const w = Math.max(10, Math.floor(rect.width)), h = 150;
+  c.width = w * dpr; c.height = h * dpr;
+  const ctx = c.getContext("2d"); ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,w,h);
+  ctx.fillStyle = DESK.color.muted; ctx.font = "11px IBM Plex Mono";
+  if (!series.length) { ctx.fillText("history appears mid-run", 20, h/2); return; }
+  const pad = { l: 30, r: 8, t: 12, b: 22 };
+  const maxDone = Math.max(...series.map(s => s.done), 1);
+  const maxPass = Math.max(...series.map(s => s.n_pass), 1);
+  const dvals = series.map(s => s.mean_d_sharpe);
+  const dMin = Math.min(0, ...dvals), dMax = Math.max(0.5, ...dvals);
+  function xAt(done){ return pad.l + (done / maxDone) * (w - pad.l - pad.r); }
+  function yPass(v){ return h - pad.b - (v / maxPass) * (h - pad.t - pad.b) * 0.92; }
+  function yDbh(v){ return h - pad.b - ((v - dMin) / (dMax - dMin || 1)) * (h - pad.t - pad.b) * 0.92; }
+  ctx.beginPath(); series.forEach((s,i)=>{ const x=xAt(s.done),y=yPass(s.n_pass); i?ctx.lineTo(x,y):ctx.moveTo(x,y); });
+  ctx.strokeStyle = DESK.color.green; ctx.lineWidth = 2; ctx.stroke();
+  ctx.beginPath(); series.forEach((s,i)=>{ const x=xAt(s.done),y=yDbh(s.mean_d_sharpe); i?ctx.lineTo(x,y):ctx.moveTo(x,y); });
+  ctx.strokeStyle = DESK.color.cyan; ctx.lineWidth = 2; ctx.stroke();
+}
+
+function drawSoftChart(soft) {
+  const keys = []; SOFT.forEach(sym => ["2019q1","2024q4"].forEach(wi => keys.push({sym, wi})));
+  const map = {}; (soft||[]).forEach(c0 => { map[`${c0.symbol}|${winShort(c0.window)}`] = c0; });
+  const vals = keys.map(k => { const cell = map[`${k.sym}|${k.wi}`]; return cell && cell.d_sharpe != null ? cell.d_sharpe : null; });
+  if (useChartJs()) {
+    destroyChart("soft");
+    chartJs.soft = new Chart($("softChart").getContext("2d"), {
+      type: "bar",
+      data: {
+        labels: keys.map(k => `${k.sym.slice(0,4)} ${k.wi}`),
+        datasets: [{
+          data: vals.map(v => v == null ? 0 : v),
+          backgroundColor: keys.map((k,i) => {
+            const cell = map[`${k.sym}|${k.wi}`];
+            if (!cell || vals[i] == null) return "#3a4658";
+            return cell.pass ? DESK.color.green : DESK.color.red;
+          }),
+          borderWidth: 0
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            ...deskTooltip(),
+            callbacks: {
+              label: (item) => {
+                const k = keys[item.dataIndex];
+                const cell = map[`${k.sym}|${k.wi}`];
+                if (!cell) return "no bulls data";
+                return `${cell.pass?"P":"f"} dBH ${fmtSign(cell.d_sharpe)} tr ${cell.trades??"—"}`;
+              }
+            }
+          }
+        },
+        scales: {
+          x: { ticks: { color: DESK.color.muted, font: { size: 8 }, maxRotation: 60 }, grid: { display: false } },
+          y: { ticks: { color: DESK.color.muted, font: { size: 8 } }, grid: { color: DESK.color.grid } }
+        }
+      }
+    });
+    return;
+  }
+  // minimal fallback already covered by empty chart
+}
+
+function drawEquity() {
+  const eq = state.equity;
+  const meta = $("equityMeta");
+  if (!eq || !eq.ok) {
+    meta.textContent = selected
+      ? `Selected ${selected.symbol}@${winShort(selected.window)} — hit Load equity`
+      : "Click a cell, then Load equity (opt-in · one cell · --instrument)";
+    destroyChart("equity");
+    return;
+  }
+  meta.innerHTML = `${eq.symbol}@${winShort(eq.window)} · sh ${fmt(eq.sharpe)} · tr ${eq.trades} · mdd ${fmt(eq.max_drawdown,3)} · bars ${eq.bars} · final ${fmt(eq.final_equity,0)}`;
+  const series = eq.returns || [];
+  if (useChartJs()) {
+    destroyChart("equity");
+    chartJs.equity = new Chart($("chartEquity").getContext("2d"), {
+      type: "line",
+      data: {
+        labels: series.map((_, i) => i),
+        datasets: [{
+          label: "cum return",
+          data: series,
+          borderColor: DESK.color.cyan,
+          backgroundColor: "rgba(61,214,198,.12)",
+          fill: true, pointRadius: 0, borderWidth: 1.5, tension: 0.05
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            ...deskTooltip(),
+            callbacks: { label: (item) => `return ${(item.parsed.y*100).toFixed(2)}%` }
+          }
+        },
+        scales: {
+          x: { display: false },
+          y: {
+            ticks: {
+              color: DESK.color.muted, font: { size: 9, family: "IBM Plex Mono" },
+              callback: (v) => (v*100).toFixed(0) + "%"
+            },
+            grid: { color: DESK.color.grid }
+          }
+        }
+      }
+    });
+    return;
+  }
+  const c = $("chartEquity");
+  const dpr = window.devicePixelRatio || 1;
+  const rect = c.getBoundingClientRect();
+  const w = Math.max(10, Math.floor(rect.width)), h = 120;
+  c.width = w * dpr; c.height = h * dpr;
+  const ctx = c.getContext("2d"); ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,w,h);
+  if (!series.length) return;
+  const pad = { l: 36, r: 8, t: 8, b: 8 };
+  const mn = Math.min(0, ...series), mx = Math.max(0.01, ...series);
+  ctx.beginPath();
+  series.forEach((v, i) => {
+    const x = pad.l + (i / (series.length-1||1)) * (w - pad.l - pad.r);
+    const y = h - pad.b - ((v - mn) / (mx - mn || 1)) * (h - pad.t - pad.b);
+    i ? ctx.lineTo(x,y) : ctx.moveTo(x,y);
+  });
+  ctx.strokeStyle = DESK.color.cyan; ctx.lineWidth = 1.5; ctx.stroke();
+}
+
+function renderSoftWalls(bulls) {
+  const soft = (bulls && bulls.cells || []).filter(c => c.soft_wall);
+  drawSoftChart(soft);
+  if (!soft.length) {
+    $("softWalls").innerHTML = `<div class="hint">Waiting for bulls artifact (QQQ / AMD / GOOGL / NVDA)</div>`;
+    return;
+  }
+  $("softWalls").innerHTML = soft.map(c => {
+    const mark = c.pass ? "P" : "f";
+    return `<div class="row"><span class="${c.pass?"ok":"bad"}">${mark}</span><span>${c.symbol}@${winShort(c.window)}</span><span>d=${fmtSign(c.d_sharpe)} tr=${c.trades??"—"}</span></div>`;
+  }).join("");
+}
+
+function selectCell(suite, symbol, window) {
+  selected = { suite, symbol, window };
+  fetch("/api/focus", {
+    method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ stem: currentStem(), suite, symbol, window })
+  });
+  renderLock();
+  renderTab();
+}
+
+function cellsToGrid(result, symbols, windows, suite) {
+  if (!result) return `<div class="hint">No artifact yet — agent should publish_run / publish_cell.</div>`;
+  const map = {};
+  (result.cells || []).forEach(c => { map[`${c.window}|${c.symbol}`] = c; });
+  const job = state.job || {};
+  const curKey = job.running && job.current ? `${job.current.window}|${job.current.symbol}` : null;
+  const selKey = selected && selected.suite === suite ? `${selected.window}|${selected.symbol}` : null;
+  let html = `<div class="grid-wrap"><table class="cells"><thead><tr><th>sym</th>`;
+  windows.forEach(w => { html += `<th>${winShort(w)}</th>`; });
+  html += `</tr></thead><tbody>`;
+  symbols.forEach(sym => {
+    html += `<tr><td class="sym">${sym}</td>`;
+    windows.forEach(w => {
+      const key = `${w}|${sym}`;
+      const c = map[key];
+      const curr = key === curKey ? " curr" : "";
+      const sel = key === selKey ? " sel" : "";
+      if (!c) { html += `<td class="pend${curr}${sel} clickable" data-suite="${suite}" data-sym="${sym}" data-win="${w}">·</td>`; return; }
+      const mark = c.pass ? "P" : "f";
+      const soft = c.soft_wall ? " soft" : "";
+      const d = c.d_sharpe == null ? "" : `<br><span class="dbh">${fmtSign(c.d_sharpe)}</span>`;
+      html += `<td class="${mark}${soft}${curr}${sel} clickable" data-suite="${suite}" data-sym="${sym}" data-win="${w}" title="dBH ${c.d_sharpe} / BH ${c.bh_sharpe} / tr ${c.trades} / mdd ${c.mdd}">${mark}${d}</td>`;
+    });
+    html += `</tr>`;
+  });
+  html += `</tbody></table></div>`;
+  return html;
+}
+
+function matrixGrid(result) {
+  if (!result || !result.matrix) return `<div class="hint">No matrix artifact yet.</div>`;
+  const job = state.job || {};
+  const curSym = job.running && job.current ? job.current.symbol : null;
+  let html = `<div class="grid-wrap"><table class="cells"><thead><tr><th>cell</th><th>pass</th><th>dBH</th><th></th></tr></thead><tbody>`;
+  result.matrix.forEach(r => {
+    const mark = r.perfect ? "P" : "f";
+    const label = `${r.batch}×${winShort(r.window)}×${r.frequency}`;
+    const curr = (curSym && (curSym === `${r.batch}×${r.frequency}` || curSym === label)) ? " curr" : "";
+    html += `<tr><td class="sym${curr}">${label}</td>`;
+    html += `<td class="${mark}">${r.n_pass}/${r.n_total}</td>`;
+    html += `<td>${fmt(r.mean_d_sharpe)}</td>`;
+    html += `<td class="${mark}">${mark}</td></tr>`;
+  });
+  // pending stream slots
+  if (job.running && job.suite === "matrix" && job.remaining) {
+    job.remaining.slice(0, 6).forEach(x => {
+      html += `<tr><td class="sym pend">${x}</td><td class="pend">·</td><td></td><td class="pend">·</td></tr>`;
+    });
+  }
+  html += `</tbody></table></div>`;
+  return html;
+}
+
+function renderCompare() {
+  const host = $("compareHost");
+  const a = currentStem(), b = compareStem();
+  const ra = (state.runs[a]||{}), rb = b ? (state.runs[b]||{}) : {};
+  const suites = ["dual","bulls","corpus","matrix"];
+  const headline = (name, r) => {
+    const d = r.dual, bu = r.bulls, c = r.corpus, p = r.promote;
+    return `<div class="head"><div class="name">${name}</div>` +
+      `dual ${d?`${d.n_pass}/${d.n_total}`:"—"} · dBH ${d?fmtSign(d.mean_d_sharpe):"—"}<br>` +
+      `bulls ${bu?`${bu.n_pass}/${bu.n_total}`:"—"} · corp ${c?`${c.n_pass}/${c.n_total}`:"—"}<br>` +
+      `<span class="${p&&p.cleared?"ok":"bad"}">${p?p.label:"no promote yet"}</span></div>`;
+  };
+  let html = `<div class="heads">${headline(a, ra)}${headline(b||"—", rb)}</div>`;
+  html += `<div class="chart-card" style="margin-bottom:.55rem"><h3>Paired dBH · genome A vs B (dual)</h3><canvas id="chartCompare" height="150"></canvas></div>`;
+  html += `<table><thead><tr><th>suite</th><th>${a}</th><th>${b||"—"}</th><th>Δ</th></tr></thead><tbody>`;
+  suites.forEach(s => {
+    const xa = ra[s], xb = rb[s];
+    const va = xa ? (s==="matrix" ? `${xa.perfect_cells||xa.n_pass}/${xa.total_cells||xa.n_total}` : `${xa.n_pass}/${xa.n_total}`) : "—";
+    const vb = xb ? (s==="matrix" ? `${xb.perfect_cells||xb.n_pass}/${xb.total_cells||xb.n_total}` : `${xb.n_pass}/${xb.n_total}`) : "—";
+    let delta = "—", cls = "";
+    if (xa && xb) {
+      const da = s === "matrix" ? ((xb.perfect_cells||xb.n_pass)-(xa.perfect_cells||xa.n_pass)) : (xb.n_pass - xa.n_pass);
+      delta = (da>=0?"+":"") + da; cls = da > 0 ? "up" : da < 0 ? "dn" : "";
+    }
+    html += `<tr><td>${s}</td><td>${va}</td><td>${vb}</td><td class="${cls}">${delta}</td></tr>`;
+  });
+  html += `</tbody></table>`;
+  host.innerHTML = html;
+  requestAnimationFrame(() => drawCompareBars(ra.dual?.cells||[], rb.dual?.cells||[]));
+}
+
+function drawCompareBars(aCells, bCells) {
+  const mapA = {}, mapB = {};
+  (aCells||[]).forEach(x => mapA[`${x.window}|${x.symbol}`] = x);
+  (bCells||[]).forEach(x => mapB[`${x.window}|${x.symbol}`] = x);
+  const keys = Object.keys({ ...mapA, ...mapB }).sort();
+  const canvas = $("chartCompare"); if (!canvas) return;
+  if (useChartJs()) {
+    destroyChart("compare");
+    chartJs.compare = new Chart(canvas.getContext("2d"), {
+      type: "bar",
+      data: {
+        labels: keys.map(k => { const [w,s]=k.split("|"); return `${s}@${winShort(w)}`; }),
+        datasets: [
+          { label: "A", data: keys.map(k => mapA[k]?.d_sharpe ?? null), backgroundColor: DESK.color.green },
+          { label: "B", data: keys.map(k => mapB[k]?.d_sharpe ?? null), backgroundColor: DESK.color.teal }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: DESK.color.muted, font: { size: 10 } } }, tooltip: deskTooltip() },
+        scales: {
+          x: { ticks: { color: DESK.color.muted, font: { size: 8 }, maxRotation: 90 }, grid: { display: false } },
+          y: { ticks: { color: DESK.color.muted, font: { size: 9 } }, grid: { color: DESK.color.grid } }
+        }
+      }
+    });
+  }
+}
+
+function renderCharts() {
+  drawDbhBars();
+  drawRunSeries();
+  drawEquity();
+}
+
+function bindGridClicks() {
+  $("gridHost").querySelectorAll("td.clickable").forEach(td => {
+    td.addEventListener("click", () => {
+      selectCell(td.dataset.suite, td.dataset.sym, td.dataset.win);
+    });
+  });
+}
+
+function renderTab() {
+  const primary = currentStem();
+  const runs = (state.runs && state.runs[primary]) || {};
+  const showCompare = tab === "compare";
+  const showChartsOnly = tab === "charts";
+  $("compareHost").style.display = showCompare ? "block" : "none";
+  $("gridHost").style.display = (showCompare || showChartsOnly) ? "none" : "block";
+  $("chartsStrip").style.display = showCompare ? "none" : "grid";
+  const hints = {
+    dual: "liquid10 × eval + 2022q1 — from published artifact (observe)",
+    bulls: "liquid10 × 2019q1 + 2024q4 · amber = soft walls",
+    corpus: "available(15) × 4 windows — published cells",
+    matrix: "quick matrix stream · current cell / remaining / ETA in cockpit",
+    compare: "Side-by-side from artifacts · pick compare genome",
+    charts: "dBH waterfall + running mean · Chart.js tooltips (canvas fallback)",
+  };
+  $("tabHint").textContent = hints[tab] || "";
+  if (tab === "dual") $("gridHost").innerHTML = cellsToGrid(runs.dual, SYMS_L10, ["eval_3m","wf_2022q1"], "dual");
+  if (tab === "bulls") $("gridHost").innerHTML = cellsToGrid(runs.bulls, SYMS_L10, ["wf_2019q1","wf_2024q4"], "bulls");
+  if (tab === "corpus") $("gridHost").innerHTML = cellsToGrid(runs.corpus, SYMS_AV, ["eval_3m","wf_2022q1","wf_2019q1","wf_2024q4"], "corpus");
+  if (tab === "matrix") $("gridHost").innerHTML = matrixGrid(runs.matrix);
+  if (tab === "compare") renderCompare();
+  bindGridClicks();
+  renderPromote();
+  renderCockpit();
+  renderCharts();
+}
+
+function applyState(s, event) {
+  // merge artifact log into UI log once on disk update (avoid dup storms)
+  const prevLogLen = (state.log || []).length;
+  state = s;
+  fillSelects(state.genomes || [], state.default);
+  if (Array.isArray(state.log) && state.log.length && (event === "hello" || event === "disk" || event === "publish")) {
+    const fresh = state.log.slice(prevLogLen);
+    fresh.forEach(line => {
+      if (!line || !line.text) return;
+      const t = line.t ? new Date(line.t * 1000).toLocaleTimeString() : new Date().toLocaleTimeString();
+      // avoid re-pushing identical head
+      if (!logBuf.length || logBuf[0].msg !== line.text) {
+        logBuf.unshift({ t, msg: line.text, cls: line.cls || "" });
+      }
+    });
+    if (logBuf.length > LOG_MAX) logBuf.length = LOG_MAX;
+    $("log").innerHTML = logBuf.map(x => `<div class="${x.cls}">[${x.t}] ${x.msg}</div>`).join("");
+  }
+  renderTab();
+}
+
+async function refresh() {
+  const r = await fetch("/api/state");
+  const s = await r.json();
+  applyState(s, "poll");
+}
+
+async function runSuite(suite, opts={}) {
+  const strategy = $("genomeSelect").value;
+  const body = { suite, strategy, ...opts };
+  const r = await fetch("/api/run", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body) });
+  const j = await r.json();
+  if (!r.ok) { logLine(j.error || "run locked", "bad"); renderLock(); return; }
+  logLine(`UI advanced: started ${suite} (prefer agent publish)`, "hi");
+  $("cockpit").classList.add("on");
+}
+
+async function loadEquity() {
+  const strat = $("genomeSelect").value;
+  const f = selected || state.focus;
+  if (!f || !f.symbol || !f.window) { logLine("select a cell first", "bad"); return; }
+  $("btnEquity").disabled = true;
+  logLine(`loading equity ${f.symbol}@${winShort(f.window)}…`, "hi");
+  try {
+    const r = await fetch("/api/equity", {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ strategy: strat, window: f.window, symbol: f.symbol })
+    });
+    const j = await r.json();
+    if (!r.ok) { logLine(j.error || "equity failed", "bad"); return; }
+    state.equity = j;
+    logLine(`equity ok · ${j.bars} bars · ret ${(j.returns?.at?.(-1)*100||0).toFixed(2)}%`, "ok");
+    drawEquity();
+  } finally {
+    $("btnEquity").disabled = false;
+  }
+}
+
+function connectEvents() {
+  if (es) es.close();
+  es = new EventSource("/api/events");
+  es.onmessage = (ev) => {
+    try {
+      const msg = JSON.parse(ev.data);
+      if (msg.type === "state") applyState(msg.state, msg.event);
+      if (msg.type === "log") logLine(msg.text, msg.cls || "");
+    } catch (e) {}
+  };
+  es.onerror = () => {};
+}
+
+document.querySelectorAll(".suite-tabs button").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".suite-tabs button").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    tab = btn.dataset.tab;
+    renderTab();
+  });
+});
+$("genomeSelect").addEventListener("change", renderTab);
+$("compareSelect").addEventListener("change", renderTab);
+$("btnDual").onclick = () => runSuite("dual");
+$("btnBulls").onclick = () => runSuite("bulls");
+$("btnCorpus").onclick = () => runSuite("corpus");
+$("btnMatrix").onclick = () => runSuite("matrix");
+$("btnAll").onclick = () => runSuite("full");
+$("btnCompare").onclick = () => {
+  const other = $("compareSelect").value;
+  if (!other) { logLine("pick a compare genome", "bad"); return; }
+  runSuite("full", { compare: other });
+};
+$("btnStop").onclick = async () => { await fetch("/api/stop", { method:"POST" }); logLine("stop requested", "bad"); };
+$("btnScan").onclick = async () => {
+  const r = await fetch("/api/scan", { method:"POST", headers:{"Content-Type":"application/json"}, body:"{}" });
+  const j = await r.json();
+  logLine(`rescanned · lifted ${ (j.lifted||[]).join(", ") || "nothing new" }`, "hi");
+  refresh();
+};
+$("btnEquity").onclick = loadEquity;
+window.addEventListener("resize", () => renderCharts());
+
+// Chart.js may load after DOM — redraw once ready
+const chartWait = setInterval(() => {
+  if (window.__chartReady || window.__chartLoadErr) {
+    clearInterval(chartWait);
+    if (window.__chartLoadErr) logLine("Chart.js CDN blocked — canvas fallback", "bad");
+    else logLine("Chart.js ready · tooltips on", "ok");
+    renderCharts();
+  }
+}, 200);
+
+refresh().then(connectEvents);
+setInterval(refresh, 4000);
+</script>
+</body>
+</html>

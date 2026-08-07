@@ -40,6 +40,17 @@ python examples/flagship-musescript-module/harness/viz_server.py
 
 **Workflow for v7h+:** open the viz → select `flagship_v7h.ms` (or keep DEFAULT v7g as baseline) → enable **watch .ms → auto dual** while editing → use **Bulls / Corpus / Matrix / Full score** after meaningful DNA changes → **Score both** against v7g to confirm no dual/dBH regression. State persists to `results/viz_state.json`.
 
+**CLIs that auto-publish** into `results/viz_state.json` (open viz_server to watch; publish is best-effort and never blocks scoring):
+
+| CLI | Suite key | What lights up |
+|---|---|---|
+| `score_probe.py` | `dual` | liquid10 × eval_3m / wf_2022q1 cells mid-run |
+| `bull_score.py` | `bulls` | liquid10 × bull windows (wf_2019q1 / wf_2024q4); champ/available remain console-only |
+| `corpus_score.py` | `corpus` | available × 4 key windows |
+| `eval.py --matrix` / `--matrix --quick` | `matrix` | batch×window×honesty×freq rows mid-run |
+
+Grind agents can call the same hooks directly: `from viz_core import publish_job_start, publish_cell, publish_run, publish_job_done`.
+
 **Dependency note (shipped default = stdlib only):**
 
 | Option | Pros | Cons |
@@ -52,11 +63,14 @@ CLI still works if you want headless / CI:
 
 ```powershell
 haxe build-cli.hxml
+haxe build-batch.hxml   # warm multi-tape runner (kills per-cell Node cold-start)
 python examples/flagship-musescript-module/harness/score_probe.py strategies/flagship_v7g.ms
 python examples/flagship-musescript-module/harness/eval.py --matrix --quick
 python examples/flagship-musescript-module/harness/corpus_score.py strategies/flagship_v7g.ms
 python examples/flagship-musescript-module/harness/bull_score.py strategies/flagship_v7g.ms
 ```
+
+Warm batch details + remaining checklist: [`harness/BATCH_RUNNER.md`](harness/BATCH_RUNNER.md).
 
 ## Next war
 
