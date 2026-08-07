@@ -2,7 +2,7 @@
 
 *Product + architecture plan. Written 2026-08-05. Home: muse-script (this plan). Body: `kalshi-ai-advisor/python/worldfeed` + Desktop `mobile/src/world/`. Cross-links: `JORMUNGANDR_GEOSPATIAL_CRE_PLAN.md`, `JORMUNGANDR_MUSESCRIPT_INTEGRATION_PLAN.md`, `JORMUNGANDR_MIROFISH_INSPIRATION.md`, `kalshi-ai-advisor/python/WORLD_DATA_PLATFORM.md` §11.*
 
-**Status:** P1 shipped (alert feed + matcher). Soft, ambitious. Constitution: honest provenance; Brier/calibration ranks — **never P&L leaderboards**; exposure scores are situational, not money PnL.
+**Status:** P2 shipped (portfolio filters + map emphasis/cluster + labeled exposure + import). Soft, ambitious. Constitution: honest provenance; Brier/calibration ranks — **never P&L leaderboards**; exposure scores are situational, not money PnL.
 
 **Blueprints synthesis (2026-08-05):** Interest / Company signal sinks in MuseLab Blueprints
 (`mobile/src/lab/blueprints/blueprintInterestSinks.js`) — Event-lane graphs that pin / alert /
@@ -292,15 +292,15 @@ P0–P1: **in-app alert rail only**. Push/email/desktop toast deferred to lock.
 
 **Effort:** M.
 
-### P2 — Multi-interest portfolio map
+### P2 — Multi-interest portfolio map ✅
 
-| Deliverable | DoD |
-| --- | --- |
-| Portfolio filters | kind, intent, tag; multi-select focus |
-| Map clustering / emphasis | Selected interests lit; others dim (reuse proximity emphasis patterns carefully — rename if overloaded) |
-| `GET /world/interests/{id}/exposure` | Components + explanation; quality labeled |
-| Symbol + counterparty kinds | Minimal: symbol without geo still lists in portfolio; optional map hop via linked region |
-| Import | CSV/JSON of interests (manual provenance) |
+| Deliverable | DoD | Status |
+| --- | --- | --- |
+| Portfolio filters | kind, intent, tag; multi-select focus | ✅ drawer chips + `intent=` query; focus Set |
+| Map clustering / emphasis | Selected interests lit; others dim | ✅ `interestPortfolioMap.js` (not proximity rename overload) |
+| `GET /world/interests/{id}/exposure` | Components + explanation; quality labeled | ✅ `component_labels` + weights + honesty note |
+| Symbol + counterparty kinds | Minimal: symbol without geo; optional region hop | ✅ helpers + import + drawer quick-add |
+| Import | CSV/JSON of interests (manual provenance) | ✅ `POST /world/interests/import` source=`import` |
 
 **Effort:** M–L.
 
