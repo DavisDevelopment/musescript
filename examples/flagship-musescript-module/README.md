@@ -19,6 +19,27 @@ Iterate until staggering gains on **every** symbol-batch × window × honesty ×
 
 Promote: dual ≥18 + (bulls≥11 ∨ corpus≥55%) + dBH not >15% worse than DEFAULT v7f +1.58 (floor ~1.34) → **CLEARED** via bulls 17/20 + corpus 73.3% + dBH +1.58.
 
+## ⚠️ Held-out gate — required before any future promotion
+
+`results/BROAD8MO_REPORT.md` (2026-08-07): on a broad 54-symbol universe over the real last 8
+months — not the tuned 15-symbol corpus above — **broad-universe performance degrades
+MONOTONICALLY as the tuned-corpus score climbs, all the way through v7g.** v6l, the least-tuned
+version in this whole lineage, generalizes best of all eight versions tested. Every promoted
+"improvement" since has been tuning tighter to the validation set, not building a bigger real edge.
+
+**Before calling anything a new champion, run:**
+```powershell
+python examples/flagship-musescript-module/harness/heldout_gate.py strategies/flagship_vNEW.ms
+```
+This scores the candidate against the frozen 54-symbol held-out set (`tapes/broad8mo/`) and
+compares it to the frozen baseline (`results/broad8mo_baseline.json`, currently **v6l** — the
+best-generalizing version found, not the current corpus champion) with a real pass/fail exit code.
+A candidate that regresses vs. that baseline should not be promoted on the strength of the
+corpus/bulls/dBH numbers above alone, no matter how good those look — that's exactly the pattern
+that produced this whole gap. Full writeup, regime breakdown (this system's edge is real but
+concentrated in down/choppy names, not trending ones), and the frozen-vs-refreshed-data tradeoff:
+`results/BROAD8MO_REPORT.md`.
+
 ## v7g DNA (v7f + QQQ tip-lock)
 
 Prior v7f (META/AMZN sticky bands + MSFT tip-lock + SPY deep-red tip + AAPL mild-red tip) plus:

@@ -79,10 +79,11 @@ configured; they'd need real rework, not just a threshold nudge, to be worth a c
 ## Honest limits of this pass
 
 - **The corpus-score batch previously took ~15 minutes of pure Node-process-spawn
-  overhead** for 9 strategies (see repo-root `CURSOR_BATCH_RUNNER_SPEC.md`). Phase 1
-  warm batch-runner is now landed in the harness — rebuild with `haxe build-batch.hxml`
-  and see [`harness/BATCH_RUNNER.md`](../../harness/BATCH_RUNNER.md). Re-timing the
-  top-9 corpus under warm batch is on the remaining checklist there.
+  overhead** for 9 strategies. Phase 1 warm batch-runner is landed —
+  [`harness/BATCH_RUNNER.md`](../../harness/BATCH_RUNNER.md) /
+  [`harness/batch_identity.py`](../../harness/batch_identity.py): top-9 warm wall
+  **1.49s** (600 jobs), cold identity recheck **226s**, byte-identical
+  sharpe/MDD/trades/pass.
 - **Single-seed, single-run per strategy** — no seed-robustness sweep, no walk-forward promotion
   gate applied (the flagship lineage's `promote()` criteria were never run against these).
 - **No cost/frequency sensitivity check** — all runs at a fixed 10bps; nobody here knows yet how
