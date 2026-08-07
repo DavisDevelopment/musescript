@@ -2,7 +2,7 @@
 
 *Product + architecture plan. Written 2026-08-05. Home: muse-script (this plan). Body: `kalshi-ai-advisor/python/worldfeed` + Desktop `mobile/src/world/`. Cross-links: `JORMUNGANDR_GEOSPATIAL_CRE_PLAN.md`, `JORMUNGANDR_MUSESCRIPT_INTEGRATION_PLAN.md`, `JORMUNGANDR_MIROFISH_INSPIRATION.md`, `kalshi-ai-advisor/python/WORLD_DATA_PLATFORM.md` §11.*
 
-**Status:** P2 shipped (portfolio filters + map emphasis/cluster + labeled exposure + import). Soft, ambitious. Constitution: honest provenance; Brier/calibration ranks — **never P&L leaderboards**; exposure scores are situational, not money PnL.
+**Status:** P3 shipped (Muse under interest scenarios — scenarioKey bind, Muse context chip, Open scenario from sim alerts). Soft, ambitious. Constitution: honest provenance; Brier/calibration ranks — **never P&L leaderboards**; exposure scores are situational, not money PnL; interest title is Muse **context**, never a score.
 
 **Blueprints synthesis (2026-08-05):** Interest / Company signal sinks in MuseLab Blueprints
 (`mobile/src/lab/blueprints/blueprintInterestSinks.js`) — Event-lane graphs that pin / alert /
@@ -304,17 +304,19 @@ P0–P1: **in-app alert rail only**. Push/email/desktop toast deferred to lock.
 
 **Effort:** M–L.
 
-### P3 — Muse under interest scenarios
+### P3 — Muse under interest scenarios ✅
 
-| Deliverable | DoD |
-| --- | --- |
-| Interest ↔ `scenarioKey` binding | Pinning a scenario from Causal Sim / Lab writes `links.scenario_keys` |
-| Muse / Truth context chip | Light & Evolve runs carry interest id in `WorldContext` / Lab session digest |
-| Alert → Muse | “Open scenario” from sim_activation alerts |
-| Live world.* (per MuseScript integration plan) | Prefer tape/`EventLog` path; truth-mode stays deterministic |
-| Constitution check | Leaderboards / fitness remain Brier/calibration — interest title is context, not score |
+| Deliverable | DoD | Status |
+| --- | --- | --- |
+| Interest ↔ `scenarioKey` binding | Pinning a scenario from Causal Sim / Lab writes `links.scenario_keys` | ✅ `POST /world/interests/{id}/scenarios` + Desktop “Pin scenario → interest” |
+| Muse / Truth context chip | Light & Evolve runs carry interest id in `WorldContext` / Lab session digest | ✅ `worldContext.interest` (role=context; excluded from scenarioKey hash) + Lab artifact + chip |
+| Alert → Muse | “Open scenario” from sim_activation alerts | ✅ `sim_shock_activation` matcher + Alert rail Open scenario → history / Lab |
+| Live world.* (per MuseScript integration plan) | Prefer tape/`EventLog` path; truth-mode stays deterministic | ✅ Reuses existing `worldMuseBridge` tape path + `proveDeterminism`; no parallel Muse rebuild |
+| Constitution check | Leaderboards / fitness remain Brier/calibration — interest title is context, not score | ✅ Chip copy + bind note + exposure explanations |
 
 **Effort:** L (engine seams already planned in `JORMUNGANDR_MUSESCRIPT_INTEGRATION_PLAN.md`).
+
+**Dashboard roadmap:** P0–P3 complete for the Business-Interest Management & World-Monitoring Dashboard spine.
 
 ### Suggested calendar (soft)
 

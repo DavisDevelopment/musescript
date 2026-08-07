@@ -58,5 +58,6 @@ Muse runs **Desktop/browser-only** via `museRuntimeClient` / `runUnderWorld` / `
 - Claim **reliability curve** (predicted p vs observed) lives on the World Muse/Truth workbench — never a P&L leaderboard tile.
 - Desktop layout triad: **Map · Split · Muse** (MiroFish interaction pattern only — no AGPL code).
 - **Uncertainty bands (spkmc MIT concept, reimplemented):** Causal Sim dock spark shows p10–p90 (+ p50/mean) over scrubbed T; optional dual baseline/CF overlay; choropleth confidence halo scales with band width. Honest empty when series or quantiles missing — never invent envelopes from peaks.
+- **Business Interest context (dashboard P3):** optional `worldContext.interest` / Lab `artifact.interest` (`id`, `title`, `kind`, `role: "context"`). Title is chrome only — **excluded from `scenarioKey` hash** and never a Truth / Brier / P&L score. Bind via `POST /world/interests/{id}/scenarios` (`links.scenario_keys`).
 
-See `JORMUNGANDR_MUSESCRIPT_INTEGRATION_PLAN.md`.
+See `JORMUNGANDR_MUSESCRIPT_INTEGRATION_PLAN.md` and `JORMUNGANDR_BUSINESS_INTEREST_DASHBOARD_PLAN.md`.
