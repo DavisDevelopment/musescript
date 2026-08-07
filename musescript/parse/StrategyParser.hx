@@ -975,7 +975,18 @@ class StrategyParser {
 			if (check("[")) return stampExpr(start, parseMatchArmsExpr(scrut));
 			i = save; // not a match — fall through so postfix `(...)` parses it as a call
 		}
-		if (isBarField(id)) return stampExpr(start, MuseNodes.barField(id));
+		// Bug (found 2026-08-07, ground-truthed via bundle inspection): hl2/hlc3/ohlc4 are BOTH
+		// bare bar-field identifiers (`hlc3`, no parens — the common case) AND, per
+		// BuiltinSigs.hx's `fun("hlc3", [], TSeries)`, independently declared as callable
+		// zero-arg builtins (`hlc3()`). Without the `!check("(")` guard, `isBarField` wins
+		// unconditionally, so `hlc3()` lowered to `Call(BarField("hlc3"), [])` — calling a
+		// resolved Float as if it were a function — and crashed at runtime with
+		// "Cannot read properties of null (reading 'apply')" on every JS-target execution.
+		// `vwap` never had this bug (it's registered ONLY as a callable, never as a bar field).
+		// Mirrors the existing `match(...)` special-case just above: peek for `(` before
+		// committing to the non-call interpretation, so a call-position use still parses as a
+		// plain identifier and falls through to the postfix call-wrapper below.
+		if (isBarField(id) && !check("(")) return stampExpr(start, MuseNodes.barField(id));
 		// Bare-ident arrow: `x => body`
 		if (check("=>")) {
 			expect("=>");

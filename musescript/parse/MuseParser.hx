@@ -378,7 +378,23 @@ class MuseParser {
 			case EUnop(op, prefix, e):
 				MuseNodes.unop(op, prefix, lowerExpr(e));
 			case ECall(e, args):
-				MuseNodes.call(lowerExpr(e), [for (a in args) lowerExpr(a)]);
+				// Same bug/fix as StrategyParser.hx's primary-expression parser (found 2026-08-07):
+				// a callee that's a bare identifier is ALREADY known to be in call position by the
+				// hscript AST shape (ECall(EIdent(id), args)) -- lower it straight to an ident
+				// reference rather than routing it back through lowerExpr's `EIdent(id): if
+				// (isBarField(id)) barField(id) else ident(id)` branch, which would wrongly
+				// produce `Call(BarField("hlc3"), [])` for callable-and-bar-field-ambiguous names
+				// (hl2/hlc3/ohlc4) -- calling a resolved Float as if it were a function.
+				var calleeExpr = switch (Tools.expr(e)) {
+					// Stamp manually (mirrors lowerExpr's own EIdent branch + trailing stampFromHscript)
+					// so the callee keeps its own position info -- skipping lowerExpr() must not also
+					// skip position-stamping, or diagnostics that read the callee's .pos (e.g. strict-mode
+					// unknown-call errors) regress. Caught by the existing test suite (78,669 assertions,
+					// 1 failure) before this file was considered done.
+					case EIdent(id) if (id != "true" && id != "false" && id != "null"): stampFromHscript(MuseNodes.ident(id), e);
+					default: lowerExpr(e);
+				}
+				MuseNodes.call(calleeExpr, [for (a in args) lowerExpr(a)]);
 			case EIf(c, a, b):
 				MuseNodes.eif(lowerExpr(c), lowerExpr(a), b != null ? lowerExpr(b) : null);
 			case EWhile(c, b):

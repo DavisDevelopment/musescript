@@ -1,0 +1,19 @@
+./musescript/compile/MuseCompiler.hx:92: MuseCompiler: target "native" not implemented ΓÇö MuseInterp fallback
+./musescript/tests/TestVmParityCorpus.hx:87: [evolved] VM parity: 2430 progs -> identical=2260 fallback=125 interpError=45 diverged=0
+
+./musescript/tests/TestVmParityCorpus.hx:48: VM parity: 83 progs -> identical=83 fallback=0 interpError=0 diverged=0
+
+./musescript/compile/StrategyWasmBackend.hx:354: StrategyWasm module load failed: CompileError: WebAssembly.Module(): Compiling function #82:"run_strategy" failed: f64.ne[0] expected type f64, found i32.const of type i32 @+9312
+utest/ui/text/PrintReport.hx:52: 
+assertations: 78669
+successes: 78668
+errors: 0
+failures: 1
+warnings: 0
+execution time: 88.584
+
+results: SOME TESTS FAILURES (success: false)
+musescript.tests.TestDetParity
+  testRenderMatchesGoldenFile: FAILURE .F
+    line: 33, DetParityDump.render drifted from golden ΓÇö regenerate testdata if intentional
+
