@@ -229,6 +229,8 @@ $files = @(
   "lab\forge\forgeLlm.js",          # LLM composer — routes through onDeviceLlm/llmClient seams (honest manual mode)
   "lib\accountDialog.js",           # pub/sub account-dialog channel (web host subscribes)
   "lib\offlineError.js",
+  "lib\useSheetChrome.js",          # Escape + body scroll freeze for drawers/sheets
+  "lib\bodyScrollLock.js",         # used by useSheetChrome
   "minigames\MiniGameCard.jsx",     # feed inline minigame card (Phase 6 added the full tree — see $trees)
   "minigames\minigames.css",        # imported by MiniGameCard (mg-* prefixed, collision-safe)
   "minigames\annotations.js",
