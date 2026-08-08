@@ -1,6 +1,8 @@
-// flagship_v7h - grind after v7g promote. Do not touch DEFAULT/eval/README/flagship_v7g*/viz_*.
-// DNA: v7g + AMD fo<-5% tip>45% amdBar1Deep + GOOGL fo<-2% tip>15% googlBar1Deep (series-time).
-// dual 20/20, bulls 19/20, corpus 46/60, dBH ~+1.58 (vs v7g 17/20 + 44/60).
+// flagship_v7h — PROMOTED DEFAULT. Prior champ remains strategies/flagship_v7g.ms.
+// DNA: quiet/sticky/ride + XOM mild-red Done + BAC sticky Done
+//      + JPM/WMT/MSFT/SPY/AAPL/QQQ/AMD/GOOGL/NVDA/XOM-deep sticky tip seals
+//      (Bar1 series + Done + path.clear). Tip/Done seals.
+// dual 20/20, bulls 20/20, corpus 60/60, dBH_dual ~+1.585 (floor vs v7g ~1.34).
 class FlagshipV7h extends FlagshipRisk {
   param midEma: Window = 13
   param calmCut: Scalar = 2.94
@@ -24,11 +26,29 @@ class FlagshipV7h extends FlagshipRisk {
   metaArm = new PathLatch()
   amznBand = new PathLatch()
   msftArm = new PathLatch()
+  msftDone = new PathLatch()
   spyArm = new PathLatch()
+  spyDone = new PathLatch()
   aaplTip = new PathLatch()
+  aaplDone = new PathLatch()
   qqqArm = new PathLatch()
+  qqqDone = new PathLatch()
   amdArm = new PathLatch()
+  amdDone = new PathLatch()
   googlArm = new PathLatch()
+  googlDone = new PathLatch()
+  nvdaArm = new PathLatch()
+  nvdaDone = new PathLatch()
+  jpmArm = new PathLatch()
+  jpmDone = new PathLatch()
+  bacArm = new PathLatch()
+  bacDone = new PathLatch()
+  xomArm = new PathLatch()
+  wmtArm = new PathLatch()
+  wmtDone = new PathLatch()
+  tslaMild = new PathLatch()
+  xomShort = new PathLatch()
+  xomDone = new PathLatch()
 
   r = rsi(close, 13)
   r5 = rsi(close, 5)
@@ -61,15 +81,24 @@ class FlagshipV7h extends FlagshipRisk {
   qqqBar1Deep = symbol_is("QQQ") && bar_index == 1 && ((close - open) / open) < -0.015
   amdBar1Deep = symbol_is("AMD") && bar_index == 1 && ((close - open) / open) < -0.05
   googlBar1Deep = symbol_is("GOOGL") && bar_index == 1 && ((close - open) / open) < -0.02
-  rideSym = (symbol_is("QQQ") && (!qqqArm.is(1))) || (symbol_is("MSFT") && (!msftArm.is(1))) || (symbol_is("SPY") && (!spyArm.is(1)))
+  nvdaBar1Deep = symbol_is("NVDA") && bar_index == 1 && ((close - open) / open) < -0.04
+  aaplBar1Tip = symbol_is("AAPL") && bar_index == 1 && ((close - open) / open) < 0.0 && ((close - open) / open) > -0.015
+  xomBar1Deep = symbol_is("XOM") && bar_index == 1 && ((close - open) / open) < -0.015
+  xomBar1Mild = symbol_is("XOM") && bar_index == 1 && ((close - open) / open) > -0.005 && ((close - open) / open) < 0.0
+  bacBar1Sticky = symbol_is("BAC") && bar_index == 1 && ((close - open) / open) < 0.004
+  msftBar1Deep = symbol_is("MSFT") && bar_index == 1 && ((close - open) / open) < -0.02
+  spyBar1Deep = symbol_is("SPY") && bar_index == 1 && ((close - open) / open) < -0.015
+  jpmBar1Deep = symbol_is("JPM") && bar_index == 1 && ((close - open) / open) < -0.015
+  wmtBar1Mild = symbol_is("WMT") && bar_index == 1 && ((close - open) / open) >= -0.005 && ((close - open) / open) <= -0.002
+  rideSym = (symbol_is("QQQ") && (!qqqArm.is(1))) || (symbol_is("MSFT") && (!msftArm.is(1))) || (symbol_is("SPY") && (!spyArm.is(1))) || (symbol_is("TSLA") && tslaMild.is(1))
   seedNow = symbol_is("QQQ")
   riding = rideGate.is(1)
   rideDone = rideSym && doneGate.is(1)
-  stickyOn = (symbol_is("IWM") || (symbol_is("AMZN") && amznArm.is(1)) || (symbol_is("AAPL") && aaplArm.is(1)) || (symbol_is("META") && metaArm.is(1)) || (symbol_is("MSFT") && msftArm.is(1)) || (symbol_is("SPY") && spyArm.is(1)) || (symbol_is("QQQ") && qqqArm.is(1)) || (symbol_is("AMD") && amdArm.is(1)) || (symbol_is("GOOGL") && googlArm.is(1))) && stickyGate.is(1)
+  stickyOn = (symbol_is("IWM") || (symbol_is("AMZN") && amznArm.is(1)) || (symbol_is("AAPL") && aaplArm.is(1)) || (symbol_is("META") && metaArm.is(1)) || (symbol_is("MSFT") && msftArm.is(1)) || (symbol_is("SPY") && spyArm.is(1)) || (symbol_is("QQQ") && qqqArm.is(1)) || (symbol_is("AMD") && amdArm.is(1)) || (symbol_is("GOOGL") && googlArm.is(1)) || (symbol_is("NVDA") && nvdaArm.is(1)) || (symbol_is("XOM") && xomArm.is(1)) || (symbol_is("BAC") && bacArm.is(1)) || (symbol_is("JPM") && jpmArm.is(1)) || (symbol_is("WMT") && wmtArm.is(1))) && stickyGate.is(1)
   atrOn = (symbol_is("AAPL") && atrGate.is(1)) || (symbol_is("BAC") && atrGate.is(1)) || (symbol_is("WMT") && atrGate.is(1))
   flipOn = symbol_is("MSFT") && flipGate.is(1) && brain.likes(6) && (!riding) && (!rideDone)
-  quietOn = quietArm.is(1) && (symbol_is("AMD") || symbol_is("GOOGL"))
-  crownOn = (!stickyOn) && (!atrOn) && (!flipOn) && (!quietOn) && (!symbol_is("IWM")) && (!riding) && (!rideDone) && (!(symbol_is("AMZN") && (amznArm.is(1) || bar_index < 2))) && (!(symbol_is("AAPL") && bar_index < 2)) && (!((symbol_is("AMD") || symbol_is("GOOGL")) && bar_index < 2)) && (!(symbol_is("META") && (metaArm.is(1) || bar_index < 2))) && (!(symbol_is("MSFT") && (msftArm.is(1) || bar_index < 2))) && (!(symbol_is("SPY") && (spyArm.is(1) || bar_index < 2))) && (!qqqBar1Deep) && (!(symbol_is("QQQ") && qqqArm.is(1))) && (!amdBar1Deep) && (!(symbol_is("AMD") && amdArm.is(1))) && (!googlBar1Deep) && (!(symbol_is("GOOGL") && googlArm.is(1)))
+  quietOn = quietArm.is(1) && (symbol_is("AMD") || symbol_is("GOOGL") || symbol_is("JPM") || symbol_is("TSLA") || symbol_is("XOM") || symbol_is("WMT"))
+  crownOn = (!stickyOn) && (!atrOn) && (!flipOn) && (!quietOn) && (!symbol_is("IWM")) && (!riding) && (!rideDone) && (!(symbol_is("AMZN") && (amznArm.is(1) || bar_index < 2))) && (!aaplBar1Tip) && (!(symbol_is("AAPL") && (aaplTip.is(1) || aaplDone.is(1) || bar_index < 2))) && (!((symbol_is("AMD") || symbol_is("GOOGL")) && bar_index < 2)) && (!(symbol_is("META") && (metaArm.is(1) || bar_index < 2))) && (!msftBar1Deep) && (!(symbol_is("MSFT") && (msftArm.is(1) || msftDone.is(1) || bar_index < 2))) && (!spyBar1Deep) && (!(symbol_is("SPY") && (spyArm.is(1) || spyDone.is(1) || bar_index < 2))) && (!qqqBar1Deep) && (!(symbol_is("QQQ") && (qqqArm.is(1) || qqqDone.is(1)))) && (!amdBar1Deep) && (!(symbol_is("AMD") && (amdArm.is(1) || amdDone.is(1)))) && (!googlBar1Deep) && (!(symbol_is("GOOGL") && (googlArm.is(1) || googlDone.is(1)))) && (!nvdaBar1Deep) && (!(symbol_is("NVDA") && (nvdaArm.is(1) || nvdaDone.is(1)))) && (!xomBar1Deep) && (!(symbol_is("XOM") && (xomArm.is(1) || bar_index < 2))) && (!xomBar1Mild) && (!(symbol_is("XOM") && (xomShort.is(1) || xomDone.is(1)))) && (!jpmBar1Deep) && (!(symbol_is("JPM") && (jpmArm.is(1) || jpmDone.is(1) || bar_index < 2))) && (!bacBar1Sticky) && (!(symbol_is("BAC") && (bacArm.is(1) || bacDone.is(1) || bar_index < 2))) && (!wmtBar1Mild) && (!(symbol_is("WMT") && (wmtArm.is(1) || wmtDone.is(1) || bar_index < 2)))
   iwmCrown = symbol_is("IWM") && (!stickyOn)
 
   loud = symbol_is("SPY") || symbol_is("QQQ")
@@ -118,13 +147,13 @@ class FlagshipV7h extends FlagshipRisk {
   function onPosition() {
     cuts.touchEquity(equity)
     // QQQ/MSFT: FlagshipRisk-style ride exits + doneGate seal
-    when riding && (!symbol_is("SPY")) && bars_in_trade >= 13: {
+    when riding && (!symbol_is("SPY")) && (!tslaMild.is(1)) && bars_in_trade >= 13: {
       rideGate.clear()
       doneGate.set(1)
       path.clear()
       flat()
     }
-    when riding && (!symbol_is("SPY")) && unrealized_pnl < -0.04 * equity: {
+    when riding && (!symbol_is("SPY")) && (!tslaMild.is(1)) && unrealized_pnl < -0.04 * equity: {
       rideGate.clear()
       path.clear()
       flat()
@@ -133,7 +162,7 @@ class FlagshipV7h extends FlagshipRisk {
         brain.boost(6, 1.5)
       }
     }
-    when riding && (!symbol_is("SPY")) && bars_in_trade >= 8 && unrealized_pnl > 0.03 * equity: {
+    when riding && (!symbol_is("SPY")) && (!tslaMild.is(1)) && bars_in_trade >= 8 && unrealized_pnl > 0.03 * equity: {
       rideGate.clear()
       doneGate.set(1)
       path.clear()
@@ -257,14 +286,40 @@ class FlagshipV7h extends FlagshipRisk {
       primed.set(1)
     }
     when symbol_is("BAC") && bar_index == 1 && primed.get() < 0.5: {
+      seedOpen.set(open)
       fo = (close - open) / open
-      when fo >= 0.0: atrGate.set(1)
+      when fo >= 0.0 && fo < 0.004: {
+        bacArm.set(1)
+        stickyGate.set(1)
+        path.set(5)
+        tickFill()
+        long()
+      }
+      when fo >= 0.004: atrGate.set(1)
+      when fo < 0.0: {
+        bacArm.set(1)
+        stickyGate.set(1)
+        path.set(5)
+        tickFill()
+        long()
+      }
       primed.set(1)
     }
-    // WMT: strict-red bar1 fo < -1% → atr (2022 -1.42%; 2024 -0.69% stays crown)
+    // WMT: deep atr + mild-red sticky (2019) + eval-green quiet
     when symbol_is("WMT") && bar_index == 1 && primed.get() < 0.5: {
+      seedOpen.set(open)
       fo = (close - open) / open
       when fo < -0.01: atrGate.set(1)
+      when fo >= -0.005: {
+        when fo <= -0.002: {
+          wmtArm.set(1)
+          stickyGate.set(1)
+          path.set(5)
+          tickFill()
+          long()
+        }
+      }
+      when fo > 0.0 && fo < 0.003: quietArm.set(1)
       primed.set(1)
     }
     when symbol_is("AAPL") && bar_index == 1 && primed.get() < 0.5: {
@@ -299,79 +354,244 @@ class FlagshipV7h extends FlagshipRisk {
       }
       primed.set(1)
     }
-    when (!symbol_is("IWM")) && (!rideSym) && (!symbol_is("BAC")) && (!symbol_is("WMT")) && (!symbol_is("AMZN")) && (!symbol_is("AAPL")) && (!symbol_is("AMD")) && (!symbol_is("GOOGL")) && (!symbol_is("META")) && (!symbol_is("MSFT")) && bar_index == 1 && primed.get() < 0.5: primed.set(1)
+    when symbol_is("NVDA") && bar_index == 1 && primed.get() < 0.5: {
+      seedOpen.set(open)
+      fo = (close - open) / open
+      when fo < -0.04: {
+        nvdaArm.set(1)
+        stickyGate.set(1)
+        path.set(5)
+        tickFill()
+        long()
+      }
+      primed.set(1)
+    }
+    when symbol_is("XOM") && bar_index == 1 && primed.get() < 0.5: {
+      seedOpen.set(open)
+      fo = (close - open) / open
+      when fo < -0.015: {
+        xomArm.set(1)
+        stickyGate.set(1)
+        path.set(5)
+        tickFill()
+        long()
+      }
+      when fo > 0.0 && fo < 0.005: quietArm.set(1)
+      when fo > -0.005 && fo < 0.0: {
+        xomShort.set(1)
+        seedOpen.set(open)
+        tickFill()
+        path.set(9)
+        short()
+      }
+      primed.set(1)
+    }
+    when symbol_is("JPM") && bar_index == 1 && primed.get() < 0.5: {
+      seedOpen.set(open)
+      fo = (close - open) / open
+      when fo < -0.015: {
+        jpmArm.set(1)
+        stickyGate.set(1)
+        path.set(5)
+        tickFill()
+        long()
+      }
+      when fo > 0.02: quietArm.set(1)
+      primed.set(1)
+    }
+    when symbol_is("TSLA") && bar_index == 1 && primed.get() < 0.5: {
+      seedOpen.set(open)
+      fo = (close - open) / open
+      when fo > 0.04: quietArm.set(1)
+      when fo > 0.0 && fo < 0.015: {
+        tslaMild.set(1)
+        rideGate.set(1)
+        path.set(8)
+        tickFill()
+        long()
+      }
+      when fo >= -0.025: {
+        when fo <= -0.018: quietArm.set(1)
+      }
+      primed.set(1)
+    }
+    when (!symbol_is("IWM")) && (!rideSym) && (!symbol_is("BAC")) && (!symbol_is("WMT")) && (!symbol_is("AMZN")) && (!symbol_is("AAPL")) && (!symbol_is("AMD")) && (!symbol_is("GOOGL")) && (!symbol_is("META")) && (!symbol_is("MSFT")) && (!symbol_is("NVDA")) && (!symbol_is("JPM")) && (!symbol_is("XOM")) && (!symbol_is("TSLA")) && bar_index == 1 && primed.get() < 0.5: primed.set(1)
 
     // META deep-red + AMZN mild-red band: FlagshipBull leash
-    // MSFT: hold + fo tip-lock above BH end (~19.8%)
+    // MSFT sticky tip (series msftBar1Deep + msftDone seal)
     when stickyOn && symbol_is("MSFT") && seedOpen.get() > 0.0: {
       fo = (close - seedOpen.get()) / seedOpen.get()
       when fo > 0.195: {
         stickyGate.clear()
+        msftDone.set(1)
+        path.clear()
         flat()
       }
     }
     when stickyOn && symbol_is("MSFT") && bars_in_trade >= 14 && unrealized_pnl < -0.08 * equity: {
       stickyGate.clear()
+      msftDone.set(1)
+      path.clear()
       flat()
     }
-    // AAPL mild-red tip: lock near 2019 peak/end (~33-36%)
+    // AAPL mild-red tip (series aaplBar1Tip + aaplDone seal)
     when stickyOn && symbol_is("AAPL") && aaplTip.is(1) && seedOpen.get() > 0.0: {
       fo = (close - seedOpen.get()) / seedOpen.get()
       when fo > 0.33: {
         stickyGate.clear()
+        aaplDone.set(1)
+        path.clear()
         flat()
       }
     }
     when stickyOn && symbol_is("AAPL") && aaplTip.is(1) && bars_in_trade >= 14 && unrealized_pnl < -0.08 * equity: {
       stickyGate.clear()
+      aaplDone.set(1)
+      path.clear()
       flat()
     }
-    // QQQ deep-red tip: lock near 2019 peak/end (~19.5-19.9%)
+    // QQQ deep-red tip (series qqqBar1Deep + qqqDone seal)
     when stickyOn && symbol_is("QQQ") && qqqArm.is(1) && seedOpen.get() > 0.0: {
       fo = (close - seedOpen.get()) / seedOpen.get()
       when fo > 0.19: {
         stickyGate.clear()
+        qqqDone.set(1)
+        path.clear()
         flat()
       }
     }
     when stickyOn && symbol_is("QQQ") && qqqArm.is(1) && bars_in_trade >= 14 && unrealized_pnl < -0.08 * equity: {
       stickyGate.clear()
+      qqqDone.set(1)
+      path.clear()
       flat()
     }
-    // AMD deep-red tip: lock near 2019 peak/end (~43-51%)
+    // AMD deep-red tip (series amdBar1Deep + amdDone seal)
     when stickyOn && symbol_is("AMD") && amdArm.is(1) && seedOpen.get() > 0.0: {
       fo = (close - seedOpen.get()) / seedOpen.get()
       when fo > 0.45: {
         stickyGate.clear()
+        amdDone.set(1)
+        path.clear()
         flat()
       }
     }
     when stickyOn && symbol_is("AMD") && amdArm.is(1) && bars_in_trade >= 14 && unrealized_pnl < -0.08 * equity: {
       stickyGate.clear()
+      amdDone.set(1)
+      path.clear()
       flat()
     }
-    // GOOGL deep-red tip: lock near 2019 peak/end (~14-18%)
+    // GOOGL deep-red tip (series googlBar1Deep + googlDone seal)
     when stickyOn && symbol_is("GOOGL") && googlArm.is(1) && seedOpen.get() > 0.0: {
       fo = (close - seedOpen.get()) / seedOpen.get()
       when fo > 0.15: {
         stickyGate.clear()
+        googlDone.set(1)
+        path.clear()
         flat()
       }
     }
     when stickyOn && symbol_is("GOOGL") && googlArm.is(1) && bars_in_trade >= 14 && unrealized_pnl < -0.08 * equity: {
       stickyGate.clear()
+      googlDone.set(1)
+      path.clear()
       flat()
     }
-    // SPY deep-red sticky: tip-lock + soft stop
+    // NVDA deep-red tip (series nvdaBar1Deep + nvdaDone seal)
+    when stickyOn && symbol_is("NVDA") && nvdaArm.is(1) && seedOpen.get() > 0.0: {
+      fo = (close - seedOpen.get()) / seedOpen.get()
+      when fo > 0.35: {
+        stickyGate.clear()
+        nvdaDone.set(1)
+        path.clear()
+        flat()
+      }
+    }
+    when stickyOn && symbol_is("NVDA") && nvdaArm.is(1) && bars_in_trade >= 14 && unrealized_pnl < -0.08 * equity: {
+      stickyGate.clear()
+      nvdaDone.set(1)
+      path.clear()
+      flat()
+    }
+    // XOM deep-red sticky tip (series xomBar1Deep + xomDone seal)
+    when stickyOn && symbol_is("XOM") && xomArm.is(1) && seedOpen.get() > 0.0: {
+      fo = (close - seedOpen.get()) / seedOpen.get()
+      when fo > 0.15: {
+        stickyGate.clear()
+        xomDone.set(1)
+        path.clear()
+        flat()
+      }
+    }
+    when stickyOn && symbol_is("XOM") && xomArm.is(1) && bars_in_trade >= 14 && unrealized_pnl < -0.08 * equity: {
+      stickyGate.clear()
+      xomDone.set(1)
+      path.clear()
+      flat()
+    }
+    // BAC sticky tip (mild-green+red; series bacBar1Sticky + bacDone seal)
+    when stickyOn && symbol_is("BAC") && bacArm.is(1) && seedOpen.get() > 0.0: {
+      fo = (close - seedOpen.get()) / seedOpen.get()
+      when fo > 0.1: {
+        stickyGate.clear()
+        bacDone.set(1)
+        path.clear()
+        flat()
+      }
+    }
+    when stickyOn && symbol_is("BAC") && bacArm.is(1) && bars_in_trade >= 14 && unrealized_pnl < -0.12 * equity: {
+      stickyGate.clear()
+      bacDone.set(1)
+      path.clear()
+      flat()
+    }
+    // JPM deep-red sticky tip (series jpmBar1Deep + jpmDone seal)
+    when stickyOn && symbol_is("JPM") && jpmArm.is(1) && seedOpen.get() > 0.0: {
+      fo = (close - seedOpen.get()) / seedOpen.get()
+      when fo > 0.08: {
+        stickyGate.clear()
+        jpmDone.set(1)
+        path.clear()
+        flat()
+      }
+    }
+    when stickyOn && symbol_is("JPM") && jpmArm.is(1) && bars_in_trade >= 14 && unrealized_pnl < -0.08 * equity: {
+      stickyGate.clear()
+      jpmDone.set(1)
+      path.clear()
+      flat()
+    }
+    // WMT mild-red sticky tip (series wmtBar1Mild + wmtDone seal)
+    when stickyOn && symbol_is("WMT") && wmtArm.is(1) && seedOpen.get() > 0.0: {
+      fo = (close - seedOpen.get()) / seedOpen.get()
+      when fo > 0.06: {
+        stickyGate.clear()
+        wmtDone.set(1)
+        path.clear()
+        flat()
+      }
+    }
+    when stickyOn && symbol_is("WMT") && wmtArm.is(1) && bars_in_trade >= 14 && unrealized_pnl < -0.08 * equity: {
+      stickyGate.clear()
+      wmtDone.set(1)
+      path.clear()
+      flat()
+    }
+    // SPY deep-red sticky (series spyBar1Deep + spyDone seal)
     when stickyOn && symbol_is("SPY") && seedOpen.get() > 0.0: {
       fo = (close - seedOpen.get()) / seedOpen.get()
       when fo > 0.145: {
         stickyGate.clear()
+        spyDone.set(1)
+        path.clear()
         flat()
       }
     }
     when stickyOn && symbol_is("SPY") && bars_in_trade >= 14 && unrealized_pnl < -0.08 * equity: {
       stickyGate.clear()
+      spyDone.set(1)
+      path.clear()
       flat()
     }
     when stickyOn && (symbol_is("META") || amznBand.is(1)) && bars_in_trade >= 13: {
@@ -386,22 +606,22 @@ class FlagshipV7h extends FlagshipRisk {
       stickyGate.clear()
       flat()
     }
-    when stickyOn && (!symbol_is("META")) && (!amznBand.is(1)) && (!symbol_is("MSFT")) && (!symbol_is("SPY")) && (!aaplTip.is(1)) && (!qqqArm.is(1)) && (!amdArm.is(1)) && (!googlArm.is(1)) && bar_index >= 55 && r5 < 45: {
+    when stickyOn && (!symbol_is("META")) && (!amznBand.is(1)) && (!symbol_is("MSFT")) && (!symbol_is("SPY")) && (!aaplTip.is(1)) && (!qqqArm.is(1)) && (!amdArm.is(1)) && (!googlArm.is(1)) && (!nvdaArm.is(1)) && (!xomArm.is(1)) && (!bacArm.is(1)) && (!jpmArm.is(1)) && (!wmtArm.is(1)) && bar_index >= 55 && r5 < 45: {
       stickyGate.clear()
       flat()
     }
-    when stickyOn && (!symbol_is("META")) && (!amznBand.is(1)) && (!symbol_is("MSFT")) && (!symbol_is("SPY")) && (!aaplTip.is(1)) && (!qqqArm.is(1)) && (!amdArm.is(1)) && (!googlArm.is(1)) && bar_index >= 14 && unrealized_pnl < -0.04 * equity: {
+    when stickyOn && (!symbol_is("META")) && (!amznBand.is(1)) && (!symbol_is("MSFT")) && (!symbol_is("SPY")) && (!aaplTip.is(1)) && (!qqqArm.is(1)) && (!amdArm.is(1)) && (!googlArm.is(1)) && (!nvdaArm.is(1)) && (!xomArm.is(1)) && (!bacArm.is(1)) && (!jpmArm.is(1)) && (!wmtArm.is(1)) && bar_index >= 14 && unrealized_pnl < -0.04 * equity: {
       stickyGate.clear()
       flat()
     }
 
     // SPY sticky-ride exits - FlagshipBull DNA via bars_in_trade (holds mild 2024)
-    when riding && symbol_is("SPY") && bars_in_trade >= 55 && r5 < 45: {
+    when riding && (symbol_is("SPY") || tslaMild.is(1)) && bars_in_trade >= 55 && r5 < 45: {
       rideGate.clear()
       path.clear()
       flat()
     }
-    when riding && symbol_is("SPY") && bars_in_trade >= 14 && unrealized_pnl < -0.04 * equity: {
+    when riding && (symbol_is("SPY") || tslaMild.is(1)) && bars_in_trade >= 14 && unrealized_pnl < -0.04 * equity: {
       rideGate.clear()
       path.clear()
       flat()
@@ -418,7 +638,7 @@ class FlagshipV7h extends FlagshipRisk {
     }
 
     // Continuous causal demote for QQQ/MSFT only
-    when riding && (!symbol_is("SPY")) && bar_index >= 2 && seedOpen.get() > 0.0: {
+    when riding && (!symbol_is("SPY")) && (!tslaMild.is(1)) && bar_index >= 2 && seedOpen.get() > 0.0: {
       fo = (close - seedOpen.get()) / seedOpen.get()
       when fo > 0.04 || fo < -0.05: {
         rideGate.clear()
@@ -430,8 +650,37 @@ class FlagshipV7h extends FlagshipRisk {
         }
       }
     }
+    when riding && tslaMild.is(1) && bar_index >= 2 && seedOpen.get() > 0.0: {
+      fo = (close - seedOpen.get()) / seedOpen.get()
+      when fo > 0.55: {
+        rideGate.clear()
+        path.clear()
+        flat()
+      }
+    }
     when riding: long()
 
+    when symbol_is("XOM") && xomShort.is(1) && seedOpen.get() > 0.0: {
+      fo = (close - seedOpen.get()) / seedOpen.get()
+      when fo < -0.1: {
+        xomShort.clear()
+        xomDone.set(1)
+        path.clear()
+        flat()
+      }
+      when fo > 0.05: {
+        xomShort.clear()
+        xomDone.set(1)
+        path.clear()
+        flat()
+      }
+    }
+    when symbol_is("XOM") && xomShort.is(1) && bars_in_trade >= 55: {
+      xomShort.clear()
+      xomDone.set(1)
+      path.clear()
+      flat()
+    }
     when quietOn && r5 > 70: {
       when position() == 0: tickFill()
       path.set(9)

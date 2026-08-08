@@ -37,7 +37,7 @@ RESULTS = FLAGSHIP / "results"
 RUNNER = ROOT / "build" / "js" / "gene-runner.js"
 BATCH_RUNNER = ROOT / "build" / "js" / "batch-runner.js"
 SOURCE_TAPE = ROOT / "data" / "real" / "tape.csv"
-DEFAULT_STRATEGY = STRATEGIES / "flagship_v7g.ms"
+DEFAULT_STRATEGY = STRATEGIES / "flagship_v7h.ms"
 
 
 def _viz(kind: str, *args: Any, **kwargs: Any) -> None:

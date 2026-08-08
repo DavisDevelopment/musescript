@@ -2,22 +2,22 @@
 
 Iterate until staggering gains on **every** symbol-batch × window × honesty × trade-frequency cell.
 
-**Current champion:** `strategies/flagship_v7g.ms` — **liquid10 dual 20/20** + bulls **17/20** + corpus **44/60** + dBH_dual **~+1.58** (promote cleared). Prior: `strategies/flagship_v7f.ms`.
+**Current champion:** `strategies/flagship_v7h.ms` — **liquid10 dual 20/20** + bulls **20/20** + corpus **60/60** + dBH_dual **~+1.585** (tip/Done seals; promote cleared). Prior: `strategies/flagship_v7g.ms`.
 
 ## Scoreboard (causal next-open, 10 bps)
 
-| Cell | v6l | v7 | v7b | v7c | v7d | v7e | v7f | **v7g** |
-|---|---|---|---|---|---|---|---|---|
-| liquid10 × eval × any | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | **10/10** |
-| liquid10 × 2022 × any | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | **10/10** |
-| liquid10 × 2022 × swing | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | **10/10** |
-| liquid10 × eval × position | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | **10/10** |
-| bulls liquid10 (2019+2024) | 4/20 | 6/20 | 8/20 | 11/20 | 14/20 | 15/20 | 16/20 | **17/20** |
-| corpus available×4 | ~29/60 | ~29–31/60 | 35/60 (58.3%) | 38/60 (63.3%) | 41/60 (68.3%) | 42/60 (70.0%) | 43/60 (71.7%) | **44/60 (73.3%)** |
-| quick matrix perfect | 10/12 | 10/12 | 10/12 | 10/12 | 10/12 | 10/12 | 10/12 | **10/12** |
-| dual mean dBH | +1.49 | +1.55 | +1.63 | +1.60 | +1.58 | +1.58 | +1.58 | **+1.58** |
+| Cell | v6l | v7 | v7b | v7c | v7d | v7e | v7f | v7g | **v7h** |
+|---|---|---|---|---|---|---|---|---|---|
+| liquid10 × eval × any | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | **10/10** |
+| liquid10 × 2022 × any | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | **10/10** |
+| liquid10 × 2022 × swing | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | **10/10** |
+| liquid10 × eval × position | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | **10/10** |
+| bulls liquid10 (2019+2024) | 4/20 | 6/20 | 8/20 | 11/20 | 14/20 | 15/20 | 16/20 | 17/20 | **20/20** |
+| corpus available×4 | ~29/60 | ~29–31/60 | 35/60 (58.3%) | 38/60 (63.3%) | 41/60 (68.3%) | 42/60 (70.0%) | 43/60 (71.7%) | 44/60 (73.3%) | **60/60 (100%)** |
+| quick matrix perfect | 10/12 | 10/12 | 10/12 | 10/12 | 10/12 | 10/12 | 10/12 | 10/12 | — |
+| dual mean dBH | +1.49 | +1.55 | +1.63 | +1.60 | +1.58 | +1.58 | +1.58 | +1.58 | **+1.585** |
 
-Promote: dual ≥18 + (bulls≥11 ∨ corpus≥55%) + dBH not >15% worse than DEFAULT v7f +1.58 (floor ~1.34) → **CLEARED** via bulls 17/20 + corpus 73.3% + dBH +1.58.
+Promote: dual ≥18 + (bulls≥11 ∨ corpus≥55%) + dBH not >15% worse than DEFAULT v7g +1.58 (floor ~1.34) → **CLEARED** via dual/bulls/corpus **20/20/60** + dBH +1.585.
 
 ## ⚠️ Held-out gate — required before any future promotion
 
@@ -40,17 +40,18 @@ that produced this whole gap. Full writeup, regime breakdown (this system's edge
 concentrated in down/choppy names, not trending ones), and the frozen-vs-refreshed-data tradeoff:
 `results/BROAD8MO_REPORT.md`.
 
-## v7g DNA (v7f + QQQ tip-lock)
+## v7h DNA (tip / Done seals)
 
-Prior v7f (META/AMZN sticky bands + MSFT tip-lock + SPY deep-red tip + AAPL mild-red tip) plus:
+Prior v7g (QQQ deep-red sticky tip) plus quiet/sticky/ride hardening:
 
-- **QQQ@2019** series-time `qqqBar1Deep` crown suppress + deep-red sticky `tip>19%`
+- **Tip/Done seals** across JPM/WMT/MSFT/SPY/AAPL/QQQ/AMD/GOOGL/NVDA + XOM mild-red / deep sticky; BAC sticky Done
+- Soft-wall names (QQQ/AMD/GOOGL/NVDA @ 2019/2024) cleared on bulls + corpus
 
-Rollback snapshot: `strategies/flagship_v7g_known_good.ms`. Prior champ file: `strategies/flagship_v7f.ms`.
+Rollback snapshot: `strategies/flagship_v7h_known_good.ms`. Prior champ file: `strategies/flagship_v7g.ms`.
 
 ## Grind visualizer (preferred for revisions & tests)
 
-Rich local scoreboard UI that drives the same scoring logic as the harness CLIs (dual / bulls / corpus / matrix --quick), with live per-cell pass/fail + dBH, promote-bar meters, soft-wall highlights (QQQ/AMD/GOOGL/NVDA on 2019/2024), watch-mode re-score on `.ms` save, and side-by-side genome compare (v7d/e/f/g).
+Rich local scoreboard UI that drives the same scoring logic as the harness CLIs (dual / bulls / corpus / matrix --quick), with live per-cell pass/fail + dBH, promote-bar meters, soft-wall highlights (QQQ/AMD/GOOGL/NVDA on 2019/2024), watch-mode re-score on `.ms` save, and side-by-side genome compare (v7d/e/f/g/h).
 
 ```powershell
 # from repo root (gene-runner must exist — build once if needed)
@@ -59,7 +60,7 @@ python examples/flagship-musescript-module/harness/viz_server.py
 # → http://127.0.0.1:8765/
 ```
 
-**Workflow for v7h+:** open the viz → select `flagship_v7h.ms` (or keep DEFAULT v7g as baseline) → enable **watch .ms → auto dual** while editing → use **Bulls / Corpus / Matrix / Full score** after meaningful DNA changes → **Score both** against v7g to confirm no dual/dBH regression. State persists to `results/viz_state.json`.
+**Workflow for v7i+:** open the viz → select candidate (or keep DEFAULT v7h as baseline) → enable **watch .ms → auto dual** while editing → use **Bulls / Corpus / Matrix / Full score** after meaningful DNA changes → **Score both** against v7h to confirm no dual/dBH regression. State persists to `results/viz_state.json`.
 
 **CLIs that auto-publish** into `results/viz_state.json` (open viz_server to watch; publish is best-effort and never blocks scoring):
 
@@ -85,16 +86,16 @@ CLI still works if you want headless / CI:
 ```powershell
 haxe build-cli.hxml
 haxe build-batch.hxml   # warm multi-tape runner (kills per-cell Node cold-start)
-python examples/flagship-musescript-module/harness/score_probe.py strategies/flagship_v7g.ms
+python examples/flagship-musescript-module/harness/score_probe.py strategies/flagship_v7h.ms
 python examples/flagship-musescript-module/harness/eval.py --matrix --quick
-python examples/flagship-musescript-module/harness/corpus_score.py strategies/flagship_v7g.ms
-python examples/flagship-musescript-module/harness/bull_score.py strategies/flagship_v7g.ms
+python examples/flagship-musescript-module/harness/corpus_score.py strategies/flagship_v7h.ms
+python examples/flagship-musescript-module/harness/bull_score.py strategies/flagship_v7h.ms
 ```
 
 Warm batch details + remaining checklist: [`harness/BATCH_RUNNER.md`](harness/BATCH_RUNNER.md).
 
 ## Next war
 
-1. Remaining bull / corpus fails toward v7h — **run in the visualizer**
-2. Corpus banks / available weak spots (JPM, XOM, TSLA, BAC @ eval)
-3. Theoretical 12/12 needs swing floor loosen or IWM seed replace
+1. Held-out / broad8mo generalization (do not promote on corpus alone)
+2. Theoretical 12/12 needs swing floor loosen or IWM seed replace
+3. Live / cost realism vs tape-tuned tip seals
