@@ -8,4 +8,6 @@ typedef FitnessOpts = {
 	var equityFloor:Float;
 	var attrBandit:Bool;
 	var creditCuts:Bool;
+	/** Sharpe annualization; omit/`null` → worker keeps `Metrics.DAILY_PERIODS_PER_YEAR`. */
+	var ?periodsPerYear:Null<Float>;
 }

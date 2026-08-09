@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -18,8 +19,8 @@ import musescript.types.MuseType;
  */
 class AdaptiveRsi implements MuseIndicator<Float, Float> {
 	var period:Int;
-	var prices:Array<Float>;
-	var absChanges:Array<Float>;
+	var prices:RingBuffer<Float>;
+	var absChanges:RingBuffer<Float>;
 	var absSum:Float;
 	var prev:Null<Float>;
 	var seedGain:Float;
@@ -51,13 +52,10 @@ class AdaptiveRsi implements MuseIndicator<Float, Float> {
 
 		// Maintain the price window (period + 1) and the |Δ| window (period).
 		prices.push(price);
-		if (prices.length > period + 1) {
-			prices.shift();
-		}
-		if (absChanges.length == period) {
-			absSum -= absChanges.shift();
-		}
-		absChanges.push(Math.abs(change));
+		// Fullness checked before push — `Null<Float>` of `0.0` is nullish on JS.
+		var absFull = absChanges.isFull();
+		var oldAbs = absChanges.push(Math.abs(change));
+		if (absFull) absSum -= oldAbs;
 		absSum += Math.abs(change);
 
 		if (avgGain != null && avgLoss != null) {
@@ -90,8 +88,8 @@ class AdaptiveRsi implements MuseIndicator<Float, Float> {
 	}
 
 	public function reset():Void {
-		prices = [];
-		absChanges = [];
+		prices = new RingBuffer(period + 1);
+		absChanges = new RingBuffer(period);
 		absSum = 0.0;
 		prev = null;
 		seedGain = 0.0;
@@ -107,7 +105,7 @@ class AdaptiveRsi implements MuseIndicator<Float, Float> {
 	public function name():String return "AdaptiveRsi";
 
 	function efficiencyRatio(price:Float):Float {
-		var oldest = prices[0];
+		var oldest = prices.oldest(0);
 		var direction = Math.abs(price - oldest);
 		if (absSum == 0.0) return 0.0;
 		var er = direction / absSum;

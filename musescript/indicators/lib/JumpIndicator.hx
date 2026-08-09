@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -21,7 +22,7 @@ import musescript.types.MuseType;
 class JumpIndicator implements MuseIndicator<Float, Float> {
 	var period:Int;
 	var threshold:Float;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var sum:Float;
 	var sumSq:Float;
 	var lastPrice:Null<Float>;
@@ -31,10 +32,7 @@ class JumpIndicator implements MuseIndicator<Float, Float> {
 		if (!Math.isFinite(threshold) || threshold <= 0.0) throw "JumpIndicator: threshold must be positive and finite";
 		this.period = period;
 		this.threshold = threshold;
-		window = [];
-		sum = 0.0;
-		sumSq = 0.0;
-		lastPrice = null;
+		reset();
 	}
 
 	public function update(price:Float):Null<Float> {
@@ -55,12 +53,13 @@ class JumpIndicator implements MuseIndicator<Float, Float> {
 			if (sigma > 0.0 && Math.abs(ret) > threshold * sigma) result = 1.0;
 		}
 
-		if (window.length == period) {
-			var old = window.shift();
+		// Fullness checked before push — `Null<Float>` of `0.0` is nullish on JS.
+		var wasFull = window.isFull();
+		var old = window.push(ret);
+		if (wasFull) {
 			sum -= old;
 			sumSq -= old * old;
 		}
-		window.push(ret);
 		sum += ret;
 		sumSq += ret * ret;
 
@@ -68,7 +67,7 @@ class JumpIndicator implements MuseIndicator<Float, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 		sum = 0.0;
 		sumSq = 0.0;
 		lastPrice = null;

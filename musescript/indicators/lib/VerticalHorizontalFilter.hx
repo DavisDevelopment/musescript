@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -21,9 +22,9 @@ import musescript.types.MuseType;
  */
 class VerticalHorizontalFilter implements MuseIndicator<Float, Float> {
 	var period:Int;
-	var closes:Array<Float>;
+	var closes:RingBuffer<Float>;
 	var prevClose:Null<Float>;
-	var diffs:Array<Float>;
+	var diffs:RingBuffer<Float>;
 	var diffSum:Float;
 
 	public function new(period:Int) {
@@ -34,13 +35,13 @@ class VerticalHorizontalFilter implements MuseIndicator<Float, Float> {
 
 	public function update(value:Float):Null<Float> {
 		if (!Math.isFinite(value)) return null;
-		if (closes.length == period) closes.shift();
 		closes.push(value);
 
 		if (prevClose != null) {
 			var diff = Math.abs(value - prevClose);
-			if (diffs.length == period) diffSum -= diffs.shift();
-			diffs.push(diff);
+			var wasFull = diffs.isFull();
+			var old = diffs.push(diff);
+			if (wasFull) diffSum -= old;
 			diffSum += diff;
 		}
 		prevClose = value;
@@ -60,9 +61,9 @@ class VerticalHorizontalFilter implements MuseIndicator<Float, Float> {
 	}
 
 	public function reset():Void {
-		closes = [];
+		closes = new RingBuffer(period);
 		prevClose = null;
-		diffs = [];
+		diffs = new RingBuffer(period);
 		diffSum = 0.0;
 	}
 

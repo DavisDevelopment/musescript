@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -19,7 +20,7 @@ import musescript.types.MuseType;
 class Tsv implements MuseIndicator<Bar, Float> {
 	public var period(default, null):Int;
 	var prevClose:Null<Float>;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var sum:Float;
 
 	public function new(period:Int) {
@@ -36,10 +37,10 @@ class Tsv implements MuseIndicator<Bar, Float> {
 		var flow = (bar.close - prevClose) * bar.volume;
 		prevClose = bar.close;
 
-		if (window.length == period) {
-			sum -= window.shift();
-		}
-		window.push(flow);
+		// Fullness checked before push — `Null<Float>` of `0.0` is nullish on JS.
+		var wasFull = window.isFull();
+		var old = window.push(flow);
+		if (wasFull) sum -= old;
 		sum += flow;
 		if (window.length < period) return null;
 		return sum;
@@ -47,7 +48,7 @@ class Tsv implements MuseIndicator<Bar, Float> {
 
 	public function reset():Void {
 		prevClose = null;
-		window = [];
+		window = new RingBuffer(period);
 		sum = 0.0;
 	}
 

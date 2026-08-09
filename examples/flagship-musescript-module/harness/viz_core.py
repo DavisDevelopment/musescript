@@ -31,6 +31,7 @@ from eval import (
     load_json,
     run_gene,
     run_gene_batch,
+    run_matrix_mega,
     stitch_source,
     summarize,
 )
@@ -1070,7 +1071,17 @@ def run_matrix_quick(
         progress,
         {"type": "suite_start", "suite": "matrix", "strategy": strategy.name, "total": len(jobs)},
     )
-    for i, (b, w, h, f) in enumerate(jobs, 1):
+    if cancel and cancel():
+        raise RuntimeError("cancelled")
+    slice_results = run_matrix_mega(
+        src,
+        jobs,
+        batches=batches,
+        honesty_cfg=honesty_cfg,
+        frequencies=frequencies,
+        coalesce=True,
+    )
+    for i, (b, w, h, f, cells) in enumerate(slice_results, 1):
         if cancel and cancel():
             raise RuntimeError("cancelled")
         remaining = [
@@ -1092,17 +1103,6 @@ def run_matrix_quick(
             },
         )
         total += 1
-        cells = eval_batch(
-            src,
-            batch_name=b,
-            symbols=batches[b]["symbols"],
-            window=w,
-            honesty_name=h,
-            honesty=honesty_cfg[h],
-            freq_name=f,
-            freq=frequencies[f],
-            frequencies=frequencies,
-        )
         summary = summarize(cells)
         is_perfect = summary["n_pass"] == summary["n_symbols"] and summary["n_symbols"] > 0
         if is_perfect:

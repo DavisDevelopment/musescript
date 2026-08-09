@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -21,7 +22,7 @@ import musescript.types.MuseType;
 class LongLine implements MuseIndicator<Bar, Float> {
 	var period:Int;
 	var multiplier:Float;
-	var bodyWindow:Array<Float>;
+	var bodyWindow:RingBuffer<Float>;
 	var sum:Float;
 
 	public function new(period:Int, multiplier:Float) {
@@ -29,15 +30,14 @@ class LongLine implements MuseIndicator<Bar, Float> {
 		if (!Math.isFinite(multiplier) || multiplier <= 0.0) throw "LongLine: multiplier must be positive and finite";
 		this.period = period;
 		this.multiplier = multiplier;
-		bodyWindow = [];
-		sum = 0.0;
+		reset();
 	}
 
 	public function update(bar:Bar):Null<Float> {
 		var body = Math.abs(bar.close - bar.open);
 		var result = 0.0;
 
-		if (bodyWindow.length == period) {
+		if (bodyWindow.isFull()) {
 			var avgBody = sum / period;
 			if (body > multiplier * avgBody) {
 				if (bar.close > bar.open) result = 1.0;
@@ -45,15 +45,16 @@ class LongLine implements MuseIndicator<Bar, Float> {
 			}
 		}
 
-		if (bodyWindow.length == period) sum -= bodyWindow.shift();
-		bodyWindow.push(body);
+		var wasFull = bodyWindow.isFull();
+		var old = bodyWindow.push(body);
+		if (wasFull) sum -= old;
 		sum += body;
 
 		return result;
 	}
 
 	public function reset():Void {
-		bodyWindow = [];
+		bodyWindow = new RingBuffer(period);
 		sum = 0.0;
 	}
 

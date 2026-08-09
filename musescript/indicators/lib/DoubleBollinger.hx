@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /** Double Bollinger output: two nested band pairs sharing one middle line. */
@@ -27,7 +28,7 @@ class DoubleBollinger implements MuseIndicator<Float, DoubleBollingerOutput> {
 	var period:Int;
 	var mult1:Float;
 	var mult2:Float;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var sum:Float;
 	var sumSq:Float;
 
@@ -38,19 +39,20 @@ class DoubleBollinger implements MuseIndicator<Float, DoubleBollingerOutput> {
 		this.period = period;
 		this.mult1 = mult1;
 		this.mult2 = mult2;
-		window = [];
+		window = new RingBuffer(period);
 		sum = 0.0;
 		sumSq = 0.0;
 	}
 
 	public function update(input:Float):Null<DoubleBollingerOutput> {
 		if (!Math.isFinite(input)) return null;
-		if (window.length == period) {
-			var old = window.shift();
+		// Fullness checked before push — `Null<Float>` of `0.0` is nullish on JS.
+		var wasFull = window.isFull();
+		var old = window.push(input);
+		if (wasFull) {
 			sum -= old;
 			sumSq -= old * old;
 		}
-		window.push(input);
 		sum += input;
 		sumSq += input * input;
 		if (window.length < period) return null;
@@ -68,7 +70,7 @@ class DoubleBollinger implements MuseIndicator<Float, DoubleBollingerOutput> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 		sum = 0.0;
 		sumSq = 0.0;
 	}

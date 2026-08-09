@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -24,9 +25,9 @@ class TdRei implements MuseIndicator<Bar, Float> {
 	static inline var LOOKBACK = 7;
 
 	var period:Int;
-	var candles:Array<Bar>;
-	var numerators:Array<Float>;
-	var denominators:Array<Float>;
+	var candles:RingBuffer<Bar>;
+	var numerators:RingBuffer<Float>;
+	var denominators:RingBuffer<Float>;
 	var lastValue:Null<Float>;
 
 	public function new(period:Int) {
@@ -45,19 +46,16 @@ class TdRei implements MuseIndicator<Bar, Float> {
 	public function value():Null<Float> return lastValue;
 
 	public function update(bar:Bar):Null<Float> {
-		// Maintain a rolling window of the last LOOKBACK candles (front =
-		// 6 bars ago when full).
-		if (candles.length == LOOKBACK) candles.shift();
+		// Need 6 previous candles before evaluating the rule.
 		if (candles.length < LOOKBACK - 1) {
-			// Need 6 previous candles before evaluating the rule.
 			candles.push(bar);
 			return null;
 		}
-		// candles holds the 6 most recent bars in order; index 0 is 6 bars
-		// ago, index len-2 is bar[i-2], index 1 is bar[i-5].
-		var prev2 = candles[candles.length - 2];
-		var prev5 = candles[1];
-		var prev6 = candles[0];
+		// Eviction-before-read: when full (LOOKBACK), prior-6 slice starts at oldest(1).
+		var base = candles.length - (LOOKBACK - 1);
+		var prev2 = candles.oldest(base + (LOOKBACK - 1) - 2);
+		var prev5 = candles.oldest(base + 1);
+		var prev6 = candles.oldest(base + 0);
 
 		var cond1 = bar.high >= prev5.low || bar.high >= prev6.low;
 		var cond2 = bar.low <= prev5.high || bar.low <= prev6.high;
@@ -66,27 +64,23 @@ class TdRei implements MuseIndicator<Bar, Float> {
 		var denominator = Math.abs(bar.high - prev2.high) + Math.abs(bar.low - prev2.low);
 		var numerator = cond1 && cond2 ? rawNum : 0.0;
 
-		if (numerators.length == period) {
-			numerators.shift();
-			denominators.shift();
-		}
 		numerators.push(numerator);
 		denominators.push(denominator);
 		candles.push(bar);
 
 		if (numerators.length < period) return null;
 		var sumNum = 0.0, sumDen = 0.0;
-		for (v in numerators) sumNum += v;
-		for (v in denominators) sumDen += v;
+		for (i in 0...numerators.length) sumNum += numerators.oldest(i);
+		for (i in 0...denominators.length) sumDen += denominators.oldest(i);
 		var v = sumDen == 0.0 ? 0.0 : 100.0 * sumNum / sumDen;
 		lastValue = v;
 		return v;
 	}
 
 	public function reset():Void {
-		candles = [];
-		numerators = [];
-		denominators = [];
+		candles = new RingBuffer(LOOKBACK);
+		numerators = new RingBuffer(period);
+		denominators = new RingBuffer(period);
 		lastValue = null;
 	}
 

@@ -1544,8 +1544,10 @@ Update this guide when any of the following lands:
 - A dual-rep change that alters bijection or epoch semantics
 - **§27's map/counter hazards are CLOSED** (`EvoLock` guards epoch interning, the credit bank, the
   column caches and `fnCache`); the graph-ownership hazard is documented in §32 and handled by
-  disabling dirty-spine above one worker. Still owed: a green multi-thread `--nma` determinism probe
-  (N genomes × M threads × K reps, identical to serial) before calling the pool proven
+  disabling dirty-spine above one worker. **Determinism probe LANDED (Node + JVM):**
+  `NmaNodeBench --det-probe` / `scripts/nma_thread_det_probe.ps1` and
+  `CorpusEvoRun --det-probe` / `scripts/nma_jvm_thread_det_probe.ps1` — N×M×K identical to serial
+  on the real Node worker_threads pool and the CorpusEvoRun JS-fallback Deque pool under `--nma`
 - A parallel or cheaper `EvolutionEngine.step` — §33's numbers are the current ceiling and should be
   re-measured, not edited, when that lands
 - **§35–§38 (V8 / Node / Electron):** `NmaNodeEvalPool` / `--threads` score fan-out + **resident

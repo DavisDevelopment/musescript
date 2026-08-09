@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -15,13 +16,13 @@ import musescript.types.MuseType;
  */
 class DistanceSsd implements MuseIndicator<DistanceSsdPair, Float> {
 	var period:Int;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var sum:Float;
 
 	public function new(period:Int) {
 		if (period <= 0) throw "DistanceSsd: period must be > 0";
 		this.period = period;
-		window = [];
+		window = new RingBuffer(period);
 		sum = 0.0;
 	}
 
@@ -31,8 +32,10 @@ class DistanceSsd implements MuseIndicator<DistanceSsdPair, Float> {
 		if (!Math.isFinite(a) || !Math.isFinite(b)) return null;
 		var sq = (a - b) * (a - b);
 
-		if (window.length == period) sum -= window.shift();
-		window.push(sq);
+		// Fullness checked before push — `Null<Float>` of `0.0` is nullish on JS.
+		var wasFull = window.isFull();
+		var old = window.push(sq);
+		if (wasFull) sum -= old;
 		sum += sq;
 
 		if (window.length < period) return null;
@@ -40,7 +43,7 @@ class DistanceSsd implements MuseIndicator<DistanceSsdPair, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 		sum = 0.0;
 	}
 

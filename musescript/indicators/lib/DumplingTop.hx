@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -23,35 +24,32 @@ import musescript.types.MuseType;
  */
 class DumplingTop implements MuseIndicator<Bar, Float> {
 	public var period(default, null):Int;
-	var closes:Array<Float>;
+	var closes:RingBuffer<Float>;
 	var last:Null<Float>;
 
 	public function new(period:Int) {
 		if (period < 5) throw "DumplingTop: period must be >= 5";
 		this.period = period;
-		closes = [];
-		last = null;
+		reset();
 	}
 
 	public function update(bar:Bar):Null<Float> {
-		if (closes.length == period) {
-			closes.shift();
-		}
 		closes.push(bar.close);
 
 		if (closes.length < period) {
 			return null;
 		}
 
-		var first = closes[0];
-		var lastClose = closes[closes.length - 1];
+		var first = closes.oldest(0);
+		var lastClose = closes.oldest(closes.length - 1);
 
 		// Find max and its index
 		var maxIdx = 0;
 		var maxVal = Math.NEGATIVE_INFINITY;
 		for (i in 0...closes.length) {
-			if (closes[i] > maxVal) {
-				maxVal = closes[i];
+			var v = closes.oldest(i);
+			if (v > maxVal) {
+				maxVal = v;
 				maxIdx = i;
 			}
 		}
@@ -69,7 +67,7 @@ class DumplingTop implements MuseIndicator<Bar, Float> {
 	}
 
 	public function reset():Void {
-		closes = [];
+		closes = new RingBuffer(period);
 		last = null;
 	}
 

@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /** Projection Bands output: upper/middle/lower. */
@@ -36,8 +37,8 @@ typedef ProjectionBandsOutput = {
  */
 class ProjectionBands implements MuseIndicator<Bar, ProjectionBandsOutput> {
 	var period:Int;
-	var highs:Array<Float>;
-	var lows:Array<Float>;
+	var highs:RingBuffer<Float>;
+	var lows:RingBuffer<Float>;
 	var sumX:Float;
 	var sumXx:Float;
 
@@ -47,28 +48,24 @@ class ProjectionBands implements MuseIndicator<Bar, ProjectionBandsOutput> {
 		var n:Float = period;
 		sumX = n * (n - 1.0) / 2.0;
 		sumXx = (n - 1.0) * n * (2.0 * n - 1.0) / 6.0;
-		highs = [];
-		lows = [];
+		reset();
 	}
 
 	/** OLS slope of (0..period, values) over the live window. */
-	function slope(values:Array<Float>):Float {
+	function slope(values:RingBuffer<Float>):Float {
 		var n:Float = period;
 		var sumY = 0.0;
 		var sumXy = 0.0;
 		for (i in 0...values.length) {
-			sumY += values[i];
-			sumXy += i * values[i];
+			var v = values.oldest(i);
+			sumY += v;
+			sumXy += i * v;
 		}
 		var denom = n * sumXx - sumX * sumX;
 		return (n * sumXy - sumX * sumY) / denom;
 	}
 
 	public function update(bar:Bar):Null<ProjectionBandsOutput> {
-		if (highs.length == period) {
-			highs.shift();
-			lows.shift();
-		}
 		highs.push(bar.high);
 		lows.push(bar.low);
 		if (highs.length < period) return null;
@@ -81,8 +78,8 @@ class ProjectionBands implements MuseIndicator<Bar, ProjectionBandsOutput> {
 		var lower = Math.POSITIVE_INFINITY;
 		for (i in 0...period) {
 			var forward = last - i;
-			var projectedHigh = highs[i] + slopeH * forward;
-			var projectedLow = lows[i] + slopeL * forward;
+			var projectedHigh = highs.oldest(i) + slopeH * forward;
+			var projectedLow = lows.oldest(i) + slopeL * forward;
 			if (projectedHigh > upper) upper = projectedHigh;
 			if (projectedLow < lower) lower = projectedLow;
 		}
@@ -91,8 +88,8 @@ class ProjectionBands implements MuseIndicator<Bar, ProjectionBandsOutput> {
 	}
 
 	public function reset():Void {
-		highs = [];
-		lows = [];
+		highs = new RingBuffer(period);
+		lows = new RingBuffer(period);
 	}
 
 	public function warmupPeriod():Int return period;

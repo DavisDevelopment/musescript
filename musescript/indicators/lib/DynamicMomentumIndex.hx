@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 import musescript.indicators.prim.StdDev;
 import musescript.indicators.prim.Sma;
@@ -35,7 +36,7 @@ class DynamicMomentumIndex implements MuseIndicator<Float, Float> {
 	var vol:StdDev;
 	var volAvg:Sma;
 	var prevClose:Null<Float>;
-	var changes:Array<Float>;
+	var changes:RingBuffer<Float>;
 	var lastVolAvg:Null<Float>;
 	var lastValue:Null<Float>;
 
@@ -45,7 +46,7 @@ class DynamicMomentumIndex implements MuseIndicator<Float, Float> {
 		vol = new StdDev(STD_PERIOD);
 		volAvg = new Sma(STD_AVG_PERIOD);
 		prevClose = null;
-		changes = [];
+		changes = new RingBuffer(MAX_PERIOD);
 		lastVolAvg = null;
 		lastValue = null;
 	}
@@ -73,9 +74,6 @@ class DynamicMomentumIndex implements MuseIndicator<Float, Float> {
 		// Record the price change
 		if (prevClose != null) {
 			var change = input - prevClose;
-			if (changes.length == MAX_PERIOD) {
-				changes.shift();
-			}
 			changes.push(change);
 		}
 		prevClose = input;
@@ -94,11 +92,11 @@ class DynamicMomentumIndex implements MuseIndicator<Float, Float> {
 		}
 
 		var td = dynamicPeriod(volValue, volAvgValue);
-		// Average gains and losses over the last `td` changes
+		// Average gains and losses over the last `td` changes (newest-first).
 		var sumGain = 0.0;
 		var sumLoss = 0.0;
-		for (i in (MAX_PERIOD - td)...MAX_PERIOD) {
-			var c = changes[i];
+		for (i in 0...td) {
+			var c = changes.at(i);
 			if (c > 0.0) {
 				sumGain += c;
 			} else if (c < 0.0) {
@@ -119,7 +117,7 @@ class DynamicMomentumIndex implements MuseIndicator<Float, Float> {
 		vol.reset();
 		volAvg.reset();
 		prevClose = null;
-		changes = [];
+		changes = new RingBuffer(MAX_PERIOD);
 		lastVolAvg = null;
 		lastValue = null;
 	}

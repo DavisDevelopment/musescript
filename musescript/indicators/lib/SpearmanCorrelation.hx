@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.SortedWindow;
 import musescript.types.MuseType;
 
 /**
@@ -20,48 +21,72 @@ import musescript.types.MuseType;
  * monotone co-movement (not just linear), −1 opposite movement. A window in
  * which one channel is constant has no rank dispersion and 0 is returned.
  * Output clamped to [−1, +1].
+ *
+ * SortedWindow invent (landed): dual value spines (`wx`/`wy`) stay ascending
+ * via binary insert/remove. Per-chrono mid-ranks materialize without
+ * `Array.sort` by (1) walking the sorted multiset for mid-tie groups into
+ * `midAt[sortedPos]`, then (2) lower_bound of each chrono value into that
+ * table. Equal values share one mid — tie order in the spine does not matter.
+ * Full Pearson over the rank arrays is kept (Δ-Pearson of ranks stays
+ * ULP-hostile through five sums + √; do not invent it). Proven bit-lock vs
+ * IndicatorGolden + port suite.
  */
 class SpearmanCorrelation implements MuseIndicator<SpearmanPair, Float> {
 	var period:Int;
-	var window:Array<SpearmanPair>;
+	var wx:SortedWindow;
+	var wy:SortedWindow;
 	var rx:Array<Float>;
 	var ry:Array<Float>;
+	/** Mid-rank at each position of the current sorted spine (length = period when ready). */
+	var midAt:Array<Float>;
 
 	public function new(period:Int) {
 		if (period < 2) throw "SpearmanCorrelation: period must be >= 2";
 		this.period = period;
-		window = [];
+		wx = new SortedWindow(period);
+		wy = new SortedWindow(period);
 		rx = [for (_ in 0...period) 0.0];
 		ry = [for (_ in 0...period) 0.0];
+		midAt = [for (_ in 0...period) 0.0];
 	}
 
 	/**
-	 * Fill `ranksOut[originalIndex] = rank` for the supplied values, using
-	 * mid-ranks for ties.
+	 * Fill `ranksOut[chronoIndex] = mid-rank` from a SortedWindow's ascending
+	 * spine + chronological ring — same mid-tie formula as the former
+	 * scratch.sort `rankInto`.
 	 */
-	static function rankInto(values:Array<Float>, ranksOut:Array<Float>):Void {
-		var scratch = [for (i in 0...values.length) { v: values[i], idx: i }];
-		scratch.sort((a, b) -> a.v < b.v ? -1 : (a.v > b.v ? 1 : 0));
-		var n = scratch.length;
+	function rankFromWindow(w:SortedWindow, ranksOut:Array<Float>):Void {
+		var sorted = w.sorted;
+		var n = sorted.length;
 		var i = 0;
 		while (i < n) {
 			var j = i + 1;
-			while (j < n && scratch[j].v == scratch[i].v) j++;
+			while (j < n && sorted[j] == sorted[i]) j++;
 			// Mid-rank of positions [i, j−1] in 1-indexed terms: (i + 1 + j) / 2.
 			var mid = (i + 1.0 + j) / 2.0;
-			for (k in i...j) ranksOut[scratch[k].idx] = mid;
+			for (k in i...j) midAt[k] = mid;
 			i = j;
+		}
+		for (ci in 0...n) {
+			var v = w.oldest(ci);
+			var lo = 0;
+			var hi = n;
+			while (lo < hi) {
+				var m = (lo + hi) >> 1;
+				if (sorted[m] < v) lo = m + 1;
+				else hi = m;
+			}
+			ranksOut[ci] = midAt[lo];
 		}
 	}
 
 	public function update(input:SpearmanPair):Null<Float> {
 		if (!Math.isFinite(input.x) || !Math.isFinite(input.y)) return null;
-		if (window.length == period) window.shift();
-		window.push({ x: input.x, y: input.y });
-		if (window.length < period) return null;
-		// Rank each channel.
-		rankInto([for (p in window) p.x], rx);
-		rankInto([for (p in window) p.y], ry);
+		wx.push(input.x);
+		wy.push(input.y);
+		if (wx.length < period) return null;
+		rankFromWindow(wx, rx);
+		rankFromWindow(wy, ry);
 		// Pearson over the rank arrays (mid-ranks make the closed forms
 		// inapplicable; the generic Pearson keeps the code uniform).
 		var n:Float = period;
@@ -91,13 +116,15 @@ class SpearmanCorrelation implements MuseIndicator<SpearmanPair, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		wx = new SortedWindow(period);
+		wy = new SortedWindow(period);
 		rx = [for (_ in 0...period) 0.0];
 		ry = [for (_ in 0...period) 0.0];
+		midAt = [for (_ in 0...period) 0.0];
 	}
 
 	public function warmupPeriod():Int return period;
-	public function isReady():Bool return window.length == period;
+	public function isReady():Bool return wx.length == period;
 	public function name():String return "SpearmanCorrelation";
 
 	public static function spec():IndicatorSpec {

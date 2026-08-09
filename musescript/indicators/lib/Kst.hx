@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.prim.Sma;
 import musescript.types.MuseType;
 
@@ -19,31 +20,30 @@ import musescript.types.MuseType;
 class Kst implements MuseIndicator<Float, Float> {
 	var rocPeriods:Array<Int>;
 	var smas:Array<Sma>;
-	var history:Array<Float>;
+	var history:RingBuffer<Float>;
+	var maxRoc:Int;
 
 	public function new(rocPeriods:Array<Int>, smaPeriods:Array<Int>) {
 		if (rocPeriods.length != 4 || smaPeriods.length != 4) throw "Kst: exactly 4 ROC/SMA periods required";
 		this.rocPeriods = rocPeriods;
 		smas = [for (p in smaPeriods) new Sma(p)];
-		history = [];
+		maxRoc = 0;
+		for (p in rocPeriods) if (p > maxRoc) maxRoc = p;
+		history = new RingBuffer(maxRoc + 1);
 	}
 
 	public function update(price:Float):Null<Float> {
 		if (!Math.isFinite(price)) return null;
-		var maxRoc = 0;
-		for (p in rocPeriods) if (p > maxRoc) maxRoc = p;
 
 		history.push(price);
-		if (history.length > maxRoc + 1) history.shift();
 
 		var total = 0.0;
 		var anyMissing = false;
 		for (k in 0...4) {
 			var rocPeriod = rocPeriods[k];
-			var n = history.length;
-			if (n <= rocPeriod) { anyMissing = true; continue; }
-			var past = history[n - 1 - rocPeriod];
-			var cur = history[n - 1];
+			if (history.length <= rocPeriod) { anyMissing = true; continue; }
+			var past = history.at(rocPeriod);
+			var cur = history.at(0);
 			var roc = past == 0.0 ? 0.0 : (cur - past) / past * 100.0;
 			var rcma = smas[k].update(roc);
 			if (rcma == null) { anyMissing = true; continue; }
@@ -54,7 +54,7 @@ class Kst implements MuseIndicator<Float, Float> {
 
 	public function reset():Void {
 		for (s in smas) s.reset();
-		history = [];
+		history = new RingBuffer(maxRoc + 1);
 	}
 
 	public function warmupPeriod():Int {

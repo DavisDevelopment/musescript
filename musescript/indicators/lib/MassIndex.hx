@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.prim.Ema;
 import musescript.types.MuseType;
 
@@ -21,7 +22,7 @@ class MassIndex implements MuseIndicator<Bar, Float> {
 	var ema1:Ema;
 	var ema2:Ema;
 	var period:Int;
-	var ratioWindow:Array<Float>;
+	var ratioWindow:RingBuffer<Float>;
 	var sum:Float;
 
 	public function new(emaPeriod:Int, period:Int) {
@@ -29,7 +30,7 @@ class MassIndex implements MuseIndicator<Bar, Float> {
 		ema1 = new Ema(emaPeriod);
 		ema2 = new Ema(emaPeriod);
 		this.period = period;
-		ratioWindow = [];
+		ratioWindow = new RingBuffer(period);
 		sum = 0.0;
 	}
 
@@ -40,8 +41,9 @@ class MassIndex implements MuseIndicator<Bar, Float> {
 		if (r2 == null) return null;
 		var ratio = r2 == 0.0 ? 0.0 : r1 / r2;
 
-		if (ratioWindow.length == period) sum -= ratioWindow.shift();
-		ratioWindow.push(ratio);
+		var wasFull = ratioWindow.isFull();
+		var old = ratioWindow.push(ratio);
+		if (wasFull) sum -= old;
 		sum += ratio;
 
 		if (ratioWindow.length < period) return null;
@@ -51,7 +53,7 @@ class MassIndex implements MuseIndicator<Bar, Float> {
 	public function reset():Void {
 		ema1.reset();
 		ema2.reset();
-		ratioWindow = [];
+		ratioWindow = new RingBuffer(period);
 		sum = 0.0;
 	}
 

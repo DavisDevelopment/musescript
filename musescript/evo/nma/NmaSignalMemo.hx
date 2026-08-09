@@ -71,6 +71,8 @@ class NmaSignalMemo {
 		d.float(costBps);
 		d.float(initialCash);
 		d.float(equityFloor);
+		// Annualization is part of the scored Sharpe — different periodsPerYear must not share memos.
+		d.float(musescript.harness.Metrics.periodsPerYear);
 		NmaSignalPack.mixColumns(d, eL, eS, xL, xS, sz, ctx.n);
 		d.finishWords();
 		return true;

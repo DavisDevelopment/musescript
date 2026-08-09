@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /** Bollinger Bands output: upper/middle/lower bands. */
@@ -24,7 +25,7 @@ typedef BollingerOutput = {
 class Bollinger implements MuseIndicator<Float, BollingerOutput> {
 	var period:Int;
 	var numStdDev:Float;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var sum:Float;
 	var sumSq:Float;
 
@@ -38,12 +39,13 @@ class Bollinger implements MuseIndicator<Float, BollingerOutput> {
 
 	public function update(input:Float):Null<BollingerOutput> {
 		if (!Math.isFinite(input)) return null;
-		if (window.length == period) {
-			var old = window.shift();
+		// Fullness checked before push — `Null<Float>` of `0.0` is nullish on JS.
+		var wasFull = window.isFull();
+		var old = window.push(input);
+		if (wasFull) {
 			sum -= old;
 			sumSq -= old * old;
 		}
-		window.push(input);
 		sum += input;
 		sumSq += input * input;
 		if (window.length < period) return null;
@@ -55,7 +57,7 @@ class Bollinger implements MuseIndicator<Float, BollingerOutput> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 		sum = 0.0;
 		sumSq = 0.0;
 	}

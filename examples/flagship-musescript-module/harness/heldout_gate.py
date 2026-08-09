@@ -140,6 +140,24 @@ def score(path: Path) -> dict:
     }
 
 
+def _paired_ci(diffs: list[float], reps: int = 20000, alpha: float = 0.05, seed: int = 7):
+    """Percentile bootstrap CI on the mean paired difference. No correlation inflation:
+    the paired differences are measured to be ~uncorrelated across symbols (see
+    harness/gate_stats.py, `difference_effective_n`)."""
+    import random
+
+    rng = random.Random(seed)
+    n = len(diffs)
+    means = sorted(
+        sum(diffs[rng.randrange(n)] for _ in range(n)) / n for _ in range(reps)
+    )
+    return (
+        statistics.mean(diffs),
+        means[int(alpha / 2 * reps)],
+        means[int((1 - alpha / 2) * reps)],
+    )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("strategy", help="relative path under strategies/, e.g. strategies/flagship_v7g.ms")
@@ -180,17 +198,51 @@ def main() -> int:
         return 2
 
     baseline = json.loads(BASELINE_PATH.read_text())
-    regressed = (
-        result["pass"] < baseline["pass"]
-        or (result["mean_d_sharpe"] or -999) < (baseline["mean_d_sharpe"] or -999) - 0.02  # small noise tolerance
-    )
     print(f"\nbaseline ({baseline['strategy']}): {baseline['pass']}/{baseline['total']} "
           f"(mean d_sharpe {baseline['mean_d_sharpe']:+.3f})")
-    if regressed:
-        print("GATE: REGRESSED vs. baseline - do not promote without understanding why.")
-        return 1
-    print("GATE: no regression vs. baseline.")
-    return 0
+
+    # --- Paired verdict -------------------------------------------------------
+    # The old gate compared MARGINAL means with a 0.02 tolerance and counted passes,
+    # treating 54 symbols as 54 independent observations. They are not: mean pairwise
+    # return correlation ~0.13 leaves ~7 effective bets, so the honest SE on a marginal
+    # mean is ~0.39 -- twenty times that tolerance. Worse, the pass count is a triple-
+    # threshold statistic that flips many symbols on a shift far too small to be real
+    # (v2 sat 0.08 SE from v1 on mean d_sharpe while its pass count collapsed 13 -> 3).
+    #
+    # Comparing the SAME symbols pairwise cancels the common market factor. Measured
+    # residual cross-symbol correlation of the differences is ~-0.01, i.e. effective
+    # n back to ~54 -- a 2.8x tighter interval for free. See harness/gate_stats.py.
+    base_d = {c["symbol"]: c["d_sharpe"] for c in baseline["cells"] if c.get("ok")}
+    cand_d = {c["symbol"]: c["d_sharpe"] for c in result["cells"] if c.get("ok")}
+    shared = sorted(set(base_d) & set(cand_d))
+    verdict, code = "INDISTINGUISHABLE", 0
+    if len(shared) >= 8:
+        diffs = [cand_d[s] - base_d[s] for s in shared]
+        m, lo, hi = _paired_ci(diffs)
+        better = sum(1 for d in diffs if d > 0)
+        print(f"\npaired vs. baseline over {len(shared)} shared symbols:")
+        print(f"  mean d_sharpe difference : {m:+.3f}  95% CI [{lo:+.3f}, {hi:+.3f}]")
+        print(f"  symbols improved         : {better}/{len(diffs)}")
+        if hi < 0:
+            verdict, code = "REGRESSED", 1
+        elif lo > 0:
+            verdict, code = "IMPROVED", 0
+
+    if verdict == "REGRESSED":
+        print("GATE: REGRESSED vs. baseline (difference resolved below zero) - do not promote.")
+    elif verdict == "IMPROVED":
+        print("GATE: IMPROVED vs. baseline (difference resolved above zero).")
+    else:
+        print("GATE: INDISTINGUISHABLE from baseline - the held-out set cannot resolve this")
+        print("      change. That is NOT a pass: it means you have no evidence either way.")
+        print("      Promoting on an unresolved difference is how v6l -> v7h happened.")
+
+    # The point-estimate direction, kept visible but explicitly NOT the verdict.
+    if result["pass"] < baseline["pass"] or (result["mean_d_sharpe"] or -999) < (baseline["mean_d_sharpe"] or -999):
+        print(f"      (point estimates are worse: {result['pass']}/{result['total']} vs "
+              f"{baseline['pass']}/{baseline['total']}, mean {result['mean_d_sharpe']:+.3f} vs "
+              f"{baseline['mean_d_sharpe']:+.3f} -- directional evidence only.)")
+    return code
 
 
 if __name__ == "__main__":

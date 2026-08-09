@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -24,20 +25,18 @@ import musescript.types.MuseType;
 class Frama implements MuseIndicator<Float, Float> {
 	var period:Int;
 	var half:Int;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var current:Null<Float>;
 
 	public function new(period:Int) {
 		if (period < 4 || period % 2 != 0) throw "Frama: period must be an even number >= 4";
 		this.period = period;
 		half = Std.int(period / 2);
-		window = [];
-		current = null;
+		reset();
 	}
 
 	public function update(price:Float):Null<Float> {
 		if (!Math.isFinite(price)) return current;
-		if (window.length == period) window.shift();
 		window.push(price);
 
 		if (current == null) {
@@ -46,12 +45,9 @@ class Frama implements MuseIndicator<Float, Float> {
 		}
 		if (window.length < period) return null;
 
-		var firstHalf = window.slice(0, half);
-		var secondHalf = window.slice(half, period);
-
-		var n1 = rangeOver(firstHalf) / half;
-		var n2 = rangeOver(secondHalf) / half;
-		var n3 = rangeOver(window) / period;
+		var n1 = rangeOver(window, 0, half) / half;
+		var n2 = rangeOver(window, half, period) / half;
+		var n3 = rangeOver(window, 0, period) / period;
 
 		var alpha = 1.0;
 		if (n1 + n2 > 0.0 && n3 > 0.0) {
@@ -65,18 +61,20 @@ class Frama implements MuseIndicator<Float, Float> {
 		return current;
 	}
 
-	static function rangeOver(vals:Array<Float>):Float {
-		var hi = vals[0];
-		var lo = vals[0];
-		for (v in vals) {
-			if (v > hi) hi = v;
-			if (v < lo) lo = v;
+	/** Range over `window.oldest(lo)..oldest(hi-1)` (Array-equivalent indexing). */
+	static function rangeOver(window:RingBuffer<Float>, lo:Int, hi:Int):Float {
+		var hiV = window.oldest(lo);
+		var loV = hiV;
+		for (i in (lo + 1)...hi) {
+			var v = window.oldest(i);
+			if (v > hiV) hiV = v;
+			if (v < loV) loV = v;
 		}
-		return hi - lo;
+		return hiV - loV;
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 		current = null;
 	}
 

@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.SortedWindow;
 import musescript.types.MuseType;
 
 /**
@@ -16,12 +17,12 @@ import musescript.types.MuseType;
  *   result = sorted[⌊h⌋] + (h − ⌊h⌋) · (sorted[⌊h⌋ + 1] − sorted[⌊h⌋])
  *
  * `quantile = 0.0` returns the window minimum, `0.5` the median, `1.0` the
- * maximum. Each update copies the window into a scratch buffer and sorts it.
+ * maximum. Sorted state is maintained incrementally via `SortedWindow`.
  */
 class RollingQuantile implements MuseIndicator<Float, Float> {
 	var period:Int;
 	var quantile:Float;
-	var window:Array<Float>;
+	var window:SortedWindow;
 
 	public function new(period:Int, quantile:Float) {
 		if (period <= 0) throw "RollingQuantile: period must be > 0";
@@ -29,35 +30,23 @@ class RollingQuantile implements MuseIndicator<Float, Float> {
 			throw "RollingQuantile: quantile must be a finite value in [0.0, 1.0]";
 		this.period = period;
 		this.quantile = quantile;
-		window = [];
+		window = new SortedWindow(period);
 	}
 
 	/** Linearly-interpolated quantile of a sorted, non-empty array (type-7). */
 	public static function quantileSorted(sorted:Array<Float>, quantile:Float):Float {
-		var n = sorted.length;
-		if (n == 1) return sorted[0];
-		var h = (n - 1) * quantile;
-		var lower = Math.ffloor(h);
-		var idx = Std.int(lower);
-		// When quantile == 1.0, h == n − 1 and the interpolation neighbour
-		// would be out of bounds — return the top.
-		if (idx >= n - 1) return sorted[n - 1];
-		var frac = h - lower;
-		return sorted[idx] + frac * (sorted[idx + 1] - sorted[idx]);
+		return SortedWindow.quantileSorted(sorted, quantile);
 	}
 
 	public function update(value:Float):Null<Float> {
 		if (!Math.isFinite(value)) return null;
-		if (window.length == period) window.shift();
 		window.push(value);
 		if (window.length < period) return null;
-		var scratch = window.copy();
-		scratch.sort((a, b) -> a < b ? -1 : (a > b ? 1 : 0));
-		return quantileSorted(scratch, quantile);
+		return window.quantile(quantile);
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new SortedWindow(period);
 	}
 
 	public function warmupPeriod():Int return period;

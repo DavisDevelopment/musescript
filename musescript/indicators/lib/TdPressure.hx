@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -17,8 +18,8 @@ import musescript.types.MuseType;
  */
 class TdPressure implements MuseIndicator<Bar, Float> {
 	var period:Int;
-	var pressures:Array<Float>;
-	var volumes:Array<Float>;
+	var pressures:RingBuffer<Float>;
+	var volumes:RingBuffer<Float>;
 	var lastValue:Null<Float>;
 
 	public function new(period:Int) {
@@ -37,10 +38,6 @@ class TdPressure implements MuseIndicator<Bar, Float> {
 		var range = bar.high - bar.low;
 		var barPressure = range > 0.0 ? ((bar.close - bar.open) / range) * bar.volume : 0.0;
 
-		if (pressures.length == period) {
-			pressures.shift();
-			volumes.shift();
-		}
 		pressures.push(barPressure);
 		volumes.push(bar.volume);
 		if (pressures.length < period) return null;
@@ -56,8 +53,8 @@ class TdPressure implements MuseIndicator<Bar, Float> {
 	}
 
 	public function reset():Void {
-		pressures = [];
-		volumes = [];
+		pressures = new RingBuffer(period);
+		volumes = new RingBuffer(period);
 		lastValue = null;
 	}
 

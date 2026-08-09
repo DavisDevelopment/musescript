@@ -4,6 +4,24 @@ Embedded DSL for algorithmic trading workstations and strategy discovery.
 
 Built on vendored [hscript](https://github.com/HaxeFoundation/hscript) **2.7.0**.
 
+**Family map:** [`../README.md`](../README.md) (muse-lab) · monorepo [`../../README.md`](../../README.md)  
+**Collaborator workflow:** [CONTRIBUTING.md](CONTRIBUTING.md) (branches, landmines, docs truth vs scratch)
+
+| You want… | Go here |
+|-----------|---------|
+| Clone / build / test | [Setup](#setup) + [Quick start](#quick-start) below |
+| How to open a PR / what not to commit | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| Op×engine honesty claims | [docs/ENGINE_MATRIX.md](docs/ENGINE_MATRIX.md) |
+| Language surface & API reference | Remainder of this README |
+| Python GP harness | Sibling [`../musegene/`](../musegene/) |
+| Proprietary evo/distill layer | Sibling [`../musescript-kestrel/`](../musescript-kestrel/) (private) |
+| Flagship strategy research | [`examples/flagship-musescript-module/`](examples/flagship-musescript-module/) — research, not the unit-test gate |
+| Aggregated backlog | [`OPEN_ITEMS.md`](OPEN_ITEMS.md) — triage, not a product contract |
+
+This repo is the **open language core**. Product UI lives in the Mederos app (`mobile/`); Kalshi
+advisor UI lives in `kalshi-ai-advisor/`. Private packages (Kestrel, Murmuration) are out-of-tree
+or gitignored — public `build-cli.hxml` must stay green without them.
+
 ## Requirements
 
 - Haxe **5.0.0-preview.1** (see `.haxerc`)
@@ -15,8 +33,16 @@ Built on vendored [hscript](https://github.com/HaxeFoundation/hscript) **2.7.0**
 ## Setup
 
 ```powershell
+haxelib install utest
+haxelib install hxnodejs
 haxelib dev musescript .
 .\run.ps1 venv          # creates .venv + installs requirements.txt (numba, numpy, wasmtime)
+```
+
+Headless fitness CLI (needed by MuseGene and flagship harness):
+
+```powershell
+haxe build-cli.hxml     # -> build/js/gene-runner.js
 ```
 
 ## Quick start

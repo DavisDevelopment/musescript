@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -24,13 +25,13 @@ class PairSpreadZScore implements MuseIndicator<PairSpreadPair, Float> {
 	var betaPeriod:Int;
 	var zPeriod:Int;
 	// Rolling OLS of y = ln(a) on x = ln(b).
-	var reg:Array<PairSpreadXY>;
+	var reg:RingBuffer<PairSpreadXY>;
 	var sumX:Float;
 	var sumY:Float;
 	var sumXx:Float;
 	var sumXy:Float;
 	// Rolling mean/variance of the spread.
-	var spreads:Array<Float>;
+	var spreads:RingBuffer<Float>;
 	var sumS:Float;
 	var sumSs:Float;
 
@@ -55,12 +56,12 @@ class PairSpreadZScore implements MuseIndicator<PairSpreadPair, Float> {
 	}
 
 	function pushSpread(s:Float):Null<Float> {
-		if (spreads.length == zPeriod) {
-			var old = spreads.shift();
+		var wasFull = spreads.isFull();
+		var old = spreads.push(s);
+		if (wasFull) {
 			sumS -= old;
 			sumSs -= old * old;
 		}
-		spreads.push(s);
 		sumS += s;
 		sumSs += s * s;
 		if (spreads.length < zPeriod) return null;
@@ -82,14 +83,14 @@ class PairSpreadZScore implements MuseIndicator<PairSpreadPair, Float> {
 		}
 		var x = Math.log(b);
 		var y = Math.log(a);
-		if (reg.length == betaPeriod) {
-			var old = reg.shift();
+		var wasFull = reg.isFull();
+		var old = reg.push({ x: x, y: y });
+		if (wasFull) {
 			sumX -= old.x;
 			sumY -= old.y;
 			sumXx -= old.x * old.x;
 			sumXy -= old.x * old.y;
 		}
-		reg.push({ x: x, y: y });
 		sumX += x;
 		sumY += y;
 		sumXx += x * x;
@@ -101,12 +102,12 @@ class PairSpreadZScore implements MuseIndicator<PairSpreadPair, Float> {
 	}
 
 	public function reset():Void {
-		reg = [];
+		reg = new RingBuffer(betaPeriod);
 		sumX = 0.0;
 		sumY = 0.0;
 		sumXx = 0.0;
 		sumXy = 0.0;
-		spreads = [];
+		spreads = new RingBuffer(zPeriod);
 		sumS = 0.0;
 		sumSs = 0.0;
 	}

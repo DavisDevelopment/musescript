@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /** Elder SafeZone output: the long and short stop levels. */
@@ -31,43 +32,35 @@ class ElderSafezone implements MuseIndicator<Bar, ElderSafezoneOutput> {
 	var hasPrev:Bool;
 	var prevHigh:Float;
 	var prevLow:Float;
-	var downPenetrations:Array<Float>;
-	var upPenetrations:Array<Float>;
+	var downPenetrations:RingBuffer<Float>;
+	var upPenetrations:RingBuffer<Float>;
 	var sumDown:Float;
 	var sumUp:Float;
-	var highs:Array<Float>;
-	var lows:Array<Float>;
+	var highs:RingBuffer<Float>;
+	var lows:RingBuffer<Float>;
 
 	public function new(period:Int, coefficient:Float) {
 		if (period <= 0) throw "ElderSafezone: period must be > 0";
 		if (!Math.isFinite(coefficient) || coefficient <= 0.0) throw "ElderSafezone: coefficient must be positive and finite";
 		this.period = period;
 		this.coefficient = coefficient;
-		hasPrev = false;
-		prevHigh = 0.0;
-		prevLow = 0.0;
-		downPenetrations = [];
-		upPenetrations = [];
-		sumDown = 0.0;
-		sumUp = 0.0;
-		highs = [];
-		lows = [];
+		reset();
 	}
 
 	public function update(bar:Bar):Null<ElderSafezoneOutput> {
-		if (highs.length == period) highs.shift();
 		highs.push(bar.high);
-		if (lows.length == period) lows.shift();
 		lows.push(bar.low);
 
 		if (hasPrev) {
 			var down = Math.max(0.0, prevLow - bar.low);
 			var up = Math.max(0.0, bar.high - prevHigh);
-			if (downPenetrations.length == period) sumDown -= downPenetrations.shift();
-			downPenetrations.push(down);
+			var wasFullDown = downPenetrations.isFull();
+			var oldDown = downPenetrations.push(down);
+			if (wasFullDown) sumDown -= oldDown;
 			sumDown += down;
-			if (upPenetrations.length == period) sumUp -= upPenetrations.shift();
-			upPenetrations.push(up);
+			var wasFullUp = upPenetrations.isFull();
+			var oldUp = upPenetrations.push(up);
+			if (wasFullUp) sumUp -= oldUp;
 			sumUp += up;
 		}
 		prevHigh = bar.high;
@@ -76,10 +69,16 @@ class ElderSafezone implements MuseIndicator<Bar, ElderSafezoneOutput> {
 
 		if (highs.length < period || downPenetrations.length < period) return null;
 
-		var hh = highs[0];
-		for (v in highs) if (v > hh) hh = v;
-		var ll = lows[0];
-		for (v in lows) if (v < ll) ll = v;
+		var hh = highs.oldest(0);
+		for (i in 1...highs.length) {
+			var v = highs.oldest(i);
+			if (v > hh) hh = v;
+		}
+		var ll = lows.oldest(0);
+		for (i in 1...lows.length) {
+			var v = lows.oldest(i);
+			if (v < ll) ll = v;
+		}
 
 		var avgDown = sumDown / period;
 		var avgUp = sumUp / period;
@@ -90,12 +89,12 @@ class ElderSafezone implements MuseIndicator<Bar, ElderSafezoneOutput> {
 		hasPrev = false;
 		prevHigh = 0.0;
 		prevLow = 0.0;
-		downPenetrations = [];
-		upPenetrations = [];
+		downPenetrations = new RingBuffer(period);
+		upPenetrations = new RingBuffer(period);
 		sumDown = 0.0;
 		sumUp = 0.0;
-		highs = [];
-		lows = [];
+		highs = new RingBuffer(period);
+		lows = new RingBuffer(period);
 	}
 
 	public function warmupPeriod():Int return period + 1;

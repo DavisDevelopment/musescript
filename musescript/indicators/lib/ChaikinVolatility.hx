@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.prim.Ema;
 import musescript.types.MuseType;
 
@@ -21,13 +22,13 @@ import musescript.types.MuseType;
 class ChaikinVolatility implements MuseIndicator<Bar, Float> {
 	var ema:Ema;
 	var rocPeriod:Int;
-	var history:Array<Float>;
+	var history:RingBuffer<Float>;
 
 	public function new(emaPeriod:Int, rocPeriod:Int) {
 		if (rocPeriod <= 0) throw "ChaikinVolatility: rocPeriod must be > 0";
 		ema = new Ema(emaPeriod);
 		this.rocPeriod = rocPeriod;
-		history = [];
+		history = new RingBuffer(rocPeriod + 1);
 	}
 
 	public function update(bar:Bar):Null<Float> {
@@ -35,17 +36,16 @@ class ChaikinVolatility implements MuseIndicator<Bar, Float> {
 		if (smoothed == null) return null;
 
 		history.push(smoothed);
-		if (history.length > rocPeriod + 1) history.shift();
 		if (history.length <= rocPeriod) return null;
 
-		var past = history[0];
+		var past = history.oldest(0);
 		if (past == 0.0) return 0.0;
 		return (smoothed - past) / past * 100.0;
 	}
 
 	public function reset():Void {
 		ema.reset();
-		history = [];
+		history = new RingBuffer(rocPeriod + 1);
 	}
 
 	public function warmupPeriod():Int return ema.period + rocPeriod;

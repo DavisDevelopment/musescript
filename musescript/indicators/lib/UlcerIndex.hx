@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -29,7 +30,9 @@ class UlcerIndex implements MuseIndicator<Float, Float> {
 	var count:Int;
 	/** Monotonically-decreasing deque of `{i, v}` over the trailing window. */
 	var maxDq:Array<{i:Int, v:Float}>;
-	var drawdownsSq:Array<Float>;
+	/** Logical head into `maxDq` (expired fronts advance the head). */
+	var maxDqHead:Int;
+	var drawdownsSq:RingBuffer<Float>;
 	var sumSq:Float;
 	var last:Null<Float>;
 
@@ -49,20 +52,26 @@ class UlcerIndex implements MuseIndicator<Float, Float> {
 		}
 		count++;
 		// Drop tail entries dominated by `input` (<= and at least as old).
-		while (maxDq.length > 0 && maxDq[maxDq.length - 1].v <= input) maxDq.pop();
+		while (maxDq.length > maxDqHead && maxDq[maxDq.length - 1].v <= input) maxDq.pop();
 		maxDq.push({ i: count, v: input });
 		// Expire the head once it falls out of the trailing window.
 		var windowLo = count - (period - 1);
 		if (windowLo < 0) windowLo = 0;
-		while (maxDq.length > 0 && maxDq[0].i < windowLo) maxDq.shift();
+		while (maxDqHead < maxDq.length && maxDq[maxDqHead].i < windowLo) maxDqHead++;
+		// Compact occasionally so the backing array stays bounded.
+		if (maxDqHead > 0 && maxDqHead * 2 >= maxDq.length) {
+			maxDq = maxDq.slice(maxDqHead);
+			maxDqHead = 0;
+		}
 		if (count < period) return null;
 		// Front is the trailing max in O(1).
-		var maxPrice = maxDq[0].v;
+		var maxPrice = maxDq[maxDqHead].v;
 		var drawdown = maxPrice == 0.0 ? 0.0 : 100.0 * (input - maxPrice) / maxPrice;
 		var sq = drawdown * drawdown;
 
-		if (drawdownsSq.length == period) sumSq -= drawdownsSq.shift();
-		drawdownsSq.push(sq);
+		var wasFull = drawdownsSq.isFull();
+		var old = drawdownsSq.push(sq);
+		if (wasFull) sumSq -= old;
 		sumSq += sq;
 		if (drawdownsSq.length < period) return null;
 		var ui = Math.sqrt(sumSq / period);
@@ -73,7 +82,8 @@ class UlcerIndex implements MuseIndicator<Float, Float> {
 	public function reset():Void {
 		count = 0;
 		maxDq = [];
-		drawdownsSq = [];
+		maxDqHead = 0;
+		drawdownsSq = new RingBuffer(period);
 		sumSq = 0.0;
 		last = null;
 	}

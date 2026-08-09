@@ -16,6 +16,7 @@ class FlagshipEnsembleV3 extends muse.Strat {
   param regimeFloor: Scalar = 0.28
   param bearCut: Scalar = 0.22
   param trendRocLen: Window = 34
+  // ⚠ PERCENTAGE POINTS, not a fraction -- this is 0.07%, not 7%. See flagship_ensemble_v1.ms.
   param trendRocMin: Scalar = 0.07
   param trendEmaLen: Window = 34
 

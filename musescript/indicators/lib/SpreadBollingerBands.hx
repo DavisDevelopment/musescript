@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /** Spread Bollinger Bands output: middle/upper/lower bands plus %b. */
@@ -30,7 +31,7 @@ typedef SpreadBollingerBandsOutput = {
 class SpreadBollingerBands implements MuseIndicator<SpreadBbPair, SpreadBollingerBandsOutput> {
 	var period:Int;
 	var numStd:Float;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var sum:Float;
 	var sumSq:Float;
 
@@ -39,7 +40,7 @@ class SpreadBollingerBands implements MuseIndicator<SpreadBbPair, SpreadBollinge
 		if (!Math.isFinite(numStd) || numStd <= 0.0) throw "SpreadBollingerBands: num_std must be > 0";
 		this.period = period;
 		this.numStd = numStd;
-		window = [];
+		window = new RingBuffer(period);
 		sum = 0.0;
 		sumSq = 0.0;
 	}
@@ -49,12 +50,13 @@ class SpreadBollingerBands implements MuseIndicator<SpreadBbPair, SpreadBollinge
 		var b = input.b;
 		if (!Math.isFinite(a) || !Math.isFinite(b)) return null;
 		var spread = a - b;
-		if (window.length == period) {
-			var old = window.shift();
+		// Fullness checked before push — `Null<Float>` of `0.0` is nullish on JS.
+		var wasFull = window.isFull();
+		var old = window.push(spread);
+		if (wasFull) {
 			sum -= old;
 			sumSq -= old * old;
 		}
-		window.push(spread);
 		sum += spread;
 		sumSq += spread * spread;
 		if (window.length < period) return null;
@@ -70,7 +72,7 @@ class SpreadBollingerBands implements MuseIndicator<SpreadBbPair, SpreadBollinge
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 		sum = 0.0;
 		sumSq = 0.0;
 	}

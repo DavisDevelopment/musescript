@@ -4,7 +4,11 @@
 //
 // 1. Trend sleeve entry simplified: v1 required trendRegime AND a further 3-bar rising()
 //    confirmation before entering, which likely missed the early/fast part of a move — the
-//    regime gate itself (roc(34) > 7%) is already real confirmation. v2 enters as soon as the
+//    regime gate itself is already real confirmation. [⚠ 2026-08-07: this line originally read
+//    "roc(34) > 7%" -- wrong. MuseScript roc() returns percentage points, so the gate is
+//    roc(34) > 0.07%, i.e. barely a filter at all. That undercuts this whole rationale: the
+//    "confirmation" v2 dropped rising(close,3) in favour of was never strong. See
+//    results/BROAD8MO_REPORT.md, "Diagnosis session".] v2 enters as soon as the
 //    regime flips on while flat.
 // 2. Chop sleeve broadened + a genuine "let a big winner run" carve-out ported from v6l:
 //    v1's chop entry was ONLY the donchian breakout; v6l also has `bounceSig` (MACD-fast
@@ -23,6 +27,7 @@ class FlagshipEnsembleV2 extends muse.Strat {
   param regimeFloor: Scalar = 0.28
   param bearCut: Scalar = 0.22
   param trendRocLen: Window = 34
+  // ⚠ PERCENTAGE POINTS, not a fraction -- this is 0.07%, not 7%. See flagship_ensemble_v1.ms.
   param trendRocMin: Scalar = 0.07
   param trendEmaLen: Window = 34
 

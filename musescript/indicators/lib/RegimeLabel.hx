@@ -3,6 +3,8 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
+import musescript.indicators.SortedWindow;
 import musescript.types.MuseType;
 
 /**
@@ -11,16 +13,19 @@ import musescript.types.MuseType;
  *
  * Discrete {-1, 0, +1} classification of current volatility regime by quartile.
  * -1 = calm (vol < q1), +1 = stressed (vol > q3), 0 = normal.
+ *
+ * The lookback vol envelope is maintained via `SortedWindow` (order stats for
+ * Q1/Q3 without a per-bar re-sort). The return window for the inner sample
+ * vol still uses a plain Array — that path has no order-statistic sort.
  */
 class RegimeLabel implements MuseIndicator<Float, Float> {
 	var volPeriod:Int;
 	var lookback:Int;
 	var prevPrice:Null<Float>;
-	var retWindow:Array<Float>;
+	var retWindow:RingBuffer<Float>;
 	var retSum:Float;
 	var retSumSq:Float;
-	var volWindow:Array<Float>;
-	var scratch:Array<Float>;
+	var volWindow:SortedWindow;
 	var last:Null<Float>;
 
 	public function new(volPeriod:Int, lookback:Int) {
@@ -30,11 +35,10 @@ class RegimeLabel implements MuseIndicator<Float, Float> {
 		this.volPeriod = volPeriod;
 		this.lookback = lookback;
 		prevPrice = null;
-		retWindow = [];
+		retWindow = new RingBuffer(volPeriod);
 		retSum = 0.0;
 		retSumSq = 0.0;
-		volWindow = [];
-		scratch = [];
+		volWindow = new SortedWindow(lookback);
 		last = null;
 	}
 
@@ -55,13 +59,12 @@ class RegimeLabel implements MuseIndicator<Float, Float> {
 		var r = Math.log(input / prev);
 
 		// Roll the return window and its running moments
-		if (retWindow.length == volPeriod) {
-			var old = retWindow.shift();
+		var wasFull = retWindow.isFull();
+		var old = retWindow.push(r);
+		if (wasFull) {
 			retSum -= old;
 			retSumSq -= old * old;
 		}
-
-		retWindow.push(r);
 		retSum += r;
 		retSumSq += r * r;
 
@@ -76,26 +79,13 @@ class RegimeLabel implements MuseIndicator<Float, Float> {
 		var variance = Math.max(0.0, (retSumSq - nf * mean * mean) / (nf - 1.0));
 		var vol = Math.sqrt(variance);
 
-		// Roll the volatility window
-		if (volWindow.length == lookback) {
-			volWindow.shift();
-		}
 		volWindow.push(vol);
-
 		if (volWindow.length < lookback) {
 			return null;
 		}
 
-		// Compute quartiles of the vol window
-		scratch = volWindow.copy();
-		scratch.sort((a, b) -> {
-			if (a < b) return -1;
-			if (a > b) return 1;
-			return 0;
-		});
-
-		var q1 = quantileSorted(scratch, 0.25);
-		var q3 = quantileSorted(scratch, 0.75);
+		var q1 = volWindow.quantile(0.25);
+		var q3 = volWindow.quantile(0.75);
 
 		// Classify
 		var label = if (vol < q1) {
@@ -110,32 +100,12 @@ class RegimeLabel implements MuseIndicator<Float, Float> {
 		return label;
 	}
 
-	/**
-	 * Linear interpolated quantile of a sorted array (type-7).
-	 */
-	static function quantileSorted(sorted:Array<Float>, quantile:Float):Float {
-		var n = sorted.length;
-		if (n == 1) return sorted[0];
-
-		var h = (n - 1) * quantile;
-		var lower = Math.floor(h);
-		var idx = Std.int(lower);
-
-		if (idx >= n - 1) {
-			return sorted[n - 1];
-		}
-
-		var frac = h - lower;
-		return sorted[idx] + frac * (sorted[idx + 1] - sorted[idx]);
-	}
-
 	public function reset():Void {
 		prevPrice = null;
-		retWindow = [];
+		retWindow = new RingBuffer(volPeriod);
 		retSum = 0.0;
 		retSumSq = 0.0;
-		volWindow = [];
-		scratch = [];
+		volWindow = new SortedWindow(lookback);
 		last = null;
 	}
 

@@ -135,7 +135,7 @@ class CceaCoEvo {
 		var skill = 0.0;
 		if (joint.projections != null && joint.projections.length > 0) {
 			var ps = Fitness.projectionScorePurged(joint, bars);
-			if (ps != null && Math.isFinite(ps)) skill = ps;
+			if (Math.isFinite(ps)) skill = ps;
 		}
 		return { trading: trading, skill: skill, joint: joint, fr: fr };
 	}

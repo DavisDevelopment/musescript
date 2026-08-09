@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -25,7 +26,7 @@ class AutocorrelationPeriodogram implements MuseIndicator<Float, Float> {
 	var minPeriod:Int;
 	var maxPeriod:Int;
 	var roof:RoofingFilter;
-	var buffer:Array<Float>;
+	var buffer:RingBuffer<Float>;
 	var r:Array<Float>;
 	var maxPwr:Float;
 	var last:Null<Float>;
@@ -37,7 +38,7 @@ class AutocorrelationPeriodogram implements MuseIndicator<Float, Float> {
 		this.minPeriod = minPeriod;
 		this.maxPeriod = maxPeriod;
 		this.roof = new RoofingFilter(10, maxPeriod);
-		this.buffer = [];
+		this.buffer = new RingBuffer(maxPeriod + AVG_LENGTH);
 		this.r = [for (_ in 0...maxPeriod + 1) 0.0];
 		this.maxPwr = 0.0;
 		this.last = null;
@@ -48,7 +49,7 @@ class AutocorrelationPeriodogram implements MuseIndicator<Float, Float> {
 		var len = buffer.length;
 		if (len < lag + AVG_LENGTH) return 0.0;
 		var filt = function(k:Int):Float {
-			return buffer[len - 1 - k];
+			return buffer.oldest(len - 1 - k);
 		};
 		var m = AVG_LENGTH;
 		var sx = 0.0, sy = 0.0, sxx = 0.0, syy = 0.0, sxy = 0.0;
@@ -76,9 +77,6 @@ class AutocorrelationPeriodogram implements MuseIndicator<Float, Float> {
 		}
 		var filt = roof.update(price);
 		if (filt == null) return null;
-		if (buffer.length == maxPeriod + AVG_LENGTH) {
-			buffer.shift();
-		}
 		buffer.push(filt);
 		if (buffer.length < maxPeriod + AVG_LENGTH) {
 			return null;
@@ -130,7 +128,7 @@ class AutocorrelationPeriodogram implements MuseIndicator<Float, Float> {
 
 	public function reset():Void {
 		roof.reset();
-		buffer = [];
+		buffer = new RingBuffer(maxPeriod + AVG_LENGTH);
 		for (i in 0...r.length) r[i] = 0.0;
 		maxPwr = 0.0;
 		last = null;

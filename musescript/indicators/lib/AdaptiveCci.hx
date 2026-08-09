@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -22,7 +23,7 @@ import musescript.types.MuseType;
  */
 class AdaptiveCci implements MuseIndicator<Bar, Float> {
 	var period:Int;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var mean:Null<Float>;
 	var last:Null<Float>;
 
@@ -30,16 +31,13 @@ class AdaptiveCci implements MuseIndicator<Bar, Float> {
 		if (period <= 0) throw "AdaptiveCci: period must be > 0";
 		if (period < 2) throw "AdaptiveCci: period must be >= 2 (efficiency ratio needs at least one step)";
 		this.period = period;
-		window = [];
+		window = new RingBuffer(period);
 		mean = null;
 		last = null;
 	}
 
 	public function update(bar:Bar):Null<Float> {
 		var tp = (bar.high + bar.low + bar.close) / 3.0;
-		if (window.length == period) {
-			window.shift();
-		}
 		window.push(tp);
 
 		if (window.length < period) return null;
@@ -47,17 +45,17 @@ class AdaptiveCci implements MuseIndicator<Bar, Float> {
 		var n = period;
 
 		// Efficiency ratio over the window.
-		var oldest = window[0];
+		var oldest = window.oldest(0);
 		var direction = Math.abs(tp - oldest);
 		var path = 0.0;
 		for (i in 0...(window.length - 1)) {
-			path += Math.abs(window[i + 1] - window[i]);
+			path += Math.abs(window.oldest(i + 1) - window.oldest(i));
 		}
 		var er = if (path > 0.0) {
 			Math.min(Math.max(direction / path, 0.0), 1.0);
 		} else {
 			0.0;
-		}
+		};
 
 		var fast = 2.0 / 3.0;
 		var slow = 2.0 / 31.0;
@@ -65,7 +63,7 @@ class AdaptiveCci implements MuseIndicator<Bar, Float> {
 
 		var newMean = if (mean == null) {
 			var sum = 0.0;
-			for (v in window) sum += v;
+			for (i in 0...window.length) sum += window.at(i);
 			sum / n;
 		} else {
 			mean + sc * (tp - mean);
@@ -73,8 +71,8 @@ class AdaptiveCci implements MuseIndicator<Bar, Float> {
 		mean = newMean;
 
 		var md = 0.0;
-		for (v in window) {
-			md += Math.abs(v - newMean);
+		for (i in 0...window.length) {
+			md += Math.abs(window.at(i) - newMean);
 		}
 		md /= n;
 
@@ -88,7 +86,7 @@ class AdaptiveCci implements MuseIndicator<Bar, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 		mean = null;
 		last = null;
 	}

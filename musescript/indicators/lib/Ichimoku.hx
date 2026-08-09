@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /** Ichimoku output: the five classic lines (unshifted — see class doc). */
@@ -34,23 +35,19 @@ class Ichimoku implements MuseIndicator<Bar, IchimokuOutput> {
 	var tenkanPeriod:Int;
 	var kijunPeriod:Int;
 	var senkouBPeriod:Int;
-	var highs:Array<Float>;
-	var lows:Array<Float>;
+	var highs:RingBuffer<Float>;
+	var lows:RingBuffer<Float>;
 
 	public function new(tenkanPeriod:Int, kijunPeriod:Int, senkouBPeriod:Int) {
 		if (tenkanPeriod <= 0 || kijunPeriod <= 0 || senkouBPeriod <= 0) throw "Ichimoku: all periods must be > 0";
 		this.tenkanPeriod = tenkanPeriod;
 		this.kijunPeriod = kijunPeriod;
 		this.senkouBPeriod = senkouBPeriod;
-		highs = [];
-		lows = [];
+		reset();
 	}
 
 	public function update(bar:Bar):Null<IchimokuOutput> {
-		var maxPeriod = maxOf(tenkanPeriod, maxOf(kijunPeriod, senkouBPeriod));
-		if (highs.length == maxPeriod) highs.shift();
 		highs.push(bar.high);
-		if (lows.length == maxPeriod) lows.shift();
 		lows.push(bar.low);
 
 		if (highs.length < senkouBPeriod || highs.length < kijunPeriod) return null;
@@ -65,11 +62,13 @@ class Ichimoku implements MuseIndicator<Bar, IchimokuOutput> {
 	function midpoint(period:Int):Float {
 		var n = highs.length;
 		var start = n - period;
-		var hh = highs[start];
-		var ll = lows[start];
+		var hh = highs.oldest(start);
+		var ll = lows.oldest(start);
 		for (i in start...n) {
-			if (highs[i] > hh) hh = highs[i];
-			if (lows[i] < ll) ll = lows[i];
+			var hv = highs.oldest(i);
+			var lv = lows.oldest(i);
+			if (hv > hh) hh = hv;
+			if (lv < ll) ll = lv;
 		}
 		return (hh + ll) / 2.0;
 	}
@@ -77,8 +76,9 @@ class Ichimoku implements MuseIndicator<Bar, IchimokuOutput> {
 	static inline function maxOf(a:Int, b:Int):Int return a > b ? a : b;
 
 	public function reset():Void {
-		highs = [];
-		lows = [];
+		var maxPeriod = maxOf(tenkanPeriod, maxOf(kijunPeriod, senkouBPeriod));
+		highs = new RingBuffer(maxPeriod);
+		lows = new RingBuffer(maxPeriod);
 	}
 
 	public function warmupPeriod():Int return maxOf(tenkanPeriod, maxOf(kijunPeriod, senkouBPeriod));

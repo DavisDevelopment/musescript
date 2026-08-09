@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -21,13 +22,13 @@ class GarmanKlass implements MuseIndicator<Bar, Float> {
 	static var TWO_LN2_MINUS_1:Float = 2.0 * Math.log(2.0) - 1.0;
 
 	var period:Int;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var sum:Float;
 
 	public function new(period:Int) {
 		if (period <= 0) throw "GarmanKlass: period must be > 0";
 		this.period = period;
-		window = [];
+		window = new RingBuffer(period);
 		sum = 0.0;
 	}
 
@@ -39,8 +40,10 @@ class GarmanKlass implements MuseIndicator<Bar, Float> {
 			perBar = 0.5 * hl * hl - TWO_LN2_MINUS_1 * co * co;
 		}
 
-		if (window.length == period) sum -= window.shift();
-		window.push(perBar);
+		// Fullness checked before push — `Null<Float>` of `0.0` is nullish on JS.
+		var wasFull = window.isFull();
+		var old = window.push(perBar);
+		if (wasFull) sum -= old;
 		sum += perBar;
 
 		if (window.length < period) return null;
@@ -49,7 +52,7 @@ class GarmanKlass implements MuseIndicator<Bar, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 		sum = 0.0;
 	}
 

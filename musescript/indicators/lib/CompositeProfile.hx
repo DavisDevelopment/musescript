@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /** CompositeProfile output: POC, VAH, VAL. */
@@ -24,7 +25,7 @@ class CompositeProfile implements MuseIndicator<Bar, CompositeProfileOutput> {
 	var period:Int;
 	var bins:Int;
 	var valueAreaPct:Float;
-	var window:Array<Bar>;
+	var window:RingBuffer<Bar>;
 	var last:Null<CompositeProfileOutput>;
 
 	public function new(period:Int, bins:Int, valueAreaPct:Float) {
@@ -35,14 +36,11 @@ class CompositeProfile implements MuseIndicator<Bar, CompositeProfileOutput> {
 		this.period = period;
 		this.bins = bins;
 		this.valueAreaPct = valueAreaPct;
-		this.window = [];
+		this.window = new RingBuffer(period);
 		this.last = null;
 	}
 
 	public function update(bar:Bar):Null<CompositeProfileOutput> {
-		if (window.length == period) {
-			window.shift();
-		}
 		window.push(bar);
 		if (window.length < period) return null;
 
@@ -125,7 +123,7 @@ class CompositeProfile implements MuseIndicator<Bar, CompositeProfileOutput> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 		last = null;
 	}
 

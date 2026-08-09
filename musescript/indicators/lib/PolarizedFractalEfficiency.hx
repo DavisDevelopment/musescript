@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.prim.Ema;
 import musescript.types.MuseType;
 
@@ -30,9 +31,9 @@ import musescript.types.MuseType;
 class PolarizedFractalEfficiency implements MuseIndicator<Float, Float> {
 	var period:Int;
 	var smoothing:Int;
-	var closes:Array<Float>;
+	var closes:RingBuffer<Float>;
 	var prev_close:Null<Float>;
-	var segments:Array<Float>;
+	var segments:RingBuffer<Float>;
 	var segment_sum:Float;
 	var ema:Ema;
 
@@ -40,9 +41,9 @@ class PolarizedFractalEfficiency implements MuseIndicator<Float, Float> {
 		if (period <= 0 || smoothing <= 0) throw "PolarizedFractalEfficiency: periods must be > 0";
 		this.period = period;
 		this.smoothing = smoothing;
-		closes = [];
+		closes = new RingBuffer(period + 1);
 		prev_close = null;
-		segments = [];
+		segments = new RingBuffer(period);
 		segment_sum = 0.0;
 		ema = new Ema(smoothing);
 	}
@@ -54,24 +55,22 @@ class PolarizedFractalEfficiency implements MuseIndicator<Float, Float> {
 			var prev = prev_close;
 			var diff = close - prev;
 			var segment = Math.sqrt(diff * diff + 1.0);
+			// Match prior Array order: add, then push, then subtract evicted —
+			// `(sum+new)-old` vs `(sum-old)+new` differs at ULP (golden-hostile).
+			// Fullness checked before push — `Null<Float>` of `0.0` is nullish on JS.
 			segment_sum += segment;
-			segments.push(segment);
-			if (segments.length > period) {
-				var removed = segments.shift();
-				segment_sum -= removed;
-			}
+			var segFull = segments.isFull();
+			var removed = segments.push(segment);
+			if (segFull) segment_sum -= removed;
 		}
 		prev_close = close;
 
 		closes.push(close);
-		if (closes.length > period + 1) {
-			closes.shift();
-		}
 		if (closes.length <= period) {
 			return null;
 		}
 
-		var oldest = closes[0];
+		var oldest = closes.oldest(0);
 		var net = close - oldest;
 		var direction = if (net > 0.0) {
 			1.0;
@@ -87,9 +86,9 @@ class PolarizedFractalEfficiency implements MuseIndicator<Float, Float> {
 	}
 
 	public function reset():Void {
-		closes = [];
+		closes = new RingBuffer(period + 1);
 		prev_close = null;
-		segments = [];
+		segments = new RingBuffer(period);
 		segment_sum = 0.0;
 		ema.reset();
 	}

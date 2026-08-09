@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -21,21 +22,20 @@ import musescript.types.MuseType;
  * otherwise.
  */
 class FallingThreeMethods implements MuseIndicator<Bar, Float> {
-	var buf:Array<Bar>;
+	var buf:RingBuffer<Bar>;
 
 	public function new() {
-		buf = [];
+		reset();
 	}
 
 	public function update(bar:Bar):Null<Float> {
 		buf.push(bar);
-		if (buf.length > 5) buf.shift();
 		if (buf.length < 5) return 0.0;
 		return compute(buf);
 	}
 
-	static function compute(w:Array<Bar>):Float {
-		var bar1 = w[0], bar2 = w[1], bar3 = w[2], bar4 = w[3], bar5 = w[4];
+	static function compute(w:RingBuffer<Bar>):Float {
+		var bar1 = w.oldest(0), bar2 = w.oldest(1), bar3 = w.oldest(2), bar4 = w.oldest(3), bar5 = w.oldest(4);
 		if (bar1.close >= bar1.open) return 0.0; // bar1 must be red
 		if (bar5.close >= bar5.open) return 0.0; // bar5 must be red
 
@@ -53,7 +53,7 @@ class FallingThreeMethods implements MuseIndicator<Bar, Float> {
 	}
 
 	public function reset():Void {
-		buf = [];
+		buf = new RingBuffer(5);
 	}
 
 	public function warmupPeriod():Int return 5;

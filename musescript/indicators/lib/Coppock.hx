@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.prim.Wma;
 import musescript.types.MuseType;
 
@@ -18,29 +19,27 @@ import musescript.types.MuseType;
 class Coppock implements MuseIndicator<Float, Float> {
 	var longRoc:Int;
 	var shortRoc:Int;
-	var history:Array<Float>;
+	var history:RingBuffer<Float>;
 	var wma:Wma;
 
 	public function new(longRoc:Int, shortRoc:Int, wmaPeriod:Int) {
 		if (longRoc <= 0 || shortRoc <= 0) throw "Coppock: ROC lookbacks must be > 0";
 		this.longRoc = longRoc;
 		this.shortRoc = shortRoc;
-		history = [];
+		var maxLookback = longRoc > shortRoc ? longRoc : shortRoc;
+		history = new RingBuffer(maxLookback + 1);
 		wma = new Wma(wmaPeriod);
 	}
 
 	public function update(price:Float):Null<Float> {
 		if (!Math.isFinite(price)) return null;
 		history.push(price);
-		var maxLookback = longRoc > shortRoc ? longRoc : shortRoc;
-		if (history.length > maxLookback + 1) history.shift();
 
 		if (history.length <= longRoc || history.length <= shortRoc) return null;
 
-		var n = history.length;
-		var longPast = history[n - 1 - longRoc];
-		var shortPast = history[n - 1 - shortRoc];
-		var cur = history[n - 1];
+		var longPast = history.at(longRoc);
+		var shortPast = history.at(shortRoc);
+		var cur = history.at(0);
 		if (longPast == 0.0 || shortPast == 0.0) return null;
 
 		var rocSum = (cur - longPast) / longPast * 100.0 + (cur - shortPast) / shortPast * 100.0;
@@ -48,7 +47,8 @@ class Coppock implements MuseIndicator<Float, Float> {
 	}
 
 	public function reset():Void {
-		history = [];
+		var maxLookback = longRoc > shortRoc ? longRoc : shortRoc;
+		history = new RingBuffer(maxLookback + 1);
 		wma.reset();
 	}
 

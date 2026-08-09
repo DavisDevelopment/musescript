@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -22,7 +23,7 @@ import musescript.types.MuseType;
 class RogersSatchell implements MuseIndicator<Bar, Float> {
 	var period:Int;
 	var tradingPeriods:Int;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var sum:Float;
 	var last:Null<Float>;
 
@@ -40,11 +41,10 @@ class RogersSatchell implements MuseIndicator<Bar, Float> {
 		var logLo = Math.log(candle.low / candle.open);
 		var sample = logHc * logHo + logLc * logLo;
 
-		if (window.length == period) {
-			var old = window.shift();
-			sum -= old;
-		}
-		window.push(sample);
+		// Fullness checked before push — `Null<Float>` of `0.0` is nullish on JS.
+		var wasFull = window.isFull();
+		var old = window.push(sample);
+		if (wasFull) sum -= old;
 		sum += sample;
 
 		if (window.length < period) return null;
@@ -60,7 +60,7 @@ class RogersSatchell implements MuseIndicator<Bar, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 		sum = 0.0;
 		last = null;
 	}

@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.prim.Ema;
 import musescript.types.MuseType;
 
@@ -20,14 +21,14 @@ class Zlema implements MuseIndicator<Float, Float> {
 	var period:Int;
 	var lag:Int;
 	/** Rolling buffer of the last `lag + 1` raw inputs, oldest at the front. */
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var ema:Ema;
 
 	public function new(period:Int) {
 		if (period <= 0) throw "Zlema: period must be > 0";
 		this.period = period;
 		this.lag = Std.int((period - 1) / 2);
-		window = [];
+		window = new RingBuffer(lag + 1);
 		ema = new Ema(period);
 	}
 
@@ -47,16 +48,15 @@ class Zlema implements MuseIndicator<Float, Float> {
 			// Non-finite input is ignored; state is left untouched.
 			return value();
 		}
-		if (window.length == lag + 1) window.shift();
 		window.push(input);
 		if (window.length < lag + 1) return null;
-		var lagged = window[0];
+		var lagged = window.oldest(0);
 		var deLagged = 2.0 * input - lagged;
 		return ema.update(deLagged);
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(lag + 1);
 		ema.reset();
 	}
 

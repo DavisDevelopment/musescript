@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /** Andrews Pitchfork output: median, upper, lower lines. */
@@ -37,7 +38,7 @@ private typedef Pivot = {
  */
 class AndrewsPitchfork implements MuseIndicator<Bar, AndrewsPitchforkOutput> {
 	var strength:Int;
-	var window:Array<Bar>;
+	var window:RingBuffer<Bar>;
 	var pivots:Array<Pivot>;
 	var count:Int;
 	var last:Null<AndrewsPitchforkOutput>;
@@ -45,7 +46,7 @@ class AndrewsPitchfork implements MuseIndicator<Bar, AndrewsPitchforkOutput> {
 	public function new(strength:Int) {
 		if (strength == 0) throw "AndrewsPitchfork: strength must be > 0";
 		this.strength = strength;
-		window = [];
+		window = new RingBuffer(2 * strength + 1);
 		pivots = [];
 		count = 0;
 		last = null;
@@ -55,23 +56,20 @@ class AndrewsPitchfork implements MuseIndicator<Bar, AndrewsPitchforkOutput> {
 		count += 1;
 		var span = 2 * strength + 1;
 
-		if (window.length == span) {
-			window.shift();
-		}
 		window.push(bar);
 
 		// Check for pivot at the center position.
 		if (window.length == span) {
 			var centerIdx = strength;
-			var center = window[centerIdx];
+			var center = window.oldest(centerIdx);
 
 			var isHigh = true;
 			var isLow = true;
 
 			for (i in 0...window.length) {
 				if (i != centerIdx) {
-					if (window[i].high >= center.high) isHigh = false;
-					if (window[i].low <= center.low) isLow = false;
+					if (window.oldest(i).high >= center.high) isHigh = false;
+					if (window.oldest(i).low <= center.low) isLow = false;
 				}
 			}
 
@@ -120,8 +118,9 @@ class AndrewsPitchfork implements MuseIndicator<Bar, AndrewsPitchforkOutput> {
 			}
 		}
 		pivots.push(pivot);
+		// Cap at 3 alternating pivots (drop oldest via slice).
 		if (pivots.length > 3) {
-			pivots.shift();
+			pivots = pivots.slice(1);
 		}
 	}
 
@@ -148,7 +147,7 @@ class AndrewsPitchfork implements MuseIndicator<Bar, AndrewsPitchforkOutput> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(2 * strength + 1);
 		pivots = [];
 		count = 0;
 		last = null;

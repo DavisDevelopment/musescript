@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -24,7 +25,7 @@ import musescript.types.MuseType;
 class RollingCorrelation implements MuseIndicator<RollingCorrelationPair, Float> {
 	var period:Int;
 	var prev:Null<RollingCorrelationPair>;
-	var window:Array<RollingCorrelationPair>;
+	var window:RingBuffer<RollingCorrelationPair>;
 	var sumX:Float;
 	var sumY:Float;
 	var sumXx:Float;
@@ -49,15 +50,15 @@ class RollingCorrelation implements MuseIndicator<RollingCorrelationPair, Float>
 		var rx = x - prev.x;
 		var ry = y - prev.y;
 		prev = { x: x, y: y };
-		if (window.length == period) {
-			var old = window.shift();
+		var wasFull = window.isFull();
+		var old = window.push({ x: rx, y: ry });
+		if (wasFull) {
 			sumX -= old.x;
 			sumY -= old.y;
 			sumXx -= old.x * old.x;
 			sumYy -= old.y * old.y;
 			sumXy -= old.x * old.y;
 		}
-		window.push({ x: rx, y: ry });
 		sumX += rx;
 		sumY += ry;
 		sumXx += rx * rx;
@@ -85,7 +86,7 @@ class RollingCorrelation implements MuseIndicator<RollingCorrelationPair, Float>
 
 	public function reset():Void {
 		prev = null;
-		window = [];
+		window = new RingBuffer(period);
 		sumX = 0.0;
 		sumY = 0.0;
 		sumXx = 0.0;

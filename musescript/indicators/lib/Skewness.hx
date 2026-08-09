@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -23,7 +24,7 @@ import musescript.types.MuseType;
  */
 class Skewness implements MuseIndicator<Float, Float> {
 	var period:Int;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var sum:Float;
 	var sumSq:Float;
 	var sumCu:Float;
@@ -36,13 +37,13 @@ class Skewness implements MuseIndicator<Float, Float> {
 
 	public function update(value:Float):Null<Float> {
 		if (!Math.isFinite(value)) return null;
-		if (window.length == period) {
-			var old = window.shift();
+		var wasFull = window.isFull();
+		var old = window.push(value);
+		if (wasFull) {
 			sum -= old;
 			sumSq -= old * old;
 			sumCu -= old * old * old;
 		}
-		window.push(value);
 		sum += value;
 		sumSq += value * value;
 		sumCu += value * value * value;
@@ -62,7 +63,7 @@ class Skewness implements MuseIndicator<Float, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 		sum = 0.0;
 		sumSq = 0.0;
 		sumCu = 0.0;

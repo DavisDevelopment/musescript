@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.lib.Bollinger;
 import musescript.indicators.prim.Atr;
 import musescript.indicators.prim.Sma;
@@ -37,9 +38,9 @@ class TtmSqueeze implements MuseIndicator<Bar, TtmSqueezeOutput> {
 	var bb:Bollinger;
 	var smaClose:Sma;
 	var atr:Atr;
-	var highs:Array<Float>;
-	var lows:Array<Float>;
-	var closes:Array<Float>;
+	var highs:RingBuffer<Float>;
+	var lows:RingBuffer<Float>;
+	var closes:RingBuffer<Float>;
 	// Pre-computed OLS constants over x = 0..period − 1.
 	var sumX:Float;
 	var denom:Float;
@@ -58,9 +59,7 @@ class TtmSqueeze implements MuseIndicator<Bar, TtmSqueezeOutput> {
 		bb = new Bollinger(period, bbMult);
 		smaClose = new Sma(period);
 		atr = new Atr(period);
-		highs = [];
-		lows = [];
-		closes = [];
+		reset();
 	}
 
 	/** John Carter's classic configuration: period = 20, bb_mult = 2.0, kc_mult = 1.5. */
@@ -69,11 +68,6 @@ class TtmSqueeze implements MuseIndicator<Bar, TtmSqueezeOutput> {
 	}
 
 	public function update(candle:Bar):Null<TtmSqueezeOutput> {
-		if (highs.length == period) {
-			highs.shift();
-			lows.shift();
-			closes.shift();
-		}
 		highs.push(candle.high);
 		lows.push(candle.low);
 		closes.push(candle.close);
@@ -93,15 +87,21 @@ class TtmSqueeze implements MuseIndicator<Bar, TtmSqueezeOutput> {
 		// high-low midpoint and the SMA of close, then a linear regression of
 		// that series (endpoint value).
 		var hi = Math.NEGATIVE_INFINITY;
-		for (h in highs) if (h > hi) hi = h;
+		for (i in 0...highs.length) {
+			var h = highs.oldest(i);
+			if (h > hi) hi = h;
+		}
 		var lo = Math.POSITIVE_INFINITY;
-		for (l in lows) if (l < lo) lo = l;
+		for (i in 0...lows.length) {
+			var l = lows.oldest(i);
+			if (l < lo) lo = l;
+		}
 		var hlMid = (hi + lo) / 2.0;
 		var baseline = (hlMid + mid) / 2.0;
 		var sumY = 0.0;
 		var sumXy = 0.0;
 		for (i in 0...closes.length) {
-			var y = closes[i] - baseline;
+			var y = closes.oldest(i) - baseline;
 			sumY += y;
 			sumXy += i * y;
 		}
@@ -117,9 +117,9 @@ class TtmSqueeze implements MuseIndicator<Bar, TtmSqueezeOutput> {
 		bb.reset();
 		smaClose.reset();
 		atr.reset();
-		highs = [];
-		lows = [];
-		closes = [];
+		highs = new RingBuffer(period);
+		lows = new RingBuffer(period);
+		closes = new RingBuffer(period);
 	}
 
 	public function warmupPeriod():Int return period;

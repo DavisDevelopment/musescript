@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.prim.Atr;
 import musescript.types.MuseType;
 
@@ -29,7 +30,7 @@ class HurstChannel implements MuseIndicator<Bar, HurstChannelOutput> {
 	var period:Int;
 	var atr:Atr;
 	var hurst:HurstExponent;
-	var closeWindow:Array<Float>;
+	var closeWindow:RingBuffer<Float>;
 	var sum:Float;
 
 	public function new(period:Int) {
@@ -37,16 +38,16 @@ class HurstChannel implements MuseIndicator<Bar, HurstChannelOutput> {
 		this.period = period;
 		atr = new Atr(period);
 		hurst = new HurstExponent(period);
-		closeWindow = [];
-		sum = 0.0;
+		reset();
 	}
 
 	public function update(bar:Bar):Null<HurstChannelOutput> {
 		var atrVal = atr.update(bar);
 		var h = hurst.update(bar.close);
 
-		if (closeWindow.length == period) sum -= closeWindow.shift();
-		closeWindow.push(bar.close);
+		var wasFull = closeWindow.isFull();
+		var old = closeWindow.push(bar.close);
+		if (wasFull) sum -= old;
 		sum += bar.close;
 
 		if (atrVal == null || h == null || closeWindow.length < period) return null;
@@ -59,7 +60,7 @@ class HurstChannel implements MuseIndicator<Bar, HurstChannelOutput> {
 	public function reset():Void {
 		atr.reset();
 		hurst.reset();
-		closeWindow = [];
+		closeWindow = new RingBuffer(period);
 		sum = 0.0;
 	}
 

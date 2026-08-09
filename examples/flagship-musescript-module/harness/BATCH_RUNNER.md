@@ -61,8 +61,9 @@ batch.
 | `score_probe.py` | One warm spawn for liquid10 × 2 windows × (strat+BH) |
 | `corpus_score.py` | One warm spawn for available × 4 windows |
 | `bull_score.py` | One warm spawn for all bull suites |
-| `eval.py` `eval_batch` / `--matrix` | One warm spawn per matrix slice (symbols batched) |
-| `viz_core.run_grid` | Dual / bulls / corpus UI suites via warm batch + `publish_*` |
+| `eval.py` `--matrix` / `run_matrix_mega` | **One** warm mega-batch (honesty×freq coalesce; freqs post-classify) |
+| `eval.py` `eval_batch` / `--eval` | One warm spawn per slice (single cell / legacy) |
+| `viz_core.run_grid` / `run_matrix_quick` | Dual / bulls / corpus / quick-matrix via warm batch + `publish_*` |
 
 Untouched single-shot paths: `eval.py --check`, `--build-tapes`, `--eval` still
 can call `run_gene` for one-offs; `--optimize` stays single-shot.
@@ -95,18 +96,32 @@ are unchanged. Agents wiring bull/corpus/matrix publish should keep calling
 `publish_*`; they automatically benefit once their loops go through
 `run_gene_batch` / `run_grid`.
 
-## Remaining checklist (not done tonight)
+## Remaining checklist
 
-- [ ] Byte-identical regression: cold `run_gene` loop vs warm `run_gene_batch`
-      on the top-9 meanrev corpus (diff sharpe/MDD/trades/pass)
-- [ ] Time the 9 × meanrev corpus_score run — target **well under a minute**
-      (was 9–18 min spawn overhead)
-- [ ] Coalesce `cmd_matrix` into **one** mega-batch across honesty × freq slices
-      (today: one spawn per slice — already ≫ better than per-symbol)
+- [x] Byte-identical regression: cold `run_gene` loop vs warm `run_gene_batch`
+      on the top-9 meanrev corpus (diff sharpe/MDD/trades/pass) —
+      `harness/batch_identity.py`, 2026-08-07: **540 strat + 60 BH cells exact match**
+- [x] Time the 9 × meanrev corpus_score run — target **well under a minute**
+      (was 9–18 min spawn overhead) — warm wall **1.49s** / 600 jobs; cold
+      recheck of same grid **226s** (spawn tax)
+- [x] Coalesce `cmd_matrix` into **one** mega-batch across honesty × freq slices
+      — `run_matrix_mega` + `harness/batch_matrix_coalesce.py`: 6 slices / 18
+      cells exact; legacy **6 spawns / 21.15s** → mega **1 spawn / 3.56s**
 - [ ] Optional: wire `corpus_score` / `bull_score` CLI publish into viz_state
       (another agent may be doing this — extend, don't rewrite)
 - [ ] Phase 2: `mederos --cli-tool=batch-eval` app-headless registry — **do not
       build** until a second/third tool wants the same convention
+
+### Re-run identity / timing
+
+```powershell
+# full top-9 (cold ~4 min + warm ~2s)
+python examples/flagship-musescript-module/harness/batch_identity.py
+# warm timing only
+python examples/flagship-musescript-module/harness/batch_identity.py --warm-only
+# 6.1c matrix coalesce (legacy N spawns vs 1 mega)
+python examples/flagship-musescript-module/harness/batch_matrix_coalesce.py
+```
 
 ## Do not
 

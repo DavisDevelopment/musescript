@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.prim.Sma;
 import musescript.types.MuseType;
 
@@ -20,27 +21,26 @@ import musescript.types.MuseType;
 class Dpo implements MuseIndicator<Float, Float> {
 	var sma:Sma;
 	var shift:Int;
-	var history:Array<Float>;
+	var history:RingBuffer<Float>;
 
 	public function new(period:Int) {
 		sma = new Sma(period);
 		shift = Std.int(period / 2) + 1;
-		history = [];
+		history = new RingBuffer(shift + 1);
 	}
 
 	public function update(price:Float):Null<Float> {
 		var avg = sma.update(price);
 		history.push(price);
-		if (history.length > shift + 1) history.shift();
 
 		if (avg == null || history.length <= shift) return null;
-		var past = history[history.length - 1 - shift];
+		var past = history.oldest(0);
 		return past - avg;
 	}
 
 	public function reset():Void {
 		sma.reset();
-		history = [];
+		history = new RingBuffer(shift + 1);
 	}
 
 	public function warmupPeriod():Int return sma.period + shift;

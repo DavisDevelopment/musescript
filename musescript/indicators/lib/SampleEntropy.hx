@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -27,7 +28,7 @@ class SampleEntropy implements MuseIndicator<Float, Float> {
 	var period:Int;
 	var embDim:Int;
 	var rFactor:Float;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var last:Null<Float>;
 
 	public function new(period:Int, m:Int, rFactor:Float) {
@@ -38,25 +39,28 @@ class SampleEntropy implements MuseIndicator<Float, Float> {
 		this.period = period;
 		this.embDim = m;
 		this.rFactor = rFactor;
-		window = [];
+		window = new RingBuffer(period);
 		last = null;
 	}
 
-	static function populationStddev(window:Array<Float>):Float {
+	static function populationStddev(window:RingBuffer<Float>):Float {
 		var n = window.length;
 		var mean = 0.0;
-		for (v in window) mean += v;
+		for (i in 0...n) mean += window.oldest(i);
 		mean /= n;
 		var variance = 0.0;
-		for (v in window) variance += (v - mean) * (v - mean);
+		for (i in 0...n) {
+			var v = window.oldest(i);
+			variance += (v - mean) * (v - mean);
+		}
 		variance /= n;
 		if (variance < 0.0) variance = 0.0;
 		return Math.sqrt(variance);
 	}
 
-	static function templatesMatch(window:Array<Float>, i:Int, j:Int, len:Int, tol:Float):Bool {
+	static function templatesMatch(window:RingBuffer<Float>, i:Int, j:Int, len:Int, tol:Float):Bool {
 		for (k in 0...len) {
-			if (Math.abs(window[i + k] - window[j + k]) > tol) return false;
+			if (Math.abs(window.oldest(i + k) - window.oldest(j + k)) > tol) return false;
 		}
 		return true;
 	}
@@ -90,7 +94,6 @@ class SampleEntropy implements MuseIndicator<Float, Float> {
 
 	public function update(input:Float):Null<Float> {
 		if (!Math.isFinite(input)) return last;
-		if (window.length == period) window.shift();
 		window.push(input);
 		if (window.length < period) return null;
 		var out = compute();
@@ -99,7 +102,7 @@ class SampleEntropy implements MuseIndicator<Float, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 		last = null;
 	}
 

@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.SortedWindow;
 import musescript.types.MuseType;
 
 /**
@@ -16,28 +17,23 @@ import musescript.types.MuseType;
  */
 class RollingIqr implements MuseIndicator<Float, Float> {
 	var period:Int;
-	var window:Array<Float>;
+	var window:SortedWindow;
 
 	public function new(period:Int) {
 		if (period <= 0) throw "RollingIqr: period must be > 0";
 		this.period = period;
-		window = [];
+		window = new SortedWindow(period);
 	}
 
 	public function update(value:Float):Null<Float> {
 		if (!Math.isFinite(value)) return null;
-		if (window.length == period) window.shift();
 		window.push(value);
 		if (window.length < period) return null;
-		var scratch = window.copy();
-		scratch.sort((a, b) -> a < b ? -1 : (a > b ? 1 : 0));
-		var q1 = RollingQuantile.quantileSorted(scratch, 0.25);
-		var q3 = RollingQuantile.quantileSorted(scratch, 0.75);
-		return q3 - q1;
+		return window.quantile(0.75) - window.quantile(0.25);
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new SortedWindow(period);
 	}
 
 	public function warmupPeriod():Int return period;

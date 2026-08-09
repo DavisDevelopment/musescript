@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.SortedWindow;
 import musescript.types.MuseType;
 
 /**
@@ -15,29 +16,17 @@ import musescript.types.MuseType;
  *
  * CSR = ProfitFactor × TailRatio
  *
- * The first value lands after `period` returns; each update re-sorts the window.
+ * Sorted order statistics are maintained incrementally via `SortedWindow`.
  * A window with no losses or no left tail reports 0.0 rather than dividing by zero.
  */
 class CommonSenseRatio implements MuseIndicator<Float, Float> {
 	var period:Int;
-	var window:Array<Float>;
+	var window:SortedWindow;
 
 	public function new(period:Int) {
 		if (period < 2) throw "CommonSenseRatio: period must be >= 2";
 		this.period = period;
-		window = [];
-	}
-
-	function percentile(sorted:Array<Float>, pct:Float):Float {
-		var lastIndex = sorted.length - 1;
-		var rank = (pct / 100.0) * lastIndex;
-		var floor = Math.floor(rank);
-		var lower = Std.int(floor);
-		if (lower >= lastIndex) {
-			return sorted[lastIndex];
-		}
-		var frac = rank - floor;
-		return sorted[lower] + frac * (sorted[lower + 1] - sorted[lower]);
+		window = new SortedWindow(period);
 	}
 
 	function compute():Float {
@@ -50,33 +39,24 @@ class CommonSenseRatio implements MuseIndicator<Float, Float> {
 		if (losses <= 0.0) {
 			return 0.0;
 		}
-		var sorted = window.copy();
-		sorted.sort(function(a, b) {
-			if (a < b) return -1;
-			if (a > b) return 1;
-			return 0;
-		});
-		var lowerTail = Math.abs(percentile(sorted, 5.0));
+		var lowerTail = Math.abs(window.percentile(5.0));
 		if (lowerTail <= 0.0) {
 			return 0.0;
 		}
 		var profitFactor = gains / losses;
-		var tailRatio = percentile(sorted, 95.0) / lowerTail;
+		var tailRatio = window.percentile(95.0) / lowerTail;
 		return profitFactor * tailRatio;
 	}
 
 	public function update(ret:Float):Null<Float> {
 		if (!Math.isFinite(ret)) return null;
-		if (window.length == period) {
-			window.shift();
-		}
 		window.push(ret);
 		if (window.length < period) return null;
 		return compute();
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new SortedWindow(period);
 	}
 
 	public function warmupPeriod():Int return period;

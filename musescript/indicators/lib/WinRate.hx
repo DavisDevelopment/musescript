@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -16,7 +17,7 @@ import musescript.types.MuseType;
  */
 class WinRate implements MuseIndicator<Float, Float> {
 	var period:Int;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var wins:Int;
 
 	public function new(period:Int) {
@@ -27,18 +28,19 @@ class WinRate implements MuseIndicator<Float, Float> {
 
 	public function update(ret:Float):Null<Float> {
 		if (!Math.isFinite(ret)) return null;
-		if (window.length == period) {
-			var old:Float = window.shift();
+		// Fullness checked before push — `Null<Float>` of `0.0` is nullish on JS.
+		var wasFull = window.isFull();
+		var old = window.push(ret);
+		if (wasFull) {
 			if (old > 0.0) wins--;
 		}
-		window.push(ret);
 		if (ret > 0.0) wins++;
 		if (window.length < period) return null;
 		return wins / period;
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 		wins = 0;
 	}
 

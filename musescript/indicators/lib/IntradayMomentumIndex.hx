@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -20,16 +21,16 @@ import musescript.types.MuseType;
  */
 class IntradayMomentumIndex implements MuseIndicator<Bar, Float> {
 	var period:Int;
-	var gains:Array<Float>;
-	var losses:Array<Float>;
+	var gains:RingBuffer<Float>;
+	var losses:RingBuffer<Float>;
 	var sumGain:Float;
 	var sumLoss:Float;
 
 	public function new(period:Int) {
 		if (period <= 0) throw "IntradayMomentumIndex: period must be > 0";
 		this.period = period;
-		gains = [];
-		losses = [];
+		gains = new RingBuffer(period);
+		losses = new RingBuffer(period);
 		sumGain = 0.0;
 		sumLoss = 0.0;
 	}
@@ -38,11 +39,15 @@ class IntradayMomentumIndex implements MuseIndicator<Bar, Float> {
 		var gain = bar.close > bar.open ? bar.close - bar.open : 0.0;
 		var loss = bar.close < bar.open ? bar.open - bar.close : 0.0;
 
-		if (gains.length == period) sumGain -= gains.shift();
-		gains.push(gain);
+		// Fullness checked before push — `Null<Float>` of `0.0` is nullish on JS.
+		var wasFull = gains.isFull();
+		var oldGain = gains.push(gain);
+		var oldLoss = losses.push(loss);
+		if (wasFull) {
+			sumGain -= oldGain;
+			sumLoss -= oldLoss;
+		}
 		sumGain += gain;
-		if (losses.length == period) sumLoss -= losses.shift();
-		losses.push(loss);
 		sumLoss += loss;
 
 		if (gains.length < period) return null;
@@ -52,8 +57,8 @@ class IntradayMomentumIndex implements MuseIndicator<Bar, Float> {
 	}
 
 	public function reset():Void {
-		gains = [];
-		losses = [];
+		gains = new RingBuffer(period);
+		losses = new RingBuffer(period);
 		sumGain = 0.0;
 		sumLoss = 0.0;
 	}

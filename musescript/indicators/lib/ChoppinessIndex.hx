@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -19,9 +20,9 @@ import musescript.types.MuseType;
 class ChoppinessIndex implements MuseIndicator<Bar, Float> {
 	var period:Int;
 	var log10Period:Float;
-	var trWindow:Array<Float>;
-	var highs:Array<Float>;
-	var lows:Array<Float>;
+	var trWindow:RingBuffer<Float>;
+	var highs:RingBuffer<Float>;
+	var lows:RingBuffer<Float>;
 	var sumTr:Float;
 	var hasPrevClose:Bool;
 	var prevClose:Float;
@@ -30,12 +31,7 @@ class ChoppinessIndex implements MuseIndicator<Bar, Float> {
 		if (period < 2) throw "ChoppinessIndex: period must be >= 2";
 		this.period = period;
 		log10Period = Math.log(period) / Math.log(10.0);
-		trWindow = [];
-		highs = [];
-		lows = [];
-		sumTr = 0.0;
-		hasPrevClose = false;
-		prevClose = 0.0;
+		reset();
 	}
 
 	public function update(bar:Bar):Null<Float> {
@@ -47,21 +43,27 @@ class ChoppinessIndex implements MuseIndicator<Bar, Float> {
 		prevClose = bar.close;
 		hasPrevClose = true;
 
-		if (trWindow.length == period) sumTr -= trWindow.shift();
-		trWindow.push(tr);
+		// Fullness checked before push — `Null<Float>` of `0.0` is nullish on JS.
+		var wasFull = trWindow.isFull();
+		var oldTr = trWindow.push(tr);
+		if (wasFull) sumTr -= oldTr;
 		sumTr += tr;
 
-		if (highs.length == period) highs.shift();
 		highs.push(bar.high);
-		if (lows.length == period) lows.shift();
 		lows.push(bar.low);
 
 		if (trWindow.length < period) return null;
 
-		var hh = highs[0];
-		for (v in highs) if (v > hh) hh = v;
-		var ll = lows[0];
-		for (v in lows) if (v < ll) ll = v;
+		var hh = highs.at(0);
+		for (i in 0...highs.length) {
+			var v = highs.at(i);
+			if (v > hh) hh = v;
+		}
+		var ll = lows.at(0);
+		for (i in 0...lows.length) {
+			var v = lows.at(i);
+			if (v < ll) ll = v;
+		}
 
 		var range = hh - ll;
 		if (range <= 0.0) return 0.0;
@@ -69,9 +71,9 @@ class ChoppinessIndex implements MuseIndicator<Bar, Float> {
 	}
 
 	public function reset():Void {
-		trWindow = [];
-		highs = [];
-		lows = [];
+		trWindow = new RingBuffer(period);
+		highs = new RingBuffer(period);
+		lows = new RingBuffer(period);
 		sumTr = 0.0;
 		hasPrevClose = false;
 		prevClose = 0.0;

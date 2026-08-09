@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.prim.Sma;
 import musescript.types.MuseType;
 
@@ -33,8 +34,8 @@ typedef StochasticOutput = {
 class Stochastic implements MuseIndicator<Bar, StochasticOutput> {
 	var kPeriod:Int;
 	var dPeriod:Int;
-	var highs:Array<Float>;
-	var lows:Array<Float>;
+	var highs:RingBuffer<Float>;
+	var lows:RingBuffer<Float>;
 	var dSma:Sma;
 	var lastK:Null<Float>;
 
@@ -42,8 +43,8 @@ class Stochastic implements MuseIndicator<Bar, StochasticOutput> {
 		if (kPeriod <= 0 || dPeriod <= 0) throw "Stochastic: periods must be > 0";
 		this.kPeriod = kPeriod;
 		this.dPeriod = dPeriod;
-		highs = [];
-		lows = [];
+		highs = new RingBuffer(kPeriod);
+		lows = new RingBuffer(kPeriod);
 		dSma = new Sma(dPeriod);
 		lastK = null;
 	}
@@ -54,18 +55,20 @@ class Stochastic implements MuseIndicator<Bar, StochasticOutput> {
 	}
 
 	public function update(bar:Bar):Null<StochasticOutput> {
-		if (highs.length == kPeriod) {
-			highs.shift();
-			lows.shift();
-		}
 		highs.push(bar.high);
 		lows.push(bar.low);
 		if (highs.length < kPeriod) return null;
 
-		var hh = highs[0];
-		for (v in highs) if (v > hh) hh = v;
-		var ll = lows[0];
-		for (v in lows) if (v < ll) ll = v;
+		var hh = highs.at(0);
+		for (i in 0...highs.length) {
+			var v = highs.at(i);
+			if (v > hh) hh = v;
+		}
+		var ll = lows.at(0);
+		for (i in 0...lows.length) {
+			var v = lows.at(i);
+			if (v < ll) ll = v;
+		}
 		var range = hh - ll;
 		// Flat range; convention: 50 (neutral, like RSI on flat input).
 		var k = range == 0.0 ? 50.0 : 100.0 * (bar.close - ll) / range;
@@ -76,8 +79,8 @@ class Stochastic implements MuseIndicator<Bar, StochasticOutput> {
 	}
 
 	public function reset():Void {
-		highs = [];
-		lows = [];
+		highs = new RingBuffer(kPeriod);
+		lows = new RingBuffer(kPeriod);
 		dSma.reset();
 		lastK = null;
 	}

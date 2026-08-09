@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -27,7 +28,7 @@ class TdCombo implements MuseIndicator<Bar, Float> {
 	var setupTarget:Int;
 	var countdownLookback:Int;
 	var countdownTarget:Int;
-	var candles:Array<Bar>;
+	var candles:RingBuffer<Bar>;
 	var buySetup:Int;
 	var sellSetup:Int;
 	var buyCombo:Int;
@@ -42,13 +43,7 @@ class TdCombo implements MuseIndicator<Bar, Float> {
 		this.setupTarget = setupTarget;
 		this.countdownLookback = countdownLookback;
 		this.countdownTarget = countdownTarget;
-		candles = [];
-		buySetup = 0;
-		sellSetup = 0;
-		buyCombo = 0;
-		sellCombo = 0;
-		direction = DIR_NONE;
-		ready = false;
+		reset();
 	}
 
 	/** DeMark's classic configuration: setup `4, 9`, combo `2, 13`. */
@@ -61,17 +56,19 @@ class TdCombo implements MuseIndicator<Bar, Float> {
 		return [setupLookback, setupTarget, countdownLookback, countdownTarget];
 	}
 
+	inline function need():Int {
+		return setupLookback > countdownLookback ? setupLookback : countdownLookback;
+	}
+
 	public function update(bar:Bar):Null<Float> {
-		var need = setupLookback > countdownLookback ? setupLookback : countdownLookback;
-		var cap = need + 1;
-		if (candles.length == cap) candles.shift();
-		if (candles.length < need) {
+		var n = need();
+		if (candles.length < n) {
 			candles.push(bar);
 			return null;
 		}
 
-		// Setup rule: compare to close[setupLookback bars ago].
-		var setupRefClose = candles[need - setupLookback].close;
+		var base = candles.length - n;
+		var setupRefClose = candles.oldest(base + n - setupLookback).close;
 		if (bar.close < setupRefClose) {
 			buySetup = buySetup + 1 < setupTarget ? buySetup + 1 : setupTarget;
 			sellSetup = 0;
@@ -83,8 +80,6 @@ class TdCombo implements MuseIndicator<Bar, Float> {
 			sellSetup = 0;
 		}
 
-		// Combo arming: a completed setup in either direction arms the combo
-		// in the same direction (resetting any opposite-direction count first).
 		if (buySetup == setupTarget) {
 			if (direction != DIR_BUY) {
 				buyCombo = 0;
@@ -99,10 +94,8 @@ class TdCombo implements MuseIndicator<Bar, Float> {
 			direction = DIR_SELL;
 		}
 
-		// Combo rule references the candle `countdownLookback` bars ago
-		// (high/low) and the immediately-prior candle (monotone strictness).
-		var comboRef = candles[need - countdownLookback];
-		var prev = candles[need - 1];
+		var comboRef = candles.oldest(base + n - countdownLookback);
+		var prev = candles.oldest(base + n - 1);
 		switch (direction) {
 			case DIR_BUY:
 				var condClassic = bar.close <= comboRef.low;
@@ -128,7 +121,7 @@ class TdCombo implements MuseIndicator<Bar, Float> {
 	}
 
 	public function reset():Void {
-		candles = [];
+		candles = new RingBuffer(need() + 1);
 		buySetup = 0;
 		sellSetup = 0;
 		buyCombo = 0;
@@ -138,7 +131,7 @@ class TdCombo implements MuseIndicator<Bar, Float> {
 	}
 
 	public function warmupPeriod():Int {
-		return (setupLookback > countdownLookback ? setupLookback : countdownLookback) + 1;
+		return need() + 1;
 	}
 
 	public function isReady():Bool return ready;

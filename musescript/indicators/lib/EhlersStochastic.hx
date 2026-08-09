@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.prim.RoofingFilter;
 import musescript.types.MuseType;
 
@@ -22,7 +23,7 @@ import musescript.types.MuseType;
 class EhlersStochastic implements MuseIndicator<Float, Float> {
 	public var period(default, null):Int;
 	var roofing:RoofingFilter;
-	var filteredBuf:Array<Float>;
+	var filteredBuf:RingBuffer<Float>;
 	var prevStoch:Float;
 	var hasPrev:Bool;
 	var lastValue:Null<Float>;
@@ -32,7 +33,7 @@ class EhlersStochastic implements MuseIndicator<Float, Float> {
 		this.period = period;
 		// Defaults match Ehlers' (10, 48) roofing filter cutoffs.
 		roofing = new RoofingFilter(10, 48);
-		filteredBuf = [];
+		filteredBuf = new RingBuffer(period);
 		prevStoch = 0.0;
 		hasPrev = false;
 		lastValue = null;
@@ -48,9 +49,6 @@ class EhlersStochastic implements MuseIndicator<Float, Float> {
 			return null;
 		}
 
-		if (filteredBuf.length == period) {
-			filteredBuf.shift();
-		}
 		filteredBuf.push(filtered);
 
 		if (filteredBuf.length < period) {
@@ -60,7 +58,8 @@ class EhlersStochastic implements MuseIndicator<Float, Float> {
 		// Find max and min in the filtered buffer
 		var max = Math.NEGATIVE_INFINITY;
 		var min = Math.POSITIVE_INFINITY;
-		for (v in filteredBuf) {
+		for (i in 0...filteredBuf.length) {
+			var v = filteredBuf.at(i);
 			if (v > max) max = v;
 			if (v < min) min = v;
 		}
@@ -70,14 +69,14 @@ class EhlersStochastic implements MuseIndicator<Float, Float> {
 			((filtered - min) / range) * 2.0 - 1.0;
 		} else {
 			0.0;
-		}
+		};
 
 		// 2-bar SMA smoothing
 		var smoothed = if (hasPrev) {
 			0.5 * (raw + prevStoch);
 		} else {
 			raw;
-		}
+		};
 
 		prevStoch = raw;
 		hasPrev = true;
@@ -88,7 +87,7 @@ class EhlersStochastic implements MuseIndicator<Float, Float> {
 
 	public function reset():Void {
 		roofing.reset();
-		filteredBuf = [];
+		filteredBuf = new RingBuffer(period);
 		prevStoch = 0.0;
 		hasPrev = false;
 		lastValue = null;

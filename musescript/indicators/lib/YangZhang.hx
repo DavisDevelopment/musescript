@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -28,9 +29,9 @@ class YangZhang implements MuseIndicator<Bar, Float> {
 	var tradingPeriods:Int;
 	var k:Float;
 	var prevClose:Null<Float>;
-	var overnight:Array<Float>;
-	var openClose:Array<Float>;
-	var rsSamples:Array<Float>;
+	var overnight:RingBuffer<Float>;
+	var openClose:RingBuffer<Float>;
+	var rsSamples:RingBuffer<Float>;
 	var sumOn:Float;
 	var sumSqOn:Float;
 	var sumOc:Float;
@@ -67,24 +68,22 @@ class YangZhang implements MuseIndicator<Bar, Float> {
 		var logLo = Math.log(candle.low / candle.open);
 		var rsSample = logHc * logHo + logLc * logLo;
 
-		// Roll the three windows.
-		if (overnight.length == period) {
-			var oldOn = overnight.shift();
+		// Roll the three windows — evict/subtract before add (ULP order).
+		var wasFull = overnight.isFull();
+		var oldOn = overnight.push(onSample);
+		var oldOc = openClose.push(ocSample);
+		var oldRs = rsSamples.push(rsSample);
+		if (wasFull) {
 			sumOn -= oldOn;
 			sumSqOn -= oldOn * oldOn;
-			var oldOc = openClose.shift();
 			sumOc -= oldOc;
 			sumSqOc -= oldOc * oldOc;
-			var oldRs = rsSamples.shift();
 			sumRs -= oldRs;
 		}
-		overnight.push(onSample);
 		sumOn += onSample;
 		sumSqOn += onSample * onSample;
-		openClose.push(ocSample);
 		sumOc += ocSample;
 		sumSqOc += ocSample * ocSample;
-		rsSamples.push(rsSample);
 		sumRs += rsSample;
 
 		if (overnight.length < period) return null;
@@ -106,9 +105,9 @@ class YangZhang implements MuseIndicator<Bar, Float> {
 
 	public function reset():Void {
 		prevClose = null;
-		overnight = [];
-		openClose = [];
-		rsSamples = [];
+		overnight = new RingBuffer(period);
+		openClose = new RingBuffer(period);
+		rsSamples = new RingBuffer(period);
 		sumOn = 0.0;
 		sumSqOn = 0.0;
 		sumOc = 0.0;

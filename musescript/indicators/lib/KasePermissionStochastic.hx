@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.prim.Ema;
 import musescript.types.MuseType;
 
@@ -33,8 +34,8 @@ typedef KasePermissionStochasticOutput = {
 class KasePermissionStochastic implements MuseIndicator<Bar, KasePermissionStochasticOutput> {
 	var length:Int;
 	var smooth:Int;
-	var highs:Array<Float>;
-	var lows:Array<Float>;
+	var highs:RingBuffer<Float>;
+	var lows:RingBuffer<Float>;
 	var fastEma:Ema;
 	var slowEma:Ema;
 
@@ -42,8 +43,8 @@ class KasePermissionStochastic implements MuseIndicator<Bar, KasePermissionStoch
 		if (length <= 0) throw "KasePermissionStochastic: length must be > 0";
 		this.length = length;
 		this.smooth = smooth;
-		highs = [];
-		lows = [];
+		highs = new RingBuffer(length);
+		lows = new RingBuffer(length);
 		fastEma = new Ema(smooth);
 		slowEma = new Ema(smooth);
 	}
@@ -56,16 +57,18 @@ class KasePermissionStochastic implements MuseIndicator<Bar, KasePermissionStoch
 	public function update(bar:Bar):Null<KasePermissionStochasticOutput> {
 		highs.push(bar.high);
 		lows.push(bar.low);
-		if (highs.length > length) {
-			highs.shift();
-			lows.shift();
-		}
 		if (highs.length < length) return null;
 
-		var highest = highs[0];
-		for (v in highs) if (v > highest) highest = v;
-		var lowest = lows[0];
-		for (v in lows) if (v < lowest) lowest = v;
+		var highest = highs.oldest(0);
+		for (i in 1...highs.length) {
+			var v = highs.oldest(i);
+			if (v > highest) highest = v;
+		}
+		var lowest = lows.oldest(0);
+		for (i in 1...lows.length) {
+			var v = lows.oldest(i);
+			if (v < lowest) lowest = v;
+		}
 		var rawK = highest > lowest ? 100.0 * (bar.close - lowest) / (highest - lowest) : 50.0;
 
 		var fast = fastEma.update(rawK);
@@ -76,8 +79,8 @@ class KasePermissionStochastic implements MuseIndicator<Bar, KasePermissionStoch
 	}
 
 	public function reset():Void {
-		highs = [];
-		lows = [];
+		highs = new RingBuffer(length);
+		lows = new RingBuffer(length);
 		fastEma.reset();
 		slowEma.reset();
 	}

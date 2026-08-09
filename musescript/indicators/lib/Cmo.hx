@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -19,8 +20,8 @@ class Cmo implements MuseIndicator<Float, Float> {
 	var period:Int;
 	var hasPrev:Bool;
 	var prevPrice:Float;
-	var gains:Array<Float>;
-	var losses:Array<Float>;
+	var gains:RingBuffer<Float>;
+	var losses:RingBuffer<Float>;
 	var sumGain:Float;
 	var sumLoss:Float;
 	var emitted:Bool;
@@ -43,12 +44,14 @@ class Cmo implements MuseIndicator<Float, Float> {
 		var gain = change > 0 ? change : 0.0;
 		var loss = change < 0 ? -change : 0.0;
 
-		if (gains.length == period) {
-			sumGain -= gains.shift();
-			sumLoss -= losses.shift();
+		// Fullness checked before push — `Null<Float>` of `0.0` is nullish on JS.
+		var wasFull = gains.isFull();
+		var oldGain = gains.push(gain);
+		var oldLoss = losses.push(loss);
+		if (wasFull) {
+			sumGain -= oldGain;
+			sumLoss -= oldLoss;
 		}
-		gains.push(gain);
-		losses.push(loss);
 		sumGain += gain;
 		sumLoss += loss;
 
@@ -62,8 +65,8 @@ class Cmo implements MuseIndicator<Float, Float> {
 	public function reset():Void {
 		hasPrev = false;
 		prevPrice = 0.0;
-		gains = [];
-		losses = [];
+		gains = new RingBuffer(period);
+		losses = new RingBuffer(period);
 		sumGain = 0.0;
 		sumLoss = 0.0;
 		emitted = false;
@@ -92,6 +95,9 @@ class Cmo implements MuseIndicator<Float, Float> {
 	 * sum, first value at `period + 1` bars (one bar to seed `prevPrice`, `period`
 	 * more to fill the window). Verified byte-for-byte equal to the Haxe port
 	 * over a shared synthetic tape by TestNativeIndicatorParity.
+	 *
+	 * MuseScript arrays have no RingBuffer — eviction stays index-rebuild so
+	 * the native source matches the Haxe ring without an Array head-remove call.
 	 */
 	public static function nativeSource():String {
 		return '@indicator("cmo") function(period) {
@@ -112,8 +118,14 @@ class Cmo implements MuseIndicator<Float, Float> {
 	if (state.gains.length == period) {
 		state.sumGain = state.sumGain - state.gains[0];
 		state.sumLoss = state.sumLoss - state.losses[0];
-		state.gains.shift();
-		state.losses.shift();
+		var ng = [];
+		var nl = [];
+		for (i in 1...state.gains.length) {
+			ng.push(state.gains[i]);
+			nl.push(state.losses[i]);
+		}
+		state.gains = ng;
+		state.losses = nl;
 	}
 	state.gains.push(gain);
 	state.losses.push(loss);

@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -15,13 +16,13 @@ import musescript.types.MuseType;
  */
 class Rocr implements MuseIndicator<Float, Float> {
 	var period:Int;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var last:Null<Float>;
 
 	public function new(period:Int) {
 		if (period <= 0) throw "Rocr: period must be > 0";
 		this.period = period;
-		this.window = [];
+		this.window = new RingBuffer(period + 1);
 		this.last = null;
 	}
 
@@ -30,23 +31,20 @@ class Rocr implements MuseIndicator<Float, Float> {
 			return last;
 		}
 
-		if (window.length == period + 1) {
-			window.shift();
-		}
 		window.push(input);
 
 		if (window.length < period + 1) {
 			return null;
 		}
 
-		var prev = window[0];
+		var prev = window.oldest(0);
 		var rocr = if (prev == 0.0) 0.0 else input / prev;
 		last = rocr;
 		return rocr;
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period + 1);
 		last = null;
 	}
 

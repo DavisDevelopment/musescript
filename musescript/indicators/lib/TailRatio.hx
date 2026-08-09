@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.SortedWindow;
 import musescript.types.MuseType;
 
 /**
@@ -18,7 +19,7 @@ import musescript.types.MuseType;
  */
 class TailRatio implements MuseIndicator<Float, Float> {
 	var period:Int;
-	var window:Array<Float>;
+	var window:SortedWindow;
 
 	public function new(period:Int) {
 		if (period < 2) throw "TailRatio: tail ratio needs period >= 2";
@@ -26,35 +27,21 @@ class TailRatio implements MuseIndicator<Float, Float> {
 		reset();
 	}
 
-	/** Linear-interpolation percentile of an ascending, non-empty array. */
-	static function percentile(sorted:Array<Float>, pct:Float):Float {
-		var lastIndex = sorted.length - 1;
-		var rank = pct / 100.0 * lastIndex;
-		var floor = Math.floor(rank);
-		var lower = Std.int(floor);
-		if (lower >= lastIndex) return sorted[lastIndex];
-		var frac = rank - floor;
-		return sorted[lower] + frac * (sorted[lower + 1] - sorted[lower]);
-	}
-
 	function compute():Float {
-		var sorted = window.copy();
-		sorted.sort((a, b) -> a < b ? -1 : (a > b ? 1 : 0));
-		var upper = percentile(sorted, 95.0);
-		var lower = Math.abs(percentile(sorted, 5.0));
+		var upper = window.percentile(95.0);
+		var lower = Math.abs(window.percentile(5.0));
 		return lower > 0.0 ? upper / lower : 0.0;
 	}
 
 	public function update(ret:Float):Null<Float> {
 		if (!Math.isFinite(ret)) return null;
-		if (window.length == period) window.shift();
 		window.push(ret);
 		if (window.length < period) return null;
 		return compute();
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new SortedWindow(period);
 	}
 
 	public function warmupPeriod():Int return period;

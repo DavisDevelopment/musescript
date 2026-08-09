@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -17,32 +18,29 @@ import musescript.types.MuseType;
  */
 class FryPanBottom implements MuseIndicator<Bar, Float> {
 	var period:Int;
-	var closes:Array<Float>;
+	var closes:RingBuffer<Float>;
 	var last:Null<Float>;
 
 	public function new(period:Int) {
 		if (period < 5) throw "FryPanBottom: period must be >= 5";
 		this.period = period;
-		closes = [];
-		last = null;
+		reset();
 	}
 
 	public function update(bar:Bar):Null<Float> {
 		closes.push(bar.close);
-		if (closes.length > period) {
-			closes.shift();
-		}
 		if (closes.length < period) return null;
 
-		var first = closes[0];
-		var last_close = closes[closes.length - 1];
+		var first = closes.oldest(0);
+		var last_close = closes.oldest(closes.length - 1);
 
 		// Find the minimum close and its index.
 		var min_idx = 0;
 		var min_val = Math.POSITIVE_INFINITY;
 		for (i in 0...closes.length) {
-			if (closes[i] < min_val) {
-				min_val = closes[i];
+			var v = closes.oldest(i);
+			if (v < min_val) {
+				min_val = v;
 				min_idx = i;
 			}
 		}
@@ -59,7 +57,7 @@ class FryPanBottom implements MuseIndicator<Bar, Float> {
 	}
 
 	public function reset():Void {
-		closes = [];
+		closes = new RingBuffer(period);
 		last = null;
 	}
 

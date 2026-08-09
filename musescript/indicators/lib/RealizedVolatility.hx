@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -15,7 +16,7 @@ import musescript.types.MuseType;
 class RealizedVolatility implements MuseIndicator<Float, Float> {
 	var period:Int;
 	var prevPrice:Null<Float>;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var sumSq:Float;
 	var last:Null<Float>;
 
@@ -23,7 +24,7 @@ class RealizedVolatility implements MuseIndicator<Float, Float> {
 		if (period <= 0) throw "RealizedVolatility: period must be > 0";
 		this.period = period;
 		prevPrice = null;
-		window = [];
+		window = new RingBuffer(period);
 		sumSq = 0.0;
 		last = null;
 	}
@@ -46,12 +47,10 @@ class RealizedVolatility implements MuseIndicator<Float, Float> {
 		var r = Math.log(input / prev);
 
 		// Roll the window of squared returns
-		if (window.length == period) {
-			var old = window.shift();
-			sumSq -= old * old;
-		}
+		var wasFull = window.isFull();
+		var old = window.push(r);
+		if (wasFull) sumSq -= old * old;
 
-		window.push(r);
 		sumSq += r * r;
 
 		if (window.length < period) {
@@ -66,7 +65,7 @@ class RealizedVolatility implements MuseIndicator<Float, Float> {
 
 	public function reset():Void {
 		prevPrice = null;
-		window = [];
+		window = new RingBuffer(period);
 		sumSq = 0.0;
 		last = null;
 	}

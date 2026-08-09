@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.SortedWindow;
 import musescript.types.MuseType;
 
 /** Bomar Bands output: upper/middle/lower bands. */
@@ -26,11 +27,19 @@ typedef BomarBandsOutput = {
  * p      = coverage-quantile of {dev_i}  // type-7 interpolation
  * upper  = middle + |middle| * p
  * lower  = middle - |middle| * p
+ *
+ * Closes live in a `SortedWindow` (stable multiset). Relative deviations are
+ * SMA-dependent — every middle move regenerates all `dev_i` — so they are *not*
+ * stored incrementally. Invent: the map `c ↦ |c−μ|/|μ|` folds left-of-μ and
+ * right-of-μ into two already-ascending abs-dev streams that merge in O(n) to
+ * the same sorted multiset as `scratch.sort`, then type-7 quantile. Never
+ * shortcut to `quantile(|c−μ|)*|μ|` (ULP ≠ relative-then-scale).
  */
 class BomarBands implements MuseIndicator<Float, BomarBandsOutput> {
 	var period:Int;
 	var coverage:Float;
-	var window:Array<Float>;
+	var closes:SortedWindow;
+	/** Scratch for fold-merged ascending relative deviations (reused). */
 	var scratch:Array<Float>;
 
 	public function new(period:Int, coverage:Float) {
@@ -40,12 +49,13 @@ class BomarBands implements MuseIndicator<Float, BomarBandsOutput> {
 		}
 		this.period = period;
 		this.coverage = coverage;
-		window = [];
+		closes = new SortedWindow(period);
 		scratch = [];
 	}
 
 	/**
 	 * Type-7 interpolation quantile (linear interpolation) of a sorted, non-empty array.
+	 * `q` is a percentage in (0, 100] matching the historical Bomar path.
 	 */
 	function quantileSorted(sorted:Array<Float>, q:Float):Float {
 		var lastIndex = sorted.length - 1;
@@ -59,34 +69,64 @@ class BomarBands implements MuseIndicator<Float, BomarBandsOutput> {
 		return sorted[lower] + frac * (sorted[lower + 1] - sorted[lower]);
 	}
 
+	/**
+	 * Build ascending relative-dev multiset without Array.sort.
+	 * Left-of-μ (descending through sorted closes) and right-of-μ (ascending)
+	 * each produce increasing `|c−μ|/|μ|`; zeros land first. Merge preserves the
+	 * sorted multiset the old push+sort path emitted.
+	 */
+	function foldRelativeDevs(middle:Float, denom:Float):Void {
+		var sorted = closes.sorted;
+		var n = sorted.length;
+		scratch.resize(0);
+
+		if (denom == 0.0) {
+			for (_ in 0...n) scratch.push(0.0);
+			return;
+		}
+
+		var leftEnd = 0;
+		while (leftEnd < n && sorted[leftEnd] < middle) leftEnd++;
+		var rightStart = leftEnd;
+		while (rightStart < n && sorted[rightStart] == middle) rightStart++;
+
+		for (_ in leftEnd...rightStart) scratch.push(0.0);
+
+		var i = leftEnd - 1;
+		var j = rightStart;
+		while (i >= 0 || j < n) {
+			if (i < 0) {
+				scratch.push(Math.abs((sorted[j] - middle) / denom));
+				j++;
+			} else if (j >= n) {
+				scratch.push(Math.abs((sorted[i] - middle) / denom));
+				i--;
+			} else {
+				var dL = Math.abs((sorted[i] - middle) / denom);
+				var dR = Math.abs((sorted[j] - middle) / denom);
+				if (dL <= dR) {
+					scratch.push(dL);
+					i--;
+				} else {
+					scratch.push(dR);
+					j++;
+				}
+			}
+		}
+	}
+
 	public function update(value:Float):Null<BomarBandsOutput> {
 		if (!Math.isFinite(value)) return null;
-		if (window.length == period) {
-			window.shift();
-		}
-		window.push(value);
-		if (window.length < period) return null;
+		closes.push(value);
+		if (closes.length < period) return null;
 
+		// Chronological SMA — do not re-sum from `sorted` (order / ULP).
 		var sum = 0.0;
-		for (v in window) sum += v;
+		for (i in 0...closes.length) sum += closes.oldest(i);
 		var middle = sum / period;
 		var denom = Math.abs(middle);
 
-		scratch = [];
-		for (v in window) {
-			var dev = if (denom == 0.0) {
-				0.0;
-			} else {
-				Math.abs((v - middle) / denom);
-			};
-			scratch.push(dev);
-		}
-		scratch.sort(function(a, b) {
-			if (a < b) return -1;
-			if (a > b) return 1;
-			return 0;
-		});
-
+		foldRelativeDevs(middle, denom);
 		var p = quantileSorted(scratch, coverage * 100.0);
 		var offset = denom * p;
 
@@ -98,12 +138,12 @@ class BomarBands implements MuseIndicator<Float, BomarBandsOutput> {
 	}
 
 	public function reset():Void {
-		window = [];
+		closes = new SortedWindow(period);
 		scratch = [];
 	}
 
 	public function warmupPeriod():Int return period;
-	public function isReady():Bool return window.length == period;
+	public function isReady():Bool return closes.length == period;
 	public function name():String return "BomarBands";
 
 	public static function spec():IndicatorSpec {

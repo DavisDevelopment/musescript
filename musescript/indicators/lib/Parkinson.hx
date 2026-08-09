@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -24,7 +25,7 @@ class Parkinson implements MuseIndicator<Bar, Float> {
 
 	var period:Int;
 	var tradingPeriods:Int;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var sumSq:Float;
 	var last:Null<Float>;
 
@@ -39,11 +40,10 @@ class Parkinson implements MuseIndicator<Bar, Float> {
 		var logHl = Math.log(candle.high / candle.low);
 		var sample = logHl * logHl;
 
-		if (window.length == period) {
-			var old = window.shift();
-			sumSq -= old;
-		}
-		window.push(sample);
+		// Fullness checked before push — `Null<Float>` of `0.0` is nullish on JS.
+		var wasFull = window.isFull();
+		var old = window.push(sample);
+		if (wasFull) sumSq -= old;
 		sumSq += sample;
 
 		if (window.length < period) return null;
@@ -57,7 +57,7 @@ class Parkinson implements MuseIndicator<Bar, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 		sumSq = 0.0;
 		last = null;
 	}

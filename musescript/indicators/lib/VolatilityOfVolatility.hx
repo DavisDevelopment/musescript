@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -24,10 +25,10 @@ class VolatilityOfVolatility implements MuseIndicator<Float, Float> {
 	var volWindow:Int;
 	var vovWindow:Int;
 	var prevPrice:Null<Float>;
-	var returns:Array<Float>;
+	var returns:RingBuffer<Float>;
 	var retSum:Float;
 	var retSumSq:Float;
-	var vols:Array<Float>;
+	var vols:RingBuffer<Float>;
 	var volSum:Float;
 	var volSumSq:Float;
 	var last:Null<Float>;
@@ -65,24 +66,25 @@ class VolatilityOfVolatility implements MuseIndicator<Float, Float> {
 		var r = Math.log(input / prev);
 
 		// Stage one: rolling sample volatility of log returns.
-		if (returns.length == volWindow) {
-			var old = returns.shift();
-			retSum -= old;
-			retSumSq -= old * old;
+		// Fullness checked before push — `Null<Float>` of `0.0` is nullish on JS.
+		var retFull = returns.isFull();
+		var oldRet = returns.push(r);
+		if (retFull) {
+			retSum -= oldRet;
+			retSumSq -= oldRet * oldRet;
 		}
-		returns.push(r);
 		retSum += r;
 		retSumSq += r * r;
 		if (returns.length < volWindow) return null;
 		var vol = sampleStddev(retSum, retSumSq, volWindow);
 
 		// Stage two: rolling sample dispersion of the volatility series.
-		if (vols.length == vovWindow) {
-			var old = vols.shift();
-			volSum -= old;
-			volSumSq -= old * old;
+		var volFull = vols.isFull();
+		var oldVol = vols.push(vol);
+		if (volFull) {
+			volSum -= oldVol;
+			volSumSq -= oldVol * oldVol;
 		}
-		vols.push(vol);
 		volSum += vol;
 		volSumSq += vol * vol;
 		if (vols.length < vovWindow) return null;
@@ -93,10 +95,10 @@ class VolatilityOfVolatility implements MuseIndicator<Float, Float> {
 
 	public function reset():Void {
 		prevPrice = null;
-		returns = [];
+		returns = new RingBuffer(volWindow);
 		retSum = 0.0;
 		retSumSq = 0.0;
-		vols = [];
+		vols = new RingBuffer(vovWindow);
 		volSum = 0.0;
 		volSumSq = 0.0;
 		last = null;

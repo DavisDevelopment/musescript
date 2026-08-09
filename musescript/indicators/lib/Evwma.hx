@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -20,21 +21,20 @@ import musescript.types.MuseType;
  */
 class Evwma implements MuseIndicator<Bar, Float> {
 	var period:Int;
-	var volWindow:Array<Float>;
+	var volWindow:RingBuffer<Float>;
 	var volSum:Float;
 	var current:Null<Float>;
 
 	public function new(period:Int) {
 		if (period <= 0) throw "Evwma: period must be > 0";
 		this.period = period;
-		volWindow = [];
-		volSum = 0.0;
-		current = null;
+		reset();
 	}
 
 	public function update(bar:Bar):Null<Float> {
-		if (volWindow.length == period) volSum -= volWindow.shift();
-		volWindow.push(bar.volume);
+		var wasFull = volWindow.isFull();
+		var old = volWindow.push(bar.volume);
+		if (wasFull) volSum -= old;
 		volSum += bar.volume;
 
 		if (current == null) {
@@ -48,7 +48,7 @@ class Evwma implements MuseIndicator<Bar, Float> {
 	}
 
 	public function reset():Void {
-		volWindow = [];
+		volWindow = new RingBuffer(period);
 		volSum = 0.0;
 		current = null;
 	}

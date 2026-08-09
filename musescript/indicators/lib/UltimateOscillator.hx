@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -29,7 +30,7 @@ class UltimateOscillator implements MuseIndicator<Bar, Float> {
 	var longest:Int;
 	var prevClose:Null<Float>;
 	/** Rolling window of (buying_pressure, true_range) pairs. */
-	var window:Array<{bp:Float, tr:Float}>;
+	var window:RingBuffer<{bp:Float, tr:Float}>;
 	var sumBpShort:Float;
 	var sumTrShort:Float;
 	var sumBpMid:Float;
@@ -66,32 +67,33 @@ class UltimateOscillator implements MuseIndicator<Bar, Float> {
 		var bp = candle.close - trueLow;
 		var tr = Math.max(candle.high, pc) - trueLow;
 
-		window.push({bp: bp, tr: tr});
-		var n = window.length;
+		// Capacity = longest. When a lookback equals `longest`, the sample leaving
+		// that window is the element `push` evicts (Array briefly held longest+1 and
+		// indexed the soon-to-shift head); `at(longest)` would be OOB on the ring.
+		var evicted = window.push({bp: bp, tr: tr});
 		sumBpShort += bp;
 		sumTrShort += tr;
 		sumBpMid += bp;
 		sumTrMid += tr;
 		sumBpLong += bp;
 		sumTrLong += tr;
-		if (n > short) {
-			var o = window[n - 1 - short];
+		pairs++;
+		if (pairs > short) {
+			var o = short < window.length ? window.at(short) : evicted;
 			sumBpShort -= o.bp;
 			sumTrShort -= o.tr;
 		}
-		if (n > mid) {
-			var o = window[n - 1 - mid];
+		if (pairs > mid) {
+			var o = mid < window.length ? window.at(mid) : evicted;
 			sumBpMid -= o.bp;
 			sumTrMid -= o.tr;
 		}
-		if (n > long) {
-			var o = window[n - 1 - long];
+		if (pairs > long) {
+			var o = long < window.length ? window.at(long) : evicted;
 			sumBpLong -= o.bp;
 			sumTrLong -= o.tr;
 		}
-		if (window.length > longest) window.shift();
 
-		pairs++;
 		if (pairs < longest) return null;
 
 		// A fully flat window has no range; contribute the midpoint 0.5.
@@ -105,7 +107,7 @@ class UltimateOscillator implements MuseIndicator<Bar, Float> {
 
 	public function reset():Void {
 		prevClose = null;
-		window = [];
+		window = new RingBuffer(longest);
 		sumBpShort = 0.0;
 		sumTrShort = 0.0;
 		sumBpMid = 0.0;

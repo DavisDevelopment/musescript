@@ -83,6 +83,9 @@ typedef FallbackResult = {var key:String; var ok:Bool; var trades:Int; var sharp
  * gen 0, not a population size the run keeps paying to re-evaluate every generation.
  *
  * Usage: CorpusEvoRun [--pop N] [--gens N] [--seed N] [--threads N] [--corpus DIR]
+ *   CorpusEvoRun --det-probe [--pop N] [--reps K] [--threads-list 2,4] [--tape CSV]
+ *     → N genomes × M fallback workers × K reps; fitness/eval must match serial
+ *       (`--threads 1`). Exercises the real JS-fallback Deque pool under `--nma`.
  */
 class CorpusEvoRun {
 	static var watDir = "build/graal/evo-corpus";
@@ -94,6 +97,11 @@ class CorpusEvoRun {
 	public static var argOverride:Null<Array<String>> = null;
 
 	static function main() {
+		if (argFlag("--det-probe")) {
+			runFbThreadDetProbe();
+			return;
+		}
+
 		var pop = argInt("--pop", 64);
 		var gens = argInt("--gens", 12);
 		var seed = argInt("--seed", 42);
@@ -3495,6 +3503,209 @@ class CorpusEvoRun {
 		} catch (e:Dynamic) {
 			return null;
 		}
+	}
+
+	/**
+	 * JVM twin of `NmaNodeBench --det-probe`: seed N genomes, score through the SAME
+	 * JS-fallback Deque worker pool CorpusEvoRun uses under `--nma` / forceFallback, require
+	 * identical (ok, trades, sharpe, equity) vs serial for each M in `--threads-list` across K reps.
+	 *
+	 * Dirty-spine / fuse-host stay off (auto-disabled at M>1 in the main path anyway).
+	 */
+	static function runFbThreadDetProbe():Void {
+		var n = argInt("--pop", 64);
+		if (n < 1) n = 1;
+		var seed = argInt("--seed", 42);
+		var reps = argInt("--reps", 3);
+		if (reps < 1) reps = 1;
+		var depth = argInt("--depth", 3);
+		var costBps = argFloat("--cost-bps", 0);
+		var startCapital = argFloat("--start-capital", 100000);
+		var equityFloor = 0.0;
+		var threadMs = parseDetProbeThreadList();
+		if (threadMs.length == 0)
+			throw "--det-probe needs at least one M>1 (pass --threads N or --threads-list 2,4)";
+
+		var tapePath = argStr("--tape", "build/graal/smoke_spy_320.csv");
+		var bars = loadBars(tapePath);
+		if (bars.length < 60)
+			throw 'tape too short: ${bars.length} bars from $tapePath';
+		var isN = Std.int(bars.length * 0.7);
+		if (isN < 60) isN = bars.length;
+		var isBars = bars.slice(0, isN);
+		var isBasket:Array<Array<Bar>> = [isBars];
+
+		Fitness.preferNma = true;
+		Fitness.nmaPopMemoEnabled = !argFlag("--no-pop-memo");
+		Fitness.nmaDirtySpine = false;
+		Fitness.nmaWorking = null;
+		Fitness.nmaTape = isBars;
+		Fitness.nmaCostBps = costBps;
+		Fitness.nmaInitialCash = startCapital;
+		Fitness.nmaEquityFloor = equityFloor;
+		Fitness.attrBandit = !argFlag("--no-attr-bandit");
+		Fitness.creditCuts = !argFlag("--no-credit-cuts");
+		Fitness.equityCurveNeeded = false;
+		Fitness.beginNmaPopMemo();
+
+		var engine = new EvolutionEngine(seed, n, Std.int(Math.max(2, Std.int(n / 16))), 3);
+		var popG = engine.seedPopulation(depth);
+
+		Sys.println("=== MuseScript NMA JVM fallback-pool determinism probe ===");
+		Sys.println('N=$n M=${threadMs.join(",")} K=$reps seed=$seed depth=$depth costBps=$costBps');
+		Sys.println('tape: $tapePath  full=${bars.length}  IS=${isBars.length}  preferNma=true forceFallback path');
+		Sys.println('compare: per-key ok/trades/sharpe/equity from fb workers (pre-parsimony)');
+
+		var baseline = fbPoolEval(popG, isBasket, costBps, startCapital, equityFloor, 1);
+		Sys.println('serial baseline: uniq=${baseline.keys.length}');
+		for (k in 0...reps) {
+			var again = fbPoolEval(popG, isBasket, costBps, startCapital, equityFloor, 1);
+			var drift = fbEvalDrift(baseline, again);
+			if (drift != null)
+				throw 'serial nondeterministic at rep=${k + 1}: $drift';
+		}
+		Sys.println('serial self-check: $reps/$reps identical');
+
+		for (m in threadMs) {
+			for (k in 0...reps) {
+				var t0 = haxe.Timer.stamp();
+				var got = fbPoolEval(popG, isBasket, costBps, startCapital, equityFloor, m);
+				var ms = (haxe.Timer.stamp() - t0) * 1000;
+				var drift = fbEvalDrift(baseline, got);
+				if (drift != null)
+					throw 'threads=$m rep=${k + 1} drifted vs serial: $drift';
+				Sys.println('threads=$m rep=${k + 1}/$reps OK (${fmtProbe(ms, 0)}ms barrier uniq=${got.keys.length})');
+			}
+		}
+
+		Sys.println('SUMMARY N=$n M=[${threadMs.join(",")}] K=$reps — fb-pool results identical to serial');
+		Sys.println("NMA_JVM_DET_PROBE_OK");
+	}
+
+	/** Snapshot of one fb-pool barrier: unique keys in dispatch order + results by key. */
+	static function fbPoolEval(
+		popG:Array<StrategyGenome>,
+		isBasket:Array<Array<Bar>>,
+		costBps:Float,
+		startCapital:Float,
+		equityFloor:Float,
+		workers:Int
+	):{keys:Array<String>, byKey:Map<String, FallbackResult>} {
+		var keyToIdx:Map<String, Array<Int>> = new Map();
+		var order:Array<String> = [];
+		for (i in 0...popG.length) {
+			var key = Canonical.structuralKey(popG[i]);
+			var bucket = keyToIdx.get(key);
+			if (bucket == null) {
+				bucket = [];
+				keyToIdx.set(key, bucket);
+				order.push(key);
+			}
+			bucket.push(i);
+		}
+
+		var w = workers < 1 ? 1 : workers;
+		var fbJobQueue = new Deque<FallbackJob>();
+		var fbResultQueue = new Deque<FallbackResult>();
+		var stopAck = new Deque<Int>();
+		for (_ in 0...w) {
+			Thread.create(function() {
+				while (true) {
+					var job = fbJobQueue.pop(true);
+					if (job.stop) {
+						stopAck.add(1);
+						return;
+					}
+					try {
+						var g = popG[keyToIdx.get(job.key)[0]];
+						var perSymbol:Array<{trades:Int, sharpe:Float, finalEquity:Float, ?bankrupt:Bool}> = [];
+						var firstFills = null;
+						var anyErr = false;
+						for (i in 0...isBasket.length) {
+							var fr = Fitness.evaluate(g, isBasket[i], "js", false, costBps, startCapital, equityFloor);
+							if (!fr.ok) { anyErr = true; break; }
+							if (i == 0) firstFills = fr.fills;
+							perSymbol.push({trades: fr.trades, sharpe: fr.sharpe, finalEquity: fr.finalEquity, bankrupt: fr.bankrupt});
+						}
+						if (anyErr) {
+							fbResultQueue.add({
+								key: job.key, ok: false, trades: 0, sharpe: Math.NaN, equity: 0,
+								fills: null, perSymbolSharpe: [], bankrupt: false, lexCases: []
+							});
+						} else {
+							var agg = BasketFitness.aggregateBasket(perSymbol);
+							fbResultQueue.add({
+								key: job.key, ok: true, trades: agg.trades, sharpe: agg.sharpe, equity: agg.finalEquity,
+								fills: firstFills, perSymbolSharpe: [for (p in perSymbol) p.sharpe],
+								bankrupt: agg.bankrupt, lexCases: []
+							});
+						}
+					} catch (e:Dynamic) {
+						fbResultQueue.add({
+							key: job.key, ok: false, trades: 0, sharpe: Math.NaN, equity: 0,
+							fills: null, perSymbolSharpe: [], bankrupt: false, lexCases: []
+						});
+					}
+				}
+			});
+		}
+
+		for (key in order) fbJobQueue.add({key: key, useFullTape: true, stop: false});
+		var byKey = new Map<String, FallbackResult>();
+		for (_ in 0...order.length) {
+			var r = fbResultQueue.pop(true);
+			byKey.set(r.key, r);
+		}
+		for (_ in 0...w) fbJobQueue.add({key: "", useFullTape: false, stop: true});
+		for (_ in 0...w) stopAck.pop(true);
+
+		return {keys: order, byKey: byKey};
+	}
+
+	static function fbEvalDrift(
+		a:{keys:Array<String>, byKey:Map<String, FallbackResult>},
+		b:{keys:Array<String>, byKey:Map<String, FallbackResult>}
+	):Null<String> {
+		if (a.keys.length != b.keys.length) return 'uniq ${a.keys.length} vs ${b.keys.length}';
+		for (i in 0...a.keys.length) {
+			if (a.keys[i] != b.keys[i]) return 'key order i=$i ${a.keys[i]} vs ${b.keys[i]}';
+			var ka = a.keys[i];
+			var ra = a.byKey.get(ka);
+			var rb = b.byKey.get(ka);
+			if (ra == null || rb == null) return 'missing result for $ka';
+			if (ra.ok != rb.ok) return '$ka ok ${ra.ok} vs ${rb.ok}';
+			if (ra.trades != rb.trades) return '$ka trades ${ra.trades} vs ${rb.trades}';
+			if (ra.bankrupt != rb.bankrupt) return '$ka bankrupt ${ra.bankrupt} vs ${rb.bankrupt}';
+			if (!sameProbeFloat(ra.sharpe, rb.sharpe)) return '$ka sharpe ${ra.sharpe} vs ${rb.sharpe}';
+			if (!sameProbeFloat(ra.equity, rb.equity)) return '$ka equity ${ra.equity} vs ${rb.equity}';
+		}
+		return null;
+	}
+
+	static inline function sameProbeFloat(x:Float, y:Float):Bool {
+		if (Math.isNaN(x) && Math.isNaN(y)) return true;
+		return x == y;
+	}
+
+	static function parseDetProbeThreadList():Array<Int> {
+		var raw = argStr("--threads-list", null);
+		var out:Array<Int> = [];
+		if (raw != null && raw.length > 0) {
+			for (part in raw.split(",")) {
+				var t = Std.parseInt(StringTools.trim(part));
+				if (t != null && t > 1 && out.indexOf(t) < 0) out.push(t);
+			}
+			return out;
+		}
+		var threads = argInt("--threads", 0);
+		if (threads > 1) return [threads];
+		return [2, 4];
+	}
+
+	static function fmtProbe(x:Float, n:Int):String {
+		var m = Math.pow(10, n);
+		var r = Math.ffloor(x * m + 0.5) / m;
+		return Std.string(r);
 	}
 
 	static function loadBars(explicitPath:Null<String>):Array<Bar> {

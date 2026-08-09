@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -19,7 +20,7 @@ import musescript.types.MuseType;
  */
 class TdDwave implements MuseIndicator<Bar, Float> {
 	var strength:Int;
-	var window:Array<Bar>;
+	var window:RingBuffer<Bar>;
 	var lastIsHigh:Null<Bool>;
 	var lastExtreme:Float;
 	var wave:Int;
@@ -53,15 +54,14 @@ class TdDwave implements MuseIndicator<Bar, Float> {
 
 	public function update(bar:Bar):Null<Float> {
 		var span = 2 * strength + 1;
-		if (window.length == span) window.shift();
 		window.push(bar);
 		if (window.length == span) {
-			var center = window[strength];
+			var center = window.oldest(strength);
 			var isHigh = true, isLow = true;
 			for (i in 0...window.length) {
 				if (i == strength) continue;
-				if (!(window[i].high < center.high)) isHigh = false;
-				if (!(window[i].low > center.low)) isLow = false;
+				if (!(window.oldest(i).high < center.high)) isHigh = false;
+				if (!(window.oldest(i).low > center.low)) isLow = false;
 			}
 			if (isHigh && !isLow) advance(true, center.high);
 			else if (isLow && !isHigh) advance(false, center.low);
@@ -70,7 +70,7 @@ class TdDwave implements MuseIndicator<Bar, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(2 * strength + 1);
 		lastIsHigh = null;
 		lastExtreme = 0.0;
 		wave = 0;

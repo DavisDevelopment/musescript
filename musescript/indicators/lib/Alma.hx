@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -21,7 +22,7 @@ class Alma implements MuseIndicator<Float, Float> {
 	var offset:Float;
 	var sigma:Float;
 	var weights:Array<Float>;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var current:Null<Float>;
 
 	public function new(period:Int, offset:Float, sigma:Float) {
@@ -64,22 +65,20 @@ class Alma implements MuseIndicator<Float, Float> {
 
 	public function update(input:Float):Null<Float> {
 		if (!Math.isFinite(input)) return current;
-		if (window.length == period) {
-			window.shift();
-		}
 		window.push(input);
 		if (window.length < period) return null;
 
 		var acc = 0.0;
+		// weights[i] were authored against Array-oldest-first indexing.
 		for (i in 0...weights.length) {
-			acc += weights[i] * window[i];
+			acc += weights[i] * window.oldest(i);
 		}
 		current = acc;
 		return acc;
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 		current = null;
 	}
 

@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -24,12 +25,12 @@ import musescript.types.MuseType;
  */
 class ShortLine implements MuseIndicator<Bar, Float> {
 	var _period:Int;
-	var ranges:Array<Float>;
+	var ranges:RingBuffer<Float>;
 
 	public function new(period:Int = 5) {
 		if (period <= 0) throw "ShortLine: period must be at least 1";
 		this._period = period;
-		ranges = [];
+		reset();
 	}
 
 	/** Configured averaging period. */
@@ -38,15 +39,14 @@ class ShortLine implements MuseIndicator<Bar, Float> {
 	public function update(candle:Bar):Null<Float> {
 		var range = candle.high - candle.low;
 		var body = candle.close - candle.open;
-		if (ranges.length < _period) {
+		if (!ranges.isFull()) {
 			ranges.push(range);
 			return 0.0;
 		}
 		var sum = 0.0;
-		for (r in ranges) sum += r;
+		for (i in 0...ranges.length) sum += ranges.oldest(i);
 		var avg = sum / _period;
 		ranges.push(range);
-		ranges.shift();
 		if (range < avg && Math.abs(body) >= 0.5 * range) {
 			return body > 0.0 ? 1.0 : -1.0;
 		}
@@ -54,7 +54,7 @@ class ShortLine implements MuseIndicator<Bar, Float> {
 	}
 
 	public function reset():Void {
-		ranges = [];
+		ranges = new RingBuffer(_period);
 	}
 
 	public function warmupPeriod():Int return _period;

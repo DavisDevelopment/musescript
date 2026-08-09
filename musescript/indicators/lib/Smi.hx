@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.prim.Ema;
 import musescript.types.MuseType;
 
@@ -27,8 +28,8 @@ class Smi implements MuseIndicator<Bar, Float> {
 	var period:Int;
 	var dPeriod:Int;
 	var d2Period:Int;
-	var highs:Array<Float>;
-	var lows:Array<Float>;
+	var highs:RingBuffer<Float>;
+	var lows:RingBuffer<Float>;
 	var emaD1:Ema;
 	var emaD2:Ema;
 	var emaR1:Ema;
@@ -40,8 +41,8 @@ class Smi implements MuseIndicator<Bar, Float> {
 		this.period = period;
 		this.dPeriod = dPeriod;
 		this.d2Period = d2Period;
-		highs = [];
-		lows = [];
+		highs = new RingBuffer(period);
+		lows = new RingBuffer(period);
 		emaD1 = new Ema(dPeriod);
 		emaD2 = new Ema(d2Period);
 		emaR1 = new Ema(dPeriod);
@@ -57,18 +58,16 @@ class Smi implements MuseIndicator<Bar, Float> {
 		return {period: period, dPeriod: dPeriod, d2Period: d2Period};
 
 	public function update(bar:Bar):Null<Float> {
-		if (highs.length == period) {
-			highs.shift();
-			lows.shift();
-		}
 		highs.push(bar.high);
 		lows.push(bar.low);
 		if (highs.length < period) return null;
 		var hh = Math.NEGATIVE_INFINITY;
 		var ll = Math.POSITIVE_INFINITY;
 		for (i in 0...highs.length) {
-			if (highs[i] > hh) hh = highs[i];
-			if (lows[i] < ll) ll = lows[i];
+			var h = highs.at(i);
+			var l = lows.at(i);
+			if (h > hh) hh = h;
+			if (l < ll) ll = l;
 		}
 		var center = (hh + ll) / 2.0;
 		var displacement = bar.close - center;
@@ -94,8 +93,8 @@ class Smi implements MuseIndicator<Bar, Float> {
 	}
 
 	public function reset():Void {
-		highs = [];
-		lows = [];
+		highs = new RingBuffer(period);
+		lows = new RingBuffer(period);
 		emaD1.reset();
 		emaD2.reset();
 		emaR1.reset();

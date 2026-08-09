@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -25,7 +26,7 @@ import musescript.types.MuseType;
 class UpsidePotentialRatio implements MuseIndicator<Float, Float> {
 	var period:Int;
 	var mar:Float;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var sumUpside:Float;
 	var sumDownsideSq:Float;
 
@@ -39,8 +40,11 @@ class UpsidePotentialRatio implements MuseIndicator<Float, Float> {
 
 	public function update(ret:Float):Null<Float> {
 		if (!Math.isFinite(ret)) return null;
-		if (window.length == period) {
-			var old = window.shift();
+		// Fullness checked before push — `Null<Float>` of `0.0` is nullish on JS.
+		// Evict-then-add order preserved for ULP identity with running upside/downside sums.
+		var wasFull = window.isFull();
+		var old = window.push(ret);
+		if (wasFull) {
 			var oldExcess = old - mar;
 			sumUpside -= oldExcess > 0.0 ? oldExcess : 0.0;
 			var oldDown = oldExcess < 0.0 ? oldExcess : 0.0;
@@ -50,7 +54,6 @@ class UpsidePotentialRatio implements MuseIndicator<Float, Float> {
 		sumUpside += excess > 0.0 ? excess : 0.0;
 		var down = excess < 0.0 ? excess : 0.0;
 		sumDownsideSq += down * down;
-		window.push(ret);
 		if (window.length < period) return null;
 		var n = period;
 		var upsideMean = sumUpside / n;
@@ -59,7 +62,7 @@ class UpsidePotentialRatio implements MuseIndicator<Float, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 		sumUpside = 0.0;
 		sumDownsideSq = 0.0;
 	}

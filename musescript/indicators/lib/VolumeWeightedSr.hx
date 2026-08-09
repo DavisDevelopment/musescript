@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /** Volume-Weighted S/R output: the support and resistance levels. */
@@ -24,9 +25,9 @@ typedef VolumeWeightedSrOutput = {
  */
 class VolumeWeightedSr implements MuseIndicator<Bar, VolumeWeightedSrOutput> {
 	public var period(default, null):Int;
-	var highs:Array<Float>;
-	var lows:Array<Float>;
-	var volumes:Array<Float>;
+	var highs:RingBuffer<Float>;
+	var lows:RingBuffer<Float>;
+	var volumes:RingBuffer<Float>;
 	var sumHv:Float;
 	var sumLv:Float;
 	var sumV:Float;
@@ -44,19 +45,17 @@ class VolumeWeightedSr implements MuseIndicator<Bar, VolumeWeightedSrOutput> {
 	public function value():Null<VolumeWeightedSrOutput> return last;
 
 	public function update(bar:Bar):Null<VolumeWeightedSrOutput> {
-		if (highs.length == period) {
-			var h = highs.shift();
-			var l = lows.shift();
-			var v = volumes.shift();
+		var wasFull = highs.isFull();
+		var h = highs.push(bar.high);
+		var l = lows.push(bar.low);
+		var v = volumes.push(bar.volume);
+		if (wasFull) {
 			sumHv -= h * v;
 			sumLv -= l * v;
 			sumV -= v;
 			sumH -= h;
 			sumL -= l;
 		}
-		highs.push(bar.high);
-		lows.push(bar.low);
-		volumes.push(bar.volume);
 		sumHv += bar.high * bar.volume;
 		sumLv += bar.low * bar.volume;
 		sumV += bar.volume;
@@ -79,9 +78,9 @@ class VolumeWeightedSr implements MuseIndicator<Bar, VolumeWeightedSrOutput> {
 	}
 
 	public function reset():Void {
-		highs = [];
-		lows = [];
-		volumes = [];
+		highs = new RingBuffer(period);
+		lows = new RingBuffer(period);
+		volumes = new RingBuffer(period);
 		sumHv = 0.0;
 		sumLv = 0.0;
 		sumV = 0.0;

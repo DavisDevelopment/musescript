@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.lib.LinReg.LinRegMath;
 import musescript.types.MuseType;
 
@@ -25,19 +26,18 @@ typedef LinRegChannelOutput = {
 class LinRegChannel implements MuseIndicator<Float, LinRegChannelOutput> {
 	var period:Int;
 	var multiplier:Float;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 
 	public function new(period:Int, multiplier:Float) {
 		if (period < 2) throw "LinRegChannel: period must be >= 2";
 		if (!Math.isFinite(multiplier) || multiplier <= 0.0) throw "LinRegChannel: multiplier must be positive and finite";
 		this.period = period;
 		this.multiplier = multiplier;
-		window = [];
+		reset();
 	}
 
 	public function update(price:Float):Null<LinRegChannelOutput> {
 		if (!Math.isFinite(price)) return null;
-		if (window.length == period) window.shift();
 		window.push(price);
 		if (window.length < period) return null;
 
@@ -46,7 +46,7 @@ class LinRegChannel implements MuseIndicator<Float, LinRegChannelOutput> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 	}
 
 	public function warmupPeriod():Int return period;

@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -18,8 +19,8 @@ import musescript.types.MuseType;
  */
 class Vwma implements MuseIndicator<Bar, Float> {
 	public var period(default, null):Int;
-	var closes:Array<Float>;
-	var volumes:Array<Float>;
+	var closes:RingBuffer<Float>;
+	var volumes:RingBuffer<Float>;
 	var sumPv:Float;
 	var sumV:Float;
 	var sumClose:Float;
@@ -37,15 +38,14 @@ class Vwma implements MuseIndicator<Bar, Float> {
 	public function update(bar:Bar):Null<Float> {
 		var close = bar.close;
 		var volume = bar.volume;
-		if (closes.length == period) {
-			var oldClose = closes.shift();
-			var oldVolume = volumes.shift();
+		var wasFull = closes.isFull();
+		var oldClose = closes.push(close);
+		var oldVolume = volumes.push(volume);
+		if (wasFull) {
 			sumPv -= oldClose * oldVolume;
 			sumV -= oldVolume;
 			sumClose -= oldClose;
 		}
-		closes.push(close);
-		volumes.push(volume);
 		sumPv += close * volume;
 		sumV += volume;
 		sumClose += close;
@@ -62,8 +62,8 @@ class Vwma implements MuseIndicator<Bar, Float> {
 	}
 
 	public function reset():Void {
-		closes = [];
-		volumes = [];
+		closes = new RingBuffer(period);
+		volumes = new RingBuffer(period);
 		sumPv = 0.0;
 		sumV = 0.0;
 		sumClose = 0.0;

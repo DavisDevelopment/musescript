@@ -73,6 +73,7 @@ class TestMain {
 		runner.addCase(new TestWalkForwardPipeline());
 		runner.addCase(new TestIndicatorPorts());
 		runner.addCase(new TestRingBuffer());
+		runner.addCase(new TestSortedWindow());
 		runner.addCase(new TestNdArray());
 		runner.addCase(new TestTaToolbelt());
 		runner.addCase(new TestMuseHost());

@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -21,7 +22,7 @@ import musescript.types.MuseType;
 class PairwiseBeta implements MuseIndicator<PairwisePair, Float> {
 	var period:Int;
 	var prev:Null<PairwisePair>;
-	var window:Array<PairwisePair>;
+	var window:RingBuffer<PairwisePair>;
 	var sumA:Float;
 	var sumB:Float;
 	var sumBb:Float;
@@ -34,14 +35,14 @@ class PairwiseBeta implements MuseIndicator<PairwisePair, Float> {
 	}
 
 	function pushReturn(ra:Float, rb:Float):Null<Float> {
-		if (window.length == period) {
-			var old = window.shift();
+		var wasFull = window.isFull();
+		var old = window.push({ a: ra, b: rb });
+		if (wasFull) {
 			sumA -= old.a;
 			sumB -= old.b;
 			sumBb -= old.b * old.b;
 			sumAb -= old.a * old.b;
 		}
-		window.push({ a: ra, b: rb });
 		sumA += ra;
 		sumB += rb;
 		sumBb += rb * rb;
@@ -79,7 +80,7 @@ class PairwiseBeta implements MuseIndicator<PairwisePair, Float> {
 
 	public function reset():Void {
 		prev = null;
-		window = [];
+		window = new RingBuffer(period);
 		sumA = 0.0;
 		sumB = 0.0;
 		sumBb = 0.0;

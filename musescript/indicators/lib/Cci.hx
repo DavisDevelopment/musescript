@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -17,7 +18,7 @@ import musescript.types.MuseType;
 class Cci implements MuseIndicator<Bar, Float> {
 	var period:Int;
 	var factor:Float;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var sum:Float;
 
 	/** `factor` defaults to the canonical 0.015 (puts ~70% of values inside +/-100). */
@@ -27,14 +28,16 @@ class Cci implements MuseIndicator<Bar, Float> {
 		if (!Math.isFinite(f) || f <= 0) throw "Cci: factor must be positive and finite";
 		this.period = period;
 		this.factor = f;
-		window = [];
+		window = new RingBuffer(period);
 		sum = 0.0;
 	}
 
 	public function update(bar:Bar):Null<Float> {
 		var tp = (bar.high + bar.low + bar.close) / 3.0;
-		if (window.length == period) sum -= window.shift();
-		window.push(tp);
+		// Fullness checked before push — `Null<Float>` of `0.0` is nullish on JS.
+		var wasFull = window.isFull();
+		var old = window.push(tp);
+		if (wasFull) sum -= old;
 		sum += tp;
 		if (window.length < period) return null;
 		var n:Float = period;
@@ -47,7 +50,7 @@ class Cci implements MuseIndicator<Bar, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 		sum = 0.0;
 	}
 

@@ -1065,6 +1065,50 @@ class TestEvoVariation extends Test {
 		Assert.floatEquals(Metrics.periodsPerYearFromBarSeconds(0), Metrics.DAILY_PERIODS_PER_YEAR, 1e-15);
 	}
 
+	public function testConfigureFromBarsDailyStays252() {
+		Metrics.resetPeriodsPerYear();
+		var bars = [for (i in 0...40) {
+			open: 100.0, high: 101.0, low: 99.0, close: 100.0 + i * 0.1,
+			volume: 1000.0, time: i * 86400.0, index: i
+		}];
+		var py = Metrics.configureFromBars(bars);
+		Assert.isTrue(py != null);
+		Assert.floatEquals(Metrics.DAILY_PERIODS_PER_YEAR, Metrics.periodsPerYear, 1e-15);
+		Metrics.resetPeriodsPerYear();
+	}
+
+	public function testFitnessEvaluateHonorsConfiguredSubDailyPeriods() {
+		// Same OHLCV / strategy; only Bar.time spacing differs. Default path keeps 252
+		// (no auto-infer). Opt-in configureFromBars → periodsPerYearFromBarSeconds(900).
+		Metrics.resetPeriodsPerYear();
+		var g = baseGenome(BCross("over", SPrice("close"), SInd("sma", "close", 8, null)));
+		var base = BarFeed.synthetic(240, 7).all();
+		var bars15:Array<musescript.harness.Bar> = [for (i in 0...base.length) {
+			open: base[i].open, high: base[i].high, low: base[i].low, close: base[i].close,
+			volume: base[i].volume, time: i * 900.0, index: i
+		}];
+		var dailyish:Array<musescript.harness.Bar> = [for (i in 0...base.length) {
+			open: base[i].open, high: base[i].high, low: base[i].low, close: base[i].close,
+			volume: base[i].volume, time: i * 86400.0, index: i
+		}];
+		var frDefault = Fitness.evaluate(g, bars15, "js", false);
+		Assert.isTrue(frDefault.ok && Math.isFinite(frDefault.sharpe) && frDefault.sharpe != 0,
+			"setup needs a non-degenerate Sharpe");
+		var expected15 = Metrics.periodsPerYearFromBarSeconds(900);
+		var got = Fitness.configurePeriodsFromBars(bars15);
+		Assert.floatEquals(expected15, got, 1e-9);
+		var frSub = Fitness.evaluate(g, bars15, "js", false);
+		Assert.floatEquals(frDefault.sharpe * Math.sqrt(expected15 / Metrics.DAILY_PERIODS_PER_YEAR),
+			frSub.sharpe, 1e-9,
+			"sub-daily configure must scale annualized Sharpe by sqrt(periods ratio)");
+		// Daily timestamps still lock to 252 (session convention), not 365.
+		Fitness.configurePeriodsFromBars(dailyish);
+		Assert.floatEquals(Metrics.DAILY_PERIODS_PER_YEAR, Fitness.periodsPerYear(), 1e-15);
+		var frDaily = Fitness.evaluate(g, dailyish, "js", false);
+		Assert.floatEquals(frDefault.sharpe, frDaily.sharpe, 1e-9);
+		Fitness.resetPeriodsPerYear();
+	}
+
 	public function testSymbolSelectorCrossoverExploresMoreThanOneMask() {
 		// The real-world consequence of the old bug: uniform crossover collapsed to the single
 		// fixed mask a[0],b[1],a[2],b[3],... Distinct seeds must yield distinct masks.

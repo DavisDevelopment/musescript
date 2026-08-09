@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /** Fractal Chaos Bands output: the most recently confirmed fractal high/low. */
@@ -24,27 +25,24 @@ typedef FractalChaosBandsOutput = {
  * (non-repainting).
  */
 class FractalChaosBands implements MuseIndicator<Bar, FractalChaosBandsOutput> {
-	var window:Array<Bar>;
+	var window:RingBuffer<Bar>;
 	var upper:Null<Float>;
 	var lower:Null<Float>;
 
 	public function new() {
-		window = [];
-		upper = null;
-		lower = null;
+		reset();
 	}
 
 	public function update(bar:Bar):Null<FractalChaosBandsOutput> {
 		window.push(bar);
-		if (window.length > 5) window.shift();
 
 		if (window.length == 5) {
-			var mid = window[2];
+			var mid = window.oldest(2);
 			var isFractalHigh = true;
 			var isFractalLow = true;
 			for (i in [0, 1, 3, 4]) {
-				if (window[i].high >= mid.high) isFractalHigh = false;
-				if (window[i].low <= mid.low) isFractalLow = false;
+				if (window.oldest(i).high >= mid.high) isFractalHigh = false;
+				if (window.oldest(i).low <= mid.low) isFractalLow = false;
 			}
 			if (isFractalHigh) upper = mid.high;
 			if (isFractalLow) lower = mid.low;
@@ -55,7 +53,7 @@ class FractalChaosBands implements MuseIndicator<Bar, FractalChaosBandsOutput> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(5);
 		upper = null;
 		lower = null;
 	}

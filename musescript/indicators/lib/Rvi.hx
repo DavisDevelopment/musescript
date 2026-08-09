@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -18,8 +19,8 @@ import musescript.types.MuseType;
  */
 class Rvi implements MuseIndicator<Bar, Float> {
 	public var period(default, null):Int;
-	var nums:Array<Float>;
-	var dens:Array<Float>;
+	var nums:RingBuffer<Float>;
+	var dens:RingBuffer<Float>;
 	var sumNum:Float;
 	var sumDen:Float;
 	var current:Null<Float>;
@@ -36,12 +37,14 @@ class Rvi implements MuseIndicator<Bar, Float> {
 	public function update(bar:Bar):Null<Float> {
 		var num = bar.close - bar.open;
 		var den = bar.high - bar.low;
-		if (nums.length == period) {
-			sumNum -= nums.shift();
-			sumDen -= dens.shift();
+		// Fullness checked before push — `Null<Float>` of `0.0` is nullish on JS.
+		var wasFull = nums.isFull();
+		var oldNum = nums.push(num);
+		var oldDen = dens.push(den);
+		if (wasFull) {
+			sumNum -= oldNum;
+			sumDen -= oldDen;
 		}
-		nums.push(num);
-		dens.push(den);
 		sumNum += num;
 		sumDen += den;
 		if (nums.length < period) return null;
@@ -56,8 +59,8 @@ class Rvi implements MuseIndicator<Bar, Float> {
 	}
 
 	public function reset():Void {
-		nums = [];
-		dens = [];
+		nums = new RingBuffer(period);
+		dens = new RingBuffer(period);
 		sumNum = 0.0;
 		sumDen = 0.0;
 		current = null;

@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -21,20 +22,15 @@ class Mfi implements MuseIndicator<Bar, Float> {
 	var period:Int;
 	var hasPrevTp:Bool;
 	var prevTp:Float;
-	var posWindow:Array<Float>;
-	var negWindow:Array<Float>;
+	var posWindow:RingBuffer<Float>;
+	var negWindow:RingBuffer<Float>;
 	var posSum:Float;
 	var negSum:Float;
 
 	public function new(period:Int) {
 		if (period <= 0) throw "Mfi: period must be > 0";
 		this.period = period;
-		hasPrevTp = false;
-		prevTp = 0.0;
-		posWindow = [];
-		negWindow = [];
-		posSum = 0.0;
-		negSum = 0.0;
+		reset();
 	}
 
 	public function update(bar:Bar):Null<Float> {
@@ -49,12 +45,14 @@ class Mfi implements MuseIndicator<Bar, Float> {
 		if (tp > prevTp) posFlow = mf;
 		else if (tp < prevTp) negFlow = mf;
 
-		if (posWindow.length == period) {
-			posSum -= posWindow.shift();
-			negSum -= negWindow.shift();
+		// Fullness checked before push — `Null<Float>` of `0.0` is nullish on JS.
+		var wasFull = posWindow.isFull();
+		var oldPos = posWindow.push(posFlow);
+		var oldNeg = negWindow.push(negFlow);
+		if (wasFull) {
+			posSum -= oldPos;
+			negSum -= oldNeg;
 		}
-		posWindow.push(posFlow);
-		negWindow.push(negFlow);
 		posSum += posFlow;
 		negSum += negFlow;
 		prevTp = tp;
@@ -69,8 +67,8 @@ class Mfi implements MuseIndicator<Bar, Float> {
 	public function reset():Void {
 		hasPrevTp = false;
 		prevTp = 0.0;
-		posWindow = [];
-		negWindow = [];
+		posWindow = new RingBuffer(period);
+		negWindow = new RingBuffer(period);
 		posSum = 0.0;
 		negSum = 0.0;
 	}

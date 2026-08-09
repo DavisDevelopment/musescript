@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /** Random Walk Index output: the bullish (high) and bearish (low) lines. */
@@ -28,9 +29,9 @@ typedef RwiOutput = {
 class Rwi implements MuseIndicator<Bar, RwiOutput> {
 	var period:Int;
 	/** Rolling window of the most recent `period` candles (oldest first). */
-	var candles:Array<Bar>;
+	var candles:RingBuffer<Bar>;
 	/** Rolling window of true ranges; trs[k] = TR of candles[k+1] vs candles[k]. */
-	var trs:Array<Float>;
+	var trs:RingBuffer<Float>;
 	var last:Null<RwiOutput>;
 
 	public function new(period:Int) {
@@ -44,7 +45,7 @@ class Rwi implements MuseIndicator<Bar, RwiOutput> {
 		// True range of this candle vs. the previous close (if any).
 		var tr:Float;
 		if (candles.length > 0) {
-			var prev = candles[candles.length - 1];
+			var prev = candles.at(0); // newest retained so far
 			var hl = candle.high - candle.low;
 			var hc = Math.abs(candle.high - prev.close);
 			var lc = Math.abs(candle.low - prev.close);
@@ -53,20 +54,18 @@ class Rwi implements MuseIndicator<Bar, RwiOutput> {
 			tr = candle.high - candle.low;
 		}
 
-		if (candles.length == period) candles.shift();
 		candles.push(candle);
 
 		// `trs` aligns with `candles` from index 1 onward.
 		if (candles.length >= 2) {
-			if (trs.length == period - 1) trs.shift();
 			trs.push(tr);
 		}
 
 		if (candles.length < period) return null;
 
 		var n = candles.length; // == period
-		var lastHigh = candles[n - 1].high;
-		var lastLow = candles[n - 1].low;
+		var lastHigh = candles.oldest(n - 1).high;
+		var lastLow = candles.oldest(n - 1).low;
 
 		var rwiHigh = 0.0;
 		var rwiLow = 0.0;
@@ -77,12 +76,12 @@ class Rwi implements MuseIndicator<Bar, RwiOutput> {
 			var trEnd = n - 1;
 			var count = trEnd - trStart;
 			var sum = 0.0;
-			for (k in trStart...trEnd) sum += trs[k];
+			for (k in trStart...trEnd) sum += trs.oldest(k);
 			var atrI = sum / count;
 			var denom = atrI * Math.sqrt(i);
 			if (denom == 0.0) continue;
-			var oldLow = candles[n - i].low;
-			var oldHigh = candles[n - i].high;
+			var oldLow = candles.oldest(n - i).low;
+			var oldHigh = candles.oldest(n - i).high;
 			var hv = (lastHigh - oldLow) / denom;
 			var lv = (oldHigh - lastLow) / denom;
 			if (hv > rwiHigh) rwiHigh = hv;
@@ -95,8 +94,8 @@ class Rwi implements MuseIndicator<Bar, RwiOutput> {
 	}
 
 	public function reset():Void {
-		candles = [];
-		trs = [];
+		candles = new RingBuffer(period);
+		trs = new RingBuffer(period - 1);
 		last = null;
 	}
 

@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -28,7 +29,7 @@ class AwesomeOscillatorHistogram implements MuseIndicator<Bar, Float> {
 	var slowPeriod:Int;
 	var lookback:Int;
 	var ao:AwesomeOscillator;
-	var history:Array<Float>;
+	var history:RingBuffer<Float>;
 	var emitted:Bool;
 
 	public function new(fast:Int, slow:Int, lookback:Int) {
@@ -55,14 +56,15 @@ class AwesomeOscillatorHistogram implements MuseIndicator<Bar, Float> {
 		if (ao == null) return null;
 		history.push(ao);
 		if (history.length <= lookback) return null;
-		var prev = history.shift();
+		// Capacity is lookback+1: oldest is AO_{t−lookback}.
+		var prev = history.oldest(0);
 		emitted = true;
 		return ao - prev;
 	}
 
 	public function reset():Void {
 		ao.reset();
-		history = [];
+		history = new RingBuffer(lookback + 1);
 		emitted = false;
 	}
 

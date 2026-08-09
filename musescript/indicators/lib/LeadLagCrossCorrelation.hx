@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -16,18 +17,16 @@ import musescript.types.MuseType;
 class LeadLagCrossCorrelation implements MuseIndicator<LeadLagPair, Float> {
 	var period:Int;
 	var lag:Int;
-	var delayBuf:Array<Float>;
-	var windowA:Array<Float>;
-	var windowB:Array<Float>;
+	var delayBuf:RingBuffer<Float>;
+	var windowA:RingBuffer<Float>;
+	var windowB:RingBuffer<Float>;
 
 	public function new(period:Int, lag:Int) {
 		if (period < 2) throw "LeadLagCrossCorrelation: period must be >= 2";
 		if (lag < 0) throw "LeadLagCrossCorrelation: lag must be >= 0";
 		this.period = period;
 		this.lag = lag;
-		delayBuf = [];
-		windowA = [];
-		windowB = [];
+		reset();
 	}
 
 	public function update(input:LeadLagPair):Null<Float> {
@@ -35,13 +34,18 @@ class LeadLagCrossCorrelation implements MuseIndicator<LeadLagPair, Float> {
 		var b = input.b;
 		if (!Math.isFinite(a) || !Math.isFinite(b)) return null;
 
-		delayBuf.push(b);
-		if (delayBuf.length <= lag) return null; // not enough history to look `lag` bars back yet
-		var delayedB = delayBuf.shift();
+		var delayedB:Float;
+		if (lag == 0) {
+			delayedB = b;
+		} else {
+			// Capacity = lag: fill lag samples first, then each push evicts B_{t-lag}.
+			var delayFull = delayBuf.isFull();
+			var old = delayBuf.push(b);
+			if (!delayFull) return null;
+			delayedB = old;
+		}
 
-		if (windowA.length == period) windowA.shift();
 		windowA.push(a);
-		if (windowB.length == period) windowB.shift();
 		windowB.push(delayedB);
 
 		if (windowA.length < period) return null;
@@ -51,14 +55,16 @@ class LeadLagCrossCorrelation implements MuseIndicator<LeadLagPair, Float> {
 	function correlation():Float {
 		var n = windowA.length;
 		var meanA = 0.0, meanB = 0.0;
-		for (v in windowA) meanA += v;
-		for (v in windowB) meanB += v;
+		for (i in 0...n) {
+			meanA += windowA.oldest(i);
+			meanB += windowB.oldest(i);
+		}
 		meanA /= n; meanB /= n;
 
 		var cov = 0.0, varA = 0.0, varB = 0.0;
 		for (i in 0...n) {
-			var da = windowA[i] - meanA;
-			var db = windowB[i] - meanB;
+			var da = windowA.oldest(i) - meanA;
+			var db = windowB.oldest(i) - meanB;
 			cov += da * db;
 			varA += da * da;
 			varB += db * db;
@@ -69,9 +75,10 @@ class LeadLagCrossCorrelation implements MuseIndicator<LeadLagPair, Float> {
 	}
 
 	public function reset():Void {
-		delayBuf = [];
-		windowA = [];
-		windowB = [];
+		// lag==0: unused delay (capacity 1 keeps construction valid).
+		delayBuf = new RingBuffer(lag > 0 ? lag : 1);
+		windowA = new RingBuffer(period);
+		windowB = new RingBuffer(period);
 	}
 
 	public function warmupPeriod():Int return period + lag;

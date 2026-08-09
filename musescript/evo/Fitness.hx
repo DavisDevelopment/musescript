@@ -175,6 +175,30 @@ class Fitness {
 	public static var nmaEquityFloor:Float = 0;
 
 	/**
+	 * Sharpe annualization for fitness / window / ProbSharpe paths (OPEN_ITEMS **1.4**).
+	 * Delegates to `Metrics.periodsPerYear` — that is the ownership point so Harness /
+	 * OrderSim / NmaFitness stay bit-aligned without an evo→harness back-edge.
+	 * Default 252; opt-in `configurePeriodsFromBars` for known sub-daily spacing.
+	 */
+	public static inline function periodsPerYear():Float {
+		return musescript.harness.Metrics.periodsPerYear;
+	}
+
+	public static inline function setPeriodsPerYear(py:Float):Void {
+		musescript.harness.Metrics.setPeriodsPerYear(py);
+	}
+
+	public static inline function resetPeriodsPerYear():Void {
+		musescript.harness.Metrics.resetPeriodsPerYear();
+	}
+
+	/** Opt-in tape resolution → `Metrics.configureFromBars`. Never called from `evaluate`. */
+	public static inline function configurePeriodsFromBars(bars:Array<Bar>,
+			?sessionSeconds:Float, ?sessionsPerYear:Float):Null<Float> {
+		return musescript.harness.Metrics.configureFromBars(bars, sessionSeconds, sessionsPerYear);
+	}
+
+	/**
 	 * Probability that `Variation.attributedPointMutate` takes the semantic-RDO path instead of
 	 * ablation targeting when `--nma` + tape are armed (`--semantic-rdo-prob`). Default 0 = off.
 	 *
@@ -1074,7 +1098,7 @@ class Fitness {
 		if (trades < resolveMinTrades(minTrades)) return NEG_INF;
 		if (Math.isNaN(sharpe)) return NEG_INF;
 		var rs = musescript.evo.rigor.ProbSharpe.rankFromAnnualized(
-			sharpe, nObs, 0, 0, nTrials != null ? nTrials : 1);
+			sharpe, nObs, 0, 0, nTrials != null ? nTrials : 1, periodsPerYear());
 		if (!Math.isFinite(rs)) return NEG_INF;
 		if (nodeCount != null && nodeCount > parsimonyThreshold)
 			rs -= parsimonyLambda * (nodeCount - parsimonyThreshold);

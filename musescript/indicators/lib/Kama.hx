@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -22,7 +23,7 @@ class Kama implements MuseIndicator<Float, Float> {
 	var erPeriod:Int;
 	var fastSc:Float;
 	var slowSc:Float;
-	var prices:Array<Float>;
+	var prices:RingBuffer<Float>;
 	var current:Null<Float>;
 
 	public function new(erPeriod:Int, fastPeriod:Int, slowPeriod:Int) {
@@ -30,8 +31,7 @@ class Kama implements MuseIndicator<Float, Float> {
 		this.erPeriod = erPeriod;
 		fastSc = 2.0 / (fastPeriod + 1.0);
 		slowSc = 2.0 / (slowPeriod + 1.0);
-		prices = [];
-		current = null;
+		reset();
 	}
 
 	public function update(price:Float):Null<Float> {
@@ -43,16 +43,15 @@ class Kama implements MuseIndicator<Float, Float> {
 			return current;
 		}
 
-		if (prices.length == erPeriod + 1) prices.shift();
 		prices.push(price);
 		if (prices.length < erPeriod + 1) {
 			current = price; // not enough history yet to compute ER; track price directly
 			return current;
 		}
 
-		var change = Math.abs(prices[prices.length - 1] - prices[0]);
+		var change = Math.abs(prices.oldest(prices.length - 1) - prices.oldest(0));
 		var volatility = 0.0;
-		for (i in 1...prices.length) volatility += Math.abs(prices[i] - prices[i - 1]);
+		for (i in 1...prices.length) volatility += Math.abs(prices.oldest(i) - prices.oldest(i - 1));
 
 		var er = volatility == 0.0 ? 0.0 : change / volatility;
 		var sc = er * (fastSc - slowSc) + slowSc;
@@ -63,7 +62,7 @@ class Kama implements MuseIndicator<Float, Float> {
 	}
 
 	public function reset():Void {
-		prices = [];
+		prices = new RingBuffer(erPeriod + 1);
 		current = null;
 	}
 

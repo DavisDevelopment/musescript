@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -21,8 +22,8 @@ class TdDemarker implements MuseIndicator<Bar, Float> {
 	var hasPrev:Bool;
 	var prevHigh:Float;
 	var prevLow:Float;
-	var demax:Array<Float>;
-	var demin:Array<Float>;
+	var demax:RingBuffer<Float>;
+	var demin:RingBuffer<Float>;
 	var lastValue:Null<Float>;
 
 	public function new(period:Int) {
@@ -48,10 +49,6 @@ class TdDemarker implements MuseIndicator<Bar, Float> {
 		var dmin = Math.max(prevLow - bar.low, 0.0);
 		prevHigh = bar.high;
 		prevLow = bar.low;
-		if (demax.length == period) {
-			demax.shift();
-			demin.shift();
-		}
 		demax.push(dmax);
 		demin.push(dmin);
 		if (demax.length < period) return null;
@@ -71,8 +68,8 @@ class TdDemarker implements MuseIndicator<Bar, Float> {
 		hasPrev = false;
 		prevHigh = 0.0;
 		prevLow = 0.0;
-		demax = [];
-		demin = [];
+		demax = new RingBuffer(period);
+		demin = new RingBuffer(period);
 		lastValue = null;
 	}
 

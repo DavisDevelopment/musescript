@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -26,7 +27,7 @@ import musescript.types.MuseType;
 class HasbrouckInformationShare implements MuseIndicator<HisPair, Float> {
 	var period:Int;
 	var prev:Null<HisPair>;
-	var window:Array<HisPair>;
+	var window:RingBuffer<HisPair>;
 	var sumX:Float;
 	var sumY:Float;
 	var sumXx:Float;
@@ -51,14 +52,14 @@ class HasbrouckInformationShare implements MuseIndicator<HisPair, Float> {
 		prev = { a: x, b: y };
 		var rx = x - px;
 		var ry = y - py;
-		if (window.length == period) {
-			var old = window.shift();
+		var wasFull = window.isFull();
+		var old = window.push({ a: rx, b: ry });
+		if (wasFull) {
 			sumX -= old.a;
 			sumY -= old.b;
 			sumXx -= old.a * old.a;
 			sumYy -= old.b * old.b;
 		}
-		window.push({ a: rx, b: ry });
 		sumX += rx;
 		sumY += ry;
 		sumXx += rx * rx;
@@ -77,7 +78,7 @@ class HasbrouckInformationShare implements MuseIndicator<HisPair, Float> {
 
 	public function reset():Void {
 		prev = null;
-		window = [];
+		window = new RingBuffer(period);
 		sumX = 0.0;
 		sumY = 0.0;
 		sumXx = 0.0;

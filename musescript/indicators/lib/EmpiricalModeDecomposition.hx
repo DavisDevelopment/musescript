@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.prim.SuperSmoother;
 import musescript.types.MuseType;
 
@@ -31,7 +32,7 @@ class EmpiricalModeDecomposition implements MuseIndicator<Float, Float> {
 	var smoother:SuperSmoother;
 	var peakSmoother:SuperSmoother;
 	var valleySmoother:SuperSmoother;
-	var bpBuf:Array<Float>;
+	var bpBuf:RingBuffer<Float>;
 	var bpHistoryLen:Int;
 	var lastValue:Null<Float>;
 
@@ -63,7 +64,7 @@ class EmpiricalModeDecomposition implements MuseIndicator<Float, Float> {
 		this.bpHistoryLen = Math.round(period * fraction);
 		if (bpHistoryLen < 1) bpHistoryLen = 1;
 
-		this.bpBuf = [];
+		this.bpBuf = new RingBuffer(bpHistoryLen);
 		this.lastValue = null;
 	}
 
@@ -87,9 +88,6 @@ class EmpiricalModeDecomposition implements MuseIndicator<Float, Float> {
 		prevIn2 = prevIn1;
 		prevIn1 = input;
 
-		if (bpBuf.length == bpHistoryLen) {
-			bpBuf.shift();
-		}
 		bpBuf.push(bp);
 
 		if (bpBuf.length < bpHistoryLen) {
@@ -97,10 +95,11 @@ class EmpiricalModeDecomposition implements MuseIndicator<Float, Float> {
 		}
 
 		// Find peak (max) and valley (min) in the buffer.
-		var peak = bpBuf[0], valley = bpBuf[0];
+		var peak = bpBuf.oldest(0), valley = bpBuf.oldest(0);
 		for (i in 1...bpBuf.length) {
-			if (bpBuf[i] >= peak) peak = bpBuf[i];
-			if (bpBuf[i] <= valley) valley = bpBuf[i];
+			var v = bpBuf.oldest(i);
+			if (v >= peak) peak = v;
+			if (v <= valley) valley = v;
 		}
 
 		var avgPeak = peakSmoother.update(peak);
@@ -129,7 +128,7 @@ class EmpiricalModeDecomposition implements MuseIndicator<Float, Float> {
 		smoother.reset();
 		peakSmoother.reset();
 		valleySmoother.reset();
-		bpBuf = [];
+		bpBuf = new RingBuffer(bpHistoryLen);
 		lastValue = null;
 	}
 

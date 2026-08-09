@@ -1,8 +1,34 @@
 # Flagship MuseScript Module
 
+> **Collaborators:** this directory is **strategy research / experiment harness**, not the MuseScript
+> language product and not a green CI gate. Product setup stays at the [repo README](../../README.md)
+> and [CONTRIBUTING](../../CONTRIBUTING.md). Probe files under `strategies/probes/`, harness helpers
+> named `_mk_*.py` / `_score_*.py`, and local `tapes/` / scoreboard JSON are scratch — do not
+> promote a genome on corpus scoreboards alone (read the held-out sections below).
+
 Iterate until staggering gains on **every** symbol-batch × window × honesty × trade-frequency cell.
 
-**Current champion:** `strategies/flagship_v7h.ms` — **liquid10 dual 20/20** + bulls **20/20** + corpus **60/60** + dBH_dual **~+1.585** (tip/Done seals; promote cleared). Prior: `strategies/flagship_v7g.ms`.
+**Current corpus champion:** `strategies/flagship_v7h.ms` — **liquid10 dual 20/20** + bulls **20/20** + corpus **60/60** + dBH_dual **~+1.585** (tip/Done seals).
+
+> ### ⛔ v7h shows NO held-out improvement — "promote cleared" below is corpus-only
+>
+> v7h was promoted on dual/bulls/corpus/dBH before `heldout_gate.py` was ever run against it.
+> On the frozen 54-symbol broad8mo set it has the **worst point estimates in the entire lineage**
+> (10/54, mean d_sharpe −0.999, vs. baseline `flagship_ensemble_v1` at 13/54 / −0.709).
+>
+> **Stated precisely** (`harness/gate_stats.py`, 2026-08-07): paired against the baseline over the
+> same 54 symbols the difference is **−0.291, 95% CI [−0.652, +0.064]** — *not* resolved. v7h is not
+> demonstrably worse than v1 on this set. It is also **nowhere near demonstrably better**, which is
+> the only thing that could justify a promotion. The honest verdict is `INDISTINGUISHABLE`, and an
+> unresolved difference is not a pass.
+>
+> What *is* solid is the direction. Paired-vs-v1 deficits run perfectly monotonically with tuning
+> round — v6l −0.069, v7 −0.110, v7b −0.131, v7c/d/e −0.196, v7f/g −0.247, v7h −0.291 — nine
+> versions, no exceptions, while the tuned-corpus score climbed 48% → 100%. No single comparison
+> carries that; the ordering does.
+>
+> Treat the scoreboard below as "fits the 15-symbol tuning set," never as "works." Full statistics:
+> `harness/gate_stats.py`; full writeup: `results/BROAD8MO_REPORT.md`.
 
 ## Scoreboard (causal next-open, 10 bps)
 
@@ -17,7 +43,7 @@ Iterate until staggering gains on **every** symbol-batch × window × honesty ×
 | quick matrix perfect | 10/12 | 10/12 | 10/12 | 10/12 | 10/12 | 10/12 | 10/12 | 10/12 | — |
 | dual mean dBH | +1.49 | +1.55 | +1.63 | +1.60 | +1.58 | +1.58 | +1.58 | +1.58 | **+1.585** |
 
-Promote: dual ≥18 + (bulls≥11 ∨ corpus≥55%) + dBH not >15% worse than DEFAULT v7g +1.58 (floor ~1.34) → **CLEARED** via dual/bulls/corpus **20/20/60** + dBH +1.585.
+Promote: dual ≥18 + (bulls≥11 ∨ corpus≥55%) + dBH not >15% worse than DEFAULT v7g +1.58 (floor ~1.34) → corpus bar **CLEARED** via dual/bulls/corpus **20/20/60** + dBH +1.585 — **but the held-out gate REGRESSED, so this is not a promotion.** These four numbers are now known not to predict generalization; see the box above.
 
 ## ⚠️ Held-out gate — required before any future promotion
 
@@ -39,6 +65,45 @@ corpus/bulls/dBH numbers above alone, no matter how good those look — that's e
 that produced this whole gap. Full writeup, regime breakdown (this system's edge is real but
 concentrated in down/choppy names, not trending ones), and the frozen-vs-refreshed-data tradeoff:
 `results/BROAD8MO_REPORT.md`.
+
+## Held-out v2 — multi-regime set (supersedes broad8mo for judging variants)
+
+`broad8mo` is 54 symbols over ONE 8-month up-window. Measured: ~7 effective independent bets, and
+**not one promote/reject decision in this thread's history is statistically resolvable on it**
+(`harness/gate_stats.py`). It also cannot do CSCV over time — 166 bars with a 34-bar warmup has no
+usable slices — so it is structurally blind to the overfitting it was built to catch.
+
+`heldout_v2` fixes both. Built from the local `equities_daily.db` (1007 symbols, 2.6M bars):
+
+| | folds | universe | purpose |
+|---|---|---|---|
+| **working** | 9 annual, 2014–2022 | 300 of 866 eligible | iterate + judge here |
+| **sealed** | 2023-01-28 → 2026-08 | 101 | **touch once, on the final candidate** |
+
+Working folds span real regime diversity — 2015 choppy, 2017 melt-up, 2018 two corrections,
+2020 COVID crash + V, 2022 bear. The sealed set exploits a natural data boundary (the bulk fetch
+stops 2023-01-27) so it is strictly *later in time* than every working fold.
+
+```powershell
+python examples/flagship-musescript-module/harness/build_heldout_v2.py --sealed  # deterministic rebuild
+python examples/flagship-musescript-module/harness/heldout_v2.py --all-variants  # score + matrix
+python examples/flagship-musescript-module/harness/heldout_v2.py --report        # inference
+```
+
+`tapes/` is gitignored; the builder is seeded, so the set is reconstructible from the script alone.
+
+**First results (`results/HELDOUT_V2_REPORT.md`, 2026-08-07):** 116 of 117 variant×fold cells are
+negative — every variant loses to buy-hold in every regime, including the 2022 bear and the 2020
+crash. broad8mo's down/choppy edge **did not replicate**. v7b→v7h are identical to three decimals
+across all nine folds: **seven rounds of tuning that took corpus 58%→100% produced no measurable
+out-of-sample difference at all.** The one real effect is `flagship_ensemble_v4` (+0.294 paired vs
+ensemble_v1, and **+0.229 at zero cost** — so it is signal, not just its 5.6-trades/symbol
+turnover advantage). Note this reverses broad8mo, which rejected v4 at 4/54.
+
+> ⚠ **Survivorship bias is real here.** The universe is names present in a recent fetch list,
+> pulled retrospectively — companies that delisted or were acquired 2014–2022 are largely absent.
+> Absolute returns are optimistic for everything, buy-hold most of all. **Only paired comparative
+> claims are supported.** Do not quote an absolute return off this set.
 
 ## v7h DNA (tip / Done seals)
 

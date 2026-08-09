@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -23,7 +24,7 @@ import musescript.types.MuseType;
 class RviVolatility implements MuseIndicator<Float, Float> {
 	public var period(default, null):Int;
 	// Rolling-stddev state.
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var sum:Float;
 	var sumSq:Float;
 	// Direction tracking.
@@ -58,12 +59,13 @@ class RviVolatility implements MuseIndicator<Float, Float> {
 		}
 
 		// 1. Roll the standard-deviation window.
-		if (window.length == period) {
-			var old = window.shift();
+		// Fullness checked before push — `Null<Float>` of `0.0` is nullish on JS.
+		var wasFull = window.isFull();
+		var old = window.push(input);
+		if (wasFull) {
 			sum -= old;
 			sumSq -= old * old;
 		}
-		window.push(input);
 		sum += input;
 		sumSq += input * input;
 
@@ -118,7 +120,7 @@ class RviVolatility implements MuseIndicator<Float, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 		sum = 0.0;
 		sumSq = 0.0;
 		prevClose = null;

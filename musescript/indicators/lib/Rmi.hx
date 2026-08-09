@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -17,7 +18,7 @@ import musescript.types.MuseType;
 class Rmi implements MuseIndicator<Float, Float> {
 	var period:Int;
 	var momentum:Int;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var seedGains:Array<Float>;
 	var seedLosses:Array<Float>;
 	var avgGain:Null<Float>;
@@ -28,7 +29,7 @@ class Rmi implements MuseIndicator<Float, Float> {
 		if (period <= 0 || momentum <= 0) throw "Rmi: period and momentum must be > 0";
 		this.period = period;
 		this.momentum = momentum;
-		this.window = [];
+		this.window = new RingBuffer(momentum);
 		this.seedGains = [];
 		this.seedLosses = [];
 		this.avgGain = null;
@@ -50,14 +51,14 @@ class Rmi implements MuseIndicator<Float, Float> {
 			return lastValue;
 		}
 
-		if (window.length < momentum) {
+		if (!window.isFull()) {
 			// Still filling the momentum lookback
 			window.push(input);
 			return null;
 		}
 
-		var past = window.shift();
-		window.push(input);
+		// Eviction returns the close `momentum` bars ago.
+		var past = window.push(input);
 
 		var change = input - past;
 		var gain = if (change > 0.0) change else 0.0;
@@ -94,7 +95,7 @@ class Rmi implements MuseIndicator<Float, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(momentum);
 		seedGains = [];
 		seedLosses = [];
 		avgGain = null;

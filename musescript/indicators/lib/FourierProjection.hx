@@ -1,6 +1,7 @@
 package musescript.indicators.lib;
 
 import musescript.indicators.FourierMath;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
@@ -30,7 +31,7 @@ class FourierProjection implements MuseIndicator<Float, Float> {
 	var k:Int;
 	var horizon:Int;
 	var detrend:Bool;
-	var buf:Array<Float>;
+	var buf:RingBuffer<Float>;
 	var emitted:Bool;
 
 	public function new(period:Int, k:Int, horizon:Int, detrend:Bool = true) {
@@ -47,16 +48,16 @@ class FourierProjection implements MuseIndicator<Float, Float> {
 	public function update(price:Float):Null<Float> {
 		if (!Math.isFinite(price)) return null;
 		buf.push(price);
-		if (buf.length > period) buf.shift();
 		if (buf.length < period) return null;
+		var xs = [for (i in 0...buf.length) buf.oldest(i)];
 
 		var slope = 0.0, intercept = 0.0;
-		var x = buf;
+		var x = xs;
 		if (detrend) {
-			var fit = FourierMath.linearFit(buf);
+			var fit = FourierMath.linearFit(xs);
 			slope = fit.slope;
 			intercept = fit.intercept;
-			x = [for (j in 0...period) buf[j] - (intercept + slope * j)];
+			x = [for (j in 0...period) xs[j] - (intercept + slope * j)];
 		}
 		var sp = FourierMath.spectrum(x);
 		var bins = FourierMath.topBins(sp.amp, k);
@@ -66,7 +67,7 @@ class FourierProjection implements MuseIndicator<Float, Float> {
 	}
 
 	public function reset():Void {
-		buf = [];
+		buf = new RingBuffer(period);
 		emitted = false;
 	}
 

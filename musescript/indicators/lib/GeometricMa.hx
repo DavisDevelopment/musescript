@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -16,28 +17,29 @@ import musescript.types.MuseType;
  */
 class GeometricMa implements MuseIndicator<Float, Float> {
 	var period:Int;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var sumLog:Float;
 
 	public function new(period:Int) {
 		if (period <= 0) throw "GeometricMa: period must be > 0";
 		this.period = period;
-		window = [];
+		window = new RingBuffer(period);
 		sumLog = 0.0;
 	}
 
 	public function update(price:Float):Null<Float> {
 		if (!Math.isFinite(price) || price <= 0.0) return window.length == period ? Math.exp(sumLog / period) : null;
 		var logP = Math.log(price);
-		if (window.length == period) sumLog -= window.shift();
-		window.push(logP);
+		var wasFull = window.isFull();
+		var old = window.push(logP);
+		if (wasFull) sumLog -= old;
 		sumLog += logP;
 		if (window.length < period) return null;
 		return Math.exp(sumLog / period);
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 		sumLog = 0.0;
 	}
 

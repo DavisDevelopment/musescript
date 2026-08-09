@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.prim.Ema;
 import musescript.types.MuseType;
 
@@ -29,8 +30,8 @@ class Stc implements MuseIndicator<Float, Float> {
 	var factor:Float;
 	var fastEma:Ema;
 	var slowEma:Ema;
-	var macdWindow:Array<Float>;
-	var dWindow:Array<Float>;
+	var macdWindow:RingBuffer<Float>;
+	var dWindow:RingBuffer<Float>;
 	var lastD:Null<Float>;
 	var lastValue:Null<Float>;
 
@@ -46,8 +47,8 @@ class Stc implements MuseIndicator<Float, Float> {
 		this.factor = factor;
 		fastEma = new Ema(fast);
 		slowEma = new Ema(slow);
-		macdWindow = [];
-		dWindow = [];
+		macdWindow = new RingBuffer(schaffPeriod);
+		dWindow = new RingBuffer(schaffPeriod);
 		lastD = null;
 		lastValue = null;
 	}
@@ -62,10 +63,11 @@ class Stc implements MuseIndicator<Float, Float> {
 		return {fast: fastPeriod, slow: slowPeriod, schaff_period: schaffPeriod, factor: factor};
 	}
 
-	static function rollingMinMax(window:Array<Float>):{lo:Float, hi:Float} {
+	static function rollingMinMax(window:RingBuffer<Float>):{lo:Float, hi:Float} {
 		var lo = Math.POSITIVE_INFINITY;
 		var hi = Math.NEGATIVE_INFINITY;
-		for (v in window) {
+		for (i in 0...window.length) {
+			var v = window.at(i);
 			if (v < lo) lo = v;
 			if (v > hi) hi = v;
 		}
@@ -79,7 +81,6 @@ class Stc implements MuseIndicator<Float, Float> {
 		if (f == null || s == null) return null;
 		var macd = f - s;
 
-		if (macdWindow.length == schaffPeriod) macdWindow.shift();
 		macdWindow.push(macd);
 		if (macdWindow.length < schaffPeriod) return null;
 
@@ -95,7 +96,6 @@ class Stc implements MuseIndicator<Float, Float> {
 		}
 		lastD = d;
 
-		if (dWindow.length == schaffPeriod) dWindow.shift();
 		dWindow.push(d);
 		if (dWindow.length < schaffPeriod) return null;
 
@@ -116,8 +116,8 @@ class Stc implements MuseIndicator<Float, Float> {
 	public function reset():Void {
 		fastEma.reset();
 		slowEma.reset();
-		macdWindow = [];
-		dWindow = [];
+		macdWindow = new RingBuffer(schaffPeriod);
+		dWindow = new RingBuffer(schaffPeriod);
 		lastD = null;
 		lastValue = null;
 	}

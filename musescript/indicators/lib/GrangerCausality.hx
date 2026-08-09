@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -15,7 +16,7 @@ import musescript.types.MuseType;
 class GrangerCausality implements MuseIndicator<{a: Float, b: Float}, Float> {
 	var period:Int;
 	var lag:Int;
-	var window:Array<{a: Float, b: Float}>;
+	var window:RingBuffer<{a: Float, b: Float}>;
 
 	public function new(period:Int, lag:Int) {
 		if (lag < 1) {
@@ -26,7 +27,7 @@ class GrangerCausality implements MuseIndicator<{a: Float, b: Float}, Float> {
 		}
 		this.period = period;
 		this.lag = lag;
-		this.window = [];
+		reset();
 	}
 
 	public function update(input:{a: Float, b: Float}):Null<Float> {
@@ -35,19 +36,17 @@ class GrangerCausality implements MuseIndicator<{a: Float, b: Float}, Float> {
 			return null;
 		}
 
-		if (window.length == period) {
-			window.shift();
-		}
 		window.push(input);
 
 		if (window.length < period) {
 			return null;
 		}
 
-		// Extract series a and b
+		// Extract series a and b (oldest-first via `oldest`).
 		var a:Array<Float> = [];
 		var b:Array<Float> = [];
-		for (pair in window) {
+		for (i in 0...window.length) {
+			var pair = window.oldest(i);
 			a.push(pair.a);
 			b.push(pair.b);
 		}
@@ -102,7 +101,7 @@ class GrangerCausality implements MuseIndicator<{a: Float, b: Float}, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 	}
 
 	public function warmupPeriod():Int return period;

@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -23,7 +24,7 @@ class AverageDailyRange implements MuseIndicator<Bar, Float> {
 	var dayKey:Null<{year:Int, month:Int, day:Int}>;
 	var curHigh:Float;
 	var curLow:Float;
-	var completed:Array<Float>;
+	var completed:RingBuffer<Float>;
 	var sum:Float;
 
 	public function new(period:Int, utcOffsetMinutes:Int) {
@@ -87,11 +88,11 @@ class AverageDailyRange implements MuseIndicator<Bar, Float> {
 			if (dayKey != null) {
 				// Close the previous day
 				var range = curHigh - curLow;
-				completed.push(range);
+				// Fullness checked before push — `Null<Float>` of `0.0` is nullish on JS.
+				var wasFull = completed.isFull();
+				var old = completed.push(range);
+				if (wasFull) sum -= old;
 				sum += range;
-				if (completed.length > period) {
-					sum -= completed.shift();
-				}
 			}
 			// Start new day
 			dayKey = civil;
@@ -111,7 +112,7 @@ class AverageDailyRange implements MuseIndicator<Bar, Float> {
 		dayKey = null;
 		curHigh = Math.NEGATIVE_INFINITY;
 		curLow = Math.POSITIVE_INFINITY;
-		completed = [];
+		completed = new RingBuffer(period);
 		sum = 0.0;
 	}
 

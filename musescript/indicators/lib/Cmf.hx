@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -19,8 +20,8 @@ import musescript.types.MuseType;
  */
 class Cmf implements MuseIndicator<Bar, Float> {
 	var period:Int;
-	var mfvWindow:Array<Float>;
-	var volWindow:Array<Float>;
+	var mfvWindow:RingBuffer<Float>;
+	var volWindow:RingBuffer<Float>;
 	var sumMfv:Float;
 	var sumVol:Float;
 
@@ -37,12 +38,13 @@ class Cmf implements MuseIndicator<Bar, Float> {
 			mfm * bar.volume;
 		}
 
-		if (mfvWindow.length == period) {
-			sumMfv -= mfvWindow.shift();
-			sumVol -= volWindow.shift();
+		var wasFull = mfvWindow.isFull();
+		var oldMfv = mfvWindow.push(mfv);
+		var oldVol = volWindow.push(bar.volume);
+		if (wasFull) {
+			sumMfv -= oldMfv;
+			sumVol -= oldVol;
 		}
-		mfvWindow.push(mfv);
-		volWindow.push(bar.volume);
 		sumMfv += mfv;
 		sumVol += bar.volume;
 
@@ -52,8 +54,8 @@ class Cmf implements MuseIndicator<Bar, Float> {
 	}
 
 	public function reset():Void {
-		mfvWindow = [];
-		volWindow = [];
+		mfvWindow = new RingBuffer(period);
+		volWindow = new RingBuffer(period);
 		sumMfv = 0.0;
 		sumVol = 0.0;
 	}

@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -16,17 +17,16 @@ import musescript.types.MuseType;
  */
 class LinReg implements MuseIndicator<Float, Float> {
 	var period:Int;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 
 	public function new(period:Int) {
 		if (period < 2) throw "LinReg: period must be >= 2";
 		this.period = period;
-		window = [];
+		reset();
 	}
 
 	public function update(price:Float):Null<Float> {
 		if (!Math.isFinite(price)) return null;
-		if (window.length == period) window.shift();
 		window.push(price);
 		if (window.length < period) return null;
 
@@ -35,7 +35,7 @@ class LinReg implements MuseIndicator<Float, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 	}
 
 	public function warmupPeriod():Int return period;
@@ -57,18 +57,18 @@ class LinReg implements MuseIndicator<Float, Float> {
 
 /** Shared OLS-over-a-window helper for LinReg / LinRegAngle / LinRegChannel. */
 class LinRegMath {
-	public static function fitLast(window:Array<Float>):{value:Float, slope:Float, intercept:Float, residualStdDev:Float} {
+	public static function fitLast(window:RingBuffer<Float>):{value:Float, slope:Float, intercept:Float, residualStdDev:Float} {
 		var n = window.length;
 		var meanX = (n - 1) / 2.0;
 		var meanY = 0.0;
-		for (v in window) meanY += v;
+		for (i in 0...n) meanY += window.oldest(i);
 		meanY /= n;
 
 		var num = 0.0;
 		var den = 0.0;
 		for (i in 0...n) {
 			var dx = i - meanX;
-			num += dx * (window[i] - meanY);
+			num += dx * (window.oldest(i) - meanY);
 			den += dx * dx;
 		}
 		var slope = den == 0.0 ? 0.0 : num / den;
@@ -77,7 +77,7 @@ class LinRegMath {
 		var sse = 0.0;
 		for (i in 0...n) {
 			var fitted = intercept + slope * i;
-			var resid = window[i] - fitted;
+			var resid = window.oldest(i) - fitted;
 			sse += resid * resid;
 		}
 		var residualStdDev = Math.sqrt(sse / n);

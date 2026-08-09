@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -21,14 +22,13 @@ import musescript.types.MuseType;
  */
 class KendallTau implements MuseIndicator<KendallTauPair, Float> {
 	var period:Int;
-	var windowA:Array<Float>;
-	var windowB:Array<Float>;
+	var windowA:RingBuffer<Float>;
+	var windowB:RingBuffer<Float>;
 
 	public function new(period:Int) {
 		if (period < 2) throw "KendallTau: period must be >= 2";
 		this.period = period;
-		windowA = [];
-		windowB = [];
+		reset();
 	}
 
 	public function update(input:KendallTauPair):Null<Float> {
@@ -36,19 +36,18 @@ class KendallTau implements MuseIndicator<KendallTauPair, Float> {
 		var b = input.b;
 		if (!Math.isFinite(a) || !Math.isFinite(b)) return null;
 
-		if (windowA.length == period) windowA.shift();
 		windowA.push(a);
-		if (windowB.length == period) windowB.shift();
 		windowB.push(b);
 		if (windowA.length < period) return null;
 
 		var n = windowA.length;
 		var concordant = 0;
 		var discordant = 0;
+		// `oldest(i)` matches prior Array indexing (oldest-first).
 		for (i in 0...n) {
 			for (j in (i + 1)...n) {
-				var da = windowA[j] - windowA[i];
-				var db = windowB[j] - windowB[i];
+				var da = windowA.oldest(j) - windowA.oldest(i);
+				var db = windowB.oldest(j) - windowB.oldest(i);
 				var sign = da * db;
 				if (sign > 0.0) concordant++;
 				else if (sign < 0.0) discordant++;
@@ -60,8 +59,8 @@ class KendallTau implements MuseIndicator<KendallTauPair, Float> {
 	}
 
 	public function reset():Void {
-		windowA = [];
-		windowB = [];
+		windowA = new RingBuffer(period);
+		windowB = new RingBuffer(period);
 	}
 
 	public function warmupPeriod():Int return period;

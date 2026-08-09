@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.SortedWindow;
 import musescript.types.MuseType;
 
 /**
@@ -17,6 +18,12 @@ import musescript.types.MuseType;
  * are small (low `gamma`, fast response); when price jumps, the errors widen
  * and `gamma` rises, slowing the filter to reject noise.
  *
+ * Absolute tracking errors live in a `SortedWindow`. Min–max normalisation is
+ * monotone affine, so order stats of the raw diffs yield the same gamma as
+ * sorting a normalised scratch — with the even-length median formed from the
+ * two already-normalised mid order stats so the FP matches the prior path
+ * bit-for-bit (raw-then-divide drifts a ULP and poisons the cascade).
+ *
  * Series input (f64): called `adaptive_laguerre_filter(close, period)`.
  */
 class AdaptiveLaguerreFilter implements MuseIndicator<Float, Float> {
@@ -26,7 +33,7 @@ class AdaptiveLaguerreFilter implements MuseIndicator<Float, Float> {
 	var l2:Float;
 	var l3:Float;
 	var filter:Null<Float>;
-	var diffs:Array<Float>;
+	var diffs:SortedWindow;
 
 	public function new(period:Int) {
 		if (period <= 0) throw "AdaptiveLaguerreFilter: period must be > 0";
@@ -39,9 +46,6 @@ class AdaptiveLaguerreFilter implements MuseIndicator<Float, Float> {
 
 		// Absolute tracking error against the previous filter (0 on the first bar).
 		var diff = filter != null ? Math.abs(price - filter) : 0.0;
-		if (diffs.length == period) {
-			diffs.shift();
-		}
 		diffs.push(diff);
 
 		var gamma = adaptiveGamma();
@@ -67,7 +71,7 @@ class AdaptiveLaguerreFilter implements MuseIndicator<Float, Float> {
 		l2 = 0.0;
 		l3 = 0.0;
 		filter = null;
-		diffs = [];
+		diffs = new SortedWindow(period);
 	}
 
 	public function warmupPeriod():Int return period;
@@ -78,26 +82,23 @@ class AdaptiveLaguerreFilter implements MuseIndicator<Float, Float> {
 	public function value():Null<Float> return filter;
 
 	function adaptiveGamma():Float {
-		var hh = Math.NEGATIVE_INFINITY;
-		var ll = Math.POSITIVE_INFINITY;
-		for (d in diffs) {
-			if (d > hh) hh = d;
-			if (d < ll) ll = d;
-		}
+		var n = diffs.length;
+		if (n == 0) return 0.0;
+		var ll = diffs.order(0);
+		var hh = diffs.order(n - 1);
 		var range = hh - ll;
 		if (range <= 0.0) return 0.0;
-
-		var norm:Array<Float> = [];
-		for (d in diffs) {
-			norm.push((d - ll) / range);
+		// Normalize then median — same FP as the old scratch.sort path.
+		// Averaging raw order stats first then dividing ((m−ll)/range) is
+		// algebraically equal for even n but not bit-identical, and ULP drift
+		// in gamma poisons the Laguerre cascade forever.
+		var mid = Math.floor(n / 2);
+		if (n % 2 == 1) {
+			return (diffs.order(mid) - ll) / range;
 		}
-		norm.sort((a, b) -> a < b ? -1 : (a > b ? 1 : 0));
-		var mid = Math.floor(norm.length / 2);
-		if (norm.length % 2 == 1) {
-			return norm[mid];
-		} else {
-			return (norm[mid - 1] + norm[mid]) / 2.0;
-		}
+		var a = (diffs.order(mid - 1) - ll) / range;
+		var b = (diffs.order(mid) - ll) / range;
+		return (a + b) / 2.0;
 	}
 
 	public static function spec():IndicatorSpec {

@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -19,11 +20,11 @@ import musescript.types.MuseType;
  */
 class Inertia implements MuseIndicator<Bar, Float> {
 	var rviPeriod:Int;
-	var bodyWindow:Array<Float>;
-	var rangeWindow:Array<Float>;
+	var bodyWindow:RingBuffer<Float>;
+	var rangeWindow:RingBuffer<Float>;
 	var sumBody:Float;
 	var sumRange:Float;
-	var rviWindow:Array<Float>;
+	var rviWindow:RingBuffer<Float>;
 	var inertiaPeriod:Int;
 
 	public function new(rviPeriod:Int, inertiaPeriod:Int) {
@@ -31,43 +32,46 @@ class Inertia implements MuseIndicator<Bar, Float> {
 		if (inertiaPeriod < 2) throw "Inertia: inertiaPeriod must be >= 2";
 		this.rviPeriod = rviPeriod;
 		this.inertiaPeriod = inertiaPeriod;
-		bodyWindow = [];
-		rangeWindow = [];
+		bodyWindow = new RingBuffer(rviPeriod);
+		rangeWindow = new RingBuffer(rviPeriod);
 		sumBody = 0.0;
 		sumRange = 0.0;
-		rviWindow = [];
+		rviWindow = new RingBuffer(inertiaPeriod);
 	}
 
 	public function update(bar:Bar):Null<Float> {
 		var body = bar.close - bar.open;
 		var range = bar.high - bar.low;
 
-		if (bodyWindow.length == rviPeriod) sumBody -= bodyWindow.shift();
-		bodyWindow.push(body);
+		// Fullness checked before push — `Null<Float>` of `0.0` is nullish on JS.
+		var bodyFull = bodyWindow.isFull();
+		var oldBody = bodyWindow.push(body);
+		if (bodyFull) sumBody -= oldBody;
 		sumBody += body;
-		if (rangeWindow.length == rviPeriod) sumRange -= rangeWindow.shift();
-		rangeWindow.push(range);
+
+		var rangeFull = rangeWindow.isFull();
+		var oldRange = rangeWindow.push(range);
+		if (rangeFull) sumRange -= oldRange;
 		sumRange += range;
 
 		if (bodyWindow.length < rviPeriod) return null;
 		if (sumRange == 0.0) return null;
 		var rvi = sumBody / sumRange;
 
-		if (rviWindow.length == inertiaPeriod) rviWindow.shift();
 		rviWindow.push(rvi);
 		if (rviWindow.length < inertiaPeriod) return null;
 
 		var n = rviWindow.length;
 		var meanX = (n - 1) / 2.0;
 		var meanY = 0.0;
-		for (v in rviWindow) meanY += v;
+		for (i in 0...n) meanY += rviWindow.oldest(i);
 		meanY /= n;
 
 		var num = 0.0;
 		var den = 0.0;
 		for (i in 0...n) {
 			var dx = i - meanX;
-			num += dx * (rviWindow[i] - meanY);
+			num += dx * (rviWindow.oldest(i) - meanY);
 			den += dx * dx;
 		}
 		if (den == 0.0) return rvi;
@@ -77,11 +81,11 @@ class Inertia implements MuseIndicator<Bar, Float> {
 	}
 
 	public function reset():Void {
-		bodyWindow = [];
-		rangeWindow = [];
+		bodyWindow = new RingBuffer(rviPeriod);
+		rangeWindow = new RingBuffer(rviPeriod);
 		sumBody = 0.0;
 		sumRange = 0.0;
-		rviWindow = [];
+		rviWindow = new RingBuffer(inertiaPeriod);
 	}
 
 	public function warmupPeriod():Int return rviPeriod + inertiaPeriod;

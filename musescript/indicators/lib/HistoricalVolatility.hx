@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -18,7 +19,7 @@ import musescript.types.MuseType;
 class HistoricalVolatility implements MuseIndicator<Float, Float> {
 	var period:Int;
 	var annualizationFactor:Float;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var sum:Float;
 	var sumSq:Float;
 	var lastPrice:Null<Float>;
@@ -30,7 +31,7 @@ class HistoricalVolatility implements MuseIndicator<Float, Float> {
 		}
 		this.period = period;
 		this.annualizationFactor = annualizationFactor;
-		window = [];
+		window = new RingBuffer(period);
 		sum = 0.0;
 		sumSq = 0.0;
 		lastPrice = null;
@@ -45,12 +46,12 @@ class HistoricalVolatility implements MuseIndicator<Float, Float> {
 		var r = Math.log(price / lastPrice);
 		lastPrice = price;
 
-		if (window.length == period) {
-			var old = window.shift();
+		var wasFull = window.isFull();
+		var old = window.push(r);
+		if (wasFull) {
 			sum -= old;
 			sumSq -= old * old;
 		}
-		window.push(r);
 		sum += r;
 		sumSq += r * r;
 		if (window.length < period) return null;
@@ -61,7 +62,7 @@ class HistoricalVolatility implements MuseIndicator<Float, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 		sum = 0.0;
 		sumSq = 0.0;
 		lastPrice = null;

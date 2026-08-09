@@ -646,6 +646,10 @@ class NmaNodeEvalPool {
 		Fitness.nmaEquityFloor = opts.equityFloor != null ? opts.equityFloor : 0;
 		Fitness.attrBandit = opts.attrBandit != false;
 		Fitness.creditCuts = opts.creditCuts != false;
+		if (opts.periodsPerYear != null && Math.isFinite(opts.periodsPerYear) && opts.periodsPerYear > 0)
+			Fitness.setPeriodsPerYear(opts.periodsPerYear);
+		else
+			Fitness.resetPeriodsPerYear();
 	}
 	#end
 }

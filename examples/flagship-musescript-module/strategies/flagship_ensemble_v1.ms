@@ -15,8 +15,21 @@
 // regime problem, a "this code has no logic for your ticker" problem. This file has zero
 // symbol_is() calls anywhere; every signal here is computable for any instrument.
 //
-// The regime gate is causal and symbol-agnostic: close above its own 50-day EMA AND up >10%
-// over the trailing ~quarter (roc 63 trading days). Nothing here needs to know the ticker.
+// The regime gate is causal and symbol-agnostic: close above its own EMA AND a positive ROC
+// over the trailing lookback. Nothing here needs to know the ticker.
+//
+// ⚠ UNITS CORRECTION (2026-08-07, comment-only -- behaviour unchanged, all scored results stand).
+// This header used to claim the gate is "up >10% over the trailing ~quarter (roc 63 trading
+// days)". Both halves were wrong. The lookback is 34 bars, not 63 (see trendRocLen below), and
+// MuseScript's roc() returns PERCENTAGE POINTS, not a fraction (TradeBuiltins.hx:773-776 --
+// pctChange * 100). So `rocTrend > 0.07` is "up more than 0.07%", i.e. effectively "up at all
+// over 34 bars" -- NOT the 7-10% strong-trend filter described. Measured consequence: this
+// "confirmed uptrend" sleeve is live on 21% of bars in names that ended the window DOWN >5%.
+// Left as-is on purpose: this is the frozen baseline and every number in
+// results/BROAD8MO_REPORT.md is quoted against this exact behaviour. Do not "fix" the constant
+// without re-baselining -- and note that tightening it does NOT reduce the regime flicker
+// (blips get relatively worse; the flicker is the close > eTrend conjunct). See
+// harness/diag_regime_units.py.
 
 class FlagshipEnsembleV1 extends muse.Strat {
   param donchIn: Window = 21
@@ -26,6 +39,7 @@ class FlagshipEnsembleV1 extends muse.Strat {
   // window (needs 63 bars of history just to compute once). Caught by score_probe: 0 trades
   // everywhere on the first attempt, not a real "no signal" result.
   param trendRocLen: Window = 34
+  // ⚠ PERCENTAGE POINTS, not a fraction -- this is 0.07%, not 7%. See the units note above.
   param trendRocMin: Scalar = 0.07
   param trendEmaLen: Window = 34
 

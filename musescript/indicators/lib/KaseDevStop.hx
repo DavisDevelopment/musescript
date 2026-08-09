@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /** Kase DevStop output: the active trailing-stop level and the direction it protects. */
@@ -37,7 +38,7 @@ class KaseDevStop implements MuseIndicator<Bar, KaseDevStopOutput> {
 	var hasPrev:Bool;
 	var prevHigh:Float;
 	var prevLow:Float;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var sum:Float;
 	var sumSq:Float;
 	var direction:Float;
@@ -71,12 +72,12 @@ class KaseDevStop implements MuseIndicator<Bar, KaseDevStopOutput> {
 		prevHigh = bar.high;
 		prevLow = bar.low;
 
-		if (window.length == period) {
-			var old = window.shift();
+		var wasFull = window.isFull();
+		var old = window.push(dtr);
+		if (wasFull) {
 			sum -= old;
 			sumSq -= old * old;
 		}
-		window.push(dtr);
 		sum += dtr;
 		sumSq += dtr * dtr;
 		if (window.length < period) return null;
@@ -118,7 +119,7 @@ class KaseDevStop implements MuseIndicator<Bar, KaseDevStopOutput> {
 		hasPrev = false;
 		prevHigh = 0.0;
 		prevLow = 0.0;
-		window = [];
+		window = new RingBuffer(period);
 		sum = 0.0;
 		sumSq = 0.0;
 		direction = 0.0;

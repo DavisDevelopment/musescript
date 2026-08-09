@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -20,7 +21,7 @@ import musescript.types.MuseType;
 class ProfileShape implements MuseIndicator<Bar, Float> {
 	var period:Int;
 	var bins:Int;
-	var window:Array<Bar>;
+	var window:RingBuffer<Bar>;
 	var last:Null<Float>;
 
 	public function new(period:Int, bins:Int) {
@@ -28,7 +29,7 @@ class ProfileShape implements MuseIndicator<Bar, Float> {
 		if (bins < 3) throw "ProfileShape: profile shape needs bins >= 3";
 		this.period = period;
 		this.bins = bins;
-		this.window = [];
+		this.window = new RingBuffer(period);
 		this.last = null;
 	}
 
@@ -78,7 +79,6 @@ class ProfileShape implements MuseIndicator<Bar, Float> {
 	}
 
 	public function update(bar:Bar):Null<Float> {
-		if (window.length == period) window.shift();
 		window.push(bar);
 		if (window.length < period) return null;
 		var poc = pocIndex();
@@ -90,7 +90,7 @@ class ProfileShape implements MuseIndicator<Bar, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 		last = null;
 	}
 

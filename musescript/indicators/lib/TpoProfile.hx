@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /** TPO Profile output: the price domain plus the per-bin time-period counts. */
@@ -28,14 +29,14 @@ typedef TpoProfileOutput = {
 class TpoProfile implements MuseIndicator<Bar, TpoProfileOutput> {
 	var period:Int;
 	var binCount:Int;
-	var window:Array<Bar>;
+	var window:RingBuffer<Bar>;
 	var last:Null<TpoProfileOutput>;
 
 	public function new(period:Int, binCount:Int) {
 		if (period <= 0 || binCount <= 0) throw "TpoProfile: period and bin_count must be > 0";
 		this.period = period;
 		this.binCount = binCount;
-		this.window = [];
+		this.window = new RingBuffer(period);
 		this.last = null;
 	}
 
@@ -93,7 +94,6 @@ class TpoProfile implements MuseIndicator<Bar, TpoProfileOutput> {
 	}
 
 	public function update(bar:Bar):Null<TpoProfileOutput> {
-		if (window.length == period) window.shift();
 		window.push(bar);
 		if (window.length < period) return null;
 		var out = compute();
@@ -102,7 +102,7 @@ class TpoProfile implements MuseIndicator<Bar, TpoProfileOutput> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 		last = null;
 	}
 

@@ -1,6 +1,7 @@
 package musescript.indicators.lib;
 
 import musescript.indicators.FourierMath;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
@@ -21,7 +22,7 @@ import musescript.types.MuseType;
 class FourierRecompose implements MuseIndicator<Float, Float> {
 	var period:Int;
 	var k:Int;
-	var buf:Array<Float>;
+	var buf:RingBuffer<Float>;
 	var emitted:Bool;
 
 	public function new(period:Int, k:Int) {
@@ -35,17 +36,17 @@ class FourierRecompose implements MuseIndicator<Float, Float> {
 	public function update(price:Float):Null<Float> {
 		if (!Math.isFinite(price)) return null;
 		buf.push(price);
-		if (buf.length > period) buf.shift();
 		if (buf.length < period) return null;
+		var xs = [for (i in 0...buf.length) buf.oldest(i)];
 
-		var sp = FourierMath.spectrum(buf);
+		var sp = FourierMath.spectrum(xs);
 		var bins = FourierMath.topBins(sp.amp, k);
 		emitted = true;
 		return FourierMath.synth(period, bins, sp.amp, sp.phase, period - 1);
 	}
 
 	public function reset():Void {
-		buf = [];
+		buf = new RingBuffer(period);
 		emitted = false;
 	}
 

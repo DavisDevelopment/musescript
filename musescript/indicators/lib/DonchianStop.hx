@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /** Donchian Stop output: the long and short trailing-stop levels. */
@@ -23,36 +24,39 @@ typedef DonchianStopOutput = {
  */
 class DonchianStop implements MuseIndicator<Bar, DonchianStopOutput> {
 	var period:Int;
-	var highs:Array<Float>;
-	var lows:Array<Float>;
+	var highs:RingBuffer<Float>;
+	var lows:RingBuffer<Float>;
 
 	public function new(period:Int) {
 		if (period <= 0) throw "DonchianStop: period must be > 0";
 		this.period = period;
-		highs = [];
-		lows = [];
+		reset();
 	}
 
 	public function update(bar:Bar):Null<DonchianStopOutput> {
 		var out:Null<DonchianStopOutput> = if (highs.length < period) null else {
-			var hh = highs[0];
-			for (v in highs) if (v > hh) hh = v;
-			var ll = lows[0];
-			for (v in lows) if (v < ll) ll = v;
+			var hh = highs.oldest(0);
+			for (i in 1...highs.length) {
+				var v = highs.oldest(i);
+				if (v > hh) hh = v;
+			}
+			var ll = lows.oldest(0);
+			for (i in 1...lows.length) {
+				var v = lows.oldest(i);
+				if (v < ll) ll = v;
+			}
 			{ longStop: ll, shortStop: hh };
 		}
 
-		if (highs.length == period) highs.shift();
 		highs.push(bar.high);
-		if (lows.length == period) lows.shift();
 		lows.push(bar.low);
 
 		return out;
 	}
 
 	public function reset():Void {
-		highs = [];
-		lows = [];
+		highs = new RingBuffer(period);
+		lows = new RingBuffer(period);
 	}
 
 	public function warmupPeriod():Int return period + 1;

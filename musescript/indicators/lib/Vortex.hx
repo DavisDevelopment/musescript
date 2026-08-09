@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /** Vortex Indicator output: the two directional movement lines. */
@@ -31,7 +32,7 @@ class Vortex implements MuseIndicator<Bar, VortexOutput> {
 	var period:Int;
 	var prev:Null<Bar>;
 	/** Rolling window of (VM+, VM−, TR) triples. */
-	var window:Array<{p:Float, m:Float, tr:Float}>;
+	var window:RingBuffer<{p:Float, m:Float, tr:Float}>;
 	var sumVmPlus:Float;
 	var sumVmMinus:Float;
 	var sumTr:Float;
@@ -57,13 +58,13 @@ class Vortex implements MuseIndicator<Bar, VortexOutput> {
 		var tr = Math.max(hl, Math.max(hc, lc));
 		prev = candle;
 
-		if (window.length == period) {
-			var old = window.shift();
+		var wasFull = window.isFull();
+		var old = window.push({p: vmPlus, m: vmMinus, tr: tr});
+		if (wasFull) {
 			sumVmPlus -= old.p;
 			sumVmMinus -= old.m;
 			sumTr -= old.tr;
 		}
-		window.push({p: vmPlus, m: vmMinus, tr: tr});
 		sumVmPlus += vmPlus;
 		sumVmMinus += vmMinus;
 		sumTr += tr;
@@ -81,7 +82,7 @@ class Vortex implements MuseIndicator<Bar, VortexOutput> {
 
 	public function reset():Void {
 		prev = null;
-		window = [];
+		window = new RingBuffer(period);
 		sumVmPlus = 0.0;
 		sumVmMinus = 0.0;
 		sumTr = 0.0;

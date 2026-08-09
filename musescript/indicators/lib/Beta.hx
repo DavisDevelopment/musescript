@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -16,7 +17,7 @@ import musescript.types.MuseType;
  */
 class Beta implements MuseIndicator<BetaPair, Float> {
 	var period:Int;
-	var window:Array<BetaPair>;
+	var window:RingBuffer<BetaPair>;
 	var sumA:Float;
 	var sumB:Float;
 	var sumBb:Float;
@@ -33,14 +34,14 @@ class Beta implements MuseIndicator<BetaPair, Float> {
 		var b = input.b;
 		if (!Math.isFinite(a) || !Math.isFinite(b)) return null;
 
-		if (window.length == period) {
-			var old = window.shift();
+		var wasFull = window.isFull();
+		var old = window.push({ a: a, b: b });
+		if (wasFull) {
 			sumA -= old.a;
 			sumB -= old.b;
 			sumBb -= old.b * old.b;
 			sumAb -= old.a * old.b;
 		}
-		window.push({ a: a, b: b });
 		sumA += a;
 		sumB += b;
 		sumBb += b * b;
@@ -58,7 +59,7 @@ class Beta implements MuseIndicator<BetaPair, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 		sumA = 0.0;
 		sumB = 0.0;
 		sumBb = 0.0;

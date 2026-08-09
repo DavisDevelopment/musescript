@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.prim.Sma;
 import musescript.types.MuseType;
 
@@ -28,7 +29,7 @@ class Tii implements MuseIndicator<Float, Float> {
 	var devPeriod:Int;
 	var sma:Sma;
 	/** Rolling window of the most recent `devPeriod` deviations. */
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var sumPos:Float;
 	var sumNeg:Float;
 	var last:Null<Float>;
@@ -38,7 +39,7 @@ class Tii implements MuseIndicator<Float, Float> {
 		this.smaPeriod = smaPeriod;
 		this.devPeriod = devPeriod;
 		sma = new Sma(smaPeriod);
-		window = [];
+		window = new RingBuffer(devPeriod);
 		sumPos = 0.0;
 		sumNeg = 0.0;
 		last = null;
@@ -52,12 +53,13 @@ class Tii implements MuseIndicator<Float, Float> {
 		if (smaValue == null) return null;
 		var dev:Float = input - smaValue;
 
-		if (window.length == devPeriod) {
-			var old:Float = window.shift();
+		// Fullness checked before push — `Null<Float>` of `0.0` is nullish on JS.
+		var wasFull = window.isFull();
+		var old = window.push(dev);
+		if (wasFull) {
 			if (old > 0.0) sumPos -= old;
 			else if (old < 0.0) sumNeg -= -old;
 		}
-		window.push(dev);
 		if (dev > 0.0) sumPos += dev;
 		else if (dev < 0.0) sumNeg += -dev;
 
@@ -74,7 +76,7 @@ class Tii implements MuseIndicator<Float, Float> {
 
 	public function reset():Void {
 		sma.reset();
-		window = [];
+		window = new RingBuffer(devPeriod);
 		sumPos = 0.0;
 		sumNeg = 0.0;
 		last = null;

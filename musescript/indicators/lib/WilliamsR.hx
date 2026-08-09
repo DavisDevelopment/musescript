@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -16,23 +17,19 @@ import musescript.types.MuseType;
  */
 class WilliamsR implements MuseIndicator<Bar, Float> {
 	var period:Int;
-	var highs:Array<Float>;
-	var lows:Array<Float>;
+	var highs:RingBuffer<Float>;
+	var lows:RingBuffer<Float>;
 
 	public function new(period:Int) {
 		if (period <= 0) throw "WilliamsR: period must be > 0";
 		this.period = period;
-		highs = [];
-		lows = [];
+		highs = new RingBuffer(period);
+		lows = new RingBuffer(period);
 	}
 
 	public function update(bar:Bar):Null<Float> {
 		highs.push(bar.high);
 		lows.push(bar.low);
-		if (highs.length > period) {
-			highs.shift();
-			lows.shift();
-		}
 		if (highs.length < period) return null;
 		var hh = Math.NEGATIVE_INFINITY, ll = Math.POSITIVE_INFINITY;
 		for (h in highs) if (h > hh) hh = h;
@@ -43,8 +40,8 @@ class WilliamsR implements MuseIndicator<Bar, Float> {
 	}
 
 	public function reset():Void {
-		highs = [];
-		lows = [];
+		highs = new RingBuffer(period);
+		lows = new RingBuffer(period);
 	}
 
 	public function warmupPeriod():Int return period;

@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /** HVN/LVN output: the price of the highest- and lowest-volume node in the profile. */
@@ -27,14 +28,14 @@ typedef HighLowVolumeNodesOutput = {
 class HighLowVolumeNodes implements MuseIndicator<Bar, HighLowVolumeNodesOutput> {
 	var period:Int;
 	var bins:Int;
-	var window:Array<Bar>;
+	var window:RingBuffer<Bar>;
 	var last:Null<HighLowVolumeNodesOutput>;
 
 	public function new(period:Int, bins:Int) {
 		if (period <= 0 || bins <= 0) throw "HighLowVolumeNodes: period and bins must be > 0";
 		this.period = period;
 		this.bins = bins;
-		this.window = [];
+		this.window = new RingBuffer(period);
 		this.last = null;
 	}
 
@@ -81,7 +82,6 @@ class HighLowVolumeNodes implements MuseIndicator<Bar, HighLowVolumeNodesOutput>
 	}
 
 	public function update(bar:Bar):Null<HighLowVolumeNodesOutput> {
-		if (window.length == period) window.shift();
 		window.push(bar);
 		if (window.length < period) return null;
 		var p = profile();
@@ -112,7 +112,7 @@ class HighLowVolumeNodes implements MuseIndicator<Bar, HighLowVolumeNodesOutput>
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 		last = null;
 	}
 

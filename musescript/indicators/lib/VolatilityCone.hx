@@ -4,6 +4,8 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
+import musescript.indicators.SortedWindow;
 import musescript.types.MuseType;
 
 /** Volatility Cone output: current realized vol inside its historical envelope. */
@@ -27,17 +29,20 @@ typedef VolatilityConeOutput = {
  * Lane 1990). Only the close is used; vol is per-period (not annualised).
  * Non-positive closes are skipped (state untouched, last value returned).
  * First value after `window + lookback` inputs.
+ *
+ * The lookback vol envelope uses `SortedWindow` for min/median/max; percentile
+ * still scans chronological vols (count ≤ current).
  */
 class VolatilityCone implements MuseIndicator<Bar, VolatilityConeOutput> {
 	var window:Int;
 	var lookback:Int;
 	var prevClose:Null<Float>;
 	/** Rolling window of log returns for the inner realized-volatility series. */
-	var returns:Array<Float>;
+	var returns:RingBuffer<Float>;
 	var retSum:Float;
 	var retSumSq:Float;
-	/** Rolling window of realized-volatility readings (the cone envelope). */
-	var vols:Array<Float>;
+	/** Rolling lookback of realized-volatility readings (sorted order stats). */
+	var vols:SortedWindow;
 	var last:Null<VolatilityConeOutput>;
 
 	public function new(window:Int, lookback:Int) {
@@ -68,30 +73,26 @@ class VolatilityCone implements MuseIndicator<Bar, VolatilityConeOutput> {
 		var r = Math.log(price / prev);
 
 		// Stage one: rolling sample volatility of log returns.
-		if (returns.length == window) {
-			var old = returns.shift();
+		var wasFull = returns.isFull();
+		var old = returns.push(r);
+		if (wasFull) {
 			retSum -= old;
 			retSumSq -= old * old;
 		}
-		returns.push(r);
 		retSum += r;
 		retSumSq += r * r;
 		if (returns.length < window) return null;
 		var current = sampleStddev(retSum, retSumSq, window);
 
 		// Stage two: maintain the lookback envelope of volatility readings.
-		if (vols.length == lookback) vols.shift();
 		vols.push(current);
 		if (vols.length < lookback) return null;
 
-		var sorted = vols.copy();
-		sorted.sort(function(a, b) return a < b ? -1 : (a > b ? 1 : 0));
-		var min = sorted[0];
-		var max = sorted[lookback - 1];
-		var mid = Std.int(lookback / 2);
-		var median = lookback % 2 == 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2.0;
+		var min = vols.order(0);
+		var max = vols.order(lookback - 1);
+		var median = vols.median();
 		var countLe = 0;
-		for (v in vols) if (v <= current) countLe++;
+		for (i in 0...vols.length) if (vols.oldest(i) <= current) countLe++;
 		var percentile = countLe / lookback * 100.0;
 
 		var out:VolatilityConeOutput = {
@@ -107,10 +108,10 @@ class VolatilityCone implements MuseIndicator<Bar, VolatilityConeOutput> {
 
 	public function reset():Void {
 		prevClose = null;
-		returns = [];
+		returns = new RingBuffer(window);
 		retSum = 0.0;
 		retSumSq = 0.0;
-		vols = [];
+		vols = new SortedWindow(lookback);
 		last = null;
 	}
 

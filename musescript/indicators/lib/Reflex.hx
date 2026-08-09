@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.prim.SuperSmoother;
 import musescript.types.MuseType;
 
@@ -17,7 +18,7 @@ import musescript.types.MuseType;
 class Reflex implements MuseIndicator<Float, Float> {
 	var period:Int;
 	var smoother:SuperSmoother;
-	var filt:Array<Float>;
+	var filt:RingBuffer<Float>;
 	var ms:Float;
 	var last:Null<Float>;
 
@@ -25,7 +26,7 @@ class Reflex implements MuseIndicator<Float, Float> {
 		if (period <= 0) throw "Reflex: period must be > 0";
 		this.period = period;
 		smoother = new SuperSmoother(period);
-		filt = [];
+		filt = new RingBuffer(period + 1);
 		ms = 0.0;
 		last = null;
 	}
@@ -40,24 +41,20 @@ class Reflex implements MuseIndicator<Float, Float> {
 			return null;
 		}
 
-		// Maintain filt window of size period + 1
-		if (filt.length == period + 1) {
-			filt.shift();
-		}
 		filt.push(filtVal);
 
 		if (filt.length < period + 1) {
 			return null;
 		}
 
-		// Newest at index period, oldest at index 0
-		var newest = filt[period];
-		var oldest = filt[0];
+		// Newest at at(0), oldest at oldest(0) / at(period).
+		var newest = filt.at(0);
+		var oldest = filt.oldest(0);
 		var slope = (oldest - newest) / period;
 
 		var sum = 0.0;
 		for (i in 1...(period + 1)) {
-			sum += (newest + i * slope) - filt[period - i];
+			sum += (newest + i * slope) - filt.at(i);
 		}
 		sum /= period;
 
@@ -75,7 +72,7 @@ class Reflex implements MuseIndicator<Float, Float> {
 
 	public function reset():Void {
 		smoother.reset();
-		filt = [];
+		filt = new RingBuffer(period + 1);
 		ms = 0.0;
 		last = null;
 	}

@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.prim.Ema;
 import musescript.types.MuseType;
 
@@ -28,7 +29,7 @@ import musescript.types.MuseType;
 class WavePm implements MuseIndicator<Float, Float> {
 	var length:Int;
 	var smoothing:Int;
-	var closes:Array<Float>;
+	var closes:RingBuffer<Float>;
 	var energyEma:Ema;
 	var smoothEma:Ema;
 
@@ -36,17 +37,16 @@ class WavePm implements MuseIndicator<Float, Float> {
 		if (length == 0) throw "WavePm: period must be > 0";
 		this.length = length;
 		this.smoothing = smoothing;
-		closes = [];
+		closes = new RingBuffer(length + 1);
 		energyEma = new Ema(length);
 		smoothEma = new Ema(smoothing); // throws for smoothing == 0, matching Rust's Ema::new
 	}
 
 	public function update(close:Float):Null<Float> {
 		closes.push(close);
-		if (closes.length > length + 1) closes.shift();
 		if (closes.length <= length) return null;
 
-		var oldest = closes[0];
+		var oldest = closes.oldest(0);
 		var momentum = close - oldest;
 		var energy = energyEma.update(momentum * momentum);
 		if (energy == null) return null;
@@ -56,7 +56,7 @@ class WavePm implements MuseIndicator<Float, Float> {
 	}
 
 	public function reset():Void {
-		closes = [];
+		closes = new RingBuffer(length + 1);
 		energyEma.reset();
 		smoothEma.reset();
 	}

@@ -39,6 +39,18 @@ BATCH_RUNNER = ROOT / "build" / "js" / "batch-runner.js"
 SOURCE_TAPE = ROOT / "data" / "real" / "tape.csv"
 DEFAULT_STRATEGY = STRATEGIES / "flagship_v7h.ms"
 
+# Incremented once per Node spawn inside run_gene_batch (OPEN_ITEMS 6.1c smoke).
+_BATCH_SPAWN_COUNT = 0
+
+
+def reset_batch_spawn_count() -> None:
+    global _BATCH_SPAWN_COUNT
+    _BATCH_SPAWN_COUNT = 0
+
+
+def batch_spawn_count() -> int:
+    return _BATCH_SPAWN_COUNT
+
 
 def _viz(kind: str, *args: Any, **kwargs: Any) -> None:
     """Best-effort observer publish; never abort scoring.
@@ -181,6 +193,7 @@ def run_gene_batch(
     """
     if not jobs:
         return {}
+    global _BATCH_SPAWN_COUNT
     # Single-job: keep interactive path ceremony-free (still warm-batch OK, but
     # score_probe on one cell shouldn't force a special mental model).
     runner = ensure_batch_runner()
@@ -214,6 +227,7 @@ def run_gene_batch(
     if timeout is None:
         timeout = max(180, 30 * len(jobs))
     try:
+        _BATCH_SPAWN_COUNT += 1
         proc = subprocess.Popen(
             cmd,
             cwd=str(ROOT),
@@ -485,23 +499,25 @@ def cell_passes(m: Metrics, bh_sharpe: float | None, freq_ok: bool) -> bool:
     return True
 
 
-def eval_batch(
+def _gene_job_id(prefix: str, sym: str, kind: str) -> str:
+    """Stable id for mega-batch jobs. Empty prefix keeps eval_batch `{sym}:strat` shape."""
+    if prefix:
+        return f"{prefix}|{sym}:{kind}"
+    return f"{sym}:{kind}"
+
+
+def build_slice_gene_jobs(
     source: str,
     *,
-    batch_name: str,
     symbols: list[str],
     window: str,
-    honesty_name: str,
     honesty: dict[str, Any],
-    freq_name: str,
-    freq: dict[str, Any],
-    frequencies: dict[str, Any],
-) -> list[CellResult]:
+    id_prefix: str = "",
+) -> tuple[list[dict[str, Any]], list[tuple[str, Path | None]]]:
+    """Build strat+BH gene jobs for one (symbols × window × honesty) group."""
     bh = buy_hold_source()
-    cells: list[CellResult] = []
     execution = honesty["execution"]
     cost_bps = float(honesty["cost_bps"])
-
     jobs: list[dict[str, Any]] = []
     plan: list[tuple[str, Path | None]] = []
     for sym in symbols:
@@ -511,7 +527,7 @@ def eval_batch(
             continue
         jobs.append(
             {
-                "id": f"{sym}:strat",
+                "id": _gene_job_id(id_prefix, sym, "strat"),
                 "source": source,
                 "tape": str(tape),
                 "execution": execution,
@@ -520,16 +536,30 @@ def eval_batch(
         )
         jobs.append(
             {
-                "id": f"{sym}:bh",
+                "id": _gene_job_id(id_prefix, sym, "bh"),
                 "source": bh,
                 "tape": str(tape),
                 "execution": execution,
                 "costBps": cost_bps,
             }
         )
+    return jobs, plan
 
-    batch_out = run_gene_batch(jobs, default_execution=execution, default_cost_bps=cost_bps) if jobs else {}
 
+def assemble_cells(
+    batch_out: dict[str, Metrics],
+    plan: list[tuple[str, Path | None]],
+    *,
+    batch_name: str,
+    window: str,
+    honesty_name: str,
+    freq_name: str,
+    freq: dict[str, Any],
+    frequencies: dict[str, Any],
+    id_prefix: str = "",
+) -> list[CellResult]:
+    """Map gene metrics → CellResult rows (freq bands are post-hoc only)."""
+    cells: list[CellResult] = []
     for sym, tape in plan:
         if tape is None:
             cells.append(
@@ -545,8 +575,14 @@ def eval_batch(
                 )
             )
             continue
-        m = batch_out.get(f"{sym}:strat", Metrics(ok=False, error="missing batch result"))
-        bh_m = batch_out.get(f"{sym}:bh", Metrics(ok=False, error="missing batch result"))
+        m = batch_out.get(
+            _gene_job_id(id_prefix, sym, "strat"),
+            Metrics(ok=False, error="missing batch result"),
+        )
+        bh_m = batch_out.get(
+            _gene_job_id(id_prefix, sym, "bh"),
+            Metrics(ok=False, error="missing batch result"),
+        )
         bh_sharpe = bh_m.sharpe if bh_m.ok else None
         d_sharpe = (m.sharpe - bh_sharpe) if m.ok and bh_sharpe is not None else None
         freq_ok = frequency_match(m, freq) if freq_name != "any" else m.ok
@@ -567,6 +603,109 @@ def eval_batch(
             )
         )
     return cells
+
+
+def eval_batch(
+    source: str,
+    *,
+    batch_name: str,
+    symbols: list[str],
+    window: str,
+    honesty_name: str,
+    honesty: dict[str, Any],
+    freq_name: str,
+    freq: dict[str, Any],
+    frequencies: dict[str, Any],
+) -> list[CellResult]:
+    """One honesty×freq slice — one warm spawn (legacy path; matrix uses mega-batch)."""
+    execution = honesty["execution"]
+    cost_bps = float(honesty["cost_bps"])
+    jobs, plan = build_slice_gene_jobs(
+        source, symbols=symbols, window=window, honesty=honesty, id_prefix=""
+    )
+    batch_out = run_gene_batch(jobs, default_execution=execution, default_cost_bps=cost_bps) if jobs else {}
+    return assemble_cells(
+        batch_out,
+        plan,
+        batch_name=batch_name,
+        window=window,
+        honesty_name=honesty_name,
+        freq_name=freq_name,
+        freq=freq,
+        frequencies=frequencies,
+        id_prefix="",
+    )
+
+
+def run_matrix_mega(
+    source: str,
+    slice_keys: list[tuple[str, str, str, str]],
+    *,
+    batches: dict[str, Any],
+    honesty_cfg: dict[str, Any],
+    frequencies: dict[str, Any],
+    coalesce: bool = True,
+) -> list[tuple[str, str, str, str, list[CellResult]]]:
+    """Evaluate matrix slices; default = one warm spawn across honesty×freq.
+
+    Freq bands only reclassify the same (batch, window, honesty) gene metrics.
+    Different honesty modes keep distinct execution/costBps via per-job fields.
+    Set ``coalesce=False`` to keep the legacy one-spawn-per-slice path (identity).
+    """
+    out: list[tuple[str, str, str, str, list[CellResult]]] = []
+    if not coalesce:
+        for b, w, h, f in slice_keys:
+            cells = eval_batch(
+                source,
+                batch_name=b,
+                symbols=batches[b]["symbols"],
+                window=w,
+                honesty_name=h,
+                honesty=honesty_cfg[h],
+                freq_name=f,
+                freq=frequencies[f],
+                frequencies=frequencies,
+            )
+            out.append((b, w, h, f, cells))
+        return out
+
+    # Unique gene groups: (batch, window, honesty). Freqs share metrics.
+    group_plan: dict[tuple[str, str, str], list[tuple[str, Path | None]]] = {}
+    all_jobs: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for b, w, h, _f in slice_keys:
+        key = (b, w, h)
+        if key in seen:
+            continue
+        seen.add(key)
+        prefix = f"{b}|{w}|{h}"
+        jobs, plan = build_slice_gene_jobs(
+            source,
+            symbols=batches[b]["symbols"],
+            window=w,
+            honesty=honesty_cfg[h],
+            id_prefix=prefix,
+        )
+        group_plan[key] = plan
+        all_jobs.extend(jobs)
+
+    batch_out = run_gene_batch(all_jobs) if all_jobs else {}
+
+    for b, w, h, f in slice_keys:
+        prefix = f"{b}|{w}|{h}"
+        cells = assemble_cells(
+            batch_out,
+            group_plan[(b, w, h)],
+            batch_name=b,
+            window=w,
+            honesty_name=h,
+            freq_name=f,
+            freq=frequencies[f],
+            frequencies=frequencies,
+            id_prefix=prefix,
+        )
+        out.append((b, w, h, f, cells))
+    return out
 
 
 def summarize(cells: list[CellResult]) -> dict[str, Any]:
@@ -843,18 +982,17 @@ def cmd_matrix(args: argparse.Namespace) -> int:
         trigger="cli",
     )
     try:
-        for i, (b, w, h, f) in enumerate(jobs, 1):
-            cells = eval_batch(
-                source,
-                batch_name=b,
-                symbols=batches[b]["symbols"],
-                window=w,
-                honesty_name=h,
-                honesty=honesty_cfg[h],
-                freq_name=f,
-                freq=frequencies[f],
-                frequencies=frequencies,
-            )
+        reset_batch_spawn_count()
+        slice_results = run_matrix_mega(
+            source,
+            jobs,
+            batches=batches,
+            honesty_cfg=honesty_cfg,
+            frequencies=frequencies,
+            coalesce=True,
+        )
+        spawns = batch_spawn_count()
+        for i, (b, w, h, f, cells) in enumerate(slice_results, 1):
             summary = summarize(cells)
             title = f"{b} x {w} x {h} x freq={f}"
             print_summary(title, summary)
@@ -911,6 +1049,7 @@ def cmd_matrix(args: argparse.Namespace) -> int:
             "total_cells": total,
             "coverage": perfect / total if total else 0.0,
             "matrix": matrix,
+            "batch_spawns": spawns,
         }
         out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
@@ -932,7 +1071,7 @@ def cmd_matrix(args: argparse.Namespace) -> int:
             )
         md_path = RESULTS / f"matrix_{strategy.stem}.md"
         md_path.write_text("\n".join(md_lines) + "\n", encoding="utf-8")
-        print(f"\n=== MATRIX DONE  perfect={perfect}/{total} ===")
+        print(f"\n=== MATRIX DONE  perfect={perfect}/{total}  spawns={spawns} ===")
         print(f"wrote {rel(out_path)}")
         print(f"wrote {rel(md_path)}")
 

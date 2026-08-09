@@ -56,6 +56,8 @@ class BarFeed implements MuseIter {
 			var h = Math.max(o, c) * 1.002;
 			var l = Math.min(o, c) * 0.998;
 			var v = 1000.0 + (rng % 500);
+			// Unit timestamps (60s) are for ordering only — Fitness/Metrics do NOT auto-infer
+			// annualization from them (would break goldens that treat bars as daily-252 periods).
 			bars.push({ open: o, high: h, low: l, close: c, volume: v, time: i * 60.0, index: i });
 			price = c;
 		}

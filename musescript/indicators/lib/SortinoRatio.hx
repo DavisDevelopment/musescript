@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -22,7 +23,7 @@ import musescript.types.MuseType;
 class SortinoRatio implements MuseIndicator<Float, Float> {
 	var period:Int;
 	var mar:Float;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var sum:Float;
 
 	public function new(period:Int, mar:Float) {
@@ -34,16 +35,19 @@ class SortinoRatio implements MuseIndicator<Float, Float> {
 
 	public function update(input:Float):Null<Float> {
 		if (!Math.isFinite(input)) return null;
-		if (window.length == period) {
-			sum -= window.shift();
+		// Fullness checked before push — `Null<Float>` of `0.0` is nullish on JS.
+		var wasFull = window.isFull();
+		var old = window.push(input);
+		if (wasFull) {
+			sum -= old;
 		}
-		window.push(input);
 		sum += input;
 		if (window.length < period) return null;
 		var n = period;
 		var mean = sum / n;
 		var downsideSq = 0.0;
-		for (r in window) {
+		for (i in 0...window.length) {
+			var r = window.oldest(i);
 			var d = r - mar;
 			if (d < 0.0) downsideSq += d * d;
 		}
@@ -53,7 +57,7 @@ class SortinoRatio implements MuseIndicator<Float, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 		sum = 0.0;
 	}
 

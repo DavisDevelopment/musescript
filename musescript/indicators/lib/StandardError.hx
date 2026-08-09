@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -25,7 +26,7 @@ import musescript.types.MuseType;
  */
 class StandardError implements MuseIndicator<Float, Float> {
 	var period:Int;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var sumX:Float;
 	/** n·Σxx − (Σx)² — OLS denominator, constant in `period`. */
 	var denom:Float;
@@ -40,23 +41,21 @@ class StandardError implements MuseIndicator<Float, Float> {
 		sumX = n * (n - 1.0) / 2.0;
 		var sumXx = (n - 1.0) * n * (2.0 * n - 1.0) / 6.0;
 		denom = n * sumXx - sumX * sumX;
-		window = [];
-		sumY = 0.0;
-		sumXy = 0.0;
-		sumYSq = 0.0;
+		reset();
 	}
 
 	public function update(value:Float):Null<Float> {
 		if (!Math.isFinite(value)) return null;
-		if (window.length == period) {
-			// Slide: pop oldest, shift indices, then push the new value at index n − 1.
-			var y0 = window.shift();
+		// Fullness checked before push — `Null<Float>` of `0.0` is nullish on JS.
+		// Slide: pop oldest, shift indices, then push the new value at index n − 1.
+		var wasFull = window.isFull();
+		var k:Float = wasFull ? period - 1 : window.length;
+		var y0 = window.push(value);
+		if (wasFull) {
 			sumXy = sumXy - sumY + y0;
 			sumY -= y0;
 			sumYSq -= y0 * y0;
 		}
-		var k:Float = window.length;
-		window.push(value);
 		sumY += value;
 		sumXy += k * value;
 		sumYSq += value * value;
@@ -74,7 +73,7 @@ class StandardError implements MuseIndicator<Float, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 		sumY = 0.0;
 		sumXy = 0.0;
 		sumYSq = 0.0;

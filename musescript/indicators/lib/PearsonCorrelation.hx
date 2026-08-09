@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -19,7 +20,7 @@ import musescript.types.MuseType;
  */
 class PearsonCorrelation implements MuseIndicator<PearsonPair, Float> {
 	var period:Int;
-	var window:Array<PearsonPair>;
+	var window:RingBuffer<PearsonPair>;
 	var sumX:Float;
 	var sumY:Float;
 	var sumXx:Float;
@@ -37,15 +38,15 @@ class PearsonCorrelation implements MuseIndicator<PearsonPair, Float> {
 		var y = input.y;
 		if (!Math.isFinite(x) || !Math.isFinite(y)) return null;
 
-		if (window.length == period) {
-			var old = window.shift();
+		var wasFull = window.isFull();
+		var old = window.push({ x: x, y: y });
+		if (wasFull) {
 			sumX -= old.x;
 			sumY -= old.y;
 			sumXx -= old.x * old.x;
 			sumYy -= old.y * old.y;
 			sumXy -= old.x * old.y;
 		}
-		window.push({ x: x, y: y });
 		sumX += x;
 		sumY += y;
 		sumXx += x * x;
@@ -72,7 +73,7 @@ class PearsonCorrelation implements MuseIndicator<PearsonPair, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 		sumX = 0.0;
 		sumY = 0.0;
 		sumXx = 0.0;

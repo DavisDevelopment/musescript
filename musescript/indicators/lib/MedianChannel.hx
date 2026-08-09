@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.SortedWindow;
 import musescript.types.MuseType;
 
 /** Median Channel output: window extremes plus the smoothed median center. */
@@ -20,30 +21,25 @@ typedef MedianChannelOutput = {
  */
 class MedianChannel implements MuseIndicator<Float, MedianChannelOutput> {
 	var period:Int;
-	var window:Array<Float>;
+	var window:SortedWindow;
 
 	public function new(period:Int) {
 		if (period < 2) throw "MedianChannel: period must be >= 2";
 		this.period = period;
-		window = [];
+		window = new SortedWindow(period);
 	}
 
 	public function update(price:Float):Null<MedianChannelOutput> {
 		if (!Math.isFinite(price)) return null;
-		if (window.length == period) window.shift();
 		window.push(price);
 		if (window.length < period) return null;
 
-		var sorted = window.copy();
-		sorted.sort((a, b) -> a < b ? -1 : (a > b ? 1 : 0));
-		var n = sorted.length;
-		var med = n % 2 == 1 ? sorted[Std.int(n / 2)] : (sorted[Std.int(n / 2) - 1] + sorted[Std.int(n / 2)]) / 2.0;
-
-		return { upper: sorted[n - 1], median: med, lower: sorted[0] };
+		var n = window.length;
+		return { upper: window.order(n - 1), median: window.median(), lower: window.order(0) };
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new SortedWindow(period);
 	}
 
 	public function warmupPeriod():Int return period;

@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -26,7 +27,7 @@ typedef CointegrationOutput = {
 class Cointegration implements MuseIndicator<CointPair, CointegrationOutput> {
 	var period:Int;
 	var adfLags:Int;
-	var window:Array<CointPair>;
+	var window:RingBuffer<CointPair>;
 	var sumA:Float;
 	var sumB:Float;
 	var sumBb:Float;
@@ -47,14 +48,14 @@ class Cointegration implements MuseIndicator<CointPair, CointegrationOutput> {
 		var b = input.b;
 		if (!Math.isFinite(a) || !Math.isFinite(b)) return null;
 
-		if (window.length == period) {
-			var old = window.shift();
+		var wasFull = window.isFull();
+		var old = window.push({ a: a, b: b });
+		if (wasFull) {
 			sumA -= old.a;
 			sumB -= old.b;
 			sumBb -= old.b * old.b;
 			sumAb -= old.a * old.b;
 		}
-		window.push({ a: a, b: b });
 		sumA += a;
 		sumB += b;
 		sumBb += b * b;
@@ -80,9 +81,10 @@ class Cointegration implements MuseIndicator<CointPair, CointegrationOutput> {
 			intercept = meanA - hedgeRatio * meanB;
 		}
 
-		// Build the spread series over the window.
+		// Build the spread series over the window (oldest-first via `oldest`).
 		var spreads = new Array<Float>();
-		for (pair in window) {
+		for (i in 0...window.length) {
+			var pair = window.oldest(i);
 			var spread = pair.a - (intercept + hedgeRatio * pair.b);
 			spreads.push(spread);
 		}
@@ -97,7 +99,7 @@ class Cointegration implements MuseIndicator<CointPair, CointegrationOutput> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 		sumA = 0.0;
 		sumB = 0.0;
 		sumBb = 0.0;

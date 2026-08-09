@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -23,26 +24,25 @@ import musescript.types.MuseType;
  */
 class IdenticalThreeCrows implements MuseIndicator<Bar, Float> {
 	var tolerance:Float;
-	var buf:Array<Bar>;
+	var buf:RingBuffer<Bar>;
 
 	public function new(tolerance:Float = 0.1) {
 		this.tolerance = Math.max(0.0, Math.min(tolerance, 0.9999));
-		buf = [];
+		reset();
 	}
 
 	public function update(bar:Bar):Null<Float> {
 		buf.push(bar);
-		if (buf.length > 3) buf.shift();
 		if (buf.length < 3) return 0.0;
 		return compute(buf);
 	}
 
-	function compute(w:Array<Bar>):Float {
-		for (b in w) if (b.close >= b.open) return 0.0; // all three must be red
+	function compute(w:RingBuffer<Bar>):Float {
+		for (i in 0...3) if (w.oldest(i).close >= w.oldest(i).open) return 0.0; // all three must be red
 
 		for (i in 1...3) {
-			var a = w[i - 1];
-			var b = w[i];
+			var a = w.oldest(i - 1);
+			var b = w.oldest(i);
 			var bodyB = b.open - b.close;
 			if (bodyB <= 0.0) return 0.0;
 			var tol = tolerance * bodyB;
@@ -54,7 +54,7 @@ class IdenticalThreeCrows implements MuseIndicator<Bar, Float> {
 	}
 
 	public function reset():Void {
-		buf = [];
+		buf = new RingBuffer(3);
 	}
 
 	public function warmupPeriod():Int return 3;

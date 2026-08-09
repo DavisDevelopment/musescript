@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.SortedWindow;
 import musescript.types.MuseType;
 
 /**
@@ -24,7 +25,7 @@ import musescript.types.MuseType;
 class ValueAtRisk implements MuseIndicator<Float, Float> {
 	var period:Int;
 	var confidence:Float;
-	var window:Array<Float>;
+	var window:SortedWindow;
 
 	public function new(period:Int, confidence:Float) {
 		if (period < 2) throw "ValueAtRisk: value-at-risk needs period >= 2";
@@ -35,32 +36,17 @@ class ValueAtRisk implements MuseIndicator<Float, Float> {
 		reset();
 	}
 
-	/** Linear-interpolated percentile (type 7 / NumPy default) on a sorted array. */
-	static function percentileSorted(sorted:Array<Float>, q:Float):Float {
-		var n = sorted.length;
-		var pos = q * (n - 1);
-		var lo = Std.int(Math.floor(pos));
-		var hi = Std.int(Math.ceil(pos));
-		if (lo == hi) return sorted[lo];
-		var frac = pos - lo;
-		return sorted[lo] + (sorted[hi] - sorted[lo]) * frac;
-	}
-
 	public function update(input:Float):Null<Float> {
 		if (!Math.isFinite(input)) return null;
-		if (window.length == period) window.shift();
 		window.push(input);
 		if (window.length < period) return null;
-		var sorted = window.copy();
-		sorted.sort((a, b) -> a < b ? -1 : (a > b ? 1 : 0));
-		var q = 1.0 - confidence;
-		var cut = percentileSorted(sorted, q);
+		var cut = window.quantile(1.0 - confidence);
 		// Loss magnitude (sign-flipped); 0 if quantile is non-negative.
 		return -cut > 0.0 ? -cut : 0.0;
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new SortedWindow(period);
 	}
 
 	public function warmupPeriod():Int return period;

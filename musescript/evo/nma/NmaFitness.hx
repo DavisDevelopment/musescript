@@ -733,9 +733,13 @@ class NmaFitness {
 	}
 
 	/** `Metrics.sharpe(Metrics.returnsFromEquity(eq.toArray()), 0)` without materializing either
-	 * array. Two streaming passes over the curve; same guards, same annualization. */
+	 * array. Two streaming passes over the curve; same guards, same annualization.
+	 * Omitted override → `Metrics.periodsPerYear`. */
 	static function sharpeOfEquity(eq:GrowableVec<Float>,
-			periodsPerYear:Float = musescript.harness.Metrics.DAILY_PERIODS_PER_YEAR):Float {
+			?periodsPerYearOverride:Null<Float>):Float {
+		var py = periodsPerYearOverride != null
+			? periodsPerYearOverride
+			: musescript.harness.Metrics.periodsPerYear;
 		var n = eq.length;
 		var cnt = n - 1;
 		if (cnt < 2) return 0;
@@ -758,7 +762,7 @@ class NmaFitness {
 		var_ /= cnt - 1;
 		var std = Math.sqrt(var_);
 		if (std == 0) return 0;
-		return (mean / std) * Math.sqrt(periodsPerYear);
+		return (mean / std) * Math.sqrt(py);
 	}
 
 	/** A bool root's column, or `null` when it reads simulator state — warming its pure operands. */

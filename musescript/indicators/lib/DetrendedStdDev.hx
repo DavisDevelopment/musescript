@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.indicators.prim.Sma;
 import musescript.types.MuseType;
 
@@ -17,7 +18,7 @@ import musescript.types.MuseType;
 class DetrendedStdDev implements MuseIndicator<Float, Float> {
 	var trendSma:Sma;
 	var period:Int;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var sum:Float;
 	var sumSq:Float;
 
@@ -25,7 +26,7 @@ class DetrendedStdDev implements MuseIndicator<Float, Float> {
 		if (period < 2) throw "DetrendedStdDev: period must be >= 2";
 		this.period = period;
 		trendSma = new Sma(period);
-		window = [];
+		window = new RingBuffer(period);
 		sum = 0.0;
 		sumSq = 0.0;
 	}
@@ -35,12 +36,13 @@ class DetrendedStdDev implements MuseIndicator<Float, Float> {
 		if (avg == null) return null;
 		var detrended = price - avg;
 
-		if (window.length == period) {
-			var old = window.shift();
+		// Fullness checked before push — `Null<Float>` of `0.0` is nullish on JS.
+		var wasFull = window.isFull();
+		var old = window.push(detrended);
+		if (wasFull) {
 			sum -= old;
 			sumSq -= old * old;
 		}
-		window.push(detrended);
 		sum += detrended;
 		sumSq += detrended * detrended;
 		if (window.length < period) return null;
@@ -52,7 +54,7 @@ class DetrendedStdDev implements MuseIndicator<Float, Float> {
 
 	public function reset():Void {
 		trendSma.reset();
-		window = [];
+		window = new RingBuffer(period);
 		sum = 0.0;
 		sumSq = 0.0;
 	}

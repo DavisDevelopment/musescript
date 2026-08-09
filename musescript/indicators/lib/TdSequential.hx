@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /** TD Sequential output: setup count, countdown count, and active countdown direction. */
@@ -36,7 +37,7 @@ class TdSequential implements MuseIndicator<Bar, TdSequentialOutput> {
 	var setupTarget:Int;
 	var countdownLookback:Int;
 	var countdownTarget:Int;
-	var candles:Array<Bar>;
+	var candles:RingBuffer<Bar>;
 	var buySetup:Int;
 	var sellSetup:Int;
 	var buyCountdown:Int;
@@ -51,13 +52,7 @@ class TdSequential implements MuseIndicator<Bar, TdSequentialOutput> {
 		this.setupTarget = setupTarget;
 		this.countdownLookback = countdownLookback;
 		this.countdownTarget = countdownTarget;
-		candles = [];
-		buySetup = 0;
-		sellSetup = 0;
-		buyCountdown = 0;
-		sellCountdown = 0;
-		countdownDir = DIR_NONE;
-		ready = false;
+		reset();
 	}
 
 	/** DeMark's classic configuration: setup `4, 9`, countdown `2, 13`. */
@@ -70,21 +65,22 @@ class TdSequential implements MuseIndicator<Bar, TdSequentialOutput> {
 		return [setupLookback, setupTarget, countdownLookback, countdownTarget];
 	}
 
+	inline function need():Int {
+		return setupLookback > countdownLookback ? setupLookback : countdownLookback;
+	}
+
 	public function update(bar:Bar):Null<TdSequentialOutput> {
-		var need = setupLookback > countdownLookback ? setupLookback : countdownLookback;
-		var cap = need + 1;
-		if (candles.length == cap) candles.shift();
-		// The required minimum history is `need` previous bars. Once we have
-		// that many, we can evaluate both rules.
-		if (candles.length < need) {
+		var n = need();
+		// Warmup: need `n` prior bars before evaluating.
+		if (candles.length < n) {
 			candles.push(bar);
 			return null;
 		}
 
-		// --- Setup rule: compare to close[setupLookback bars ago] ---
-		// After `need` candles are buffered, the candle at offset `need - L`
-		// from the front is the one `L` bars before the new candle.
-		var setupRefClose = candles[need - setupLookback].close;
+		// Eviction-before-read: when capacity already holds `n+1` prior+current
+		// from the previous bar, the prior-`n` slice starts at oldest(1).
+		var base = candles.length - n;
+		var setupRefClose = candles.oldest(base + n - setupLookback).close;
 
 		if (bar.close < setupRefClose) {
 			buySetup = buySetup + 1 < setupTarget ? buySetup + 1 : setupTarget;
@@ -97,9 +93,6 @@ class TdSequential implements MuseIndicator<Bar, TdSequentialOutput> {
 			sellSetup = 0;
 		}
 
-		// --- Countdown activation: a completed setup arms the countdown in
-		// the same direction; an opposite-direction setup invalidates any
-		// active countdown.
 		if (buySetup == setupTarget) {
 			if (countdownDir != DIR_BUY) {
 				buyCountdown = 0;
@@ -114,10 +107,7 @@ class TdSequential implements MuseIndicator<Bar, TdSequentialOutput> {
 			countdownDir = DIR_SELL;
 		}
 
-		// --- Countdown rule: compare close to high/low `countdownLookback`
-		// bars ago. Only the active direction advances; the strict guard
-		// pins the count at `countdownTarget` once reached.
-		var cdRef = candles[need - countdownLookback];
+		var cdRef = candles.oldest(base + n - countdownLookback);
 		switch (countdownDir) {
 			case DIR_BUY:
 				if (bar.close <= cdRef.low && buyCountdown < countdownTarget) buyCountdown++;
@@ -148,7 +138,7 @@ class TdSequential implements MuseIndicator<Bar, TdSequentialOutput> {
 	}
 
 	public function reset():Void {
-		candles = [];
+		candles = new RingBuffer(need() + 1);
 		buySetup = 0;
 		sellSetup = 0;
 		buyCountdown = 0;
@@ -158,7 +148,7 @@ class TdSequential implements MuseIndicator<Bar, TdSequentialOutput> {
 	}
 
 	public function warmupPeriod():Int {
-		return (setupLookback > countdownLookback ? setupLookback : countdownLookback) + 1;
+		return need() + 1;
 	}
 
 	public function isReady():Bool return ready;

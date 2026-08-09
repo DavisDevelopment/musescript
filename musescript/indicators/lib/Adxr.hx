@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -18,14 +19,14 @@ import musescript.types.MuseType;
 class Adxr implements MuseIndicator<Bar, Float> {
 	var period:Int;
 	var adx:Adx;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var last:Null<Float>;
 
 	public function new(period:Int) {
 		if (period <= 0) throw "Adxr: period must be > 0";
 		this.period = period;
 		this.adx = new Adx(period);
-		this.window = [];
+		this.window = new RingBuffer(period);
 		this.last = null;
 	}
 
@@ -34,13 +35,10 @@ class Adxr implements MuseIndicator<Bar, Float> {
 		if (adxOut == null) return null;
 		var adxValue = adxOut.adx;
 
-		if (window.length == period) {
-			window.shift();
-		}
 		window.push(adxValue);
 		if (window.length < period) return null;
 
-		var oldest = window[0];
+		var oldest = window.oldest(0);
 		var adxr = (adxValue + oldest) / 2.0;
 		last = adxr;
 		return adxr;
@@ -48,7 +46,7 @@ class Adxr implements MuseIndicator<Bar, Float> {
 
 	public function reset():Void {
 		adx.reset();
-		window = [];
+		window = new RingBuffer(period);
 		last = null;
 	}
 

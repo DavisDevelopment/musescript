@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /** Volume Profile output: the price domain plus the per-bin volume histogram. */
@@ -29,14 +30,14 @@ typedef VolumeProfileOutput = {
 class VolumeProfile implements MuseIndicator<Bar, VolumeProfileOutput> {
 	var period:Int;
 	var binCount:Int;
-	var window:Array<Bar>;
+	var window:RingBuffer<Bar>;
 	var last:Null<VolumeProfileOutput>;
 
 	public function new(period:Int, binCount:Int) {
 		if (period <= 0 || binCount <= 0) throw "VolumeProfile: period and bin_count must be > 0";
 		this.period = period;
 		this.binCount = binCount;
-		this.window = [];
+		this.window = new RingBuffer(period);
 		this.last = null;
 	}
 
@@ -98,7 +99,6 @@ class VolumeProfile implements MuseIndicator<Bar, VolumeProfileOutput> {
 	}
 
 	public function update(bar:Bar):Null<VolumeProfileOutput> {
-		if (window.length == period) window.shift();
 		window.push(bar);
 		if (window.length < period) return null;
 		var out = compute();
@@ -107,7 +107,7 @@ class VolumeProfile implements MuseIndicator<Bar, VolumeProfileOutput> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 		last = null;
 	}
 

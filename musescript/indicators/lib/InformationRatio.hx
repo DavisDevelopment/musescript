@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -18,16 +19,14 @@ import musescript.types.MuseType;
  */
 class InformationRatio implements MuseIndicator<InformationRatioPair, Float> {
 	var period:Int;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 	var sum:Float;
 	var sumSq:Float;
 
 	public function new(period:Int) {
 		if (period < 2) throw "InformationRatio: period must be >= 2";
 		this.period = period;
-		window = [];
-		sum = 0.0;
-		sumSq = 0.0;
+		reset();
 	}
 
 	public function update(input:InformationRatioPair):Null<Float> {
@@ -36,12 +35,13 @@ class InformationRatio implements MuseIndicator<InformationRatioPair, Float> {
 		if (!Math.isFinite(a) || !Math.isFinite(b)) return null;
 		var excess = a - b;
 
-		if (window.length == period) {
-			var old = window.shift();
+		// Fullness checked before push — `Null<Float>` of `0.0` is nullish on JS.
+		var wasFull = window.isFull();
+		var old = window.push(excess);
+		if (wasFull) {
 			sum -= old;
 			sumSq -= old * old;
 		}
-		window.push(excess);
 		sum += excess;
 		sumSq += excess * excess;
 		if (window.length < period) return null;
@@ -54,7 +54,7 @@ class InformationRatio implements MuseIndicator<InformationRatioPair, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 		sum = 0.0;
 		sumSq = 0.0;
 	}

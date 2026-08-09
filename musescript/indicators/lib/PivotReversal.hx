@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -26,7 +27,7 @@ import musescript.types.MuseType;
 class PivotReversal implements MuseIndicator<Bar, Float> {
 	var left:Int;
 	var right:Int;
-	var window:Array<Bar>;
+	var window:RingBuffer<Bar>;
 	var pivotHighLevel:Null<Float>;
 	var pivotLowLevel:Null<Float>;
 	var prevClose:Null<Float>;
@@ -36,7 +37,7 @@ class PivotReversal implements MuseIndicator<Bar, Float> {
 		if (left <= 0 || right <= 0) throw "PivotReversal: left and right must be > 0";
 		this.left = left;
 		this.right = right;
-		window = [];
+		window = new RingBuffer(left + right + 1);
 		pivotHighLevel = null;
 		pivotLowLevel = null;
 		prevClose = null;
@@ -54,9 +55,6 @@ class PivotReversal implements MuseIndicator<Bar, Float> {
 
 	public function update(candle:Bar):Null<Float> {
 		var close = candle.close;
-		if (window.length == left + right + 1) {
-			window.shift();
-		}
 		window.push(candle);
 		if (window.length < left + right + 1) {
 			prevClose = close;
@@ -64,13 +62,13 @@ class PivotReversal implements MuseIndicator<Bar, Float> {
 		}
 
 		// Confirm the pivot candidate sitting `right` bars back.
-		var cand = window[left];
+		var cand = window.oldest(left);
 		var isHigh = true;
 		var isLow = true;
 		for (i in 0...window.length) {
 			if (i == left) continue;
-			if (window[i].high >= cand.high) isHigh = false;
-			if (window[i].low <= cand.low) isLow = false;
+			if (window.oldest(i).high >= cand.high) isHigh = false;
+			if (window.oldest(i).low <= cand.low) isLow = false;
 		}
 		if (isHigh) pivotHighLevel = cand.high;
 		if (isLow) pivotLowLevel = cand.low;
@@ -93,7 +91,7 @@ class PivotReversal implements MuseIndicator<Bar, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(left + right + 1);
 		pivotHighLevel = null;
 		pivotLowLevel = null;
 		prevClose = null;

@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /** Value Area output: Point of Control, Value Area High and Value Area Low. */
@@ -30,7 +31,7 @@ class ValueArea implements MuseIndicator<Bar, ValueAreaOutput> {
 	var period:Int;
 	var binCount:Int;
 	var valueAreaPct:Float;
-	var window:Array<Bar>;
+	var window:RingBuffer<Bar>;
 	var last:Null<ValueAreaOutput>;
 
 	public function new(period:Int, binCount:Int, valueAreaPct:Float) {
@@ -41,7 +42,7 @@ class ValueArea implements MuseIndicator<Bar, ValueAreaOutput> {
 		this.period = period;
 		this.binCount = binCount;
 		this.valueAreaPct = valueAreaPct;
-		this.window = [];
+		this.window = new RingBuffer(period);
 		this.last = null;
 	}
 
@@ -133,7 +134,6 @@ class ValueArea implements MuseIndicator<Bar, ValueAreaOutput> {
 	}
 
 	public function update(bar:Bar):Null<ValueAreaOutput> {
-		if (window.length == period) window.shift();
 		window.push(bar);
 		if (window.length < period) return null;
 		var out = compute();
@@ -142,7 +142,7 @@ class ValueArea implements MuseIndicator<Bar, ValueAreaOutput> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period);
 		last = null;
 	}
 

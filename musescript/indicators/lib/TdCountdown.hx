@@ -4,6 +4,7 @@ import musescript.harness.Bar;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -29,7 +30,7 @@ class TdCountdown implements MuseIndicator<Bar, Float> {
 	var setupTarget:Int;
 	var countdownLookback:Int;
 	var countdownTarget:Int;
-	var candles:Array<Bar>;
+	var candles:RingBuffer<Bar>;
 	var buySetup:Int;
 	var sellSetup:Int;
 	var buyCountdown:Int;
@@ -44,13 +45,7 @@ class TdCountdown implements MuseIndicator<Bar, Float> {
 		this.setupTarget = setupTarget;
 		this.countdownLookback = countdownLookback;
 		this.countdownTarget = countdownTarget;
-		candles = [];
-		buySetup = 0;
-		sellSetup = 0;
-		buyCountdown = 0;
-		sellCountdown = 0;
-		direction = DIR_NONE;
-		ready = false;
+		reset();
 	}
 
 	/** DeMark's classic configuration: setup `4, 9`, countdown `2, 13`. */
@@ -63,17 +58,19 @@ class TdCountdown implements MuseIndicator<Bar, Float> {
 		return [setupLookback, setupTarget, countdownLookback, countdownTarget];
 	}
 
+	inline function need():Int {
+		return setupLookback > countdownLookback ? setupLookback : countdownLookback;
+	}
+
 	public function update(bar:Bar):Null<Float> {
-		var need = setupLookback > countdownLookback ? setupLookback : countdownLookback;
-		var cap = need + 1;
-		if (candles.length == cap) candles.shift();
-		if (candles.length < need) {
+		var n = need();
+		if (candles.length < n) {
 			candles.push(bar);
 			return null;
 		}
 
-		// Setup rule: compare to close[setupLookback bars ago].
-		var setupRefClose = candles[need - setupLookback].close;
+		var base = candles.length - n;
+		var setupRefClose = candles.oldest(base + n - setupLookback).close;
 		if (bar.close < setupRefClose) {
 			buySetup = buySetup + 1 < setupTarget ? buySetup + 1 : setupTarget;
 			sellSetup = 0;
@@ -99,7 +96,7 @@ class TdCountdown implements MuseIndicator<Bar, Float> {
 			direction = DIR_SELL;
 		}
 
-		var cdRef = candles[need - countdownLookback];
+		var cdRef = candles.oldest(base + n - countdownLookback);
 		switch (direction) {
 			case DIR_BUY:
 				if (bar.close <= cdRef.low && buyCountdown < countdownTarget) buyCountdown++;
@@ -119,7 +116,7 @@ class TdCountdown implements MuseIndicator<Bar, Float> {
 	}
 
 	public function reset():Void {
-		candles = [];
+		candles = new RingBuffer(need() + 1);
 		buySetup = 0;
 		sellSetup = 0;
 		buyCountdown = 0;
@@ -129,7 +126,7 @@ class TdCountdown implements MuseIndicator<Bar, Float> {
 	}
 
 	public function warmupPeriod():Int {
-		return (setupLookback > countdownLookback ? setupLookback : countdownLookback) + 1;
+		return need() + 1;
 	}
 
 	public function isReady():Bool return ready;

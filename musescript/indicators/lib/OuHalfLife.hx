@@ -3,6 +3,7 @@ package musescript.indicators.lib;
 import musescript.indicators.MuseIndicator;
 import musescript.indicators.IndicatorSpec;
 import musescript.indicators.IndicatorCache;
+import musescript.indicators.RingBuffer;
 import musescript.types.MuseType;
 
 /**
@@ -22,27 +23,27 @@ import musescript.types.MuseType;
  */
 class OuHalfLife implements MuseIndicator<OuHalfLifePair, Float> {
 	var period:Int;
-	var window:Array<Float>;
+	var window:RingBuffer<Float>;
 
 	public function new(period:Int) {
 		if (period < 3) throw "OuHalfLife: period must be >= 3";
 		this.period = period;
-		window = [];
+		reset();
 	}
 
 	public function update(input:OuHalfLifePair):Null<Float> {
 		var spread = input.a - input.b;
 		if (!Math.isFinite(spread)) return null;
-		if (window.length == period + 1) window.shift();
 		window.push(spread);
 		if (window.length < period + 1) return null;
 
 		// Regress delta_t = spread_t - spread_{t-1} against x_t = spread_{t-1}.
+		// `oldest(i)` matches prior Array indexing (oldest-first).
 		var xs:Array<Float> = [];
 		var ys:Array<Float> = [];
 		for (i in 1...window.length) {
-			xs.push(window[i - 1]);
-			ys.push(window[i] - window[i - 1]);
+			xs.push(window.oldest(i - 1));
+			ys.push(window.oldest(i) - window.oldest(i - 1));
 		}
 		var n = xs.length;
 		var meanX = 0.0, meanY = 0.0;
@@ -63,7 +64,7 @@ class OuHalfLife implements MuseIndicator<OuHalfLifePair, Float> {
 	}
 
 	public function reset():Void {
-		window = [];
+		window = new RingBuffer(period + 1);
 	}
 
 	public function warmupPeriod():Int return period + 1;
