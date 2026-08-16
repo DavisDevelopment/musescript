@@ -127,7 +127,8 @@ class EvolutionEngine {
 	 * size-safe `pd_shift` / closed rank→bag `PanelAction`s). Needs universe for
 	 * xs_rank (shift does not). Pair xs_rank with `configureForPanel` so genomes
 	 * score via `runPanelBacktest`. Pass `null` for full catalog; `[]` clears.
-	 * Columnar NMA hosts `KPd("shift")` (lookback); `xs_rank` stays Expand panel.
+	 * Columnar NMA hosts `KPd("shift")` (lookback) and packed `KPd("xs_rank")`
+	 * (`|universe| ≤ PD_RANK1D_MAX`); wide/frame xs_rank stays Expand.
 	 * Frame PD stays WASM U; packed `pd_rank1d` may claim N ≤64; bags → host_eval.
 	 */
 	public function configureForPd(?ops:Array<String>):Void {

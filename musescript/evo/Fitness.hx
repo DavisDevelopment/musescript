@@ -29,13 +29,15 @@ import musescript.vm.MuseBytecodeCompiler.VmUnsupported;
  * xs_rank `KPd`) keep the single-name BarFeed path even if a panel is attached. Columnar NMA
  * (cliff 3): closed `SPanel` → `field@SYM` via `PanelInline` + packed `PanelFeed` columns;
  * `PABuy`/`PARebalance`/`PATargetWeight`/`PABagScanTop`/`PABagRankWeights` score on
- * `PortfolioSim` under `preferNma` (backend `nma`). Open panel genomes and `KPd("xs_rank")`
- * stay Expand→interp/WASM (`nma-unsupported` / `vm-unsupported`). `SProj` PSPoint inlines via
+ * `PortfolioSim` under `preferNma` (backend `nma`). Open panel genomes stay Expand→interp/WASM
+ * (`nma-unsupported` / `vm-unsupported`). Gated `KPd("xs_rank")` is columnar-NMA when
+ * `|universe| ≤ PD_RANK1D_MAX` and scores pack as `field@SYM` (packed `pd_rank1d`);
+ * wide/frame / unknown-kind xs_rank stay `nma-unsupported`. `evaluateVm` still refuses
+ * panel xs_rank (do not force preferVm). `SProj` PSPoint inlines via
  * `ProjInline`; PSHost/PSNoise stay Expand. Closed `KNp` scalar mean/sum/dot of window is
  * columnar-NMA eligible (trailing window reduce over SPrice/SInd columns) and bytecode-VM
  * eligible (`VmNpEligibility`); Series-lane `KPd("shift")` is columnar-NMA eligible (lookback
- * of OHLC field) and VM-eligible via `VmPdEligibility`; Expand `KPd("xs_rank")` stays
- * Expand→interp (panel honesty — Fitness refuses evaluateVm); gated frame hand forms
+ * of OHLC field) and VM-eligible via `VmPdEligibility`; gated frame hand forms
  * (`pd_from_columns` / `pd_xs_rank` / groupby / join / frame `pd_shift`) and packed
  * `pd_rank1d` ≤64 remain VM-eligible when shapes fit. With `preferVm` (default ON;
  * CorpusEvoRun `--no-vm` to opt out),
@@ -647,12 +649,12 @@ class Fitness {
 
 	/**
 	 * True when any closed `KPd` leaf is outside columnar-NMA honesty
-	 * (`shift` only). `xs_rank` stays Expand panel/frame.
+	 * (`shift`, or packed `xs_rank` ≤ `PD_RANK1D_MAX`). Wide/frame xs_rank stays Expand.
 	 */
 	static function hasClosedPdUnsupportedByNma(g:StrategyGenome):Bool {
 		function wsc(n:ScalarNode):Bool {
 			return switch (n) {
-				case KPd(op, _, _, _, _): op != "shift";
+				case KPd(op, kind, w, sym, syms): !Expand.pdNmaEligible(op, kind, w, sym, syms);
 				case KArith(_, a, b): wsc(a) || wsc(b);
 				case KHole(inner): wsc(inner);
 				case KNp(_, _, _, _) | KSeries(_) | KLookback(_, _) | KConst(_) | KParam(_) | KFeature(_): false;
@@ -682,12 +684,13 @@ class Fitness {
 					"genome uses PSHost/PSNoise SProj -- Expand→decorate/compile path");
 			nmaGenome = inlined;
 		}
-		// Closed KPd("xs_rank") / non-shift PD stays Expand→interp/JS (panel/frame).
 		// Closed KPd("shift") is columnar-NMA via lookback of OHLC field (matches Expand Series lag).
+		// Closed KPd("xs_rank") is columnar-NMA when packed pd_rank1d-honest (≤ PD_RANK1D_MAX);
+		// wide/frame / unknown-kind xs_rank stay Expand→interp/JS.
 		// Closed KNp is columnar-NMA via trailing window mean/sum/dot over series columns.
 		if (hasClosedPdUnsupportedByNma(nmaGenome))
 			return new FitnessResult(false, -999, 0, 0, "nma-unsupported",
-				"genome uses closed KPd xs_rank / non-shift PD -- Expand→interp/JS (panel/frame U; Series shift is NMA-eligible)");
+				"genome uses closed KPd outside columnar NMA (wide/frame xs_rank or unknown PD) -- Expand→interp/JS");
 		// Cliff 3: closed SPanel → field@SYM (`PanelInline`) + packed PanelFeed columns.
 		// Closed PABuy/PARebalance/PATargetWeight/PABagScanTop/PABagRankWeights drive PortfolioSim
 		// from signal (+ bag score/rank) columns (backend `nma`). Open bag_rank_* stay Expand.

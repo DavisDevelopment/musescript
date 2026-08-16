@@ -4,7 +4,9 @@ package musescript.evo.nma;
  * NMA counterpart of `ScalarNode`. Family base `NmaScalar` (never instantiated) + concrete
  * `final` classes mirroring the enum constructors 1:1: `KConst`/`KParam`/`KArith`/`KSeries`/
  * `KLookback`/`KFeature`/`KHole`/`KNp`/`KPd`. Closed `KPd("shift")` is columnar (Series lag ≡
- * lookback); `KPd("xs_rank")` stays Expand-only (`nma-unsupported` — panel/frame path).
+ * lookback); closed `KPd("xs_rank")` is columnar when packed `pd_rank1d`-honest
+ * (`|syms| ≤ PD_RANK1D_MAX`, `field@SYM` scores). Wide/frame xs_rank stays Expand
+ * (`nma-unsupported`).
  * See `NmaNode` for the per-node-state + GraalVM dispatch rationale (kind-switch hot path,
  * `final` leaves, allocation-free `childCount`/`childAt`).
  *
@@ -152,9 +154,10 @@ final class NmaKNp extends NmaScalar {
 
 /**
  * `KPd(op, kind, window, sym, syms)` — closed PD palette leaf.
- * Columnar NMA hosts `op == "shift"` only: size-capped Series lag of an OHLC field,
+ * Columnar NMA hosts `op == "shift"` (size-capped Series lag of an OHLC field,
  * bit-matching Expand `pd_shift(pd_series(window(field, p+1)), p)` → last-cell extract
- * (= lookback `p`). `xs_rank` is refused upstream (`nma-unsupported`).
+ * (= lookback `p`)) and packed `op == "xs_rank"` (`pd_rank1d` over `field@SYM` scores
+ * when `|syms| ≤ PD_RANK1D_MAX`). Wide/frame xs_rank is refused upstream (`nma-unsupported`).
  * Field name is `pdKind` (not `kind`) so it does not collide with `NmaNode.kind`.
  *
  * «ῥάβδος ἑπτάκλαδος· ὁδὸς μία πρὸς θέρος.»

@@ -22,7 +22,8 @@ import musescript.parse.MuseParser;
  * `EvolutionEngine.configureForPanel` + `PanelAction` → `runPanelBacktest`
  * metrics. Classic genomes stay single-name. Cliff-3 NMA hosts closed
  * `SPanel` + `PABuy`/`PARebalance`/`PATargetWeight`/`PABagScanTop`/`PABagRankWeights`
- * (`preferNma` → backend `nma`); `KPd` / open `bag_rank_*` stay Expand.
+ * (`preferNma` → backend `nma`) plus packed `KPd("xs_rank")` ≤64; wide/frame
+ * xs_rank / open `bag_rank_*` stay Expand.
  */
 class TestPanelFitness extends Test {
 	function teardown() {
@@ -281,15 +282,25 @@ class TestPanelFitness extends Test {
 		Assert.isTrue(PanelInline.isNmaPanelAction(PABagRankWeights("mom", 4, ["AAA", "BBB"])));
 	}
 
-	/** KPd xs_rank still nma-unsupported (Expand panel path). */
-	public function testNmaKdPdStillUnsupported() {
+	/** Packed KPd xs_rank ≤64 is columnar-NMA on a PanelFeed (parity vs Expand). */
+	public function testNmaKPdXsRankParity() {
 		var panel = plantedPanel(40);
 		Fitness.configurePanel(panel);
+		var g = pdRankTargetWeightGenome();
+		var keys = PanelInline.seriesKeys(g);
+		Assert.isTrue(keys.indexOf("close@AAA") >= 0, keys.join(","));
+		Assert.isTrue(keys.indexOf("close@BBB") >= 0, keys.join(","));
+		Assert.isTrue(Expand.pdXsRankNmaEligible("mom", 5, "AAA", ["AAA", "BBB"]));
 		Fitness.preferNma = true;
-		var fr = Fitness.evaluate(pdRankTargetWeightGenome(), panel.all(), "js");
-		Assert.isTrue(fr.ok, fr.error);
-		Assert.isTrue(fr.backend != "nma", fr.backend);
+		var fr = Fitness.evaluate(g, panel.all(), "js");
 		Fitness.preferNma = false;
+		var frExpand = Fitness.evaluate(g, panel.all(), "js");
+		Assert.isTrue(fr.ok, fr.error);
+		Assert.isTrue(frExpand.ok, frExpand.error);
+		Assert.equals("nma", fr.backend, fr.backend);
+		Assert.equals(frExpand.trades, fr.trades);
+		Assert.floatEquals(frExpand.finalEquity, fr.finalEquity);
+		Assert.floatEquals(frExpand.sharpe, fr.sharpe);
 	}
 
 	/** Hand template: percentile xs_rank → target_weight on planted AAA↑/BBB↓ panel. */
@@ -381,17 +392,6 @@ class TestPanelFitness extends Test {
 		}
 		Assert.isTrue(hit, "expected grown PD genome under configureForPanel + configureForPd");
 		Fitness.configurePanel(null);
-	}
-
-	public function testPdNmaFallsThroughToExpand() {
-		var panel = plantedPanel(50);
-		Fitness.configurePanel(panel);
-		Fitness.preferNma = true;
-		var fr = Fitness.evaluate(pdRankTargetWeightGenome(), panel.all(), "js");
-		Assert.isTrue(fr.ok, fr.error);
-		Assert.isTrue(fr.backend != "nma" && fr.backend.indexOf("nma") < 0, fr.backend);
-		Assert.isTrue(fr.trades > 0);
-		Fitness.preferNma = false;
 	}
 
 	/** Closed bag scan: top-1 mom on planted AAA↑/BBB↓ → always long AAA sleeve. */

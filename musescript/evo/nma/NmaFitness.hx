@@ -199,6 +199,9 @@ class NmaFitness {
 	public static function evaluate(g:StrategyGenome, bars:Array<Bar>,
 			?costBps:Float = 0.0, ?initialCash:Float = 100000, ?equityFloor:Float = 0.0):FitnessResult {
 		try {
+			if (Expand.hasKPdXsRank(g))
+				return new FitnessResult(false, -999, 0, 0, "nma-unsupported",
+					"KPd xs_rank is panel-path NMA (evaluatePanel + packed field@SYM); classic OrderSim stays Expand");
 			var built = prepare(g, bars);
 			if (built == null)
 				return new FitnessResult(false, -999, 0, 0, "nma-unsupported",
@@ -214,8 +217,10 @@ class NmaFitness {
 	 * Columnar panel fitness (cliff 3): `PanelInline` genome + packed `field@SYM` columns from
 	 * `PanelFeed`, signals via `NmaEval`, apply via real `PortfolioSim` matching Expand's
 	 * closed `PABuy` / `PARebalance` / `PATargetWeight` / `PABagScanTop` / `PABagRankWeights`
-	 * templates (entryLong / exitLong only). Open bags, `KPd("xs_rank")`, and sim-coupled
-	 * roots stay Expand (`nma-unsupported`). `KPd("shift")` may appear in classic roots.
+	 * templates (entryLong / exitLong only). Packed `KPd("xs_rank")` (≤ `PD_RANK1D_MAX`)
+	 * evaluates as a scalar rank column on those packed scores. Open bags, wide/frame
+	 * xs_rank, and sim-coupled roots stay Expand (`nma-unsupported`). `KPd("shift")`
+	 * may appear in classic roots.
 	 *
 	 * «πολλαὶ νῆες, εἷς στόλος· κορυφαῖος Πορτοφόλιον.»
 	 */

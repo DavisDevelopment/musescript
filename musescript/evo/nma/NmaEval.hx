@@ -2,6 +2,10 @@ package musescript.evo.nma;
 
 import musescript.indicators.GrowableVec;
 import musescript.indicators.RingBuffer;
+import musescript.dataframe.GroupBy;
+import musescript.ndarray.NdArrayF64;
+import musescript.builtins.PortfolioBuiltins;
+import musescript.evo.Palette;
 // Explicit family-module imports for the SECONDARY concrete node types the kind-switch casts to.
 import musescript.evo.nma.NmaSeries;
 import musescript.evo.nma.NmaScalar;
@@ -21,7 +25,9 @@ import musescript.evo.nma.NmaBool;
  *  - Closed `KNp` (mean/sum/dot of trailing `window`) is implemented HERE: short early windows
  *    match `TradeBuiltins.window` + `NpBuiltins` reduces — not SMA's full-window NaN warmup.
  *  - Closed `KPd("shift")` is implemented HERE as lookback of an OHLC field (= Expand
- *    `pd_shift` → last-cell extract). `KPd("xs_rank")` stays Expand (panel/frame).
+ *    `pd_shift` → last-cell extract). Closed `KPd("xs_rank")` is implemented HERE as
+ *    packed percentile `pd_rank1d` over `field@SYM` score columns when `|syms| ≤
+ *    PD_RANK1D_MAX`. Wide/frame xs_rank stays Expand (panel/frame).
  *  - Closed `SPanel` is hosted via `PanelInline` → `SPrice`/`SInd` over packed `field@SYM`
  *    columns (`NmaPanelPack` / `PanelFeed`). Closed bag templates (`PABagScanTop` /
  *    `PABagRankWeights`) build bag weights from those score columns in `NmaFitness`.
@@ -81,7 +87,9 @@ class NmaEval {
 					knp.window, ctx.n);
 			case KPd:
 				var kpd = (cast node : NmaKPd);
-				pdShiftColumn(kpd.pdKind, kpd.window, ctx);
+				if (kpd.op == "shift") pdShiftColumn(kpd.pdKind, kpd.window, ctx);
+				else if (kpd.op == "xs_rank") pdXsRankColumn(kpd, ctx);
+				else throw 'NmaEval.evalScalar: KPd("${kpd.op}") is not columnar-NMA (nma-unsupported)';
 			default: throw 'NmaEval.evalScalar: non-scalar kind ${node.kind}';
 		};
 		popStore(node, ctx, () -> NmaCanonical.ensureWordsScalar(node), col);
@@ -370,6 +378,63 @@ class NmaEval {
 		var p = musescript.evo.Expand.clampPdShiftPeriods(periods);
 		var field = musescript.evo.Expand.pdShiftField(kind);
 		return lookback(ctx.priceColumn(field), p, ctx.n);
+	}
+
+	/**
+	 * Closed `KPd("xs_rank")` columnar path — bit-match Expand packed `pd_rank1d`
+	 * (`np_get_flat(pd_rank1d([scores…], true), idx)`). Scores are packed `field@SYM`
+	 * columns (OHLCV / panel-of / fund); OHLCV/fund `window > 0` is lookback.
+	 * Missing packed fields throw rather than inventing NaN ranks.
+	 */
+	static function pdXsRankColumn(kpd:NmaKPd, ctx:NmaEvalContext):GrowableVec<Float> {
+		if (!musescript.evo.Expand.pdXsRankNmaEligible(kpd.pdKind, kpd.window, kpd.sym, kpd.syms))
+			throw 'NmaEval.pdXsRankColumn: KPd("xs_rank") not columnar-NMA (nma-unsupported)';
+		var syms = kpd.syms;
+		var idx = syms.indexOf(kpd.sym);
+		var scores = [for (s in syms) pdXsRankScoreColumn(kpd.pdKind, kpd.window, s, ctx)];
+		var n = ctx.n;
+		var m = syms.length;
+		var col = new GrowableVec<Float>(n > 0 ? n : 8);
+		var packed:Array<Float> = [for (_ in 0...m) Math.NaN];
+		var i = 0;
+		while (i < n) {
+			var j = 0;
+			while (j < m) {
+				packed[j] = scores[j].at(i);
+				j++;
+			}
+			var ranks = GroupBy.rank1d(NdArrayF64.asarray1d(packed), true, true);
+			col.setAt(i, ranks.getFlat(idx));
+			i++;
+		}
+		col.commitLength(n);
+		return col;
+	}
+
+	/** Per-symbol score column matching Expand `panelOfExpr` / bag score packing. */
+	static function pdXsRankScoreColumn(kind:String, window:Int, sym:String, ctx:NmaEvalContext):GrowableVec<Float> {
+		if (kind == "fund") {
+			var key = PortfolioBuiltins.seriesKey("revenue", sym);
+			if (!ctx.hasField(key))
+				throw 'NmaEval.pdXsRankColumn: missing packed panel field $key (nma-unsupported)';
+			var col = ctx.priceColumn(key);
+			return window > 0 ? lookback(col, window, ctx.n) : col;
+		}
+		if (Palette.PANEL_OF_INDS.indexOf(kind) >= 0) {
+			var key = PortfolioBuiltins.seriesKey("close", sym);
+			if (!ctx.hasField(key))
+				throw 'NmaEval.pdXsRankColumn: missing packed panel field $key (nma-unsupported)';
+			var w = window > 0 ? window : 14;
+			return evalSeries(new NmaSInd(kind, key, w, null), ctx);
+		}
+		if (Palette.FIELDS.indexOf(kind) >= 0) {
+			var key = PortfolioBuiltins.seriesKey(kind, sym);
+			if (!ctx.hasField(key))
+				throw 'NmaEval.pdXsRankColumn: missing packed panel field $key (nma-unsupported)';
+			var col = ctx.priceColumn(key);
+			return window > 0 ? lookback(col, window, ctx.n) : col;
+		}
+		throw 'NmaEval.pdXsRankColumn: kind "$kind" is not columnar-NMA (nma-unsupported)';
 	}
 
 	static function arith(op:String, a:GrowableVec<Float>, b:GrowableVec<Float>, n:Int):GrowableVec<Float> {

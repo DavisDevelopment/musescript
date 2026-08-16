@@ -119,7 +119,7 @@ eligibility changes; this table is the navigator.
 | **JS** | **B** (`pd_*`) | **B** | **B** | grant / Studio (parquet: Node + hyparquet) |
 | **Bytecode VM** | **H** gated frames (`VmPdEligibility`) · **U** Index/asof/keys-agg | **H** OBJ `NdArrayF64` | **H** OBJ `Series`/`NdArrayF64` + frame shift | **U** |
 | **WASM** | **U** (opaque fallback) | **N** ≤64 | **N** packed + `$vec_shift` | **U** |
-| **NMA** | Don't force frames into kind-switch | — | — | — |
+| **NMA** | Don't force frames into kind-switch; packed `KPd("xs_rank")` ≤64 is columnar | packed rank1d via `NmaEval` | Series `KPd("shift")` lookback | — |
 
 ## CI
 

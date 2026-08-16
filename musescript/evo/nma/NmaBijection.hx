@@ -62,9 +62,9 @@ class NmaBijection {
 			case KNp(op, a, window, b):
 				new NmaKNp(op, seriesFromEnum(a), window, b != null ? seriesFromEnum(b) : null);
 			case KPd(op, kind, window, sym, syms):
-				if (op != "shift")
+				if (!musescript.evo.Expand.pdNmaEligible(op, kind, window, sym, syms))
 					throw 'NmaBijection.scalarFromEnum: KPd("$op") is not columnar-NMA supported (nma-unsupported)';
-				new NmaKPd("shift", kind, window, sym != null ? sym : "",
+				new NmaKPd(op, kind, window, sym != null ? sym : "",
 					syms != null ? syms.copy() : []);
 		};
 	}

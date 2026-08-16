@@ -8,8 +8,9 @@ import musescript.harness.PanelFeed;
  * same values as WASM feature-tape pack / `PortfolioBuiltins.observePanel`.
  *
  * No bags: callers only request closed OHLCV / fund / indicator-source keys that
- * `PanelInline` mapped from `SPanel`, plus `seriesKeysForPanelAction` for closed
- * `PABagScanTop` / `PABagRankWeights` score universes.
+ * `PanelInline` mapped from `SPanel` / packed `KPd("xs_rank")`, plus
+ * `seriesKeysForPanelAction` for closed `PABagScanTop` / `PABagRankWeights`
+ * score universes.
  *
  * «στήλη μία καθ' ἡμέραν· σύμπαν τὸ πάνελ.»
  */

@@ -109,7 +109,10 @@ class PanelInline {
 				for (k in keysForPanel(kind, sym, field, window)) add(k);
 		}
 		function wsc(n:ScalarNode):Void switch (n) {
-			case KConst(_) | KParam(_) | KFeature(_) | KPd(_, _, _, _, _):
+			case KConst(_) | KParam(_) | KFeature(_):
+			case KPd(op, kind, w, _, syms):
+				if (op == "xs_rank")
+					for (k in keysForBagScoreUniverse(kind, w, syms)) add(k);
 			case KSeries(s) | KLookback(s, _): ws(s);
 			case KNp(_, a, _, b):
 				ws(a);

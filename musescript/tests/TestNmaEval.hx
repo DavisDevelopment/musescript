@@ -238,4 +238,39 @@ class TestNmaEval extends Test {
 		Assert.isTrue(Math.isNaN(expect[1]));
 		Assert.floatEquals(10.0, expect[2]);
 	}
+
+	/**
+	 * Closed KPd("xs_rank"): packed percentile pd_rank1d of field@SYM scores.
+	 * Matches GroupBy.rank1d(..., true, true) cell extract — no invented ranks.
+	 */
+	public function testKPdXsRankMatchesRank1d() {
+		var aaa = [1.0, 3.0, 2.0, 5.0];
+		var bbb = [2.0, 1.0, 4.0, 5.0];
+		var n = aaa.length;
+		var expect = new Array<Float>();
+		for (i in 0...n) {
+			var packed = [aaa[i], bbb[i]];
+			var ranks = musescript.dataframe.GroupBy.rank1d(
+				musescript.ndarray.NdArrayF64.asarray1d(packed), true, true);
+			expect.push(ranks.getFlat(0));
+		}
+		var ctx = ctxOf(["close@AAA" => aaa, "close@BBB" => bbb], n);
+		var xs = new NmaKPd("xs_rank", "close", 0, "AAA", ["AAA", "BBB"]);
+		assertColEquals(expect, NmaEval.evalScalar(xs, ctx), "KPd xs_rank ≡ pd_rank1d");
+		Assert.floatEquals(0.5, expect[0]);
+		Assert.floatEquals(1.0, expect[1]);
+		Assert.floatEquals(0.75, expect[3]);
+	}
+
+	public function testKPdXsRankMissingPanelThrows() {
+		var ctx = ctxOf(["close" => [1.0, 2.0]], 2);
+		var xs = new NmaKPd("xs_rank", "close", 0, "AAA", ["AAA", "BBB"]);
+		var threw = false;
+		try {
+			NmaEval.evalScalar(xs, ctx);
+		} catch (e:Dynamic) {
+			threw = Std.string(e).indexOf("nma-unsupported") >= 0;
+		}
+		Assert.isTrue(threw, "missing field@SYM must not invent ranks");
+	}
 }

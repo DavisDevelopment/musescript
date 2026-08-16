@@ -13,6 +13,8 @@ import musescript.evo.StrategyGenome;
 import musescript.evo.Variation;
 import musescript.harness.BarFeed;
 import musescript.harness.HarnessContext;
+import musescript.harness.PanelFeed;
+import musescript.harness.Bar;
 import musescript.parse.MuseParser;
 
 /**
@@ -390,19 +392,84 @@ class TestNpPdEvoPalette extends Test {
 			"KPd shift NMA finalEquity bits vs Expand→JS");
 	}
 
-	/** KPd("xs_rank") still refuses columnar NMA (panel/frame Expand). */
-	public function testKPdXsRankStillNmaUnsupported() {
+	/** Classic OrderSim NmaFitness still refuses xs_rank (needs panel pack). */
+	public function testKPdXsRankClassicNmaUnsupported() {
 		var g = genome(BCmp(">",
 			KPd("xs_rank", "mom", 5, "AAA", ["AAA", "BBB"]),
 			KConst(0.5)));
 		g.panelAction = PATargetWeight("AAA");
 		var bars = BarFeed.synthetic(30, 5).all();
 		var fr = musescript.evo.nma.NmaFitness.evaluate(g, bars);
-		Assert.isFalse(fr.ok, "xs_rank NmaFitness must fail");
-		Assert.notEquals("nma", fr.backend, "KPd xs_rank must not claim columnar NMA");
+		Assert.isFalse(fr.ok, "xs_rank classic NmaFitness must fail");
+		Assert.notEquals("nma", fr.backend, "KPd xs_rank must not claim classic OrderSim NMA");
 	}
 
-	/** Series-lane KPd("shift") is VM-eligible; xs_rank stays panel/frame U. */
+	/** Packed KPd("xs_rank") ≤64 is columnar-NMA on a PanelFeed — parity vs Expand→JS. */
+	public function testKPdXsRankPreferNmaParityVsExpand() {
+		var bySym = new Map<String, Array<Bar>>();
+		for (name in ["AAA", "BBB"]) {
+			var bars:Array<Bar> = [];
+			var price = 100.0;
+			for (i in 0...60) {
+				var drift = name == "AAA" ? 0.012 : -0.008;
+				var o = price;
+				var c = price * (1 + drift);
+				bars.push({
+					open: o, high: Math.max(o, c) * 1.001, low: Math.min(o, c) * 0.999,
+					close: c, volume: 1000.0, time: i * 1.0, index: i
+				});
+				price = c;
+			}
+			bySym.set(name, bars);
+		}
+		var panel = PanelFeed.fromSymbolBars(bySym);
+		var g = genome(BCmp(">",
+			KPd("xs_rank", "mom", 5, "AAA", ["AAA", "BBB"]),
+			KConst(0.5)));
+		g.size = KPd("xs_rank", "mom", 5, "AAA", ["AAA", "BBB"]);
+		g.panelAction = PATargetWeight("AAA");
+		var prevNma = Fitness.preferNma;
+		var prevVm = Fitness.preferVm;
+		Fitness.configurePanel(panel);
+		Fitness.preferNma = false;
+		Fitness.preferVm = false;
+		var ref = Fitness.evaluate(g, panel.all(), "js", false);
+		Assert.isTrue(ref.ok, "ref " + ref.backend + " " + ref.error);
+		Fitness.preferNma = true;
+		Fitness.preferVm = false;
+		var nma = Fitness.evaluate(g, panel.all(), "js", false);
+		Fitness.preferNma = prevNma;
+		Fitness.preferVm = prevVm;
+		Fitness.configurePanel(null);
+		Assert.isTrue(nma.ok, "nma " + nma.backend + " " + nma.error);
+		Assert.equals("nma", nma.backend);
+		Assert.equals(ref.trades, nma.trades);
+		Assert.equals(
+			haxe.io.FPHelper.doubleToI64(ref.finalEquity),
+			haxe.io.FPHelper.doubleToI64(nma.finalEquity),
+			"KPd xs_rank NMA finalEquity bits vs Expand→JS");
+	}
+
+	/** Wide-universe xs_rank stays nma-unsupported (frame path). */
+	public function testKPdXsRankWideStaysNmaUnsupported() {
+		var wide = [for (i in 0...Palette.PD_RANK1D_MAX + 1) 'S$i'];
+		Assert.isFalse(Expand.pdXsRankNmaEligible("mom", 5, "S0", wide));
+		var g = genome(BCmp(">", KPd("xs_rank", "mom", 5, "S0", wide), KConst(0.5)));
+		g.panelAction = PATargetWeight("S0");
+		var threw = false;
+		try {
+			musescript.evo.nma.NmaBijection.genomeFromEnum(g);
+		} catch (e:Dynamic) {
+			threw = Std.string(e).indexOf("nma-unsupported") >= 0;
+		}
+		Assert.isTrue(threw, "wide xs_rank bijection must throw");
+		var bars = BarFeed.synthetic(20, 3).all();
+		var fr = musescript.evo.nma.NmaFitness.evaluate(g, bars);
+		Assert.isFalse(fr.ok);
+		Assert.equals("nma-unsupported", fr.backend);
+	}
+
+	/** Series-lane KPd("shift") is VM-eligible; panel xs_rank stays vm-unsupported. */
 	public function testKPdShiftPreferVmParity() {
 		var gShift = genome(BCmp(">", KPd("shift", "close", 3, "", []), KConst(0.0)));
 		var bars = BarFeed.synthetic(60, 7).all();

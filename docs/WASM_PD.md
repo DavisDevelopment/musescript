@@ -96,12 +96,12 @@ engine.configureForPd(null)       # or ["xs_rank"] / ["shift"] / both
 ```
 
 NMA columnarizes closed bag templates (`PABagScanTop` / `PABagRankWeights` →
-score columns → equal bag or percentile xs_rank → `bag_norm` → `applyBag`);
-`KPd("xs_rank")` / panel stay Expand→interp/JS (or WASM HostABI for closed bags).
-Bytecode VM Series + Frame lanes: packed `pd_rank1d` + gated Expand `pd_shift` chain +
+score columns → equal bag or percentile xs_rank → `bag_norm` → `applyBag`) and
+packed `KPd("xs_rank")` (`|universe| ≤ 64`, `field@SYM` scores → `pd_rank1d`).
+Wide/frame xs_rank stays Expand→interp/JS. Bytecode VM Series + Frame lanes: packed `pd_rank1d` + gated Expand `pd_shift` chain +
 const `pd_from_columns` / `pd_xs_rank` / single-key groupby / `pd_join` / frame `pd_shift`
 are **H** (`VmPdEligibility`, dims ≤ 64) — `Fitness.evaluateVm` accepts `KPd("shift")`
-and still refuses `KPd("xs_rank")` / panel (Expand honesty). WASM Series lane is the
+and still refuses `KPd("xs_rank")` / panel (do not force preferVm). WASM Series lane is the
 packed twin (`WasmPdEligibility`, `$vec_shift`). `Fitness.preferVm` defaults ON
 (Expand→interp fallback on U).
 

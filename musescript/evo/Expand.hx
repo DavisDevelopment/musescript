@@ -348,6 +348,28 @@ class Expand {
 	}
 
 	/**
+	 * Columnar-NMA honesty for gated `KPd("xs_rank")`. Packed percentile `pd_rank1d`
+	 * when `|syms| ≤ PD_RANK1D_MAX` and scores are hostable as packed `field@SYM`
+	 * columns (OHLCV / panel-of inds / fund). Wide-universe frame `pd_xs_rank`,
+	 * empty/missing universe, unknown kinds, and a symbol outside `syms` stay Expand.
+	 * OHLCV/fund `window > 0` is lookback of the packed column — not invented ranks.
+	 */
+	public static function pdXsRankNmaEligible(kind:String, window:Int, sym:String, syms:Array<String>):Bool {
+		if (syms == null || syms.length == 0 || syms.length > Palette.PD_RANK1D_MAX) return false;
+		if (sym == null || syms.indexOf(sym) < 0) return false;
+		if (kind == "fund") return true;
+		if (Palette.PANEL_OF_INDS.indexOf(kind) >= 0) return true;
+		return Palette.FIELDS.indexOf(kind) >= 0;
+	}
+
+	/** Closed `KPd` leaf NMA can host: Series `shift`, or columnar-honest `xs_rank`. */
+	public static inline function pdNmaEligible(op:String, kind:String, window:Int, sym:String, syms:Array<String>):Bool {
+		if (op == "shift") return true;
+		if (op == "xs_rank") return pdXsRankNmaEligible(kind, window, sym, syms);
+		return false;
+	}
+
+	/**
 	 * Percentile xs_rank → scalar for `sym`. Prefers packed `pd_rank1d` when the
 	 * universe fits the WASM N cap; otherwise the opaque one-row frame path.
 	 */

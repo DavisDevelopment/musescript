@@ -16,7 +16,8 @@ enum ScalarNode {
 	 * `b` is required for `dot` (ignored for mean/sum). Columnar NMA evaluates trailing
 	 * window reduces over SPrice/SInd columns; WASM may claim native on the scalar subset;
 	 * bytecode VM is eligible (`VmNpEligibility`). Closed `KPd("shift")` is likewise
-	 * NMA/VM-eligible; `KPd("xs_rank")` remains Expand-only (panel/frame).
+	 * NMA/VM-eligible; packed `KPd("xs_rank")` is NMA-eligible (≤ `PD_RANK1D_MAX`);
+	 * wide/frame xs_rank remains Expand-only. VM still refuses panel xs_rank.
 	 */
 	KNp(op:String, a:SeriesNode, window:Int, ?b:SeriesNode);
 	/**
@@ -26,8 +27,9 @@ enum ScalarNode {
 	 * `|syms| ≤ PD_RANK1D_MAX`, else one-row `pd_from_columns` + percentile
 	 * `pd_xs_rank` (coerces onto `PanelAction` / `target_weight`), or size-capped
 	 * `pd_shift` over `window(field, w)`. WASM: `pd_rank1d` N ≤64; frame path U.
-	 * NMA: `KPd("shift")` columnar (lookback); `xs_rank` `nma-unsupported`.
-	 * VM: Series shift H (`VmPdEligibility`); xs_rank panel/frame U.
+	 * NMA: `KPd("shift")` columnar (lookback); packed `xs_rank` columnar when
+	 * `|syms| ≤ PD_RANK1D_MAX` (`field@SYM` scores); wide/frame `nma-unsupported`.
+	 * VM: Series shift H (`VmPdEligibility`); panel xs_rank U (do not force preferVm).
 	 */
 	KPd(op:String, kind:String, window:Int, sym:String, syms:Array<String>);
 }

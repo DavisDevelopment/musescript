@@ -10,6 +10,7 @@ import musescript.evo.Variation;
 import musescript.evo.EvolutionEngine;
 import musescript.evo.Expand;
 import musescript.evo.Fitness;
+import musescript.evo.Palette;
 import musescript.evo.Canonical;
 import musescript.harness.BarFeed;
 import musescript.harness.Metrics;
@@ -76,6 +77,18 @@ class TestEvoVariation extends Test {
 		// fake-fitness stub bug violated (identical output regardless of the bars passed in).
 		Assert.isTrue(a.trades != b.trades || Math.abs(a.finalEquity - b.finalEquity) > 1e-6,
 			'expected different tapes to produce different results: a=(${a.trades},${a.finalEquity}) b=(${b.trades},${b.finalEquity})');
+	}
+
+	public function testPdXsRankNmaEligibleGate() {
+		Assert.isTrue(Expand.pdXsRankNmaEligible("mom", 5, "AAA", ["AAA", "BBB"]));
+		Assert.isTrue(Expand.pdXsRankNmaEligible("close", 0, "AAA", ["AAA", "BBB"]));
+		Assert.isTrue(Expand.pdNmaEligible("shift", "close", 3, "", []));
+		Assert.isTrue(Expand.pdNmaEligible("xs_rank", "mom", 5, "AAA", ["AAA", "BBB"]));
+		var wide = [for (i in 0...Palette.PD_RANK1D_MAX + 1) 'S$i'];
+		Assert.isFalse(Expand.pdXsRankNmaEligible("mom", 5, "S0", wide), "wide universe stays Expand");
+		Assert.isFalse(Expand.pdXsRankNmaEligible("mystery", 5, "AAA", ["AAA", "BBB"]));
+		Assert.isFalse(Expand.pdXsRankNmaEligible("mom", 5, "ZZZ", ["AAA", "BBB"]));
+		Assert.isFalse(Expand.pdNmaEligible("xs_rank", "mom", 5, "S0", wide));
 	}
 
 	// ── new: attribution-guided mutation prefers the low-impact node ──────────────────────

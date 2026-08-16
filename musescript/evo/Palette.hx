@@ -32,9 +32,10 @@ import musescript.harness.Bar;
  * `EvolutionEngine.configureForPanel`) so `PanelAction` genomes score via
  * portfolio `runPanelBacktest` — not single-name Sharpe dressed up. Columnar NMA
  * (cliff 3) hosts closed `SPanel` → `field@SYM` + `PABuy`/`PARebalance`/`PATargetWeight`
- * / closed `PABagScanTop` / `PABagRankWeights` (`preferNma` → backend `nma`); open panel /
- * `KPd("xs_rank")` stay Expand (`nma-unsupported`). `KPd("shift")` is columnar-NMA
- * (lookback of OHLC field), analogous to closed `KNp`.
+ * / closed `PABagScanTop` / `PABagRankWeights` (`preferNma` → backend `nma`); packed
+ * `KPd("xs_rank")` (`|universe| ≤ PD_RANK1D_MAX`, `field@SYM` scores) is also
+ * columnar-NMA. Wide/frame xs_rank and open panel stay Expand (`nma-unsupported`).
+ * `KPd("shift")` is columnar-NMA (lookback of OHLC field), analogous to closed `KNp`.
  * Open-world bag recipes / `symbols()` remain out of genome Expand.
  *
  * Closed NP / PD palette (not open-world muse.np / muse.pd in Expand):
@@ -47,10 +48,12 @@ import musescript.harness.Bar;
  * groupby/merge/HTTP. Coerces `KPd` xs_rank onto `PanelAction` / `target_weight`
  * so fitness uses `configureForPanel` → `runPanelBacktest`. Size-safe `pd_shift`
  * grows without a universe and stays single-name. NMA columnarizes closed NP
- * window reduces, closed `KPd("shift")`, and cliff-3 closed SPanel/HostABI + bag
- * templates (`PABagScanTop` / `PABagRankWeights`); `KPd("xs_rank")` stays
- * `nma-unsupported`. Bytecode VM: closed NP scalar B (`VmNpEligibility`), Series
- * `KPd("shift")` H (`VmPdEligibility`); Expand xs_rank panel/frame U. Enable trio:
+ * window reduces, closed `KPd("shift")`, packed `KPd("xs_rank")` ≤ `PD_RANK1D_MAX`,
+ * and cliff-3 closed SPanel/HostABI + bag templates (`PABagScanTop` /
+ * `PABagRankWeights`). Wide/frame xs_rank stays `nma-unsupported`. Bytecode VM:
+ * closed NP scalar B (`VmNpEligibility`), Series `KPd("shift")` H
+ * (`VmPdEligibility`); Expand xs_rank panel/frame U (`evaluateVm` — do not force
+ * preferVm). Enable trio:
  * `configureForPanel` + `configureForPd` + `configureForUniverse` (panel configures
  * universe automatically).
  */

@@ -64,7 +64,8 @@ Source: `VmNpEligibility` / `VmPdEligibility`.
 | **U** | VM | Index / merge_asof / keys-agg / transform·rank groupby · comparisons/risk `np_*` · axis/keepdims/ddof · over-cap / multi-dim create · matmul side >8 · descending `pd_rank1d` / `pd_xs_rank` arity-3 |
 
 Closed evo: `KNp` and gated `KPd("shift")` may hit `--vm`; Expand `KPd("xs_rank")` still
-`vm-unsupported` (panel honesty) — hand-written packed `pd_rank1d` + gated frame shapes stay eligible.
+`vm-unsupported` (panel honesty — do not force preferVm). Packed xs_rank ≤64 is columnar-NMA.
+Hand-written packed `pd_rank1d` + gated frame shapes stay VM-eligible.
 
 ### Cliff-2 handle ABI (OBJ lane)
 
