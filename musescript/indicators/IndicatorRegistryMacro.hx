@@ -34,6 +34,7 @@ class IndicatorRegistryMacro {
 		var claimed = new Map<String, String>();
 		for (f in files) {
 			if (!StringTools.endsWith(f, ".hx")) continue;
+			checkShiftBan(dir, f);
 			var typeName = f.substr(0, f.length - 3);
 			var path = LIB_PACK + typeName;
 			var t = try Context.getType(path) catch (e:Dynamic) null;
@@ -56,6 +57,16 @@ class IndicatorRegistryMacro {
 	#if macro
 	/** `name: "..."` as it appears in a `spec()` object literal. */
 	static var NAME_RE = ~/name\s*:\s*"([A-Za-z0-9_.]+)"\s*,\s*args\s*:/;
+
+	/**
+	 * OPEN_ITEMS 1.2 — fail the BUILD on `Array.shift()` in `indicators/lib/`.
+	 *
+	 * The RingBuffer grind (1.1) is at zero remaining `.shift()` calls. This keeps it there:
+	 * `Array.shift()` is O(n) compact-on-evict, the exact cost the ring was ported to kill.
+	 * Pattern requires a preceding `.` so `unshift(` (Hilbert-style front-insert) is allowed.
+	 * Comment-only mentions of `.shift()` also fail — rephrase rather than reintroduce the call.
+	 */
+	static var SHIFT_CALL_RE = ~/\.shift\s*\(/;
 
 	/**
 	 * Fail the BUILD when two lib/ classes claim the same builtin `name:`.
@@ -84,6 +95,20 @@ class IndicatorRegistryMacro {
 				Context.currentPos());
 		}
 		claimed.set(name, typeName);
+	}
+
+	static function checkShiftBan(dir:String, file:String):Void {
+		var src = try sys.io.File.getContent(dir + "/" + file) catch (e:Dynamic) null;
+		if (src == null) return;
+		var lines = src.split("\n");
+		for (i in 0...lines.length) {
+			if (!SHIFT_CALL_RE.match(lines[i])) continue;
+			Context.error('IndicatorRegistryMacro: OPEN_ITEMS 1.2 — `.shift()` is banned in '
+				+ 'musescript/indicators/lib/ ($file:' + (i + 1) + '). Use RingBuffer '
+				+ '(O(1) eviction) instead of Array.shift() (O(n) compact). `unshift` is not banned.',
+				Context.currentPos());
+			return;
+		}
 	}
 
 	static function resolveLibDir():Null<String> {

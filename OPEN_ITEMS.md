@@ -16,7 +16,7 @@ Repo root docs for humans: `README.md`, `CONTRIBUTING.md`, `docs/*`, and this fi
 | # | Action | Evidence / note | Status |
 |---|--------|-----------------|--------|
 | 1.1 | Finish `RingBuffer` migration; drop remaining `.shift()` in `indicators/lib/` | **0** files still call `.shift()` (was 29→0 this pass; prior 48→29, 65→48, 85→65, 103→85). Migrated this pass (all remaining): AndrewsPitchfork, AutocorrelationPeriodogram, CompositeProfile, EmpiricalModeDecomposition, FourierDecompose, FourierDominantPeriod, FourierProjection, FourierRecompose, HighLowVolumeNodes, Ichimoku, KasePermissionStochastic, PivotReversal, ProfileShape, RegimeLabel (retWindow), SampleEntropy, SinglePrints, TdCombo, TdCountdown, TdDemarker, TdDwave, TdPressure, TdRei, TdSequential, TpoProfile, UlcerIndex (drawdownsSq ring + deque head; no `.shift()`), ValueArea, VolatilityCone (returns ring), VolumeProfile, VolumeWeightedSr. IndicatorGolden empty + port batches 03/14/24/27/28/30/34/35/38/39/41/42/43/44/45 + TestFourierBuiltins green. **§1.2 unblocked.** | done |
-| 1.2 | After 1.1: build lint ban `.shift()` in `indicators/lib/` | 1.1 closed at 0 — lint ban now unblocked | open |
+| 1.2 | After 1.1: build lint ban `.shift()` in `indicators/lib/` | **Landed.** Fail-closed on `.shift(` (not `unshift`) in `musescript/indicators/lib/` only: compile-time `IndicatorRegistryMacro.checkShiftBan`, utest `TestIndicatorLibHygiene`, `node tools/ban_indicator_shift.mjs` (engine-matrix preflight + pipeline-hardening CI). RingBuffer grind stays locked; `prim/` out of scope. | done |
 | 1.3 | Window-re-sort indicators → sorted-insert / ring | **0** `.sort(` in `indicators/lib/` (was 15→7→3→1→0). Landed this pass: SpearmanCorrelation — dual `SortedWindow` spines + mid-tie table/`lower_bound` chrono materialization; full Pearson kept (Δ-Pearson of ranks still ULP-hostile — out of scope). Prior: MAD abs-dev, BomarBands fold-merge; ALF / RegimeLabel / VolCone / CVaR; MedianMa/Channel, RollingQuantile/Iqr, QuartileBands, VaR, TailRatio, CommonSenseRatio. IndicatorGolden empty + TestPortBatch41 green | done |
 | 1.4 | Wire real bar resolution into Sharpe `periodsPerYear` | **Landed.** Ownership: `Metrics.periodsPerYear` (default **252**). Opt-in `configureFromBars` / `Fitness.configurePeriodsFromBars` (daily≈86400 → 252, not 365; sub-daily → `periodsPerYearFromBarSeconds`). Wired through Metrics.sharpe/sortino, OrderSim.sharpeOnline, NmaFitness, Fitness window/ProbSharpe, FitnessOpts→Nma workers, signal-memo digest. No auto-infer on `evaluate` (synthetic `i*60` + goldens stay 252). | done |
 | 1.5 | `MurmurationRng`: 32-bit-safe math (`haxe.Int32` or validated 32-bit triple) | **Landed.** `haxe.Int32` `imul32`/`iadd32` + Int32 xorshift/mix (same footgun class as `Rand`/`BarFeed`). JVM/interp stream unchanged; pre-fix JS corrected to match. Goldens + same-seed determinism in `TestMurmuration` | done |
@@ -38,6 +38,7 @@ Repo root docs for humans: `README.md`, `CONTRIBUTING.md`, `docs/*`, and this fi
 | 3.3 | Class-strategy gaps beyond current wiring | `ClassStrategyLower` is on MuseRuntime/Compiler/GeneRunner/Debug/CorpusSeed/HonestOptimize + tests — **kept open at peer request** (known residual gap) | open — verify gap |
 | 3.4–3.7 | Candle genome `SCandle`, `count_recent`/`held`, `pattern {…}`, cross-bar vocab | No `SCandle` / `count_recent` / held builtin hits | open |
 | 4.1 | Native `NmaSProj` (today SProj → ProjInline / nma-unsupported) | `NmaBijection` still throws on `SProj` | open |
+| 4.7 | Columnar NMA for gated `KPd("xs_rank")` | **Landed.** Packed `pd_rank1d` ≤64 + `field@SYM` scores via `NmaEval` / `Expand.pdXsRankNmaEligible`. Wide `\|universe\|>64` / unknown kinds / no panel pack stay Expand. `evaluateVm` still refuses panel xs_rank. | done (residual: wide frame) |
 | 4.2–4.5 | Expand proj runtime leftovers; CRPS-as-fan-score; multi-seed A/B; use-weighted projScore | Ew CRPS + Fitness.projScore exist; full P1–P4 residuals still real | open / partial |
 | 4.6 | Full CCEA beyond crisp `--ccea` vertical | Epic | deferred |
 
@@ -99,7 +100,7 @@ Repo root docs for humans: `README.md`, `CONTRIBUTING.md`, `docs/*`, and this fi
 ## Suggested next grind (post-triage)
 
 1. **6.1d** / **3.3** — optional viz publish, or hunt remaining class-strategy gap
-2. **1.2** — build lint ban `.shift()` in `indicators/lib/` (1.1 now at 0)
+2. **1.6 / 1.8** — spec() arity audit, or builtins docs / Pine-map coverage
 3. **9.7** — WorldFrameHost only after D6 lock
 
 ### Human locks still needed

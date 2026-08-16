@@ -34,9 +34,11 @@ no two ports ever touch the same file.
    struct), constructor params, and the `update`/`reset` bodies.
 2. **Translate line-for-line** into `lib/<PascalName>.hx` implementing
    `MuseIndicator<TIn, TOut>` (`update`/`reset`/`warmupPeriod`/`isReady`/`name`).
-   `Option<T>` → `Null<T>`; rolling windows → `RingBuffer` (or `FloatSeries` /
+   `Option<T>` → `Null<T>`;    rolling windows → `RingBuffer` (or `FloatSeries` /
    `GrowableVec` for absolute-index series) — **not** `Array` + `shift` / `for..in`
    on hot paths (see `RingBuffer.hx` and `evo/nma/JIT_AUTHORING_GUIDE.md`).
+   `.shift()` in `lib/` is a **build/CI fail** (OPEN_ITEMS 1.2: macro + `TestIndicatorLibHygiene`
+   + `tools/ban_indicator_shift.mjs`); `unshift` is still allowed.
    Struct output → a typedef (see `lib/Aroon.hx`'s `AroonOutput`). Cite the
    source path in the class doc comment. If it composes a primitive
    (`Ema::new`, `Rsi::new`, ...), use the `prim/` version; port that primitive

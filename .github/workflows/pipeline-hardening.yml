@@ -33,6 +33,9 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Ban .shift() in indicators/lib (OPEN_ITEMS 1.2)
+        run: node tools/ban_indicator_shift.mjs
+
       - name: Build + run projection-host / hardening suite
         run: |
           haxe build-projection-host-tests.hxml

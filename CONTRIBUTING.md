@@ -77,7 +77,8 @@ out-of-tree / private (`build-kestrel*.hxml`) and must not be required for open-
 | `.\run.ps1 test` | Main Node suite |
 | `.\run.ps1 test-py` | Python host suite |
 | `.\run.ps1 07` | Cross-runtime numeric stress |
-| `.\run.ps1 engine-matrix` | Op×engine honesty gate |
+| `.\run.ps1 engine-matrix` | Op×engine honesty gate (preflight: `.shift()` ban in `indicators/lib/`) |
+| `node tools/ban_indicator_shift.mjs` | OPEN_ITEMS 1.2 grep: no `.shift()` in `musescript/indicators/lib/` |
 | `.\run.ps1 all` | Examples + both test suites |
 
 Flagship strategy research is **not** the unit-test gate. See the flagship module README before

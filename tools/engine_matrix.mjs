@@ -3,6 +3,9 @@
  * Engine-matrix honesty gate — build + run each critical suite.
  * Fail closed on any non-zero haxe/node exit. Prints suite names.
  *
+ * Preflight: `tools/ban_indicator_shift.mjs` (OPEN_ITEMS 1.2 — no Array.shift
+ * in musescript/indicators/lib/). Fail closed before any Haxe suite.
+ *
  * Usage:
  *   node tools/engine_matrix.mjs
  *   node tools/engine_matrix.mjs --list
@@ -115,6 +118,14 @@ function main() {
   console.log(" Muse engine-matrix honesty gate");
   console.log(` Suites (${suites.length}): ${names.join(", ")}`);
   console.log("══════════════════════════════════════════════════════");
+
+  console.log("");
+  console.log("──────── hygiene:shift-ban ────────");
+  const hygieneCode = run("node", ["tools/ban_indicator_shift.mjs"], "hygiene:shift-ban");
+  if (hygieneCode !== 0) {
+    console.error(`[engine-matrix] FAIL hygiene=shift-ban exit=${hygieneCode}`);
+    process.exit(hygieneCode);
+  }
 
   const results = [];
   for (const s of suites) {

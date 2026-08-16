@@ -36,7 +36,8 @@ bash tools/engine_matrix.sh --soak
 
 Requires: Haxe (see `.haxerc` / CI 4.3.6), `haxelib install utest hxnodejs`, Node 20+.
 Any suite that fails build **or** run exits non-zero; suite names are printed before each
-build and again in the final summary.
+build and again in the final summary. Default runs also preflight `node tools/ban_indicator_shift.mjs`
+(OPEN_ITEMS 1.2: no `.shift()` in `musescript/indicators/lib/`).
 
 `.\run.ps1 engine-matrix` is an alias on Windows.
 
