@@ -1,6 +1,30 @@
-# Notes for the next Claude — flagship ensemble thread, 2026-08-07
+# Notes for the next Claude — flagship ensemble thread, 2026-08-15
 
-## ⚡ READ FIRST — broad8mo is superseded. Everything below it was judged on a broken instrument.
+## ⚡ READ FIRST — v5 ablation is done. Latch did the work. Do not write v8.
+
+Scored `flagship_ensemble_v5` **once** on heldout_v2 working folds (9×300, `next-open`, 10bps).
+Sealed 2023–26 untouched. `gate_stats.VARIANTS` now includes v5 so `--report` sees it.
+
+**2×2 (paired d_sharpe, n=2700):**
+
+| cell | isolates | paired Δ | 95% CI | better |
+|---|---|---|---|---|
+| v5 vs v1 | **latch** (both have `rising(close,3)`) | **+0.237** | [+0.209, +0.266] | 1641/2700 |
+| v4 vs v5 | **entry** (both have the latch; v4 dropped rising) | **+0.057** | [+0.040, +0.075] | 1441/2700 |
+| v4 vs v1 | both changes (compound) | **+0.294** | [+0.263, +0.327] | 1716/2700 |
+
+The two nested contrasts add: 0.237 + 0.057 = 0.294. **The latch is the main effect.** Restoring
+rising does not kill v4's edge vs v1; dropping rising on top of the latch is a smaller, still
+resolved increment. Mean trades/symbol from the same 10bps matrix: v1 12.13, v5 5.10, v4 5.61 —
+the latch is what cuts turnover; v4 still beats v5 while trading *slightly more*, so the entry
+increment is not a cost artifact vs v5.
+
+v5 did **not** fail vs v1, so **do not** start hysteresis / `diag_regime_units.py` / a new genome.
+No v6 (missing no-latch/no-rising cell) and no v8. Sealed set still sealed.
+
+---
+
+## Earlier — 2026-08-07 — broad8mo is superseded. Everything below it was judged on a broken instrument.
 
 A multi-regime held-out set now exists (`results/HELDOUT_V2_REPORT.md`): **9 annual regime folds ×
 300 symbols = 2700 symbol-folds**, 2014–2022, plus a **sealed** 2023→2026 set that is still sealed.

@@ -100,6 +100,11 @@ out-of-sample difference at all.** The one real effect is `flagship_ensemble_v4`
 ensemble_v1, and **+0.229 at zero cost** — so it is signal, not just its 5.6-trades/symbol
 turnover advantage). Note this reverses broad8mo, which rejected v4 at 4/54.
 
+**v5 ablation (2026-08-15):** `flagship_ensemble_v5` is the latch + `rising(close,3)` cell. Paired
+vs v1 **+0.237** [+0.209, +0.266], 1641/2700 — the latch, holding the entry fixed. vs v4
+**−0.057** [−0.075, −0.040], 972/2700 — dropping rising is a smaller extra. Nested contrasts add
+to v4's +0.294. Sealed set still untouched.
+
 > ⚠ **Survivorship bias is real here.** The universe is names present in a recent fetch list,
 > pulled retrospectively — companies that delisted or were acquired 2014–2022 are largely absent.
 > Absolute returns are optimistic for everything, buy-hold most of all. **Only paired comparative

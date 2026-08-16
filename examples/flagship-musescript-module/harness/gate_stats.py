@@ -67,7 +67,7 @@ VARIANTS = [
     "flagship_v6l", "flagship_v7", "flagship_v7b", "flagship_v7c", "flagship_v7d",
     "flagship_v7e", "flagship_v7f", "flagship_v7g", "flagship_v7h",
     "flagship_ensemble_v1", "flagship_ensemble_v2", "flagship_ensemble_v3",
-    "flagship_ensemble_v4",
+    "flagship_ensemble_v4", "flagship_ensemble_v5",
 ]
 DEFAULT_REF = "flagship_ensemble_v1"
 EULER = 0.5772156649015329
