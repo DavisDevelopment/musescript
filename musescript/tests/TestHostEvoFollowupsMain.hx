@@ -16,6 +16,8 @@ class TestHostEvoFollowupsMain {
 		runner.addCase(new TestNpPdEvoPalette());
 		runner.addCase(new TestPanelFitness());
 		runner.addCase(new TestEvoVariation());
+		runner.addCase(new TestEvoScaling());
+		runner.addCase(new TestNmaAttr());
 		runner.addCase(new TestAuthorHoles());
 		runner.addCase(new TestNmaFitness());
 		runner.addCase(new TestHybridWasm());

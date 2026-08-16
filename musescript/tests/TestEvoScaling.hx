@@ -11,6 +11,7 @@ import musescript.evo.BoolNode;
 import musescript.evo.ScalarNode;
 import musescript.evo.SeriesNode;
 import musescript.evo.StrategyGenome;
+import musescript.evo.EvolutionEngine;
 import musescript.evo.nma.NmaFitness;
 import musescript.harness.Bar;
 import musescript.harness.BarFeed;
@@ -188,6 +189,26 @@ class TestEvoScaling extends Test {
 		Assert.equals(first.trades, second.trades);
 		Assert.floatEquals(first.finalEquity, second.finalEquity, 1e-12);
 		Assert.floatEquals(first.sharpe, second.sharpe, 1e-12);
+	}
+
+	/**
+	 * Same seed + same cheap oracle ⇒ identical population keys after `step`.
+	 * Guards the variation/attribution allocation cuts (double-copy splice, donor-path skip,
+	 * identity remap) against RNG or ranking drift.
+	 */
+	public function testStepSameSeedSameKeys() {
+		function keysOf(seed:Int):Array<String> {
+			var e = new EvolutionEngine(seed, 16, 2, 3);
+			var pop = e.seedPopulation(3);
+			function evalFn(g:StrategyGenome):Float return Canonical.nodeCount(g) * 1.0;
+			var fit = [for (g in pop) evalFn(g)];
+			var next = e.step(pop, fit, evalFn, 1.0, 2);
+			return [for (g in next) Canonical.structuralKey(g)];
+		}
+		var a = keysOf(99);
+		var b = keysOf(99);
+		Assert.equals(a.length, 16);
+		Assert.same(a, b);
 	}
 
 	public function testEqualButDistinctTapeArrayAgrees() {

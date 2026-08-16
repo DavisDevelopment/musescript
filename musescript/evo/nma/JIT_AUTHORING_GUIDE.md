@@ -1548,8 +1548,11 @@ Update this guide when any of the following lands:
   `NmaNodeBench --det-probe` / `scripts/nma_thread_det_probe.ps1` and
   `CorpusEvoRun --det-probe` / `scripts/nma_jvm_thread_det_probe.ps1` — N×M×K identical to serial
   on the real Node worker_threads pool and the CorpusEvoRun JS-fallback Deque pool under `--nma`
-- A parallel or cheaper `EvolutionEngine.step` — §33's numbers are the current ceiling and should be
-  re-measured, not edited, when that lands
+- A parallel or cheaper `EvolutionEngine.step` — §33's generation-split numbers are the Amdahl
+  ceiling and should be re-measured, not edited, when wall/gen moves. **Allocation cuts LANDED
+  (OPEN_ITEMS 2.13):** `NmaNodeBench --step-micro` is the cheap-oracle A/B (same-seed keys).
+  Variation splice/catalog/donor alloc + same-tape NMA session reuse; child production still serial
+  on Node. Fuse-host / WASM-widen still secondary.
 - **§35–§38 (V8 / Node / Electron):** `NmaNodeEvalPool` / `--threads` score fan-out + **resident
   genome ids** (sticky ownership, inline JSON put on score) landed on `NmaNodeBench` (§37.1).
   `--clone-prob` is wired on the Node bench as the measured step lever. Still owed: (a) a

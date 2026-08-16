@@ -65,6 +65,42 @@ class TreeSurgery {
 		}
 	}
 
+	/**
+	 * Same preorder as `collectBool`, but only the path copies Variation catalogs keep.
+	 * The `{path, node}` wrapper was throwaway on every attributed child.
+	 */
+	public static function collectBoolPaths(n:BoolNode, path:GPath, out:Array<GPath>, ?armed:Bool = true):Void {
+		if (armed) out.push(path.copy());
+		switch (n) {
+			case BCross(_, _, _) | BCmp(_, _, _) | BTrend(_, _, _) | BFeature(_):
+			case BAnd(a, b) | BOr(a, b):
+				path.push(StepA); collectBoolPaths(a, path, out, armed); path.pop();
+				path.push(StepB); collectBoolPaths(b, path, out, armed); path.pop();
+			case BNot(a):
+				path.push(StepA); collectBoolPaths(a, path, out, armed); path.pop();
+			case BHole(inner):
+				path.push(StepA); collectBoolPaths(inner, path, out, true); path.pop();
+		}
+	}
+
+	/**
+	 * Same preorder as `collectBool`, nodes only — donor pools never read the path.
+	 * Skipping `path.copy()` here is the whole point (O(nodes × depth) garbage per unique genome).
+	 */
+	public static function collectBoolNodes(n:BoolNode, out:Array<BoolNode>, ?armed:Bool = true):Void {
+		if (armed) out.push(n);
+		switch (n) {
+			case BCross(_, _, _) | BCmp(_, _, _) | BTrend(_, _, _) | BFeature(_):
+			case BAnd(a, b) | BOr(a, b):
+				collectBoolNodes(a, out, armed);
+				collectBoolNodes(b, out, armed);
+			case BNot(a):
+				collectBoolNodes(a, out, armed);
+			case BHole(inner):
+				collectBoolNodes(inner, out, true);
+		}
+	}
+
 	public static function collectScalarInBool(n:BoolNode, path:GPath, out:Array<{path:GPath, node:ScalarNode}>, ?armed:Bool = true):Void {
 		switch (n) {
 			case BCross(_, _, _):

@@ -17,8 +17,11 @@ import musescript.harness.OhlcvCsv;
  *   node build/js/nma-node-bench.js --pop 1000 --gens 6 --threads 4 --tape build/graal/smoke_spy_320.csv
  *   node build/js/nma-node-bench.js --pop 1000 --gens 6 --threads 4 --clone-prob 0.4
  *   node build/js/nma-node-bench.js --det-probe --pop 64 --threads 4 --reps 3
+ *   node build/js/nma-node-bench.js --step-micro --pop 128 --gens 20 --warm 8
  *
  * Reports mean wallMs/gen (full generation including step) and scoreMs (fitness barrier only).
+ * `--step-micro` isolates serial `EvolutionEngine.step` (cheap `nodeCount` oracle, no tape)
+ * and re-runs same-seed for champion-key honesty.
  * `--threads N` fans the population score barrier (and AttrPool attribution batches) across Node
  * `worker_threads` via `NmaNodeEvalPool` resident genome ids. `EvolutionEngine.step` child
  * production stays serial on the main isolate (§33 — Variation memos are not cross-isolate).
@@ -41,6 +44,10 @@ class NmaNodeBench {
 
 		if (argFlag("--det-probe")) {
 			runDetProbe();
+			return;
+		}
+		if (argFlag("--step-micro")) {
+			runStepMicro();
 			return;
 		}
 
@@ -175,6 +182,63 @@ class NmaNodeBench {
 			+ ' gensPerSec=${fmt(1000.0 / meanWall, 2)} best=${fmt(best, 4)}'
 			+ ' threads=$threads nmaOk=${Fitness.nmaOkCount} nmaFall=${Fitness.nmaFallCount}');
 		Sys.println("NMA_NODE_BENCH_OK");
+	}
+
+	/**
+	 * Variation/attribution allocation microbench — no tape, no NMA.
+	 * `evalFn` is `nodeCount` so every ablation still pays `withBoolRepl` + catalog/donor walks,
+	 * which is the serial `step` tax §33 still sees when the oracle is free.
+	 *
+	 * Prints mean stepMs and a same-seed champion-key pair (honesty: keys must match).
+	 *
+	 * «στάθμην τίθει πρὶν κόπτειν.»
+	 */
+	static function runStepMicro():Void {
+		var pop = argInt("--pop", 128);
+		var gens = argInt("--gens", 12);
+		var seed = argInt("--seed", 42);
+		var warm = argInt("--warm", 2);
+		var depth = argInt("--depth", 3);
+		var attrCross = argFloat("--attr-cross-prob", 1.0);
+		var donorCap = argInt("--donor-cap", 2);
+
+		function evalFn(g:StrategyGenome):Float return Canonical.nodeCount(g) * 1.0;
+
+		function runOnce(label:String, printGens:Bool):{mean:Float, champ:String, keys:Array<String>} {
+			var engine = new EvolutionEngine(seed, pop, Std.int(Math.max(2, Std.int(pop / 16))), 3);
+			var popG = engine.seedPopulation(depth);
+			var fitness = [for (g in popG) evalFn(g)];
+			for (_ in 0...warm)
+				popG = engine.step(popG, fitness, evalFn, attrCross, donorCap);
+			fitness = [for (g in popG) evalFn(g)];
+			var stepSum = 0.0;
+			for (gen in 0...gens) {
+				var t0 = haxe.Timer.stamp();
+				popG = engine.step(popG, fitness, evalFn, attrCross, donorCap);
+				var stepMs = (haxe.Timer.stamp() - t0) * 1000;
+				stepSum += stepMs;
+				fitness = [for (g in popG) evalFn(g)];
+				if (printGens)
+					Sys.println('gen=${pad(gen)} best=${fmt(fitness[0], 4)} | ${fmt(stepMs, 1)}ms stepMs');
+			}
+			var champ = Canonical.structuralKey(popG[0]);
+			var keys = [for (g in popG) Canonical.structuralKey(g)];
+			var mean = stepSum / gens;
+			Sys.println('$label meanStepMs=${fmt(mean, 2)} champ=${champ.substr(0, 12)}… n=${keys.length}');
+			return { mean: mean, champ: champ, keys: keys };
+		}
+
+		Sys.println("=== MuseScript EvolutionEngine.step micro (cheap oracle) ===");
+		Sys.println('pop=$pop gens=$gens seed=$seed warm=$warm depth=$depth attrCross=$attrCross donorCap=$donorCap');
+		var a = runOnce("pass-a", true);
+		var b = runOnce("pass-b", false);
+		if (a.champ != b.champ)
+			throw 'step-micro honesty fail: champ key drifted across same-seed reruns';
+		for (i in 0...a.keys.length)
+			if (a.keys[i] != b.keys[i])
+				throw 'step-micro honesty fail: pop[$i] key drifted across same-seed reruns';
+		Sys.println('SUMMARY meanStepMs=${fmt(a.mean, 2)} sameSeedKeys=ok');
+		Sys.println("STEP_MICRO_OK");
 	}
 
 	/**

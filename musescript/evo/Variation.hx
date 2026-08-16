@@ -1009,7 +1009,6 @@ class Variation {
 		if (!boolCatalogMemo.exists(key)) boolCatalogMemo.set(key, out);
 		memoLock.release();
 		g.boolCatalogCache = out;
-		g.boolSiteKeysCache = siteKeysFresh(g, out);
 		g.variationCacheGen = cacheGen;
 		return out;
 	}
@@ -1018,9 +1017,9 @@ class Variation {
 	 * every call) -- `buildCatalog` runs on every mutation/crossover child, hundreds of times
 	 * per generation, so a per-call closure object was avoidable allocation pressure. */
 	function addBoolSlot(out:Array<CatalogEntry>, armed:Bool, slot:Int, root:BoolNode):Void {
-		var bc:Array<{path:GPath, node:BoolNode}> = [];
-		TreeSurgery.collectBool(root, [], bc, armed);
-		for (e in bc) out.push({ slot: slot, kind: EBool, path: e.path });
+		var paths:Array<GPath> = [];
+		TreeSurgery.collectBoolPaths(root, [], paths, armed);
+		for (p in paths) out.push({ slot: slot, kind: EBool, path: p });
 		var sc:Array<{path:GPath, node:ScalarNode}> = [];
 		TreeSurgery.collectScalarInBool(root, [], sc, armed);
 		for (e in sc) out.push({ slot: slot, kind: EScalar, path: e.path });
@@ -1030,27 +1029,23 @@ class Variation {
 	}
 
 	function addBoolSitesOnly(out:Array<CatalogEntry>, armed:Bool, slot:Int, root:BoolNode):Void {
-		var bc:Array<{path:GPath, node:BoolNode}> = [];
-		TreeSurgery.collectBool(root, [], bc, armed);
-		for (e in bc) out.push({ slot: slot, kind: EBool, path: e.path });
+		var paths:Array<GPath> = [];
+		TreeSurgery.collectBoolPaths(root, [], paths, armed);
+		for (p in paths) out.push({ slot: slot, kind: EBool, path: p });
 	}
 
 	function withBoolRepl(g:StrategyGenome, entry:CatalogEntry, repl:BoolNode):StrategyGenome {
+		// One copyGenome: the setEntry* helpers used to copy again (params/lineage/projections
+		// paid twice on every splice, including every enum-oracle ablation).
 		var out = copyGenome(g);
-		var v = switch (entry.slot) {
-			case 0: TreeSurgery.replaceBoolWithBool(g.entryLong, entry.path, repl);
-			case 1: TreeSurgery.replaceBoolWithBool(g.entryShort, entry.path, repl);
-			case 2: TreeSurgery.replaceBoolWithBool(g.exitLong, entry.path, repl);
-			case 3: TreeSurgery.replaceBoolWithBool(g.exitShort, entry.path, repl);
+		switch (entry.slot) {
+			case 0: out.entryLong = TreeSurgery.replaceBoolWithBool(g.entryLong, entry.path, repl);
+			case 1: out.entryShort = TreeSurgery.replaceBoolWithBool(g.entryShort, entry.path, repl);
+			case 2: out.exitLong = TreeSurgery.replaceBoolWithBool(g.exitLong, entry.path, repl);
+			case 3: out.exitShort = TreeSurgery.replaceBoolWithBool(g.exitShort, entry.path, repl);
 			default: throw "withBoolRepl: size slot can't hold a BoolNode";
-		};
-		return switch (entry.slot) {
-			case 0: setEntryLong(out, v);
-			case 1: setEntryShort(out, v);
-			case 2: setExitLong(out, v);
-			case 3: setExitShort(out, v);
-			default: out;
-		};
+		}
+		return out;
 	}
 
 	function withScalarRepl(g:StrategyGenome, entry:CatalogEntry, repl:ScalarNode):StrategyGenome {
@@ -1235,12 +1230,9 @@ class Variation {
 		var result:StrategyGenome = switch (site.kind) {
 			case EBool:
 				var donor:BoolNode = cast donorPool[donorIdx];
-				var refs = [];
-				paramRefsInBool(donor, refs);
-				var mapping = remapOffsets(refs, offset, extraParams, g2.params);
-				var remapped = remapBool(donor, mapping);
+				var remapped = importBoolDonor(donor, offset, extraParams, g2.params);
 				var child = withBoolRepl(g1, site, remapped);
-				child.params = g1.params.concat(extraParams);
+				if (extraParams.length > 0) child.params = g1.params.concat(extraParams);
 				child.lineage = [Canonical.structuralKey(g1), Canonical.structuralKey(g2)];
 				var out = compactParams(child);
 				maybeRegisterDirtySpineBool(g1, site, remapped, out);
@@ -1249,13 +1241,17 @@ class Variation {
 				var donor:ScalarNode = cast donorPool[donorIdx];
 				var refs = [];
 				paramRefsInScalar(donor, refs);
-				var mapping = remapOffsets(refs, offset, extraParams, g2.params);
-				withScalarRepl(g1, site, remapScalar(donor, mapping));
+				if (refs.length == 0)
+					withScalarRepl(g1, site, donor);
+				else {
+					var mapping = remapOffsets(refs, offset, extraParams, g2.params);
+					withScalarRepl(g1, site, remapScalar(donor, mapping));
+				}
 			case ESeries:
 				var donor:SeriesNode = cast donorPool[donorIdx];
 				withSeriesRepl(g1, site, donor); // SeriesNode never contains a ScalarNode -> no param refs possible
 		};
-		result.params = g1.params.concat(extraParams);
+		result.params = extraParams.length > 0 ? g1.params.concat(extraParams) : result.params;
 		result.lineage = [Canonical.structuralKey(g1), Canonical.structuralKey(g2)];
 		return ensurePdPanelAction(compactParams(result));
 	}
@@ -1327,13 +1323,9 @@ class Variation {
 		var donor = sampled[weightedPickIndex(donorWeights)];
 
 		var extraParams:Array<EvoParam> = [];
-		var offset = g1.params.length;
-		var refs = [];
-		paramRefsInBool(donor, refs);
-		var mapping = remapOffsets(refs, offset, extraParams, g2.params);
-		var remapped = remapBool(donor, mapping);
+		var remapped = importBoolDonor(donor, g1.params.length, extraParams, g2.params);
 		var result = withBoolRepl(g1, site, remapped);
-		result.params = g1.params.concat(extraParams);
+		if (extraParams.length > 0) result.params = g1.params.concat(extraParams);
 		result.lineage = [Canonical.structuralKey(g1), Canonical.structuralKey(g2)];
 		var out = compactParams(result);
 		maybeRegisterDirtySpineBool(g1, site, remapped, out);
@@ -1474,9 +1466,9 @@ class Variation {
 	function donorsFromBool(out:Array<Dynamic>, root:BoolNode, kind:EKind):Void {
 		switch (kind) {
 			case EBool:
-				var bc:Array<{path:GPath, node:BoolNode}> = [];
-				TreeSurgery.collectBool(root, [], bc);
-				for (e in bc) out.push(e.node);
+				var nodes = new Array<BoolNode>();
+				TreeSurgery.collectBoolNodes(root, nodes);
+				for (n in nodes) out.push(n);
 			case EScalar:
 				var sc:Array<{path:GPath, node:ScalarNode}> = [];
 				TreeSurgery.collectScalarInBool(root, [], sc);
@@ -1619,6 +1611,16 @@ class Variation {
 			case BHole(inner): BHole(remapBool(inner, mapping));
 			case BFeature(src): BFeature(src); // opaque leaf: no params to remap
 		};
+	}
+
+	/** Import a donor bool into the recipient param space. Identity when the donor is param-free
+	 * (the common case) — `remapBool` otherwise rebuilds every AND/OR/NOT wrapper for a no-op. */
+	static function importBoolDonor(donor:BoolNode, offset:Int, extra:Array<EvoParam>,
+			sourceParams:Array<EvoParam>):BoolNode {
+		var refs = [];
+		paramRefsInBool(donor, refs);
+		if (refs.length == 0) return donor;
+		return remapBool(donor, remapOffsets(refs, offset, extra, sourceParams));
 	}
 
 	/** Builds a fresh-index mapping for `refs` (donor's param indices) starting at `offset` in

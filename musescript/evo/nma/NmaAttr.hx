@@ -78,6 +78,20 @@ class NmaAttr {
 			sessionHits++;
 			return held;
 		}
+		// Dirty-spine working copy on the SAME tape: skip `genomeFromEnum` + cold columns.
+		// Attribution uses `Fitness.nmaTape` (often an `--attr-bars` prefix); a full-IS pack
+		// must not be reused — sibling memos and epoch are tape-keyed.
+		var pack = Fitness.workingGet(Canonical.structuralKey(g));
+		if (pack != null && pack.bars == bars && pack.ctx.n == bars.length) {
+			pack.ctx.popMemo = Fitness.nmaPopMemo;
+			var baseline = NmaFitness.scorePrepared(
+				pack.nma, pack.ctx, bars, costBps, initialCash, equityFloor);
+			var reused = new AttrSession(g, bars, costBps, initialCash, equityFloor,
+				pack.nma, pack.ctx, baseline);
+			holdSession(reused);
+			sessionHits++;
+			return reused;
+		}
 		var built = NmaFitness.prepare(g, bars);
 		if (built == null) return null;
 		var baseline = NmaFitness.scorePrepared(
@@ -118,12 +132,22 @@ class NmaAttr {
 		return s;
 	}
 
+	static var alwaysTrueSlot:Null<NmaBool> = null;
+
 	/** Always-true bool used by attributed mutate/crossover ablations (`1 > 0`).
+	 *
+	 * Immutable leaf — one instance per process. `swapScore` splices it in and restores the
+	 * saved root, so sharing cannot leak into a working tree.
 	 *
 	 * «εὑρήκαμεν, συγκάθομεν· Βάκχος ἡγεῖται.»
 	 */
 	public static function alwaysTrueNma():NmaBool {
-		return new NmaBCmp(">", new NmaKConst(1.0), new NmaKConst(0.0));
+		var n = alwaysTrueSlot;
+		if (n == null) {
+			n = new NmaBCmp(">", new NmaKConst(1.0), new NmaKConst(0.0));
+			alwaysTrueSlot = n;
+		}
+		return n;
 	}
 
 	/**
